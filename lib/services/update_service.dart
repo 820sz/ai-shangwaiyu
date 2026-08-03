@@ -111,19 +111,44 @@ class UpdateService {
     return out;
   }
 
-  /// 下载 APK 到应用缓存目录,返回本地文件路径
+  /// GitHub 加速代理前缀(国内访问加速,逐个尝试,失败回退)
+  static const List<String> _mirrorPrefixes = [
+    'https://ghproxy.net/',
+    'https://gh-proxy.com/',
+    'https://ghfast.top/',
+  ];
+
+  /// 生成候选下载地址:镜像优先(GitHub 国内直连慢),直连兜底
+  static List<String> _candidateUrls(String githubUrl) => [
+        ..._mirrorPrefixes.map((p) => '$p$githubUrl'),
+        githubUrl,
+      ];
+
+  /// 下载 APK 到应用缓存目录,返回本地文件路径。
+  /// 依次尝试加速镜像,全部失败后回退 GitHub 直连。
   static Future<String> downloadApk(
     String url, {
     void Function(int received, int total)? onProgress,
   }) async {
     final dir = await getApplicationCacheDirectory();
     final file = File('${dir.path}/readflow-update.apk');
-    await _dio.download(
-      url,
-      file.path,
-      onReceiveProgress: onProgress,
-    );
-    return file.path;
+
+    Object? lastError;
+    for (final candidate in _candidateUrls(url)) {
+      if (file.existsSync()) file.deleteSync(); // 清掉上次残留
+      onProgress?.call(0, 1); // 换源后进度归零
+      try {
+        await _dio.download(
+          candidate,
+          file.path,
+          onReceiveProgress: onProgress,
+        );
+        return file.path;
+      } catch (e) {
+        lastError = e;
+      }
+    }
+    throw lastError ?? Exception('下载失败');
   }
 
   /// 调起系统安装器安装 APK(Android 会引导"未知来源"授权)
