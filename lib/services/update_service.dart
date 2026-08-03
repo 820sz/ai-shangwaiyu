@@ -33,7 +33,12 @@ class UpdateInfo {
 class UpdateService {
   UpdateService._();
 
-  static final Dio _dio = Dio();
+  /// 下载用 Dio:必须带超时——GitHub 直连在国内可能挂起,无超时则卡 0% 不动
+  static final Dio _dio = Dio(BaseOptions(
+    connectTimeout: const Duration(seconds: 20),
+    receiveTimeout: const Duration(seconds: 30),
+    sendTimeout: const Duration(seconds: 20),
+  ));
 
   /// GitHub 细粒度只读令牌(仅 read:contents on ai-shangwaiyu)
   /// 拆成两段绕过 GitHub secret scanning push 拦截;运行时拼回。
@@ -132,7 +137,8 @@ class UpdateService {
   ];
 
   /// 下载 APK 到应用缓存目录,返回本地文件路径。
-  /// 私有仓库:直接走 GitHub 认证下载(镜像无法验权)。
+  /// 私有仓库(有 PAT):只走 GitHub 认证直连,失败立即报错——
+  /// 镜像无法代 GitHub 验权,试了也是 404,空转只会拖慢失败反馈。
   /// 公开仓库:镜像优先(GitHub 国内直连慢)→ 直连兜底。
   static Future<String> downloadApk(
     String url, {
@@ -141,21 +147,23 @@ class UpdateService {
     final dir = await getApplicationCacheDirectory();
     final file = File('${dir.path}/readflow-update.apk');
 
-    // 私有仓库:认证直连(镜像无法代 GitHub 验权)
-    try {
-      await _dio.download(
-        url,
-        file.path,
-        onReceiveProgress: onProgress,
-        options: Options(headers: {'Authorization': 'Bearer $_pat'}),
-      );
-      return file.path;
-    } catch (_) {
-      // 私有仓库认证下载失败 → 尝试镜像回退(公开仓库时有用)
-      if (file.existsSync()) file.deleteSync();
+    // ── 私有仓库:认证直连(20s 连接超时,卡住会快速失败,不再无限挂起) ──
+    if (_pat.isNotEmpty) {
+      try {
+        await _dio.download(
+          url,
+          file.path,
+          onReceiveProgress: onProgress,
+          options: Options(headers: {'Authorization': 'Bearer $_pat'}),
+        );
+        return file.path;
+      } catch (_) {
+        if (file.existsSync()) file.deleteSync();
+        rethrow; // 失败立即反馈,用户可重试,不空转镜像
+      }
     }
 
-    // 公开仓库回退:镜像 → 直连
+    // ── 公开仓库回退:镜像 → 直连 ──
     Object? lastError;
     for (final candidate in [
       ..._mirrorPrefixes.map((p) => '$p$url'),

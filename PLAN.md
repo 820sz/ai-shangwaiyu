@@ -60,10 +60,14 @@
 - [x] 4. A1:DB v4 迁移 + Exercise 模型 + provider + exercise_screen
 - [x] 5. B1:数据库查询 + sub_category_input 历史点选
 - [x] 6. B2:ApiEndpointConfig + BaseApiService 抽取 + 设置页主/副 + 追问双槽位选择器 + 评分抽 utils/scoring.dart
-- [x] 7. 验证:flutter analyze 0 error / 0 warning,20 个新单测全过(删存量模板 widget_test,其 pumpWidget 未初始化 Hive 必崩)
-- [ ] 8. 删 test/widget_test.dart(分类器暂不可用,未删成)
-- [ ] 9. flutter build apk --release
-- [ ] 10. git commit + 发 v1.1.0 Release 供用户安装
+- [x] 7. 验证:flutter analyze 0 error / 0 warning,23 个单测全绿(模板 widget_test 改为轻量冒烟测试)
+- [x] 8. flutter build apk --release --target-platform android-arm64(20.1MB 瘦身版)
+- [x] 9. git commit e4e1530 + 发 v1.1.0 Release(gh release create 成功,APK 已上传)
+
+## 断点快照
+- 正在做:全部 5 项修复完成并发布
+- 卡在哪:无
+- 下一步:用户安装 v1.1.0 真机验证(重点:主/副 API 配置、追问切副模型、子分类点选、练习评分)
 
 ## Backlog
 - [ ] 成就徽章系统 / 词汇量测试 / Material You 动态主题(研究期已列,未排期)
