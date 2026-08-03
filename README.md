@@ -1,17 +1,19 @@
-# readflow
+# AI上外语
 
-A new Flutter project.
+AI 英语阅读学习助手 —— 拍照取词、生词归档、AI 文章生成、回译练习。
 
-## Getting Started
+- 📷 拍照取词 → 豆包视觉识别(单词/短语/句子,支持圈画标记与全文翻译)
+- 📚 生词按 教材/书籍/外刊/碎片文章 分类归档,支持每日学习统计
+- ✍️ AI 生成英文文章 + 回译练习 + 结构化纠错(DeepSeek)
+- 🔄 内置自动更新(检查 GitHub Release)
 
-This project is a starting point for a Flutter application.
+## 技术栈
 
-A few resources to get you started if this is your first Flutter project:
+Flutter · Provider · SQLite(sqflite) · Hive · Dio
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+## 发布流程
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+```bash
+flutter build apk --release
+gh release create v1.0.1 build/app/outputs/flutter-apk/app-release.apk --notes "更新说明"
+```

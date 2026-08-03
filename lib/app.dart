@@ -21,7 +21,7 @@ class _ReadFlowAppState extends State<ReadFlowApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'ReadFlow',
+      title: 'AI上外语',
       debugShowCheckedModeBanner: false,
       navigatorKey: appNavigatorKey,
       theme: AppTheme.lightTheme,
