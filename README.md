@@ -14,6 +14,7 @@ Flutter · Provider · SQLite(sqflite) · Hive · Dio
 ## 发布流程
 
 ```bash
-flutter build apk --release
-gh release create v1.0.1 build/app/outputs/flutter-apk/app-release.apk --notes "更新说明"
+# 只打 arm64(主流手机全覆盖),APK 56MB → 20MB
+flutter build apk --release --target-platform android-arm64
+gh release create vX.Y.Z build/app/outputs/flutter-apk/app-release.apk --notes "更新说明"
 ```
