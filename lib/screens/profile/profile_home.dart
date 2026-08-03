@@ -4,6 +4,8 @@ import '../../providers/stats_provider.dart';
 import '../../providers/vocab_provider.dart';
 import '../../providers/article_provider.dart';
 import '../../widgets/stats_chart.dart';
+import '../../widgets/update_dialog.dart';
+import '../../services/update_service.dart';
 import 'vocab_list.dart';
 import 'stats_page.dart';
 import 'api_settings.dart';
@@ -119,6 +121,22 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
               title: 'API 设置',
               subtitle: '配置豆包和 DeepSeek API Key',
               onTap: () => _showSettings(),
+            ),
+            _MenuTile(
+              icon: Icons.system_update_alt,
+              title: '检查更新',
+              subtitle: '检查 GitHub 最新版本',
+              onTap: () async {
+                final info = await UpdateService.checkLatestRelease();
+                if (!context.mounted) return;
+                if (info == null || !info.hasUpdate) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('当前已是最新版本')),
+                  );
+                } else {
+                  showUpdateDialog(context, info);
+                }
+              },
             ),
             const SizedBox(height: 16),
 

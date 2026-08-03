@@ -65,4 +65,9 @@ class AppConstants {
   // ── 分析模式 ──
   static const String analysisModeMarked = 'marked';
   static const String analysisModeFullText = 'fullText';
+
+  // ── 自动更新(GitHub Release)──
+  /// GitHub 用户名,为空则跳过更新检查
+  static const String githubOwner = '820sz';
+  static const String githubRepo = 'readflow';
 }

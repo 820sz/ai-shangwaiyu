@@ -6,6 +6,8 @@ import 'config/constants.dart';
 import 'providers/vocab_provider.dart';
 import 'providers/article_provider.dart';
 import 'providers/stats_provider.dart';
+import 'services/update_service.dart';
+import 'widgets/update_dialog.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -24,4 +26,16 @@ void main() async {
       child: const ReadFlowApp(),
     ),
   );
+
+  // 启动 3 秒后静默检查更新(失败静默,不打扰使用)
+  Future.delayed(const Duration(seconds: 3), _checkUpdateSilently);
+}
+
+Future<void> _checkUpdateSilently() async {
+  final ctx = appNavigatorKey.currentContext;
+  if (ctx == null) return;
+  final info = await UpdateService.checkLatestRelease();
+  if (info != null && info.hasUpdate && ctx.mounted) {
+    showUpdateDialog(ctx, info);
+  }
 }

@@ -5,6 +5,9 @@ import 'screens/input/input_home.dart';
 import 'screens/output/output_home.dart';
 import 'screens/profile/profile_home.dart';
 
+/// 全局导航 Key:供启动时的静默更新检查弹窗使用
+final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
+
 class ReadFlowApp extends StatefulWidget {
   const ReadFlowApp({super.key});
 
@@ -20,6 +23,7 @@ class _ReadFlowAppState extends State<ReadFlowApp> {
     return MaterialApp(
       title: 'ReadFlow',
       debugShowCheckedModeBanner: false,
+      navigatorKey: appNavigatorKey,
       theme: AppTheme.lightTheme,
       home: Scaffold(
         body: IndexedStack(

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 自动更新:FileProvider 可共享的路径(APK 下载到应用缓存目录) -->
+<paths>
+    <cache-path name="cache" path="."/>
+    <files-path name="files" path="."/>
+    <external-files-path name="external_files" path="."/>
+    <external-path name="external" path="."/>
+</paths>
