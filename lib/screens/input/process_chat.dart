@@ -6,6 +6,7 @@ import 'package:hive_flutter/hive_flutter.dart';
 import '../../config/constants.dart';
 import '../../models/vocabulary.dart';
 import '../../providers/vocab_provider.dart';
+import '../../services/api_endpoint.dart';
 import '../../services/doubao_api.dart';
 import 'widgets/word_list_tile.dart';
 import 'widgets/ai_result_header.dart';
@@ -140,6 +141,25 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         .get(AppConstants.keyDoubaoThinking);
     return (v is String && v.isNotEmpty) ? v : 'disabled';
   }
+
+  /// 追问当前槽位:'primary' / 'secondary'(Hive 持久化,默认主)
+  String get _followUpSlot {
+    final v = Hive.box(AppConstants.hiveBoxSettings)
+        .get(AppConstants.keyFollowUpSlot);
+    return (v is String && v == 'secondary') ? 'secondary' : 'primary';
+  }
+
+  /// 追问当前使用的槽位配置(副未配置时回落到主)
+  ApiEndpointConfig get _followUpEndpoint {
+    if (_followUpSlot == 'secondary' &&
+        ApiEndpointConfig.secondary.isConfigured) {
+      return ApiEndpointConfig.secondary;
+    }
+    return ApiEndpointConfig.primary;
+  }
+
+  /// 追问当前显示的模型名(按槽位)
+  String get _followUpModel => _followUpEndpoint.model;
 
   // ── 追问抽屉（ValueNotifier 确保跨路由更新） ──
   final ValueNotifier<List<_FollowUpMessage>> _followUpMessages =
@@ -924,7 +944,8 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     }
 
     try {
-      final stream = _api.followUpStream(question, context: finalContext);
+      final stream = _api.followUpStream(question,
+          context: finalContext, endpoint: _followUpEndpoint);
 
       _followUpSub = stream.listen(
         (chunk) {
@@ -1232,17 +1253,34 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     _openFollowUp(prefillQuestion: '请详细解释 "${item.word}" 的用法', followUpContext: ctx.toString());
   }
 
-  /// 追问抽屉专用的紧凑模型/思考选择器
+  /// 追问抽屉专用的紧凑模型/思考选择器 — 主/副双槽位分组。
+  /// 选主槽位模型 → 识图同款(多模态);选副槽位模型 → 专项文本(若已配置)。
   Widget _buildCompactModelPicker() {
+    final isSecondary = _followUpSlot == 'secondary' &&
+        ApiEndpointConfig.secondary.isConfigured;
+    final secModels = AppConstants.deepseekFallbackModels;
+
+    PopupMenuItem<String> groupTitle(String text) => PopupMenuItem(
+          enabled: false,
+          height: 24,
+          child: Text(text,
+              style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.grey[500])),
+        );
+
     return PopupMenuButton<String>(
       offset: const Offset(0, 200),
       padding: EdgeInsets.zero,
-      constraints: const BoxConstraints(maxWidth: 260),
+      constraints: const BoxConstraints(maxWidth: 280, maxHeight: 420),
       itemBuilder: (_) => [
+        // ── 主 API(多模态) ──
+        groupTitle(isSecondary ? '主 API(多模态)' : '主 API'),
         ...DoubaoApiService.fallbackDoubaoModels.map((m) {
-          final isSel = m == _currentModel;
+          final isSel = _followUpSlot == 'primary' && m == _followUpModel;
           return PopupMenuItem(
-            value: 'model:$m',
+            value: 'primary:$m',
             height: 30,
             child: Text(m,
                 style: TextStyle(
@@ -1251,9 +1289,27 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                     color: isSel ? const Color(0xFF3D7A5C) : null)),
           );
         }),
+        // ── 副 API(专项文本,已配置时显示) ──
+        if (isSecondary) ...[
+          const PopupMenuDivider(),
+          groupTitle('副 API(专项文本)'),
+          ...secModels.map((m) {
+            final isSel = _followUpSlot == 'secondary' && m == _followUpModel;
+            return PopupMenuItem(
+              value: 'secondary:$m',
+              height: 30,
+              child: Text(m,
+                  style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: isSel ? FontWeight.w600 : FontWeight.normal,
+                      color: isSel ? const Color(0xFF4A6CF7) : null)),
+            );
+          }),
+        ],
         const PopupMenuDivider(),
+        // ── 思考模式(写入当前追问槽位) ──
         ...AppConstants.thinkingOptions.entries.map((e) {
-          final isSel = e.key == _currentThinking;
+          final isSel = e.key == _followUpEndpoint.thinking;
           return PopupMenuItem(
             value: 'think:${e.key}',
             height: 30,
@@ -1276,12 +1332,19 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         }),
       ],
       onSelected: (v) async {
-        if (v.startsWith('model:')) {
-          await Hive.box(AppConstants.hiveBoxSettings)
-              .put(AppConstants.keyDoubaoModel, v.substring(6));
+        final box = Hive.box(AppConstants.hiveBoxSettings);
+        if (v.startsWith('primary:')) {
+          await box.put(AppConstants.keyDoubaoModel, v.substring(8));
+          await box.put(AppConstants.keyFollowUpSlot, 'primary');
+        } else if (v.startsWith('secondary:')) {
+          await box.put(AppConstants.keyDeepseekModel, v.substring(11));
+          await box.put(AppConstants.keyFollowUpSlot, 'secondary');
         } else if (v.startsWith('think:')) {
-          await Hive.box(AppConstants.hiveBoxSettings)
-              .put(AppConstants.keyDoubaoThinking, v.substring(6));
+          // 思考模式写入当前追问槽位对应的 key
+          final key = _followUpSlot == 'secondary'
+              ? AppConstants.keyDeepseekThinking
+              : AppConstants.keyDoubaoThinking;
+          await box.put(key, v.substring(6));
         }
         if (mounted) setState(() {});
       },
@@ -1295,9 +1358,14 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              _currentModel.length > 18
-                  ? '${_currentModel.substring(0, 18)}…'
-                  : _currentModel,
+              isSecondary ? '副·' : '主·',
+              style: TextStyle(
+                  fontSize: 9, color: Colors.grey[400], fontWeight: FontWeight.w600),
+            ),
+            Text(
+              _followUpModel.length > 16
+                  ? '${_followUpModel.substring(0, 16)}…'
+                  : _followUpModel,
               style: TextStyle(fontSize: 10, color: Colors.grey[600]),
             ),
             Icon(Icons.arrow_drop_down, size: 14, color: Colors.grey[400]),

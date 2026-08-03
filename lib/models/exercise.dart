@@ -3,7 +3,8 @@ class Exercise {
   final int? id;
   final int articleId;
   final String type; // back_translation
-  final List<String> sourceSentences; // AI 生成的英文原句
+  final List<String> sourceSentences; // 题面(回译=中文句子)
+  final List<String>? referenceAnswers; // 英文参考答案(新练习有,旧练习为 null)
   final List<String?>? userAnswers; // 用户回答（可为空）
   final double? score; // 得分（百分比）
   final DateTime createdAt;
@@ -13,6 +14,7 @@ class Exercise {
     required this.articleId,
     this.type = 'back_translation',
     required this.sourceSentences,
+    this.referenceAnswers,
     this.userAnswers,
     this.score,
     DateTime? createdAt,
@@ -24,6 +26,8 @@ class Exercise {
       'article_id': articleId,
       'type': type,
       'source_sentences': _encodeJson(sourceSentences),
+      'reference_answers':
+          referenceAnswers != null ? _encodeJson(referenceAnswers!) : null,
       'user_answers':
           userAnswers != null ? _encodeJson(userAnswers!) : null,
       'score': score,
@@ -32,6 +36,7 @@ class Exercise {
   }
 
   factory Exercise.fromMap(Map<String, dynamic> map) {
+    final refRaw = map['reference_answers'] as String?;
     return Exercise(
       id: map['id'] as int?,
       articleId: map['article_id'] as int,
@@ -39,6 +44,9 @@ class Exercise {
       sourceSentences: _decodeJsonList(map['source_sentences'] as String?)
           .whereType<String>()
           .toList(),
+      referenceAnswers: refRaw != null
+          ? _decodeJsonList(refRaw).whereType<String>().toList()
+          : null,
       userAnswers: map['user_answers'] != null
           ? _decodeJsonList(map['user_answers'] as String?)
           : null,
@@ -58,7 +66,7 @@ class Exercise {
   }
 
   // ── 私有 JSON 编解码 ──
-  static String _encodeJson(List<String?> list) {
+  static String _encodeJson(Iterable<String?> list) {
     return list.map((s) => s ?? '').join('|||');
   }
 

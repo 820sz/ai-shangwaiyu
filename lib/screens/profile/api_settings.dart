@@ -2,9 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:hive/hive.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../../config/constants.dart';
+import '../../services/api_endpoint.dart';
 import '../../services/doubao_api.dart';
 
-/// 全屏 API 设置页 — 豆包 & DeepSeek 双端点的 Key / URL / 模型名
+/// 全屏 API 设置页 — 主/副双槽位:
+/// 主 = 多模态(识图/全文翻译/素材推荐/追问默认)
+/// 副 = 专项文本(文章生成/回译/建议),未配置则全部走主
 class ApiSettingsScreen extends StatefulWidget {
   const ApiSettingsScreen({super.key});
 
@@ -15,76 +18,88 @@ class ApiSettingsScreen extends StatefulWidget {
 class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
   late final Box _box;
 
-  late final TextEditingController _doubaoKeyCtrl;
-  late final TextEditingController _doubaoUrlCtrl;
-  late final TextEditingController _doubaoModelCtrl;
-  late final TextEditingController _deepseekKeyCtrl;
-  late final TextEditingController _deepseekUrlCtrl;
-  late final TextEditingController _deepseekModelCtrl;
+  // ── 主槽位(多模态) ──
+  late final TextEditingController _primaryKeyCtrl;
+  late final TextEditingController _primaryUrlCtrl;
+  late final TextEditingController _primaryModelCtrl;
+  String _primaryThinking = 'disabled';
 
-  /// 模型列表（异步填充）
-  List<String> _doubaoModels = DoubaoApiService.fallbackDoubaoModels;
-  final List<String> _deepseekModels = ['deepseek-chat', 'deepseek-reasoner'];
+  // ── 副槽位(专项文本) ──
+  late final TextEditingController _secondaryKeyCtrl;
+  late final TextEditingController _secondaryUrlCtrl;
+  late final TextEditingController _secondaryModelCtrl;
+  String _secondaryThinking = 'disabled';
 
-  /// 思考模式
-  String _doubaoThinking = 'disabled';
+  /// 模型列表(异步填充)
+  List<String> _primaryModels = DoubaoApiService.fallbackDoubaoModels;
+  List<String> _secondaryModels = AppConstants.deepseekFallbackModels;
 
   /// 加载中
-  bool _doubaoLoading = false;
-  bool _deepseekLoading = false;
+  bool _primaryLoading = false;
+  bool _secondaryLoading = false;
 
   @override
   void initState() {
     super.initState();
     _box = Hive.box(AppConstants.hiveBoxSettings);
-    _doubaoKeyCtrl = TextEditingController(
+    _primaryKeyCtrl = TextEditingController(
       text: _box.get(AppConstants.keyDoubaoApiKey, defaultValue: '') as String? ?? '',
     );
-    _doubaoUrlCtrl = TextEditingController(
+    _primaryUrlCtrl = TextEditingController(
       text: _box.get(AppConstants.keyDoubaoBaseUrl, defaultValue: '') as String? ?? '',
     );
-    _doubaoModelCtrl = TextEditingController(
+    _primaryModelCtrl = TextEditingController(
       text: _box.get(AppConstants.keyDoubaoModel, defaultValue: '') as String? ?? '',
     );
-    final saved = _box.get(AppConstants.keyDoubaoThinking) as String?;
-    // 迁移旧值：minimal → disabled，其余合法则保留
-    if (saved == 'minimal') {
-      _doubaoThinking = 'disabled';
-    } else if (saved == 'disabled' || saved == 'low' || saved == 'medium' || saved == 'high') {
-      _doubaoThinking = saved!;
-    } else {
-      _doubaoThinking = 'disabled';
-    }
-    _deepseekKeyCtrl = TextEditingController(
+    _primaryThinking = _migrateThinking(AppConstants.keyDoubaoThinking);
+
+    _secondaryKeyCtrl = TextEditingController(
       text: _box.get(AppConstants.keyDeepseekApiKey, defaultValue: '') as String? ?? '',
     );
-    _deepseekUrlCtrl = TextEditingController(
+    _secondaryUrlCtrl = TextEditingController(
       text: _box.get(AppConstants.keyDeepseekBaseUrl, defaultValue: '') as String? ?? '',
     );
-    _deepseekModelCtrl = TextEditingController(
+    _secondaryModelCtrl = TextEditingController(
       text: _box.get(AppConstants.keyDeepseekModel, defaultValue: '') as String? ?? '',
     );
+    _secondaryThinking = _migrateThinking(AppConstants.keyDeepseekThinking);
+  }
+
+  /// 读思考模式并迁移旧值(minimal → disabled),非法值一律 disabled
+  String _migrateThinking(String hiveKey) {
+    final saved = _box.get(hiveKey) as String?;
+    if (saved == 'minimal') return 'disabled';
+    if (saved == 'disabled' ||
+        saved == 'low' ||
+        saved == 'medium' ||
+        saved == 'high') {
+      return saved!;
+    }
+    return 'disabled';
   }
 
   @override
   void dispose() {
-    _doubaoKeyCtrl.dispose();
-    _doubaoUrlCtrl.dispose();
-    _doubaoModelCtrl.dispose();
-    _deepseekKeyCtrl.dispose();
-    _deepseekUrlCtrl.dispose();
-    _deepseekModelCtrl.dispose();
+    _primaryKeyCtrl.dispose();
+    _primaryUrlCtrl.dispose();
+    _primaryModelCtrl.dispose();
+    _secondaryKeyCtrl.dispose();
+    _secondaryUrlCtrl.dispose();
+    _secondaryModelCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _save() async {
-    await _box.put(AppConstants.keyDoubaoApiKey, _doubaoKeyCtrl.text.trim());
-    await _box.put(AppConstants.keyDoubaoBaseUrl, _doubaoUrlCtrl.text.trim());
-    await _box.put(AppConstants.keyDoubaoModel, _doubaoModelCtrl.text.trim());
-    await _box.put(AppConstants.keyDoubaoThinking, _doubaoThinking);
-    await _box.put(AppConstants.keyDeepseekApiKey, _deepseekKeyCtrl.text.trim());
-    await _box.put(AppConstants.keyDeepseekBaseUrl, _deepseekUrlCtrl.text.trim());
-    await _box.put(AppConstants.keyDeepseekModel, _deepseekModelCtrl.text.trim());
+    // 主槽位(复用原豆包 key,老配置无需迁移)
+    await _box.put(AppConstants.keyDoubaoApiKey, _primaryKeyCtrl.text.trim());
+    await _box.put(AppConstants.keyDoubaoBaseUrl, _primaryUrlCtrl.text.trim());
+    await _box.put(AppConstants.keyDoubaoModel, _primaryModelCtrl.text.trim());
+    await _box.put(AppConstants.keyDoubaoThinking, _primaryThinking);
+    // 副槽位(复用原 DeepSeek key)
+    await _box.put(AppConstants.keyDeepseekApiKey, _secondaryKeyCtrl.text.trim());
+    await _box.put(AppConstants.keyDeepseekBaseUrl, _secondaryUrlCtrl.text.trim());
+    await _box.put(AppConstants.keyDeepseekModel, _secondaryModelCtrl.text.trim());
+    await _box.put(AppConstants.keyDeepseekThinking, _secondaryThinking);
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -99,47 +114,54 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
 
   // ── 模型选择器 ──
 
-  Future<void> _fetchAndShowPicker({required bool isDoubao}) async {
-    final keyCtrl = isDoubao ? _doubaoKeyCtrl : _deepseekKeyCtrl;
-    final urlCtrl = isDoubao ? _doubaoUrlCtrl : _deepseekUrlCtrl;
-    final defaultUrl = isDoubao ? AppConstants.doubaoBaseUrl : AppConstants.deepseekBaseUrl;
+  Future<void> _fetchAndShowPicker({required bool isPrimary}) async {
+    final keyCtrl = isPrimary ? _primaryKeyCtrl : _secondaryKeyCtrl;
+    final urlCtrl = isPrimary ? _primaryUrlCtrl : _secondaryUrlCtrl;
+    final defaultUrl = isPrimary
+        ? ApiEndpointConfig.primary.defaultBaseUrl
+        : ApiEndpointConfig.secondary.defaultBaseUrl;
 
     final apiKey = keyCtrl.text.trim();
-    final baseUrl = urlCtrl.text.trim().isNotEmpty ? urlCtrl.text.trim() : defaultUrl;
+    final baseUrl =
+        urlCtrl.text.trim().isNotEmpty ? urlCtrl.text.trim() : defaultUrl;
 
     setState(() {
-      if (isDoubao) {
-        _doubaoLoading = true;
+      if (isPrimary) {
+        _primaryLoading = true;
       } else {
-        _deepseekLoading = true;
+        _secondaryLoading = true;
       }
     });
 
-    // Doubao: 调 API 获取动态列表；DeepSeek: 仅用内置清单
-    if (apiKey.isNotEmpty && isDoubao) {
+    // 两个槽位都尝试拉取 /models(OpenAI 兼容),失败保留内置清单
+    if (apiKey.isNotEmpty) {
       final models = await DoubaoApiService.fetchModels(baseUrl, apiKey);
       if (mounted) {
         setState(() {
-          _doubaoModels = models;
+          if (isPrimary) {
+            _primaryModels = models;
+          } else {
+            _secondaryModels = models;
+          }
         });
       }
     }
 
     if (mounted) {
       setState(() {
-        if (isDoubao) {
-          _doubaoLoading = false;
+        if (isPrimary) {
+          _primaryLoading = false;
         } else {
-          _deepseekLoading = false;
+          _secondaryLoading = false;
         }
       });
-      _showModelPicker(isDoubao: isDoubao);
+      _showModelPicker(isPrimary: isPrimary);
     }
   }
 
-  void _showModelPicker({required bool isDoubao}) {
-    final modelCtrl = isDoubao ? _doubaoModelCtrl : _deepseekModelCtrl;
-    final models = isDoubao ? _doubaoModels : _deepseekModels;
+  void _showModelPicker({required bool isPrimary}) {
+    final modelCtrl = isPrimary ? _primaryModelCtrl : _secondaryModelCtrl;
+    final models = isPrimary ? _primaryModels : _secondaryModels;
     final currentModel = modelCtrl.text.trim();
     final bottomSafe = MediaQuery.of(context).padding.bottom;
 
@@ -177,81 +199,71 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // ── 豆包（火山方舟） ──
-          _SectionHeader(title: '豆包（火山方舟）'),
+          // ── 主 API(多模态) ──
+          _SectionHeader(title: '主 API(多模态)'),
+          const SizedBox(height: 4),
+          Text(
+            '拍照识词 / 全文翻译 / 素材推荐 / 追问默认。需支持图片识别的模型。',
+            style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+          ),
           const SizedBox(height: 8),
           _ApiField(
-            controller: _doubaoKeyCtrl,
+            controller: _primaryKeyCtrl,
             label: 'API Key',
-            hint: '火山方舟 → API Key 管理',
+            hint: '默认端点：${ApiEndpointConfig.primary.defaultBaseUrl}',
           ),
           _ApiField(
-            controller: _doubaoUrlCtrl,
+            controller: _primaryUrlCtrl,
             label: 'Base URL',
-            hint: '默认：${AppConstants.doubaoBaseUrl}',
+            hint: '留空用默认',
           ),
           _ModelRow(
-            controller: _doubaoModelCtrl,
+            controller: _primaryModelCtrl,
             label: '模型名称',
-            hint: '默认：${AppConstants.doubaoVisionModel}',
-            loading: _doubaoLoading,
-            onFetch: () => _fetchAndShowPicker(isDoubao: true),
+            hint: '默认：${ApiEndpointConfig.primary.defaultModel}',
+            loading: _primaryLoading,
+            onFetch: () => _fetchAndShowPicker(isPrimary: true),
           ),
-          // 思考强度
-          Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: InputDecorator(
-              decoration: const InputDecoration(
-                labelText: '思考模式',
-                border: OutlineInputBorder(),
-                isDense: true,
-              ),
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<String>(
-                  value: _doubaoThinking,
-                  isExpanded: true,
-                  isDense: true,
-                  style: const TextStyle(fontSize: 14, color: Colors.black87),
-                  items: AppConstants.thinkingOptions.entries
-                      .map((e) => DropdownMenuItem(
-                            value: e.key,
-                            child: Text(e.value),
-                          ))
-                      .toList(),
-                  onChanged: (v) {
-                    if (v != null) setState(() => _doubaoThinking = v);
-                  },
-                ),
-              ),
-            ),
+          _ThinkingDropdown(
+            value: _primaryThinking,
+            onChanged: (v) => setState(() => _primaryThinking = v),
           ),
           const SizedBox(height: 24),
 
-          // ── DeepSeek ──
-          _SectionHeader(title: 'DeepSeek'),
+          // ── 副 API(专项文本) ──
+          _SectionHeader(title: '副 API(专项文本 · 可选)'),
+          const SizedBox(height: 4),
+          Text(
+            '文章生成 / 回译练习 / 个性化建议。未配置时自动使用主 API。',
+            style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+          ),
           const SizedBox(height: 8),
           _ApiField(
-            controller: _deepseekKeyCtrl,
+            controller: _secondaryKeyCtrl,
             label: 'API Key',
-            hint: 'platform.deepseek.com → API keys',
+            hint: '默认端点：${ApiEndpointConfig.secondary.defaultBaseUrl}',
           ),
           _ApiField(
-            controller: _deepseekUrlCtrl,
+            controller: _secondaryUrlCtrl,
             label: 'Base URL',
-            hint: '默认：${AppConstants.deepseekBaseUrl}',
+            hint: '留空用默认',
           ),
           _ModelRow(
-            controller: _deepseekModelCtrl,
+            controller: _secondaryModelCtrl,
             label: '模型名称',
-            hint: '默认：${AppConstants.deepseekChatModel}',
-            loading: _deepseekLoading,
-            onFetch: () => _fetchAndShowPicker(isDoubao: false),
+            hint: '默认：${ApiEndpointConfig.secondary.defaultModel}',
+            loading: _secondaryLoading,
+            onFetch: () => _fetchAndShowPicker(isPrimary: false),
+          ),
+          _ThinkingDropdown(
+            value: _secondaryThinking,
+            onChanged: (v) => setState(() => _secondaryThinking = v),
           ),
           const SizedBox(height: 16),
 
           // ── 提示 ──
           Text(
-            '留空的字段将使用默认值。模型列表可直接选择，也可手动输入其他模型。'
+            '可填任意 OpenAI 兼容端点。模型列表可直接选择，也可手动输入。'
             'Key 保存在手机本地，不上传任何服务器。',
             style: TextStyle(fontSize: 11, color: Colors.grey[500]),
           ),
@@ -368,6 +380,45 @@ class _ModelRow extends StatelessWidget {
   }
 }
 
+/// 思考模式下拉(两槽位共用)
+class _ThinkingDropdown extends StatelessWidget {
+  final String value;
+  final ValueChanged<String> onChanged;
+
+  const _ThinkingDropdown({required this.value, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: InputDecorator(
+        decoration: const InputDecoration(
+          labelText: '思考模式',
+          border: OutlineInputBorder(),
+          isDense: true,
+        ),
+        child: DropdownButtonHideUnderline(
+          child: DropdownButton<String>(
+            value: value,
+            isExpanded: true,
+            isDense: true,
+            style: const TextStyle(fontSize: 14, color: Colors.black87),
+            items: AppConstants.thinkingOptions.entries
+                .map((e) => DropdownMenuItem(
+                      value: e.key,
+                      child: Text(e.value),
+                    ))
+                .toList(),
+            onChanged: (v) {
+              if (v != null) onChanged(v);
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// BottomSheet — 模型列表 + 搜索
 class _ModelPickerSheet extends StatefulWidget {
   final List<String> models;
@@ -406,80 +457,80 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
         return Padding(
           padding: EdgeInsets.only(bottom: widget.bottomSafe),
           child: Column(
-        children: [
-          // 拖拽条
-          Padding(
-            padding: const EdgeInsets.only(top: 8, bottom: 4),
-            child: Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: Colors.grey[300],
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-          ),
-          // 搜索栏
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: TextField(
-              decoration: InputDecoration(
-                hintText: '搜索模型…',
-                prefixIcon: const Icon(Icons.search, size: 20),
-                suffixIcon: _filter.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(Icons.clear, size: 18),
-                        onPressed: () => setState(() => _filter = ''),
-                      )
-                    : null,
-                border: const OutlineInputBorder(),
-                isDense: true,
-                contentPadding: const EdgeInsets.symmetric(vertical: 8),
-              ),
-              onChanged: (v) => setState(() => _filter = v),
-            ),
-          ),
-          // 底部提示
-          Padding(
-            padding: const EdgeInsets.only(bottom: 4),
-            child: Text(
-              '未找到需要的模型？手动输入到上方文本框即可',
-              style: TextStyle(fontSize: 11, color: Colors.grey[400]),
-            ),
-          ),
-          // 列表
-          Expanded(
-            child: ListView.separated(
-              controller: scrollCtrl,
-              itemCount: _filtered.length,
-              separatorBuilder: (_, _) => const Divider(height: 1),
-              itemBuilder: (ctx, i) {
-                final model = _filtered[i];
-                final isSelected = model == widget.currentModel;
-                return ListTile(
-                  dense: true,
-                  leading: Icon(
-                    isSelected ? Icons.radio_button_checked : Icons.radio_button_off,
-                    size: 20,
-                    color: isSelected ? Theme.of(context).colorScheme.primary : Colors.grey,
+            children: [
+              // 拖拽条
+              Padding(
+                padding: const EdgeInsets.only(top: 8, bottom: 4),
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey[300],
+                    borderRadius: BorderRadius.circular(2),
                   ),
-                  title: Text(
-                    model,
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                      color: isSelected ? Theme.of(context).colorScheme.primary : null,
-                    ),
+                ),
+              ),
+              // 搜索栏
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: TextField(
+                  decoration: InputDecoration(
+                    hintText: '搜索模型…',
+                    prefixIcon: const Icon(Icons.search, size: 20),
+                    suffixIcon: _filter.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear, size: 18),
+                            onPressed: () => setState(() => _filter = ''),
+                          )
+                        : null,
+                    border: const OutlineInputBorder(),
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 8),
                   ),
-                  onTap: () => widget.onSelected(model),
-                );
-              },
-            ),
+                  onChanged: (v) => setState(() => _filter = v),
+                ),
+              ),
+              // 底部提示
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text(
+                  '未找到需要的模型？手动输入到上方文本框即可',
+                  style: TextStyle(fontSize: 11, color: Colors.grey[400]),
+                ),
+              ),
+              // 列表
+              Expanded(
+                child: ListView.separated(
+                  controller: scrollCtrl,
+                  itemCount: _filtered.length,
+                  separatorBuilder: (_, _) => const Divider(height: 1),
+                  itemBuilder: (ctx, i) {
+                    final model = _filtered[i];
+                    final isSelected = model == widget.currentModel;
+                    return ListTile(
+                      dense: true,
+                      leading: Icon(
+                        isSelected ? Icons.radio_button_checked : Icons.radio_button_off,
+                        size: 20,
+                        color: isSelected ? Theme.of(context).colorScheme.primary : Colors.grey,
+                      ),
+                      title: Text(
+                        model,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                          color: isSelected ? Theme.of(context).colorScheme.primary : null,
+                        ),
+                      ),
+                      onTap: () => widget.onSelected(model),
+                    );
+                  },
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
-  },
-  );
   }
 }

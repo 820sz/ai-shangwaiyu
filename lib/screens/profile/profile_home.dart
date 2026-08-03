@@ -90,7 +90,7 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
                 const SizedBox(width: 10),
                 _StatCard(
                     icon: Icons.fitness_center,
-                    value: '0',
+                    value: '${stats.totalExercises}',
                     label: '已完成练习',
                     color: Colors.green),
               ],

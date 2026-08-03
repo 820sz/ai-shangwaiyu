@@ -68,6 +68,7 @@ class DatabaseService {
         article_id INTEGER NOT NULL,
         type TEXT DEFAULT 'back_translation',
         source_sentences TEXT NOT NULL,
+        reference_answers TEXT,
         user_answers TEXT,
         score REAL,
         created_at TEXT NOT NULL,
@@ -127,6 +128,12 @@ class DatabaseService {
       try {
         await db.execute("ALTER TABLE vocabulary ADD COLUMN material_path TEXT");
       } catch (e) { debugPrint('ReadFlow DB migration v3 material_path: $e'); }
+    }
+    if (oldV < 4) {
+      // 回译练习英文参考答案(旧练习无此列,评分为估算)
+      try {
+        await db.execute("ALTER TABLE exercises ADD COLUMN reference_answers TEXT");
+      } catch (e) { debugPrint('ReadFlow DB migration v4 reference_answers: $e'); }
     }
   }
 
@@ -284,6 +291,19 @@ class DatabaseService {
     return rows.map((r) => r['category'] as String).toList();
   }
 
+  /// 某分类下已用过的素材路径(子分类记忆:去重、按名称排序)
+  static Future<List<String>> getMaterialPathsByCategory(
+      String category) async {
+    final db = await database;
+    final rows = await db.rawQuery(
+      "SELECT DISTINCT material_path FROM vocabulary "
+      "WHERE category = ? AND material_path IS NOT NULL AND material_path != '' "
+      "ORDER BY material_path",
+      [category],
+    );
+    return rows.map((r) => r['material_path'] as String).toList();
+  }
+
   /// 按分类获取生词
   static Future<List<Vocabulary>> getVocabulariesByCategory(
     String category, {
@@ -352,6 +372,14 @@ class DatabaseService {
       where: 'id = ?',
       whereArgs: [exerciseId],
     );
+  }
+
+  /// 已完成练习总数(已评分的练习)
+  static Future<int> getTotalExerciseCount() async {
+    final db = await database;
+    final result = await db.rawQuery(
+        'SELECT COUNT(*) as cnt FROM exercises WHERE score IS NOT NULL');
+    return Sqflite.firstIntValue(result) ?? 0;
   }
 
   static Future<List<Exercise>> getExercisesByArticle(int articleId) async {

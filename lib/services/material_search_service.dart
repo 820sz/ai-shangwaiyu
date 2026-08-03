@@ -1,71 +1,20 @@
 import 'dart:convert';
-import 'package:dio/dio.dart';
-import 'package:hive_flutter/hive_flutter.dart';
-import '../config/constants.dart';
+import 'api_endpoint.dart';
+import 'base_api.dart';
 
-/// AI 学习材料推荐服务 — 纯文本 Chat Completions，不涉及图片
-class MaterialSearchService {
-  Dio? _dioInstance;
-  String? _dioBaseUrl;
-
-  String get _baseUrl {
-    final v = Hive.box(AppConstants.hiveBoxSettings)
-        .get(AppConstants.keyDoubaoBaseUrl);
-    return (v is String && v.isNotEmpty) ? v : AppConstants.doubaoBaseUrl;
-  }
-
-  String get _modelName {
-    final v = Hive.box(AppConstants.hiveBoxSettings)
-        .get(AppConstants.keyDoubaoModel);
-    return (v is String && v.isNotEmpty) ? v : AppConstants.doubaoVisionModel;
-  }
-
-  String? _getApiKey() {
-    return Hive.box(AppConstants.hiveBoxSettings)
-        .get(AppConstants.keyDoubaoApiKey);
-  }
-
-  Dio get _dio {
-    final url = _baseUrl;
-    if (_dioInstance == null || _dioBaseUrl != url) {
-      _dioBaseUrl = url;
-      _dioInstance = Dio(BaseOptions(
-        baseUrl: url,
-        connectTimeout: const Duration(seconds: 30),
-        receiveTimeout: const Duration(seconds: 120),
-        headers: {'Content-Type': 'application/json'},
-      ));
-    }
-    return _dioInstance!;
-  }
-
-  /// 从 Hive 读取思考模式配置
-  Map<String, dynamic>? _buildThinkingParams() {
-    final v = Hive.box(AppConstants.hiveBoxSettings)
-        .get(AppConstants.keyDoubaoThinking);
-    final mode = (v is String &&
-            (v == 'disabled' || v == 'low' || v == 'medium' || v == 'high'))
-        ? v
-        : 'disabled';
-
-    if (mode == 'disabled') {
-      return {'thinking': {'type': 'disabled'}};
-    }
-    return {
-      'thinking': {'type': 'enabled'},
-      'reasoning_effort': mode,
-    };
-  }
+/// AI 学习材料推荐服务 — 纯文本 Chat Completions(读主槽位,与识图同一配置)
+class MaterialSearchService extends BaseApiService {
+  @override
+  ApiEndpointConfig get config => ApiEndpointConfig.primary;
 
   /// 基于分类推荐学习材料
   Future<List<Map<String, String>>> searchMaterials(String category) async {
-    final apiKey = _getApiKey();
-    if (apiKey == null || apiKey.isEmpty) {
+    if (!config.isConfigured) {
       throw Exception('请先在设置中配置 API Key');
     }
 
     final body = {
-      'model': _modelName,
+      'model': config.model,
       'messages': [
         {
           'role': 'system',
@@ -80,81 +29,17 @@ class MaterialSearchService {
       ],
       'temperature': 0.8,
       'max_tokens': 2048,
-      ..._buildThinkingParams()!,
+      ...config.buildThinkingParams(),
     };
 
-    // POST with reasoning_effort fallback — retry once without thinking params
-    Response response;
-    try {
-      response = await _dio.post(
-        '/chat/completions',
-        options: Options(
-          headers: {'Authorization': 'Bearer $apiKey'},
-        ),
-        data: body,
-      );
-    } on DioException catch (e) {
-      // If rejected because of thinking/reasoning params, retry without them
-      if (_isReasoningError(e) && (body.containsKey('thinking') || body.containsKey('reasoning_effort'))) {
-        final safeBody = Map<String, dynamic>.from(body)
-          ..remove('reasoning_effort')
-          ..remove('thinking');
-        response = await _dio.post(
-          '/chat/completions',
-          options: Options(
-            headers: {'Authorization': 'Bearer $apiKey'},
-          ),
-          data: safeBody,
-        );
-      } else {
-        rethrow;
-      }
-    }
+    final response = await postWithReasoningFallback(
+      '/chat/completions',
+      body,
+      cfg: config,
+    );
 
-    final content = _extractContent(response.data);
+    final content = BaseApiService.extractContent(response.data);
     return parseMaterialResponse(content);
-  }
-
-  /// 判断是否因 reasoning_effort 参数导致 API 报错（应 retry 移除）
-  static bool _isReasoningError(DioException e) {
-    final statusCode = e.response?.statusCode;
-    if (statusCode == null || statusCode < 400 || statusCode >= 500) return false;
-    final d = e.response?.data;
-    String body;
-    if (d is Map) {
-      final error = d['error'];
-      if (error is Map) {
-        body = '${error['code'] ?? ''} ${error['message'] ?? ''}';
-      } else {
-        body = d.toString();
-      }
-    } else if (d is String) {
-      body = d;
-    } else {
-      body = e.message ?? '';
-    }
-    return body.contains('1830102') ||
-        (body.contains('invalid') && body.contains('parameter'));
-  }
-
-  /// 安全提取 API 响应中的 content
-  static String _extractContent(Map<String, dynamic> data) {
-    final error = data['error'];
-    if (error != null) {
-      final msg = error is Map ? (error['message'] ?? '未知错误') : '$error';
-      throw Exception('API 返回错误：$msg');
-    }
-    final choices = data['choices'] as List<dynamic>?;
-    if (choices == null || choices.isEmpty) {
-      throw Exception('API 返回空响应，请检查模型是否可用');
-    }
-    final message = choices[0]['message'];
-    if (message == null) {
-      throw Exception('API 响应格式异常：缺少 message 字段');
-    }
-    final content = message['content'];
-    if (content is String) return content;
-    throw Exception('API 返回内容为空');
   }
 
   /// 解析 AI 返回的素材推荐 JSON

@@ -196,7 +196,7 @@ class _ExerciseScreenState extends State<ExerciseScreen> {
     final score = await provider.submitExerciseAnswers(
       widget.exercise.id!,
       _answers,
-      widget.exercise.sourceSentences, // 实际应该用英语原文，这里用中文占位评分
+      widget.exercise.referenceAnswers, // 英文参考答案;旧练习为 null → 估算
     );
 
     setState(() {

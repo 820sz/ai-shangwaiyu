@@ -4,6 +4,7 @@ import '../models/exercise.dart';
 import '../models/learning_record.dart';
 import '../services/database.dart';
 import '../services/deepseek_api.dart';
+import '../utils/scoring.dart';
 
 class ArticleProvider extends ChangeNotifier {
   final DeepseekApiService _deepseek = DeepseekApiService();
@@ -101,7 +102,9 @@ class ArticleProvider extends ChangeNotifier {
 
       final exercise = Exercise(
         articleId: article.id!,
+        // 题面=中文,参考答案=英文原句(供真实评分)
         sourceSentences: sentences.map((s) => s['chinese']!).toList(),
+        referenceAnswers: sentences.map((s) => s['english']!).toList(),
         userAnswers: List.filled(sentences.length, null),
       );
 
@@ -129,6 +132,7 @@ class ArticleProvider extends ChangeNotifier {
         id: id,
         articleId: article.id!,
         sourceSentences: sentences.map((s) => s['chinese']!).toList(),
+        referenceAnswers: sentences.map((s) => s['english']!).toList(),
         userAnswers: null,
       );
     } catch (e) {
@@ -139,25 +143,15 @@ class ArticleProvider extends ChangeNotifier {
     }
   }
 
-  /// 保存练习答案并评分
+  /// 保存练习答案并评分(评分逻辑见 utils/scoring.dart)
   Future<double?> submitExerciseAnswers(
     int exerciseId,
     List<String?> answers,
     List<String>? referenceAnswers,
   ) async {
-    // 简单评分：比较与参考答案的相似度（基于长度匹配）
     double score = 0;
     if (referenceAnswers != null && referenceAnswers.isNotEmpty) {
-      int matched = 0;
-      for (int i = 0; i < answers.length && i < referenceAnswers.length; i++) {
-        final user = answers[i]?.trim().toLowerCase() ?? '';
-        final ref = referenceAnswers[i].toLowerCase();
-        // 宽松匹配：用户答了且长度达到参考答案的 50% 以上
-        if (user.isNotEmpty && user.length >= ref.length * 0.3) {
-          matched++;
-        }
-      }
-      score = matched / referenceAnswers.length * 100;
+      score = scoreBackTranslation(answers, referenceAnswers);
     }
 
     await DatabaseService.saveExerciseAnswer(exerciseId, answers, score);

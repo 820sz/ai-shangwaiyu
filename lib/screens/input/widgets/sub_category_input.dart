@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../services/database.dart';
 
 /// 分类子信息（由 showSubCategoryInput 返回）
 class CategorySubInfo {
@@ -64,6 +65,10 @@ class _SubCategoryInputSheetState extends State<_SubCategoryInputSheet> {
   late final TextEditingController _nameCtrl;
   late final TextEditingController _extraCtrl;
 
+  /// 该分类下已用过的素材路径(子分类记忆)
+  List<String> _historyPaths = [];
+  bool _historyLoaded = false;
+
   static const _hints = <String, List<String>>{
     '教材': ['教材名称（如：新概念英语）', '单元/册（如：第2册）'],
     '书籍': ['书名（如：哈利波特与魔法石）', '章节/页码（可选）'],
@@ -77,6 +82,36 @@ class _SubCategoryInputSheetState extends State<_SubCategoryInputSheet> {
     super.initState();
     _nameCtrl = TextEditingController(text: widget.prefill);
     _extraCtrl = TextEditingController();
+    _loadHistory();
+  }
+
+  /// 加载本分类历史子分类(失败静默 → 空列表,不影响输入)
+  Future<void> _loadHistory() async {
+    try {
+      final paths = await DatabaseService.getMaterialPathsByCategory(
+          widget.category);
+      if (mounted) {
+        setState(() {
+          _historyPaths = paths;
+          _historyLoaded = true;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _historyLoaded = true);
+    }
+  }
+
+  /// 点选历史路径 → 填充输入框(用户可继续微调)
+  /// 路径形如 '书籍/三体/第1章',截掉主分类前缀后放回 name 框,
+  /// 确认时按 segments 拼回原路径,不会丢失层级。
+  void _applyHistory(String path) {
+    final display = path.startsWith('${widget.category}/')
+        ? path.substring(widget.category.length + 1)
+        : path;
+    setState(() {
+      _nameCtrl.text = display;
+      _extraCtrl.clear();
+    });
   }
 
   @override
@@ -160,6 +195,36 @@ class _SubCategoryInputSheetState extends State<_SubCategoryInputSheet> {
               style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey),
             ),
             const SizedBox(height: 16),
+            // 历史子分类 — 点选即填,不必重新输入
+            if (_historyLoaded && _historyPaths.isNotEmpty) ...[
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  '历史子分类(点选快速填入)',
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: Colors.grey),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                children: _historyPaths.map((p) {
+                  final display = p.startsWith('${widget.category}/')
+                      ? p.substring(widget.category.length + 1)
+                      : p;
+                  return ChoiceChip(
+                    label: Text(display,
+                        style: const TextStyle(fontSize: 12)),
+                    selected: false,
+                    onSelected: (_) => _applyHistory(p),
+                    visualDensity: VisualDensity.compact,
+                    side: BorderSide(color: Colors.grey[300]!),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 12),
+            ],
             // 输入框1 — 材料名称
             TextField(
               controller: _nameCtrl,

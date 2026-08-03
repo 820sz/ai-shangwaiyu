@@ -1,60 +1,20 @@
 import 'dart:convert';
-import 'package:dio/dio.dart';
-import 'package:hive_flutter/hive_flutter.dart';
-import '../config/constants.dart';
+import 'api_endpoint.dart';
+import 'base_api.dart';
 import 'database.dart';
 
-/// DeepSeek API 服务 — 文章生成、回译练习、个性化推荐
-class DeepseekApiService {
-  /// 安全提取 API 响应 content
-  static String _extractContent(Map<String, dynamic> data) {
-    final error = data['error'];
-    if (error != null) {
-      final msg = error is Map ? (error['message'] ?? '未知错误') : '$error';
-      throw Exception('API 返回错误：$msg');
-    }
-    final choices = data['choices'] as List<dynamic>?;
-    if (choices == null || choices.isEmpty) {
-      throw Exception('API 返回空响应，请检查模型是否可用');
-    }
-    final message = choices[0]['message'];
-    if (message == null) {
-      throw Exception('API 响应格式异常：缺少 message 字段');
-    }
-    final content = message['content'];
-    if (content is String) return content;
-    throw Exception('API 返回内容为空');
-  }
+/// 专项文本 API 服务(副槽位):文章生成、回译练习、个性化建议。
+///
+/// 原 DeepSeek 服务。槽位策略:副槽位已配置 → 用副;未配置 → 全部走主槽位
+/// (与用户约定:只填主 API 时所有操作都走主)。
+class DeepseekApiService extends BaseApiService {
+  @override
+  ApiEndpointConfig get config =>
+      ApiEndpointConfig.secondary.isConfigured
+          ? ApiEndpointConfig.secondary
+          : ApiEndpointConfig.primary;
 
-  /// 从 Hive 读取配置（无自定义值则用默认）
-  String get _baseUrl {
-    final v = Hive.box(AppConstants.hiveBoxSettings)
-        .get(AppConstants.keyDeepseekBaseUrl);
-    return (v is String && v.isNotEmpty) ? v : AppConstants.deepseekBaseUrl;
-  }
-
-  String get _model {
-    final v = Hive.box(AppConstants.hiveBoxSettings)
-        .get(AppConstants.keyDeepseekModel);
-    return (v is String && v.isNotEmpty) ? v : AppConstants.deepseekChatModel;
-  }
-
-  Dio get _dio => Dio(BaseOptions(
-        baseUrl: _baseUrl,
-        connectTimeout: const Duration(seconds: 30),
-        receiveTimeout: const Duration(seconds: 180),
-        headers: {'Content-Type': 'application/json'},
-      ));
-
-  String? _getApiKey() {
-    final box = Hive.box(AppConstants.hiveBoxSettings);
-    return box.get(AppConstants.keyDeepseekApiKey);
-  }
-
-  bool get isConfigured {
-    final key = _getApiKey();
-    return key != null && key.isNotEmpty;
-  }
+  bool get isConfigured => config.isConfigured;
 
   // ═══════════════ 生成含生词的英语文章 ═══════════════
 
@@ -62,9 +22,8 @@ class DeepseekApiService {
   Future<Map<String, dynamic>> generateArticle(
     List<Map<String, String>> vocabList,
   ) async {
-    final apiKey = _getApiKey();
-    if (apiKey == null || apiKey.isEmpty) {
-      throw Exception('请先在设置中配置 DeepSeek API Key');
+    if (!config.isConfigured) {
+      throw Exception('请先在设置中配置 API Key');
     }
 
     // 获取用户偏好记忆
@@ -97,21 +56,22 @@ $vocabText
 
 请生成一篇文章，把这些生词自然地融入进去。''';
 
-    final response = await _dio.post(
+    final response = await postWithReasoningFallback(
       '/v1/chat/completions',
-      options: Options(headers: {'Authorization': 'Bearer $apiKey'}),
-      data: {
-        'model': _model,
+      {
+        'model': config.model,
         'messages': [
           {'role': 'system', 'content': systemPrompt},
           {'role': 'user', 'content': userPrompt},
         ],
         'temperature': 0.8,
         'max_tokens': 4096,
+        ...config.buildThinkingParams(),
       },
+      cfg: config,
     );
 
-    final content = _extractContent(response.data);
+    final content = BaseApiService.extractContent(response.data);
     return _parseJsonResponse(content);
   }
 
@@ -120,9 +80,8 @@ $vocabText
   /// 根据文章内容生成中→英回译练习
   Future<List<Map<String, String>>> generateBackTranslationExercise(
       String articleContent) async {
-    final apiKey = _getApiKey();
-    if (apiKey == null || apiKey.isEmpty) {
-      throw Exception('请先在设置中配置 DeepSeek API Key');
+    if (!config.isConfigured) {
+      throw Exception('请先在设置中配置 API Key');
     }
 
     const systemPrompt = '''你是一个专业的英语教学助手。根据给定的英语文章，从中挑选5-8个关键句子，生成回译练习。
@@ -133,11 +92,10 @@ $vocabText
 3. 返回 JSON: {"sentences": [{"english": "...", "chinese": "..."}]}
 4. 只返回 JSON，不要有其他内容''';
 
-    final response = await _dio.post(
+    final response = await postWithReasoningFallback(
       '/v1/chat/completions',
-      options: Options(headers: {'Authorization': 'Bearer $apiKey'}),
-      data: {
-        'model': _model,
+      {
+        'model': config.model,
         'messages': [
           {'role': 'system', 'content': systemPrompt},
           {
@@ -147,10 +105,12 @@ $vocabText
         ],
         'temperature': 0.5,
         'max_tokens': 4096,
+        ...config.buildThinkingParams(),
       },
+      cfg: config,
     );
 
-    final content = _extractContent(response.data);
+    final content = BaseApiService.extractContent(response.data);
     final parsed = _parseJsonResponse(content);
     final sentences = parsed['sentences'] as List<dynamic>?;
     if (sentences == null) return [];
@@ -174,9 +134,8 @@ $vocabText
     required Map<String, int> vocabByBook,
     required Map<String, String> memory,
   }) async {
-    final apiKey = _getApiKey();
-    if (apiKey == null || apiKey.isEmpty) {
-      throw Exception('请先在设置中配置 DeepSeek API Key');
+    if (!config.isConfigured) {
+      throw Exception('请先在设置中配置 API Key');
     }
 
     final memoryContext = memory.entries
@@ -196,11 +155,10 @@ $vocabText
 
 保持鼓励的语气，建议要具体可行。200字以内。''';
 
-    final response = await _dio.post(
+    final response = await postWithReasoningFallback(
       '/v1/chat/completions',
-      options: Options(headers: {'Authorization': 'Bearer $apiKey'}),
-      data: {
-        'model': _model,
+      {
+        'model': config.model,
         'messages': [
           {'role': 'system', 'content': systemPrompt},
           {
@@ -221,10 +179,12 @@ $memoryContext
         ],
         'temperature': 0.7,
         'max_tokens': 1024,
+        ...config.buildThinkingParams(),
       },
+      cfg: config,
     );
 
-    return response.data['choices'][0]['message']['content'] as String;
+    return BaseApiService.extractContent(response.data);
   }
 
   // ═══════════════ 通用 JSON 解析 ═══════════════

@@ -8,9 +8,15 @@ class AppConstants {
       'https://ark.cn-beijing.volces.com/api/v3';
   static const String doubaoVisionModel = 'doubao-seed-2-1-turbo-260628';
 
-  /// DeepSeek 文本模型
+  /// DeepSeek 文本模型(2026-07-24 起 deepseek-chat/reasoner 已停用,仅剩 v4 系列)
   static const String deepseekBaseUrl = 'https://api.deepseek.com';
-  static const String deepseekChatModel = 'deepseek-chat';
+  static const String deepseekChatModel = 'deepseek-v4-flash';
+
+  /// 副槽位(专项文本)内置模型清单 — 拉取 /models 失败时的兜底
+  static const List<String> deepseekFallbackModels = [
+    'deepseek-v4-flash', // 快速通用,默认
+    'deepseek-v4-pro',   // 高能力,思考模式
+  ];
 
   // ── 本地存储 Key ──
   static const String hiveBoxSettings = 'settings';
@@ -21,6 +27,10 @@ class AppConstants {
   static const String keyDeepseekApiKey = 'deepseek_api_key';
   static const String keyDeepseekModel = 'deepseek_model';
   static const String keyDeepseekBaseUrl = 'deepseek_base_url';
+  /// 副槽位(专项文本)思考模式,默认 disabled
+  static const String keyDeepseekThinking = 'deepseek_thinking';
+  /// 追问对话使用的槽位:primary=多模态 / secondary=专项文本
+  static const String keyFollowUpSlot = 'follow_up_slot';
 
   // ── 思考模式 ──
   // disabled → thinking: {type: disabled}，完全跳过推理
@@ -34,7 +44,7 @@ class AppConstants {
 
   // ── 数据库 ──
   static const String dbName = 'readflow.db';
-  static const int dbVersion = 3;
+  static const int dbVersion = 4;
 
   // ── 分类系统 ──
   static const List<String> learningCategories = [

@@ -6,13 +6,13 @@ class StatsProvider extends ChangeNotifier {
   List<LearningRecord> _dailyLogs = [];
   int _streakDays = 0;
   int _totalVocab = 0;
+  int _totalExercises = 0;
   bool _loading = false;
 
   List<LearningRecord> get dailyLogs => _dailyLogs;
   int get streakDays => _streakDays;
   int get totalVocab => _totalVocab;
-  // TODO: 实现练习完成计数 — DatabaseService.getTotalExerciseCount()
-  int get totalExercises => 0;
+  int get totalExercises => _totalExercises;
   bool get loading => _loading;
 
   /// 加载统计数据
@@ -30,6 +30,7 @@ class StatsProvider extends ChangeNotifier {
     // 计算连续天数
     _streakDays = _calculateStreak(_dailyLogs);
     _totalVocab = await DatabaseService.getTotalVocabCount();
+    _totalExercises = await DatabaseService.getTotalExerciseCount();
 
     _loading = false;
     notifyListeners();

@@ -3,9 +3,10 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
-import 'package:hive_flutter/hive_flutter.dart';
 import 'package:image/image.dart' as img;
 import '../config/constants.dart';
+import 'api_endpoint.dart';
+import 'base_api.dart';
 
 /// SSE 流式数据块
 class SseChunk {
@@ -14,76 +15,19 @@ class SseChunk {
   const SseChunk({required this.text, required this.isReasoning});
 }
 
-/// 豆包（火山方舟）视觉 API 服务
-class DoubaoApiService {
-  /// 从 Hive 读取配置（无自定义值则用默认）
-  String get _baseUrl {
-    final v = Hive.box(AppConstants.hiveBoxSettings)
-        .get(AppConstants.keyDoubaoBaseUrl);
-    return (v is String && v.isNotEmpty) ? v : AppConstants.doubaoBaseUrl;
-  }
+/// 多模态 API 服务(主槽位):识图/全文翻译/追问。
+/// 原豆包服务,配置源收敛到 ApiEndpointConfig.primary。
+class DoubaoApiService extends BaseApiService {
+  @override
+  ApiEndpointConfig get config => ApiEndpointConfig.primary;
 
   /// 当前使用的模型名（公开，供 UI 展示/调试）
-  String get modelName {
-    final v = Hive.box(AppConstants.hiveBoxSettings)
-        .get(AppConstants.keyDoubaoModel);
-    return (v is String && v.isNotEmpty) ? v : AppConstants.doubaoVisionModel;
-  }
-
-  // 复用 Dio 实例，避免每次请求重新 TCP+TLS 握手
-  Dio? _dioInstance;
-  String? _dioBaseUrl;
-
-  Dio get _dio {
-    final url = _baseUrl;
-    if (_dioInstance == null || _dioBaseUrl != url) {
-      _dioBaseUrl = url;
-      _dioInstance = Dio(BaseOptions(
-        baseUrl: url,
-        connectTimeout: const Duration(seconds: 60),
-        receiveTimeout: const Duration(seconds: 600),
-        sendTimeout: const Duration(seconds: 60),
-        headers: {'Content-Type': 'application/json'},
-        // HTTP keep-alive 复用连接
-        persistentConnection: true,
-      ));
-    }
-    return _dioInstance!;
-  }
-
-  /// 从 Hive 读取 API Key
-  String? _getApiKey() {
-    final box = Hive.box(AppConstants.hiveBoxSettings);
-    return box.get(AppConstants.keyDoubaoApiKey);
-  }
+  String get modelName => config.model;
 
   /// 检查是否已配置 API Key
-  bool get isConfigured {
-    final key = _getApiKey();
-    return key != null && key.isNotEmpty;
-  }
+  bool get isConfigured => config.isConfigured;
 
   // ── 图片压缩 ──
-
-  /// 安全提取 API 响应中的 content 字段
-  static String _extractContent(Map<String, dynamic> data) {
-    final error = data['error'];
-    if (error != null) {
-      final msg = error is Map ? (error['message'] ?? '未知错误') : '$error';
-      throw Exception('API 返回错误：$msg');
-    }
-    final choices = data['choices'] as List<dynamic>?;
-    if (choices == null || choices.isEmpty) {
-      throw Exception('API 返回空响应，请检查模型是否可用');
-    }
-    final message = choices[0]['message'];
-    if (message == null) {
-      throw Exception('API 响应格式异常：缺少 message 字段');
-    }
-    final content = message['content'];
-    if (content is String) return content;
-    throw Exception('API 返回内容为空');
-  }
 
   /// 安全读取图片字节，文件不存在或读取失败时抛友好错误
   Future<Uint8List> _readImageBytes(File imageFile) async {
@@ -157,89 +101,6 @@ class DoubaoApiService {
 
   // ── 共享 ──
 
-  /// 豆包 thinking 参数
-  /// turbo 模型开启 thinking 后即使 minimal 级别也要 1min+。
-  /// 策略：低度以下禁用 thinking（秒级），中度以上才开启。
-  /// disabled → thinking: disabled（秒级）
-  /// low    → thinking: disabled（秒级，准确度靠系统提示词保证）
-  /// medium → thinking: enabled + reasoning_effort: low
-  /// high   → thinking: enabled + reasoning_effort: medium
-  Map<String, dynamic>? _buildThinkingParams() {
-    final v = Hive.box(AppConstants.hiveBoxSettings)
-        .get(AppConstants.keyDoubaoThinking);
-    final mode = (v is String &&
-            (v == 'disabled' || v == 'low' || v == 'medium' || v == 'high'))
-        ? v
-        : 'disabled';
-
-    switch (mode) {
-      case 'disabled':
-      case 'low':
-        // turbo 模型 thinking 太慢，低度以下一律禁用
-        return {'thinking': {'type': 'disabled'}};
-      case 'medium':
-        return {
-          'thinking': {'type': 'enabled'},
-          'reasoning_effort': 'low',
-        };
-      case 'high':
-        return {
-          'thinking': {'type': 'enabled'},
-          'reasoning_effort': 'medium',
-        };
-      default:
-        return {'thinking': {'type': 'disabled'}};
-    }
-  }
-
-  /// POST — 自适应递归降级（最多 3 次）
-  /// 1. 有 reasoning_effort → 移除它（保留 thinking: enabled，默认 minimal）
-  /// 2. thinking: enabled → auto → disabled → 移除 thinking
-  Future<Response> _postWithReasoningFallback(
-    String path,
-    Map<String, dynamic> body, {
-    required String apiKey,
-    ResponseType? responseType,
-    int retryDepth = 0,
-  }) async {
-    try {
-      return await _dio.post(path,
-          options: Options(
-            headers: {'Authorization': 'Bearer $apiKey'},
-            responseType: responseType,
-          ),
-          data: body);
-    } on DioException catch (e) {
-      if (!_isReasoningError(e) || retryDepth >= 3) rethrow;
-
-      final degraded = Map<String, dynamic>.from(body);
-
-      // Step 1: 移除 reasoning_effort（最常见的不兼容参数）
-      if (degraded.containsKey('reasoning_effort')) {
-        degraded.remove('reasoning_effort');
-      } else if (degraded['thinking'] is Map) {
-        // Step 2: 逐级降 thinking.type
-        final t = degraded['thinking'] as Map;
-        final type = t['type'] as String?;
-        if (type == 'enabled') {
-          degraded['thinking'] = {'type': 'auto'};
-        } else if (type == 'auto') {
-          degraded['thinking'] = {'type': 'disabled'};
-        } else {
-          // disabled 或未知 → 移除 thinking
-          degraded.remove('thinking');
-        }
-      } else {
-        rethrow;
-      }
-
-      return _postWithReasoningFallback(path, degraded,
-          apiKey: apiKey,
-          responseType: responseType,
-          retryDepth: retryDepth + 1);
-    }
-  }
-
   Map<String, dynamic> _buildRequestBody(
     List<String> imageUris, {
     String? sourceBook,
@@ -288,7 +149,7 @@ class DoubaoApiService {
       ],
       'max_tokens': 2048,
       'temperature': 0,
-      ..._buildThinkingParams()!,
+      ...config.buildThinkingParams(),
       if (stream) 'stream': true,
     };
   }
@@ -303,9 +164,8 @@ class DoubaoApiService {
     String analysisMode = AppConstants.analysisModeMarked,
   }) async {
     if (imageFiles.isEmpty) throw Exception('没有可识别的图片');
-    final apiKey = _getApiKey();
-    if (apiKey == null || apiKey.isEmpty) {
-      throw Exception('请先在设置中配置豆包 API Key');
+    if (!config.isConfigured) {
+      throw Exception('请先在设置中配置主 API Key');
     }
 
     final imageUris = await Future.wait(
@@ -320,10 +180,10 @@ class DoubaoApiService {
       analysisMode: analysisMode,
     );
 
-    final response = await _postWithReasoningFallback(
-      '/chat/completions', body, apiKey: apiKey);
+    final response = await postWithReasoningFallback(
+      '/chat/completions', body, cfg: config);
 
-    final content = _extractContent(response.data);
+    final content = BaseApiService.extractContent(response.data);
     return parseResponse(content, analysisMode: analysisMode);
   }
 
@@ -337,9 +197,8 @@ class DoubaoApiService {
     String analysisMode = AppConstants.analysisModeMarked,
   }) async* {
     if (imageFiles.isEmpty) throw Exception('没有可识别的图片');
-    final apiKey = _getApiKey();
-    if (apiKey == null || apiKey.isEmpty) {
-      throw Exception('请先在设置中配置豆包 API Key');
+    if (!config.isConfigured) {
+      throw Exception('请先在设置中配置主 API Key');
     }
 
     final imageUris = await Future.wait(
@@ -355,8 +214,8 @@ class DoubaoApiService {
       analysisMode: analysisMode,
     );
 
-    final response = await _postWithReasoningFallback(
-      '/chat/completions', body, apiKey: apiKey,
+    final response = await postWithReasoningFallback(
+      '/chat/completions', body, cfg: config,
       responseType: ResponseType.stream);
 
     final data = response.data;
@@ -364,29 +223,6 @@ class DoubaoApiService {
       throw Exception('API 未返回流式响应：${data is Map ? data['error'] ?? data : data}');
     }
     yield* _parseSseStream(data.stream);
-  }
-
-  /// 判断是否因 reasoning_effort 参数导致 API 报错（应 retry 移除）
-  static bool _isReasoningError(DioException e) {
-    final statusCode = e.response?.statusCode;
-    // 4xx 客户端错误才可能是参数问题
-    if (statusCode == null || statusCode < 400 || statusCode >= 500) return false;
-
-    final d = e.response?.data;
-    String body;
-    if (d is Map) {
-      final error = d['error'];
-      if (error is Map) {
-        body = '${error['code'] ?? ''} ${error['message'] ?? ''}';
-      } else {
-        body = d.toString();
-      }
-    } else if (d is String) {
-      body = d;
-    } else {
-      body = e.message ?? '';
-    }
-    return body.contains('1830102');
   }
 
   /// SSE data 行解析 → 产出 SseChunk（null = [DONE] 或空行）
@@ -444,18 +280,20 @@ class DoubaoApiService {
 
   // ── 追问对话（text-only 流式） ──
 
-  /// 基于已有识别结果发送追问，返回流式 SSE 块
+  /// 基于已有识别结果发送追问，返回流式 SSE 块。
+  /// [endpoint] 指定槽位(主/副),null 用本服务默认槽位(主)。
   Stream<SseChunk> followUpStream(
     String question, {
     required String context,
+    ApiEndpointConfig? endpoint,
   }) async* {
-    final apiKey = _getApiKey();
-    if (apiKey == null || apiKey.isEmpty) {
-      throw Exception('请先在设置中配置豆包 API Key');
+    final cfg = endpoint ?? config;
+    if (!cfg.isConfigured) {
+      throw Exception('请先在设置中配置 API Key');
     }
 
     final body = {
-      'model': modelName,
+      'model': cfg.model,
       'messages': [
         {
           'role': 'system',
@@ -469,12 +307,12 @@ class DoubaoApiService {
       ],
       'temperature': 0.3,
       'max_tokens': 2048,
-      ..._buildThinkingParams()!,
+      ...cfg.buildThinkingParams(),
       'stream': true,
     };
 
-    final response = await _postWithReasoningFallback(
-      '/chat/completions', body, apiKey: apiKey,
+    final response = await postWithReasoningFallback(
+      '/chat/completions', body, cfg: cfg,
       responseType: ResponseType.stream);
 
     final data = response.data;
