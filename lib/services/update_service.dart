@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
@@ -119,42 +120,88 @@ class UpdateService {
     return out;
   }
 
-  /// GitHub 加速代理前缀(公开仓库时国内加速,全失败回退直连)
+  /// GitHub 加速代理前缀(2026-03 国内实测可用/高速,按前缀式代理格式)。
+  /// 全部为公共节点,随时可能失效——并发竞速 + 直连兜底,不依赖单点。
   static const List<String> _mirrorPrefixes = [
-    'https://ghproxy.net/',
-    'https://gh-proxy.com/',
-    'https://ghfast.top/',
+    'https://gh.zwy.one/',          // 实测 7119 KB/s
+    'https://gh.llkk.cc/',          // 实测 6211 KB/s
+    'https://ghproxy.cxkpro.top/',  // 实测 5292 KB/s
+    'https://gh.h233.eu.org/',      // 实测 4918 KB/s
+    'https://ghfast.top/',          // 多国 CDN,实测 2972 KB/s
+    'https://gh-proxy.com/',        // 老牌稳定
   ];
 
   /// 下载 APK 到应用缓存目录,返回本地文件路径。
-  /// 公开仓库:镜像优先(GitHub 国内直连慢)→ 直连兜底。
+  /// 并发竞速:所有候选(镜像 + 直连)同时下载到独立临时文件,
+  /// 首个完成者胜出,其余立即取消——串行试错会卡死在
+  /// "连接成功但吐数据极慢"的镜像上,竞速模式不会。
+  /// 进度取所有节点中的最大值(最快节点的进展)。
   static Future<String> downloadApk(
     String url, {
     void Function(int received, int total)? onProgress,
   }) async {
     final dir = await getApplicationCacheDirectory();
-    final file = File('${dir.path}/readflow-update.apk');
 
-    // ── 镜像 → 直连 ──
-    Object? lastError;
-    for (final candidate in [
-      ..._mirrorPrefixes.map((p) => '$p$url'),
-      url,
-    ]) {
-      if (file.existsSync()) file.deleteSync();
-      onProgress?.call(0, 1);
+    // 候选去重(镜像前缀 + 直连)
+    final candidates = <String>[];
+    for (final p in _mirrorPrefixes) {
+      final c = '$p$url';
+      if (!candidates.contains(c)) candidates.add(c);
+    }
+    if (!candidates.contains(url)) candidates.add(url);
+
+    // 总预算:120s 内没有任一候选完成 → 报错让用户重试
+    const totalBudget = Duration(seconds: 120);
+
+    final cancelTokens = <CancelToken>[];
+    final complete = Completer<String>();
+    var settled = false;
+    var maxReceived = 0;
+
+    Future<void> tryCandidate(String candidate, int idx) async {
+      final cancel = CancelToken();
+      cancelTokens.add(cancel);
+      final file = File('${dir.path}/readflow-update-$idx.part');
       try {
+        if (file.existsSync()) file.deleteSync();
         await _dio.download(
           candidate,
           file.path,
-          onReceiveProgress: onProgress,
+          cancelToken: cancel,
+          onReceiveProgress: (received, total) {
+            if (settled) return;
+            // 上报全部节点中的最大进度(哪个快显示哪个)
+            if (received > maxReceived) {
+              maxReceived = received;
+              onProgress?.call(received, total);
+            }
+          },
         );
-        return file.path;
-      } catch (e) {
-        lastError = e;
+        if (!settled) {
+          settled = true;
+          complete.complete(file.path);
+          // 胜出后取消其余候选,停止占用带宽
+          for (final c in cancelTokens) {
+            if (!identical(c, cancel)) c.cancel();
+          }
+        }
+      } catch (_) {
+        // 单节点失败:等别的候选,总预算兜底
       }
     }
-    throw lastError ?? Exception('下载失败');
+
+    // 启动所有候选(不 await,竞速)
+    for (int i = 0; i < candidates.length; i++) {
+      tryCandidate(candidates[i], i);
+    }
+    onProgress?.call(0, 1);
+
+    return complete.future.timeout(totalBudget, onTimeout: () {
+      for (final c in cancelTokens) {
+        c.cancel();
+      }
+      throw Exception('下载超时(120s),请检查网络后重试');
+    });
   }
 
   /// 调起系统安装器安装 APK(Android 会引导"未知来源"授权)
