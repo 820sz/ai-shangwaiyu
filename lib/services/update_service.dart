@@ -217,8 +217,16 @@ class UpdateService {
     });
   }
 
-  /// 调起系统安装器安装 APK(Android 会引导"未知来源"授权)
+  /// 调起系统安装器安装 APK(Android 会引导"未知来源"授权)。
+  /// open_filex 打开失败时不抛异常而是返回 OpenResult——
+  /// 必须检查返回值,否则对话框静默关闭、安装器不拉起(用户以为没反应)。
   static Future<void> installApk(String path) async {
-    await OpenFilex.open(path, type: 'application/vnd.android.package-archive');
+    final result = await OpenFilex.open(
+      path,
+      type: 'application/vnd.android.package-archive',
+    );
+    if (result.type != ResultType.done) {
+      throw Exception('打开安装器失败(${result.type.name}): ${result.message}');
+    }
   }
 }

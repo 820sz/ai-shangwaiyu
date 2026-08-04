@@ -38,10 +38,13 @@
             android:name="com.yalantis.ucrop.UCropActivity"
             android:screenOrientation="portrait"
             android:theme="@style/Ucrop.CropTheme"/>
-        <!-- 自动更新:FileProvider 提供给系统安装器读取下载的 APK -->
+        <!-- 自动更新:FileProvider 提供给系统安装器读取下载的 APK。
+             authority 必须与 open_filex 4.7.0 硬编码的
+             packageName + ".fileProvider.com.crazecoder.openfile" 完全一致——
+             不一致时 getUriForFile 抛异常被插件吞掉,安装器静默不拉起 -->
         <provider
             android:name="androidx.core.content.FileProvider"
-            android:authorities="${applicationId}.fileprovider"
+            android:authorities="${applicationId}.fileProvider.com.crazecoder.openfile"
             android:exported="false"
             android:grantUriPermissions="true">
             <meta-data
