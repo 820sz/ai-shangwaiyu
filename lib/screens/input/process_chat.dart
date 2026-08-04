@@ -29,12 +29,17 @@ class _FollowUpMessage {
   final String content;
   final String? reasoningText;
   final bool streaming; // AI 是否仍在生成
+  /// 生成此消息的模型名(仅 AI 消息有值)。
+  /// 头像/标签按消息自身的模型渲染——切槽位不改变历史气泡;
+  /// null = 旧版本数据,渲染时回退当前模型。
+  final String? model;
 
   const _FollowUpMessage({
     required this.role,
     required this.content,
     this.reasoningText,
     this.streaming = false,
+    this.model,
   });
 
   _FollowUpMessage copyWith({
@@ -46,6 +51,7 @@ class _FollowUpMessage {
     content: content ?? this.content,
     reasoningText: reasoningText ?? this.reasoningText,
     streaming: streaming ?? this.streaming,
+    model: model,
   );
 }
 
@@ -77,7 +83,7 @@ class _SavedConversation {
         title: json['title'] as String,
         dateLabel: json['dateLabel'] as String,
         messages: (json['messages'] as List)
-            .map((e) => e as Map<String, dynamic>)
+            .map((e) => Map<String, dynamic>.from(e as Map))
             .toList(),
       );
 }
@@ -243,6 +249,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
               role: m['role']?.toString() == 'user' ? 'user' : 'ai',
               content: m['content']?.toString() ?? '',
               reasoningText: m['reasoningText']?.toString(),
+              model: m['model']?.toString(),
             ),
           )
           .toList();
@@ -316,6 +323,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                 'role': m.role,
                 'content': m.content,
                 if (m.reasoningText != null) 'reasoningText': m.reasoningText,
+                if (m.model != null) 'model': m.model,
               },
             )
             .toList(),
@@ -323,8 +331,10 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
 
       final box = Hive.box(AppConstants.hiveBoxSettings);
       final raw = box.get(AppConstants.keySavedSessions) as List? ?? [];
+      // Hive 读回的嵌套 Map 是 _Map<dynamic, dynamic>,
+      // 不能直接 as Map<String, dynamic>(运行时强转失败)——必须 .from 重建
       final list = raw
-          .map((e) => SavedSession.fromJson(e as Map<String, dynamic>))
+          .map((e) => SavedSession.fromJson(Map<String, dynamic>.from(e as Map)))
           .toList();
       list.insert(0, conv);
       while (list.length > AppConstants.maxSavedSessions) {
@@ -647,7 +657,11 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
       final raw = box.get(_hiveKeySavedChats);
       if (raw is List) {
         _savedConversations = raw
-            .map((e) => _SavedConversation.fromJson(e as Map<String, dynamic>))
+            .map(
+              (e) => _SavedConversation.fromJson(
+                Map<String, dynamic>.from(e as Map),
+              ),
+            )
             .toList();
       }
     } catch (_) {
@@ -679,6 +693,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
               'role': m.role,
               'content': m.content,
               if (m.reasoningText != null) 'reasoningText': m.reasoningText,
+              if (m.model != null) 'model': m.model,
             },
           )
           .toList(),
@@ -704,6 +719,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
             role: m['role'] as String,
             content: m['content'] as String,
             reasoningText: m['reasoningText'] as String?,
+            model: m['model'] as String?,
           ),
         )
         .toList();
@@ -1117,7 +1133,13 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
   void _sendFollowUp(String text) {
     if (text.isEmpty) return;
     final userMsg = _FollowUpMessage(role: 'user', content: text);
-    final aiMsg = _FollowUpMessage(role: 'ai', content: '', streaming: true);
+    // 捕获发送时实际生效的模型(副槽位未配置会回落到主)——该楼回复就记它
+    final aiMsg = _FollowUpMessage(
+      role: 'ai',
+      content: '',
+      streaming: true,
+      model: _followUpModel,
+    );
 
     _followUpMessages.value = [..._followUpMessages.value, userMsg, aiMsg];
     _followUpCtrl.clear();
@@ -1157,6 +1179,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
               : content,
           reasoningText: reasoning.isNotEmpty ? reasoning : null,
           streaming: !done,
+          model: msgs[aiMsgIndex].model, // 保留发送时捕获的模型
         );
         _followUpMessages.value = msgs;
       }
@@ -1213,13 +1236,9 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
             ? MainAxisAlignment.end
             : MainAxisAlignment.start,
         children: [
-          // AI 头像（左侧）— 跟随追问槽位模型切换
+          // AI 头像（左侧）— 按生成该消息的模型渲染,切槽位不改历史气泡
           if (!isUser) ...[
-            ValueListenableBuilder<String>(
-              valueListenable: _followUpSlotNotifier,
-              builder: (_, __, ___) =>
-                  _aiAvatar(radius: 14, modelName: _followUpModel),
-            ),
+            _aiAvatar(radius: 14, modelName: msg.model ?? _followUpModel),
             const SizedBox(width: 8),
           ],
           // 气泡
@@ -1239,6 +1258,18 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  // 模型名标签（仅 AI 消息,旧数据无 model 时不显示）
+                  if (!isUser && msg.model != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Text(
+                        msg.model!,
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: Colors.grey[500],
+                        ),
+                      ),
+                    ),
                   // 推理（仅 AI 消息）
                   if (msg.reasoningText != null &&
                       msg.reasoningText!.isNotEmpty)
@@ -1907,9 +1938,6 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     );
   }
 
-  /// 品牌 Logo 资源路径，无对应文件则 null
-  String? get _providerIconAsset => _iconAssetFor(_currentModel);
-
   String? _iconAssetFor(String modelName) {
     final m = modelName.toLowerCase();
     if (m.contains('doubao') || m.contains('seed') || m.contains('ark')) {
@@ -1944,9 +1972,6 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     }
     return null;
   }
-
-  /// 厂商主题色（Logo 加载失败时兜底）
-  Color get _providerColor => _colorFor(_currentModel);
 
   Color _colorFor(String modelName) {
     final m = modelName.toLowerCase();

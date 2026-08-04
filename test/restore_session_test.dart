@@ -67,4 +67,40 @@ void main() {
     expect(find.text('word0'), findsOneWidget);
     expect(find.text('word22'), findsOneWidget);
   });
+
+  test('Hive 往返:会话写入后读回可解析(复现 _Map<dynamic,dynamic> cast 崩溃)', () async {
+    final box = Hive.box(AppConstants.hiveBoxSettings);
+    final s = SavedSession(
+      id: 't-roundtrip',
+      createdAt: DateTime.now(),
+      analysisMode: AppConstants.analysisModeMarked,
+      results: [
+        Vocabulary(word: 'hello', translation: '你好', photoPath: '/x/img0.jpg')
+            .toMap(),
+      ],
+      fullTextParagraphs: const [
+        {'original': 'Hi.', 'translation': '你好。'},
+      ],
+      followUpMessages: const [
+        {'role': 'user', 'content': '什么意思'},
+        {'role': 'ai', 'content': 'hello 意为你好。', 'model': 'deepseek-v4-flash'},
+      ],
+    );
+
+    // 第一次保存:raw 为空,不触发解析(修复前也不会炸)
+    await box.put(
+      AppConstants.keySavedSessions,
+      [s.toJson()],
+    );
+    // 第二次保存:读回已有会话再解析——Hive 读回的嵌套 Map 是
+    // _Map<dynamic, dynamic>,直接 as Map<String, dynamic> 会抛
+    final raw = box.get(AppConstants.keySavedSessions) as List? ?? [];
+    final list = raw
+        .map((e) => SavedSession.fromJson(Map<String, dynamic>.from(e as Map)))
+        .toList();
+
+    expect(list, hasLength(1));
+    expect(list.first.followUpMessages.last['model'], 'deepseek-v4-flash',
+        reason: '追问消息的 model 字段应随会话持久化');
+  });
 }

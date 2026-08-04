@@ -508,8 +508,10 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
       final box = Hive.box(AppConstants.hiveBoxSettings);
       final raw = box.get(AppConstants.keySavedSessions);
       if (raw is List) {
+        // Hive 读回的嵌套 Map 是 _Map<dynamic, dynamic>,不能直接
+        // as Map<String, dynamic> 强转(会抛)——必须 .from 重建
         return raw
-            .map((e) => SavedSession.fromJson(e as Map<String, dynamic>))
+            .map((e) => SavedSession.fromJson(Map<String, dynamic>.from(e as Map)))
             .toList();
       }
     } catch (_) {}
