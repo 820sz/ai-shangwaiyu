@@ -179,7 +179,20 @@ class UpdateService {
         );
         if (!settled) {
           settled = true;
-          complete.complete(file.path);
+          // 竞速临时名是 .part——PackageInstaller 按 URI 文件名扩展名
+          // 判断是否 APK,非 .apk 会静默拒绝打开(进度满但不跳安装界面)。
+          // 必须改回 .apk 再交给系统安装器。
+          final apkPath = file.path.replaceFirst(RegExp(r'\.part$'), '.apk');
+          if (file.existsSync()) {
+            try {
+              await file.rename(apkPath);
+            } catch (_) {
+              try {
+                await file.copy(apkPath);
+              } catch (_) {}
+            }
+          }
+          complete.complete(apkPath);
           // 胜出后取消其余候选,停止占用带宽
           for (final c in cancelTokens) {
             if (!identical(c, cancel)) c.cancel();
