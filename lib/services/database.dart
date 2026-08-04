@@ -56,6 +56,7 @@ class DatabaseService {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         title TEXT NOT NULL,
         content TEXT NOT NULL,
+        translation TEXT,
         vocab_ids TEXT DEFAULT '',
         created_at TEXT NOT NULL
       )
@@ -134,6 +135,12 @@ class DatabaseService {
       try {
         await db.execute("ALTER TABLE exercises ADD COLUMN reference_answers TEXT");
       } catch (e) { debugPrint('ReadFlow DB migration v4 reference_answers: $e'); }
+    }
+    if (oldV < 5) {
+      // 文章全文中文翻译(旧文章无此列,阅读器"显示翻译"会提示)
+      try {
+        await db.execute("ALTER TABLE articles ADD COLUMN translation TEXT");
+      } catch (e) { debugPrint('ReadFlow DB migration v5 translation: $e'); }
     }
   }
 

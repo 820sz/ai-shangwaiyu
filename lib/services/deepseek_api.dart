@@ -44,8 +44,9 @@ class DeepseekApiService extends BaseApiService {
 2. 文章长度 200-400 词
 3. 难度控制在用户水平（根据记忆信息判断）
 4. 题材以故事、科普、日常对话为宜，让读者有兴趣读下去
-5. 返回 JSON: {"title": "...", "content": "..."}
-6. 只返回 JSON，不要有其他内容''';
+5. 返回 JSON: {"title": "...", "content": "...", "translation": "..."}
+6. translation 为 content 的全文中文翻译，段落用空行分隔，与 content 段落一一对应
+7. 只返回 JSON，不要有其他内容''';
 
     final userPrompt = '''
 用户记忆信息：

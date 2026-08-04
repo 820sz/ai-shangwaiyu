@@ -3,6 +3,8 @@ class Article {
   final int? id;
   final String title;
   final String content;
+  /// 全文中文翻译(与 content 段落一一对应,空行分隔)。旧文章无此数据。
+  final String? translation;
   final List<int> vocabIds; // 文章包含的生词 ID 列表
   final DateTime createdAt;
 
@@ -10,6 +12,7 @@ class Article {
     this.id,
     required this.title,
     required this.content,
+    this.translation,
     this.vocabIds = const [],
     DateTime? createdAt,
   }) : createdAt = createdAt ?? DateTime.now();
@@ -19,6 +22,7 @@ class Article {
       if (id != null) 'id': id,
       'title': title,
       'content': content,
+      'translation': translation,
       'vocab_ids': vocabIds.join(','),
       'created_at': createdAt.toIso8601String(),
     };
@@ -30,6 +34,7 @@ class Article {
       id: map['id'] as int?,
       title: map['title'] as String,
       content: map['content'] as String,
+      translation: map['translation'] as String?,
       vocabIds: vocabStr.isEmpty
           ? []
           : vocabStr
@@ -48,6 +53,15 @@ class Article {
   /// 段落拆分（按双换行）
   List<String> get paragraphs {
     return content
+        .split('\n\n')
+        .where((p) => p.trim().isNotEmpty)
+        .toList();
+  }
+
+  /// 翻译段落拆分（与 paragraphs 索引一一对应；无翻译数据时为空列表）
+  List<String> get translationParagraphs {
+    if (translation == null || translation!.isEmpty) return const [];
+    return translation!
         .split('\n\n')
         .where((p) => p.trim().isNotEmpty)
         .toList();

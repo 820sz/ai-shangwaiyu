@@ -412,11 +412,17 @@ class DoubaoApiService extends BaseApiService {
     'doubao-seed-evolving',
   ];
 
-  /// 获取模型列表：先尝试 GET /models，失败则返回内置清单
+  /// 获取模型列表：先尝试 GET /models，再按允许前缀过滤，最后内置清单兜底。
+  /// [allowPrefixes] 只保留前缀匹配的模型(如豆包槽位只留 doubao 系列)——
+  /// 方舟聚合端点会返回非本族模型(如 deepseek)，混入列表会误导用户。
+  /// 拉取成功但过滤为空(用户用的是其他兼容端点)→ 返回全部拉取结果；
+  /// 拉取失败 → 返回内置清单。
   static Future<List<String>> fetchModels(
     String baseUrl,
-    String apiKey,
-  ) async {
+    String apiKey, {
+    List<String> allowPrefixes = const [],
+    List<String> fallback = fallbackDoubaoModels,
+  }) async {
     try {
       final dio = Dio(BaseOptions(
         baseUrl: baseUrl,
@@ -436,11 +442,17 @@ class DoubaoApiService extends BaseApiService {
             .where((id) => id.isNotEmpty)
             .toList();
         ids.sort();
+        if (ids.isNotEmpty && allowPrefixes.isNotEmpty) {
+          final filtered = ids
+              .where((id) => allowPrefixes.any((p) => id.startsWith(p)))
+              .toList();
+          if (filtered.isNotEmpty) return filtered;
+        }
         if (ids.isNotEmpty) return ids;
       }
     } catch (_) {
       // API 不通，走兜底
     }
-    return List.of(fallbackDoubaoModels);
+    return List.of(fallback);
   }
 }

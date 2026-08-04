@@ -67,6 +67,7 @@ class ArticleProvider extends ChangeNotifier {
       final article = Article(
         title: title,
         content: content,
+        translation: result['translation'] as String?,
         vocabIds: vocabIds,
       );
 
@@ -88,6 +89,7 @@ class ArticleProvider extends ChangeNotifier {
   /// 为文章生成回译练习
   Future<Exercise?> generateExercise(Article article) async {
     _generating = true;
+    _error = null;
     notifyListeners();
 
     try {
@@ -95,6 +97,7 @@ class ArticleProvider extends ChangeNotifier {
           await _deepseek.generateBackTranslationExercise(article.content);
 
       if (sentences.isEmpty) {
+        _error = 'AI 未返回有效句子，请重试。';
         _generating = false;
         notifyListeners();
         return null;
@@ -190,6 +193,7 @@ extension ArticleCopy on Article {
       id: id ?? this.id,
       title: title,
       content: content,
+      translation: translation,
       vocabIds: vocabIds,
       createdAt: createdAt,
     );

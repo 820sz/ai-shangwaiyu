@@ -133,9 +133,17 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
       }
     });
 
-    // 两个槽位都尝试拉取 /models(OpenAI 兼容),失败保留内置清单
+    // 两槽位拉取 /models 后按模型族过滤:
+    // 主=豆包系列,副=DeepSeek 系列 —— 方舟聚合端点会混入他族模型,过滤避免误导
     if (apiKey.isNotEmpty) {
-      final models = await DoubaoApiService.fetchModels(baseUrl, apiKey);
+      final models = await DoubaoApiService.fetchModels(
+        baseUrl,
+        apiKey,
+        allowPrefixes: isPrimary ? const ['doubao'] : const ['deepseek'],
+        fallback: isPrimary
+            ? DoubaoApiService.fallbackDoubaoModels
+            : AppConstants.deepseekFallbackModels,
+      );
       if (mounted) {
         setState(() {
           if (isPrimary) {

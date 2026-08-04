@@ -40,19 +40,9 @@ class UpdateService {
     sendTimeout: const Duration(seconds: 20),
   ));
 
-  /// GitHub 细粒度只读令牌(仅 read:contents on ai-shangwaiyu)
-  /// 拆成两段绕过 GitHub secret scanning push 拦截;运行时拼回。
-  /// 令牌即使被 APK 提取也只能读当前仓库代码,不可写入。
-  static String get _pat => '${_p1}${_p2}';
-  static const _p1 = 'github_pat_11BGBDXVI0w0moUPI2s3bE_Qd8uYazEOTkphC8exWvKlpUuXGViasUGY3VDfUFVqTaE6JQ';
-  static const _p2 = 'SR6EDmtTZkRu';
-
-  /// 请求 Options:私有仓库加 Authorization(公开仓库匿名访问也能过,但多一层保障)
+  /// 请求 Options:公开仓库匿名访问即可
   static Options _apiOpts() => Options(
-        headers: {
-          'Accept': 'application/vnd.github+json',
-          'Authorization': 'Bearer $_pat',
-        },
+        headers: {'Accept': 'application/vnd.github+json'},
         sendTimeout: const Duration(seconds: 10),
         receiveTimeout: const Duration(seconds: 10),
       );
@@ -137,8 +127,6 @@ class UpdateService {
   ];
 
   /// 下载 APK 到应用缓存目录,返回本地文件路径。
-  /// 私有仓库(有 PAT):只走 GitHub 认证直连,失败立即报错——
-  /// 镜像无法代 GitHub 验权,试了也是 404,空转只会拖慢失败反馈。
   /// 公开仓库:镜像优先(GitHub 国内直连慢)→ 直连兜底。
   static Future<String> downloadApk(
     String url, {
@@ -147,23 +135,7 @@ class UpdateService {
     final dir = await getApplicationCacheDirectory();
     final file = File('${dir.path}/readflow-update.apk');
 
-    // ── 私有仓库:认证直连(20s 连接超时,卡住会快速失败,不再无限挂起) ──
-    if (_pat.isNotEmpty) {
-      try {
-        await _dio.download(
-          url,
-          file.path,
-          onReceiveProgress: onProgress,
-          options: Options(headers: {'Authorization': 'Bearer $_pat'}),
-        );
-        return file.path;
-      } catch (_) {
-        if (file.existsSync()) file.deleteSync();
-        rethrow; // 失败立即反馈,用户可重试,不空转镜像
-      }
-    }
-
-    // ── 公开仓库回退:镜像 → 直连 ──
+    // ── 镜像 → 直连 ──
     Object? lastError;
     for (final candidate in [
       ..._mirrorPrefixes.map((p) => '$p$url'),

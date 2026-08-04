@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../../providers/vocab_provider.dart';
 import '../../config/constants.dart';
+import '../../models/saved_session.dart';
 import '../../services/doubao_api.dart';
 import 'process_chat.dart';
 import 'widgets/analysis_mode_picker.dart';
@@ -234,6 +235,19 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
               onPressed: _submitImages,
               icon: const Icon(Icons.auto_awesome, size: 18),
               label: Text('开始识别 (${_pendingImages.length}张)'),
+            ),
+          ],
+
+          // ── 继续上次暂存的会话 ──
+          if (_savedSessions.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: _showSavedSessions,
+              icon: const Icon(Icons.history, size: 16),
+              label: Text(
+                '继续上次会话（${_savedSessions.length} 条）',
+                style: const TextStyle(fontSize: 12),
+              ),
             ),
           ],
 
@@ -474,6 +488,126 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
 
   void _removePendingImage(int index) {
     setState(() => _pendingImages.removeAt(index));
+  }
+
+  // ═══════════════ 暂存会话 ═══════════════
+
+  /// 已暂存的会话列表(最新在前)
+  List<SavedSession> get _savedSessions {
+    try {
+      final box = Hive.box(AppConstants.hiveBoxSettings);
+      final raw = box.get(AppConstants.keySavedSessions);
+      if (raw is List) {
+        return raw
+            .map((e) => SavedSession.fromJson(e as Map<String, dynamic>))
+            .toList();
+      }
+    } catch (_) {}
+    return const [];
+  }
+
+  /// 会话列表弹窗:点选恢复,可删除
+  void _showSavedSessions() {
+    showModalBottomSheet(
+      context: context,
+      useSafeArea: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  const Text('暂存的会话',
+                      style:
+                          TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                  const Spacer(),
+                  TextButton(
+                    onPressed: () {
+                      Hive.box(AppConstants.hiveBoxSettings)
+                          .delete(AppConstants.keySavedSessions);
+                      Navigator.pop(ctx);
+                      if (mounted) setState(() {});
+                    },
+                    child: const Text('清空全部',
+                        style: TextStyle(fontSize: 12, color: Colors.red)),
+                  ),
+                ],
+              ),
+            ),
+            if (_savedSessions.isEmpty)
+              const Padding(
+                padding: EdgeInsets.all(32),
+                child: Text('暂无暂存的会话',
+                    style: TextStyle(color: Colors.grey)),
+              )
+            else
+              ...List.generate(_savedSessions.length, (i) {
+                final s = _savedSessions[i];
+                return ListTile(
+                  leading: const Icon(Icons.chat_bubble_outline, size: 20),
+                  title: Text(s.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 14)),
+                  subtitle: Text(s.dateLabel,
+                      style: const TextStyle(fontSize: 12)),
+                  trailing: IconButton(
+                    icon: const Icon(Icons.delete_outline, size: 18),
+                    onPressed: () {
+                      final box = Hive.box(AppConstants.hiveBoxSettings);
+                      final rest = _savedSessions
+                          .where((x) => x.id != s.id)
+                          .toList();
+                      box.put(AppConstants.keySavedSessions,
+                          rest.map((x) => x.toJson()).toList());
+                      Navigator.pop(ctx);
+                      if (mounted) setState(() {});
+                    },
+                  ),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _resumeSession(s);
+                  },
+                );
+              }),
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 恢复会话:从结果 photoPath 重建图片文件列表(只保留仍存在的副本),
+  /// 以恢复模式打开结果页 — 识别结果与追问消息一并还原。
+  void _resumeSession(SavedSession s) {
+    final files = <File>[];
+    for (final m in s.results) {
+      final p = m['photoPath'] as String?;
+      if (p == null || p.isEmpty) continue;
+      final f = File(p);
+      if (f.existsSync() && !files.any((x) => x.path == p)) {
+        files.add(f);
+      }
+    }
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ProcessChatScreen(
+          imageFiles: files,
+          sourceBook: s.sourceBook,
+          sourcePage: s.sourcePage,
+          analysisMode: s.analysisMode,
+          restoreSession: s,
+        ),
+      ),
+    ).then((_) {
+      if (mounted) setState(() {});
+    });
   }
 
   /// 点击缩略图 → 大图预览弹窗，可放大查看、裁剪

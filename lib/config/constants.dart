@@ -31,6 +31,10 @@ class AppConstants {
   static const String keyDeepseekThinking = 'deepseek_thinking';
   /// 追问对话使用的槽位:primary=多模态 / secondary=专项文本
   static const String keyFollowUpSlot = 'follow_up_slot';
+  /// 暂存的识图会话列表(SavedSession.toJson 的 List)
+  static const String keySavedSessions = 'saved_sessions';
+  /// 最多保留的暂存会话数
+  static const int maxSavedSessions = 5;
 
   // ── 思考模式 ──
   // disabled → thinking: {type: disabled}，完全跳过推理
@@ -44,7 +48,7 @@ class AppConstants {
 
   // ── 数据库 ──
   static const String dbName = 'readflow.db';
-  static const int dbVersion = 4;
+  static const int dbVersion = 5;
 
   // ── 分类系统 ──
   static const List<String> learningCategories = [

@@ -3,7 +3,9 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:path_provider/path_provider.dart';
 import '../../config/constants.dart';
+import '../../models/saved_session.dart';
 import '../../models/vocabulary.dart';
 import '../../providers/vocab_provider.dart';
 import '../../services/api_endpoint.dart';
@@ -91,6 +93,8 @@ class ProcessChatScreen extends StatefulWidget {
   final String? sourceBook;
   final String? sourcePage;
   final String analysisMode; // AppConstants.analysisModeMarked / analysisModeFullText
+  /// 非空 = 恢复模式:跳过识别,直接还原会话的识别结果 + 追问消息
+  final SavedSession? restoreSession;
 
   const ProcessChatScreen({
     super.key,
@@ -98,6 +102,7 @@ class ProcessChatScreen extends StatefulWidget {
     this.sourceBook,
     this.sourcePage,
     this.analysisMode = AppConstants.analysisModeMarked,
+    this.restoreSession,
   });
 
   @override
@@ -183,7 +188,152 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _loadSavedConversations();
-    _startStreaming();
+    if (widget.restoreSession != null) {
+      _restoreSession(widget.restoreSession!);
+    } else {
+      _startStreaming();
+    }
+  }
+
+  /// 恢复模式:还原会话快照(结果 + 全文翻译 + 追问消息),跳过识别。
+  /// 追问消息原样进抽屉——满足"返回临时对话后追问记录不消失"。
+  void _restoreSession(SavedSession s) {
+    try {
+      // 图片锚点按实际文件重建
+      _imageGroupKeys.clear();
+      for (int i = 0; i < widget.imageFiles.length; i++) {
+        _imageGroupKeys[i] = GlobalKey(debugLabel: 'image_group_$i');
+      }
+
+      // 结果还原:照片副本丢失时置 null(分组标题仍显示,不崩)
+      _results = s.results.map((m) {
+        final v = Vocabulary.fromMap(m);
+        final p = v.photoPath;
+        if (p == null || p.isEmpty || !File(p).existsSync()) {
+          return v.copyWith(photoPath: null);
+        }
+        return v;
+      }).toList();
+      _selected.clear();
+      _selected.addAll(List.generate(_results.length, (i) => i));
+
+      _fullTextParagraphs = List<Map<String, String>>.from(
+        s.fullTextParagraphs
+            .map((m) => {
+                  'original': m['original']?.toString() ?? '',
+                  'translation': m['translation']?.toString() ?? '',
+                })
+            .where((m) => m['original']!.isNotEmpty),
+      );
+
+      _followUpMessages.value = s.followUpMessages
+          .where((m) => m['content']?.toString().isNotEmpty ?? false)
+          .map((m) => _FollowUpMessage(
+                role: m['role']?.toString() == 'user' ? 'user' : 'ai',
+                content: m['content']?.toString() ?? '',
+                reasoningText: m['reasoningText']?.toString(),
+              ))
+          .toList();
+      _followUpDirty = false;
+
+      if (mounted) setState(() => _phase = _StreamPhase.results);
+    } catch (e) {
+      debugPrint('ReadFlow restoreSession error: $e');
+      if (mounted) {
+        setState(() {
+          _phase = _StreamPhase.error;
+          _errorMessage = '会话恢复失败，请重试。\n$e';
+        });
+      }
+    }
+  }
+
+  // ═══════════════ 会话暂存 ═══════════════
+
+  /// 暂存当前会话:结果 + 追问 + 图片副本 → Hive(最多 [AppConstants.maxSavedSessions] 条)
+  Future<void> _saveSession() async {
+    try {
+      final now = DateTime.now();
+      final id = now.millisecondsSinceEpoch.toString();
+
+      // 图片复制到持久目录(系统可能清理缓存目录)
+      final docsDir = await getApplicationDocumentsDirectory();
+      final sessionDir = Directory('${docsDir.path}/sessions/$id');
+      await sessionDir.create(recursive: true);
+      final copyMap = <String, String>{};
+      for (int i = 0; i < widget.imageFiles.length; i++) {
+        final f = widget.imageFiles[i];
+        if (!f.existsSync()) continue;
+        final ext = f.path.split('.').last.toLowerCase();
+        final safeExt = ['jpg', 'jpeg', 'png', 'webp'].contains(ext) ? ext : 'jpg';
+        final target = '${sessionDir.path}/img$i.$safeExt';
+        try {
+          await f.copy(target);
+          copyMap[f.path] = target;
+        } catch (e) {
+          debugPrint('ReadFlow copy image $i error: $e');
+        }
+      }
+
+      // photoPath 重写为持久副本;词来源仍以副本为准
+      final results = _results
+          .map((v) {
+            final p = v.photoPath;
+            if (p != null && copyMap.containsKey(p)) {
+              return v.copyWith(photoPath: copyMap[p]);
+            }
+            return v;
+          })
+          .map((v) => v.toMap())
+          .toList();
+
+      final conv = SavedSession(
+        id: id,
+        createdAt: now,
+        analysisMode: widget.analysisMode,
+        sourceBook: widget.sourceBook,
+        sourcePage: widget.sourcePage,
+        results: results,
+        fullTextParagraphs: _fullTextParagraphs,
+        followUpMessages: _followUpMessages.value
+            .where((m) => !m.streaming) // 跳过还在生成中的消息
+            .map((m) => {
+                  'role': m.role,
+                  'content': m.content,
+                  if (m.reasoningText != null)
+                    'reasoningText': m.reasoningText,
+                })
+            .toList(),
+      );
+
+      final box = Hive.box(AppConstants.hiveBoxSettings);
+      final raw = box.get(AppConstants.keySavedSessions) as List? ?? [];
+      final list = raw
+          .map((e) => SavedSession.fromJson(e as Map<String, dynamic>))
+          .toList();
+      list.insert(0, conv);
+      while (list.length > AppConstants.maxSavedSessions) {
+        list.removeLast();
+      }
+      await box.put(
+          AppConstants.keySavedSessions, list.map((e) => e.toJson()).toList());
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('会话已暂存，可在「输入」页继续查看'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('ReadFlow saveSession error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('暂存失败：$e')),
+        );
+      }
+    }
   }
 
   @override
@@ -1076,6 +1226,13 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         appBar: AppBar(
           title: Text(_appBarTitle),
           actions: [
+          // 暂存会话:结果态可随时暂存,退出后从「输入」页继续
+          if (_phase == _StreamPhase.results)
+            IconButton(
+              icon: const Icon(Icons.bookmark_add_outlined),
+              tooltip: '暂存会话',
+              onPressed: _saveSession,
+            ),
           if (_phase == _StreamPhase.results && widget.analysisMode != AppConstants.analysisModeFullText) ...[
             IconButton(
               icon: const Icon(Icons.checklist),
@@ -1256,9 +1413,14 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
   /// 追问抽屉专用的紧凑模型/思考选择器 — 主/副双槽位分组。
   /// 选主槽位模型 → 识图同款(多模态);选副槽位模型 → 专项文本(若已配置)。
   Widget _buildCompactModelPicker() {
-    final isSecondary = _followUpSlot == 'secondary' &&
-        ApiEndpointConfig.secondary.isConfigured;
-    final secModels = AppConstants.deepseekFallbackModels;
+    final secConfigured = ApiEndpointConfig.secondary.isConfigured;
+    final isSecondary = _followUpSlot == 'secondary' && secConfigured;
+    // 副分组模型 = 已保存的副模型 + 内置清单(去重,保证当前值可选)
+    final secModels = <String>{
+      if (ApiEndpointConfig.secondary.model.isNotEmpty)
+        ApiEndpointConfig.secondary.model,
+      ...AppConstants.deepseekFallbackModels,
+    }.toList();
 
     PopupMenuItem<String> groupTitle(String text) => PopupMenuItem(
           enabled: false,
@@ -1289,10 +1451,17 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                     color: isSel ? const Color(0xFF3D7A5C) : null)),
           );
         }),
-        // ── 副 API(专项文本,已配置时显示) ──
-        if (isSecondary) ...[
-          const PopupMenuDivider(),
-          groupTitle('副 API(专项文本)'),
+        // ── 副 API(专项文本,始终显示分组;未配置时禁用并引导去设置) ──
+        const PopupMenuDivider(),
+        groupTitle(secConfigured ? '副 API(专项文本)' : '副 API(专项文本 · 未配置)'),
+        if (!secConfigured)
+          const PopupMenuItem(
+            enabled: false,
+            height: 36,
+            child: Text('到「我的 → API 设置」填写副 API Key 后即可切换',
+                style: TextStyle(fontSize: 10, color: Colors.grey)),
+          )
+        else
           ...secModels.map((m) {
             final isSel = _followUpSlot == 'secondary' && m == _followUpModel;
             return PopupMenuItem(
@@ -1305,7 +1474,6 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                       color: isSel ? const Color(0xFF4A6CF7) : null)),
             );
           }),
-        ],
         const PopupMenuDivider(),
         // ── 思考模式(写入当前追问槽位) ──
         ...AppConstants.thinkingOptions.entries.map((e) {
@@ -1337,7 +1505,8 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
           await box.put(AppConstants.keyDoubaoModel, v.substring(8));
           await box.put(AppConstants.keyFollowUpSlot, 'primary');
         } else if (v.startsWith('secondary:')) {
-          await box.put(AppConstants.keyDeepseekModel, v.substring(11));
+          // 'secondary:' 恰好 10 字符——之前 substring(11) 会吃掉模型名首字母
+          await box.put(AppConstants.keyDeepseekModel, v.substring(10));
           await box.put(AppConstants.keyFollowUpSlot, 'secondary');
         } else if (v.startsWith('think:')) {
           // 思考模式写入当前追问槽位对应的 key

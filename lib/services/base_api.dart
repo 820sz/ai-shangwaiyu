@@ -21,7 +21,9 @@ abstract class BaseApiService {
       _dioInstance = Dio(BaseOptions(
         baseUrl: url,
         connectTimeout: const Duration(seconds: 60),
-        receiveTimeout: const Duration(seconds: 600),
+        // 接收空闲超时:流式响应持续有数据不受影响,长时间无数据才断开。
+        // 600s 太长会让"模型失效/网络黑洞"看起来像卡死,收紧到 180s
+        receiveTimeout: const Duration(seconds: 180),
         sendTimeout: const Duration(seconds: 60),
         headers: {'Content-Type': 'application/json'},
         // HTTP keep-alive 复用连接

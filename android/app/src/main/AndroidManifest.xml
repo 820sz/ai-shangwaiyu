@@ -33,6 +33,11 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- 裁剪图片:uCrop 界面(image_cropper 官方要求手动声明,缺失则点击裁剪闪退) -->
+        <activity
+            android:name="com.yalantis.ucrop.UCropActivity"
+            android:screenOrientation="portrait"
+            android:theme="@style/Ucrop.CropTheme"/>
         <!-- 自动更新:FileProvider 提供给系统安装器读取下载的 APK -->
         <provider
             android:name="androidx.core.content.FileProvider"

@@ -32,6 +32,17 @@ class _ArticleReaderScreenState extends State<ArticleReaderScreen> {
         actions: [
           TextButton(
             onPressed: () {
+              if (article.translation == null ||
+                  article.translation!.isEmpty) {
+                // 旧文章无翻译数据(DB v5 之前的文章)——提示而不是无反应
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('该文章暂无中文翻译，可删除后重新生成'),
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+                return;
+              }
               setState(() => _showTranslation = !_showTranslation);
             },
             child: Text(_showTranslation ? '隐藏翻译' : '显示翻译'),
@@ -58,15 +69,33 @@ class _ArticleReaderScreenState extends State<ArticleReaderScreen> {
           ),
           const SizedBox(height: 20),
 
-          // 文章内容
-          ...article.paragraphs.map((p) => Padding(
+          // 文章内容(显示翻译时英文段下方对照渲染对应中文段,段落索引对齐)
+          ...article.paragraphs.asMap().entries.map((e) => Padding(
                 padding: const EdgeInsets.only(bottom: 14),
-                child: Text(
-                  p,
-                  style: theme.textTheme.bodyLarge?.copyWith(
-                    height: 1.8,
-                    fontSize: 16,
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      e.value,
+                      style: theme.textTheme.bodyLarge?.copyWith(
+                        height: 1.8,
+                        fontSize: 16,
+                      ),
+                    ),
+                    if (_showTranslation &&
+                        e.key < article.translationParagraphs.length)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(
+                          article.translationParagraphs[e.key],
+                          style: TextStyle(
+                            height: 1.8,
+                            fontSize: 14,
+                            color: Colors.grey[700],
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               )),
 
@@ -119,6 +148,16 @@ class _ArticleReaderScreenState extends State<ArticleReaderScreen> {
           ],
 
           const SizedBox(height: 16),
+
+          // 生成失败/提示信息(此前失败完全无反馈,用户以为一直在生成)
+          if (provider.error != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                provider.error!,
+                style: TextStyle(color: theme.colorScheme.error, fontSize: 12),
+              ),
+            ),
 
           // 生成新练习
           if (provider.generating)
