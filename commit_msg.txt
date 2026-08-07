@@ -1,15 +1,16 @@
-v1.2.11: 识图固定不思考 + 例句完整 + 取消选择 + 后台中断自动重试
+v1.2.12: 思考模式恢复 + 纯思考超时自动降级(治本)
 
-- 识图固定不思考: 豆包视觉模型思考速度不受 budget_tokens 控制
-  (低度思考实测都慢,参数微调无效——停止瞎改), _buildRequestBody
-  识图请求直接 thinking disabled,速度回到不思考水平;
-  追问仍可思考(followUpStream 保留 thinking 参数)
-- 例句完整呈现: 详细模式例句去掉 maxLines:2 截断
-- 取消选择: AppBar 选中时新增"取消选择(N)"文字按钮(与删除并列),
-  一键清空所有选中,不用逐个长按取消
-- 后台中断: onDone/onError 置 _subscription=null; resumed 时
-  connecting/streaming 且订阅已结束 → 自动重试(静默中断也覆盖)
-
-验证: analyze 0 error, 34 测试全绿
+- 背景: v1.2.11 直接禁用识图思考被用户否定(回避问题)。
+  真相: 豆包视觉模型思考时间服务端不可控——budget_tokens 参数对它无效,
+  低中高各档位都离谱(用户实测),参数微调全是徒劳
+- 方案: 恢复思考模式(识图重新走 buildThinkingParams),
+  加"纯思考超时兜底": 第一个 reasoning chunk 出现时启动计时
+  (低10s/中15s/高30s), 到点还没出 content → 切断当前流,
+  自动降级"不思考"重新识别(总耗时=阈值+一次快速识别≈30-40s),
+  SnackBar 提示"已自动切换为快速识别"
+- 细节: _thinkingDegraded 状态——降级仅本次生效,识别完成/手动重试
+  复位恢复用户选择; 首字节超时思考档位放宽到45/60/90s;
+  dispose/_onStreamDone 清理计时器
+- 验证: analyze 0 error, 34 测试全绿
 
 Co-Authored-By: Claude <noreply@anthropic.com>

@@ -136,6 +136,13 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
   int _thinkingSeconds = 0;
   Timer? _thinkingTimer; // 每秒刷新思考耗时显示
 
+  /// 思考超时已降级:豆包视觉模型思考时间服务端不可控(budget 参数无效,
+  /// 开启后可能纯思考 3 分钟+)——纯思考超过阈值自动切"不思考"重新识别,
+  /// 总耗时可控。用户手动重试或下一次识别时复位
+  bool _thinkingDegraded = false;
+  Timer? _thinkingTimeoutTimer; // 思考阶段超时计时
+  int _thinkingTimeoutSeconds = 15;
+
   // ── 当前配置（从 Hive 实时读） ──
   final DoubaoApiService _api = DoubaoApiService();
   // ── 滚动控制 ──
@@ -382,6 +389,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     _subscription?.cancel();
     _firstByteTimer?.cancel();
     _thinkingTimer?.cancel();
+    _thinkingTimeoutTimer?.cancel();
     _followUpSub?.cancel();
     _followUpCtrl.dispose();
     _followUpFocus.dispose();
@@ -425,12 +433,22 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
 
   void _startStreaming() {
     _firstByteTimer?.cancel();
-    // 根据思考模式自适应超时：不思考25s，低35s，中60s，高90s
-    final thinking = _currentThinking;
+    // 思考超时降级后强制"不思考"快速识别;否则按用户选择的思考模式
+    final thinking = _thinkingDegraded ? 'disabled' : _currentThinking;
+    // 思考阶段纯思考超时阈值(豆包视觉模型思考时间不可控,到点自动降级):
+    // 低10s / 中15s / 高30s
+    _thinkingTimeoutSeconds = thinking == 'low'
+        ? 10
+        : thinking == 'medium'
+        ? 15
+        : thinking == 'high'
+        ? 30
+        : 0;
+    // 首字节超时:不思考25s,思考模式放宽(思考+出结果)
     final timeoutSeconds = thinking == 'disabled'
         ? 25
         : thinking == 'low'
-        ? 35
+        ? 45
         : thinking == 'medium'
         ? 60
         : 90;
@@ -477,10 +495,21 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                   });
                 }
               });
+              // 纯思考超时兜底:豆包视觉模型思考不可控(各档位都离谱),
+              // 到点自动降级为不思考快速识别
+              if (_thinkingTimeoutSeconds > 0) {
+                _thinkingTimeoutTimer?.cancel();
+                _thinkingTimeoutTimer = Timer(
+                  Duration(seconds: _thinkingTimeoutSeconds),
+                  _onThinkingTimeout,
+                );
+              }
             }
             _reasoningText += chunk.text;
           } else {
-            // 收到 content → 停止思考计时
+            // 收到 content → 停止思考计时 + 取消思考超时兜底
+            _thinkingTimeoutTimer?.cancel();
+            _thinkingTimeoutTimer = null;
             if (_thinkingStartAt != null) {
               _thinkingTimer?.cancel();
               _thinkingSeconds = DateTime.now()
@@ -541,6 +570,9 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
   void _onStreamDone() {
     _firstByteTimer?.cancel();
     _subscription = null; // 流已结束,供回前台检测"静默中断"
+    _thinkingTimeoutTimer?.cancel();
+    _thinkingTimeoutTimer = null;
+    _thinkingDegraded = false; // 一次识别结束,下次恢复用户选择的思考模式
     if (!mounted) return;
     // cancelOnError=false → onDone 在 onError 后也触发，避免覆盖错误信息
     if (_phase == _StreamPhase.error) return;
@@ -626,9 +658,46 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     }
   }
 
+  /// 纯思考超过阈值(低10s/中15s/高30s)还没出内容——
+  /// 豆包视觉模型思考时间服务端不可控,直接切断并降级为"不思考"重新识别,
+  /// 总耗时 = 阈值 + 一次快速识别(约 30-40s),不再无限等
+  void _onThinkingTimeout() {
+    if (!mounted) return;
+    if (_contentText.isNotEmpty) return; // 已有内容,不需要降级
+    if (_phase != _StreamPhase.connecting &&
+        _phase != _StreamPhase.streaming) {
+      return;
+    }
+    debugPrint('ReadFlow: 思考超时($_thinkingTimeoutSeconds s),降级为快速识别');
+    _subscription?.cancel();
+    _subscription = null;
+    _firstByteTimer?.cancel();
+    _thinkingTimer?.cancel();
+    setState(() {
+      _thinkingDegraded = true;
+      _reasoningText = '';
+      _contentText = '';
+      _thinkingStartAt = null;
+      _thinkingSeconds = 0;
+      _thinkingExpanded = false;
+      _phase = _StreamPhase.connecting;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          '思考超过 $_thinkingTimeoutSeconds 秒未出结果，已自动切换为快速识别',
+        ),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+    _startStreaming();
+  }
+
   void _retry() {
     _subscription?.cancel();
     _thinkingTimer?.cancel();
+    _thinkingTimeoutTimer?.cancel();
+    _thinkingDegraded = false; // 手动重试恢复用户选择的思考模式
     _streamStartIndex = 0; // 重试 = 全新识别
     setState(() {
       _phase = _StreamPhase.connecting;
