@@ -1,15 +1,15 @@
-v1.2.15: 思考参数根治(reasoning_effort)+ 短语/句子完整显示回退 + 新logo
+v1.2.16: 砍思考降级链路 + 提示词根治词条截断 + 新logo
 
-- 思考慢根因(实测):budget_tokens 对豆包完全无效(512/1024/2048 耗时
-  27-37s 无差别),不传 thinking 默认深度思考 61.8s;改用 reasoning_effort
-  (官方分档,实测生效):档位映射(整体提速档)低→minimal≈3s/中→low≈14s/
-  高→medium≈25s(复杂图);副槽位 DS 不认时自动降级移除(已有链路)
-- 省略号根因(22:21 截图逐字读出):模型把 phrase/sentence 的 word 字段
-  词条化截断(开头~20字符+"…"),originalSentence 字段完整——
-  显示层回退:word 以省略号结尾且存在更长 originalSentence 时显示完整句子
-  (详细模式 _displayWord + 总览 WordListTile)
-- 思考文案按新映射更新;reasoning 超时阈值适配(低10s/中20s/高30s)
-- 新 logo:用户定稿图直接缩放替换 5 密度(不做任何处理)
-- 验证:analyze 0 error / 40 测试全绿+1 skip(含 thinking_params 6 用例)
+- 思考:删除整个降级链路(_degradeToFast/_onThinkingTimeout/_thinkingDegraded/
+  纯思考超时)——reasoning_effort 生效后思考时长可控(实测低≈3s/中≈14s/高≈25s),
+  原降级=等满阈值+完整重跑一次识别,总耗时反而巨长(用户实测确认)。思考模式
+  首字节超时放宽 60s 只报错不自动重试;Dio receiveTimeout 180s 为最终兜底
+- 词条截断根治(23:04 截图逐字读):word 字段被模型词条化截断(开头~20字符+"…"),
+  且提示词把 original_sentence 标为"可选"→ 模型大量省略 → v1.2.15 显示回退无源可用。
+  ①提示词强制 word 完整输出、禁止截断/省略号;短语/句子 original_sentence 必填(治本)
+  ②显示回退去掉 word 类型豁免:任何类型 word 以省略号结尾且存在更长完整句子时
+  显示 originalSentence(双保险)
+- 新 logo:用户新定稿(1364x1364)直接缩放替换 5 密度,不做任何处理
+- 验证:analyze 0 error / 40 测试全绿+1 skip
 
 Co-Authored-By: Claude <noreply@anthropic.com>

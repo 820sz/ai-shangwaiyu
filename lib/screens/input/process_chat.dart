@@ -136,12 +136,9 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
   int _thinkingSeconds = 0;
   Timer? _thinkingTimer; // 每秒刷新思考耗时显示
 
-  /// 思考超时已降级:豆包视觉模型思考时间服务端不可控(budget 参数无效,
-  /// 开启后可能纯思考 3 分钟+)——纯思考超过阈值自动切"不思考"重新识别,
-  /// 总耗时可控。用户手动重试或下一次识别时复位
-  bool _thinkingDegraded = false;
-  Timer? _thinkingTimeoutTimer; // 思考阶段超时计时
-  int _thinkingTimeoutSeconds = 15;
+  // (2026-08-08 移除思考超时降级链路:reasoning_effort 生效后思考时长可控
+  // ~3-25s,原降级是"等满阈值+重跑一次完整识别",总耗时反而巨长——
+  // 思考模式直接等真实结果,Dio receiveTimeout 180s 兜底)
 
   // ── 当前配置（从 Hive 实时读） ──
   final DoubaoApiService _api = DoubaoApiService();
@@ -389,7 +386,6 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     _subscription?.cancel();
     _firstByteTimer?.cancel();
     _thinkingTimer?.cancel();
-    _thinkingTimeoutTimer?.cancel();
     _followUpSub?.cancel();
     _followUpCtrl.dispose();
     _followUpFocus.dispose();
@@ -433,37 +429,15 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
 
   void _startStreaming() {
     _firstByteTimer?.cancel();
-    // 思考超时降级后强制"不思考"快速识别;否则按用户选择的思考模式
-    final thinking = _thinkingDegraded ? 'disabled' : _currentThinking;
-    // 思考阶段纯思考超时阈值(reasoning_effort 档位 2026-08-07 实测:
-    // 低=minimal≈3s / 中=low≈14s / 高=medium≈25s 复杂图,到点没出
-    // content 自动降级快速识别):
-    // 低10s / 中20s / 高30s
-    _thinkingTimeoutSeconds = thinking == 'low'
-        ? 10
-        : thinking == 'medium'
-        ? 20
-        : thinking == 'high'
-        ? 30
-        : 0;
-    // 首字节超时:不思考25s;思考模式 20/25/30s——
-    // 到点还没收到任何字节(reasoning 都不吐)自动降级快速识别
-    final timeoutSeconds = thinking == 'disabled'
-        ? 25
-        : thinking == 'low'
-        ? 20
-        : thinking == 'medium'
-        ? 25
-        : 30;
+    final thinking = _currentThinking;
+    // 首字节超时(只报错,不降级重跑):不思考25s;思考模式60s——
+    // reasoning_effort 生效后(2026-08-07 实测低≈3s/中≈14s/高≈25s)
+    // 思考模式直接等真实结果,Dio receiveTimeout 180s 是最终兜底。
+    // 到点仍未收到任何字节(连 reasoning 都不吐)判定模型空回复,报错让用户重试
+    final timeoutSeconds = thinking == 'disabled' ? 25 : 60;
     _firstByteTimer = Timer(Duration(seconds: timeoutSeconds), () {
       if (mounted && _phase == _StreamPhase.connecting) {
         _subscription?.cancel();
-        if (!_thinkingDegraded && thinking != 'disabled') {
-          // 思考模式等待超时:豆包可能在服务端闷头思考,连 reasoning
-          // 都不吐(计时器没启动)——直接降级快速识别,不再等
-          _degradeToFast(timeoutSeconds);
-          return;
-        }
         setState(() {
           _phase = _StreamPhase.error;
           _errorMessage =
@@ -504,21 +478,10 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                   });
                 }
               });
-              // 纯思考超时兜底:豆包视觉模型思考不可控(各档位都离谱),
-              // 到点自动降级为不思考快速识别
-              if (_thinkingTimeoutSeconds > 0) {
-                _thinkingTimeoutTimer?.cancel();
-                _thinkingTimeoutTimer = Timer(
-                  Duration(seconds: _thinkingTimeoutSeconds),
-                  _onThinkingTimeout,
-                );
-              }
             }
             _reasoningText += chunk.text;
           } else {
-            // 收到 content → 停止思考计时 + 取消思考超时兜底
-            _thinkingTimeoutTimer?.cancel();
-            _thinkingTimeoutTimer = null;
+            // 收到 content → 停止思考计时
             if (_thinkingStartAt != null) {
               _thinkingTimer?.cancel();
               _thinkingSeconds = DateTime.now()
@@ -579,9 +542,6 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
   void _onStreamDone() {
     _firstByteTimer?.cancel();
     _subscription = null; // 流已结束,供回前台检测"静默中断"
-    _thinkingTimeoutTimer?.cancel();
-    _thinkingTimeoutTimer = null;
-    _thinkingDegraded = false; // 一次识别结束,下次恢复用户选择的思考模式
     if (!mounted) return;
     // cancelOnError=false → onDone 在 onError 后也触发，避免覆盖错误信息
     if (_phase == _StreamPhase.error) return;
@@ -667,54 +627,9 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     }
   }
 
-  /// 思考兜底降级:豆包视觉模型思考时间服务端不可控(参数无效,各档位
-  /// 都离谱,甚至可能连 reasoning chunk 都不吐、首字节迟迟不来)。
-  /// 达到等待上限(纯思考阈值 或 首字节等待)即切断当前流,
-  /// 降级为"不思考"重新识别——总耗时封顶 ≈ 等待上限 + 一次快速识别。
-  void _degradeToFast(int waitedSeconds) {
-    if (!mounted) return;
-    if (_contentText.isNotEmpty) return; // 已有内容,不需要降级
-    if (_phase != _StreamPhase.connecting &&
-        _phase != _StreamPhase.streaming) {
-      return;
-    }
-    debugPrint('ReadFlow: 思考等待超时($waitedSeconds s),降级为快速识别');
-    _subscription?.cancel();
-    _subscription = null;
-    _firstByteTimer?.cancel();
-    _thinkingTimer?.cancel();
-    _thinkingTimeoutTimer?.cancel();
-    _thinkingTimeoutTimer = null;
-    setState(() {
-      _thinkingDegraded = true;
-      _reasoningText = '';
-      _contentText = '';
-      _thinkingStartAt = null;
-      _thinkingSeconds = 0;
-      _thinkingExpanded = false;
-      _phase = _StreamPhase.connecting;
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          '思考超过 $waitedSeconds 秒未出结果，已自动切换为快速识别',
-        ),
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
-    _startStreaming();
-  }
-
-  /// 纯思考超时(已收到 reasoning 但一直没出内容)——低10s/中15s/高30s
-  void _onThinkingTimeout() {
-    _degradeToFast(_thinkingTimeoutSeconds);
-  }
-
   void _retry() {
     _subscription?.cancel();
     _thinkingTimer?.cancel();
-    _thinkingTimeoutTimer?.cancel();
-    _thinkingDegraded = false; // 手动重试恢复用户选择的思考模式
     _streamStartIndex = 0; // 重试 = 全新识别
     setState(() {
       _phase = _StreamPhase.connecting;
@@ -2807,11 +2722,10 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     );
   }
 
-  /// 词条显示文本:模型会把 phrase/sentence 的 word 词条化截断
-  /// (实测输出开头 ~20 字符+"…"),originalSentence 才是完整句子。
-  /// word 以省略号结尾且存在更长的完整句子时,回退显示完整句子。
+  /// 词条显示文本:模型会把 word 字段词条化截断(实测输出开头 ~20 字符
+  /// +"…"),original_sentence 字段才是完整句子——word 以省略号结尾且
+  /// 存在更长的完整句子时,回退显示完整句子。不区分类型:单词也可能被截。
   String _displayWord(Vocabulary item) {
-    if (item.wordType == 'word') return item.word;
     final w = item.word;
     if ((w.endsWith('…') || w.endsWith('...')) &&
         item.originalSentence != null &&

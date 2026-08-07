@@ -36,11 +36,10 @@ class WordListTile extends StatelessWidget {
     return '单词';
   }
 
-  /// 词条显示文本:模型会把 phrase/sentence 的 word 词条化截断
-  /// (实测输出开头 ~20 字符+"…"),originalSentence 才是完整句子。
-  /// word 以省略号结尾且存在更长的完整句子时,回退显示完整句子。
+  /// 词条显示文本:模型会把 word 字段词条化截断(实测输出开头 ~20 字符
+  /// +"…"),original_sentence 字段才是完整句子——word 以省略号结尾且
+  /// 存在更长的完整句子时,回退显示完整句子。不区分类型:单词也可能被截。
   String _displayWord(Vocabulary item) {
-    if (item.wordType == 'word') return item.word;
     final w = item.word;
     if ((w.endsWith('…') || w.endsWith('...')) &&
         item.originalSentence != null &&

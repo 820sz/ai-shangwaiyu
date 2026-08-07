@@ -125,8 +125,8 @@ class DoubaoApiService extends BaseApiService {
       ),
       _ => (
         '''你是英语学习助手。识别照片中被标记的英语内容。输出JSON，格式：
-{"items":[{"word":"原文","translation":"中文释义","word_type":"word|phrase|sentence","part_of_speech":"词性(可选)","original_sentence":"所在句子(可选)"}]}
-要求：单词给词性，短语/句子给翻译。${imageUris.length > 1 ? '多图格式：{"items_by_image":[{"image_index":0,"items":[...]},...]}' : ''}无标记返回{"items":[]}。只输出JSON。简洁思考。''',
+{"items":[{"word":"完整原文","translation":"中文释义","word_type":"word|phrase|sentence","part_of_speech":"词性(可选)","original_sentence":"完整句子(短语/句子必填,单词可选)"}]}
+要求：1.word 必须与照片中的文本完全一致——单词、短语、句子一律完整输出,禁止截断,禁止用省略号(…)代替后半部分。2.短语/句子必须在 original_sentence 中给出其所在的完整句子(必填,不可省略)。3.单词给词性。${imageUris.length > 1 ? '多图格式：{"items_by_image":[{"image_index":0,"items":[...]},...]}' : ''}无标记返回{"items":[]}。只输出JSON。简洁思考。''',
         '识别标记的英语内容$bookHint$pageHint$countHint'
       ),
     };
