@@ -435,12 +435,14 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     _firstByteTimer?.cancel();
     // 思考超时降级后强制"不思考"快速识别;否则按用户选择的思考模式
     final thinking = _thinkingDegraded ? 'disabled' : _currentThinking;
-    // 思考阶段纯思考超时阈值(豆包视觉模型思考时间不可控,到点自动降级):
-    // 低10s / 中15s / 高30s
+    // 思考阶段纯思考超时阈值(reasoning_effort 档位 2026-08-07 实测:
+    // 低=minimal≈3s / 中=low≈14s / 高=medium≈25s 复杂图,到点没出
+    // content 自动降级快速识别):
+    // 低10s / 中20s / 高30s
     _thinkingTimeoutSeconds = thinking == 'low'
         ? 10
         : thinking == 'medium'
-        ? 15
+        ? 20
         : thinking == 'high'
         ? 30
         : 0;
@@ -2708,10 +2710,13 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                 ),
                 const SizedBox(width: 8),
                 // 单词占满横幅;短语/句子完整呈现(一排显示不完第二排接着),
-                // 只有单词类型单行省略
+                // 只有单词类型单行省略。
+                // 模型会把 phrase/sentence 的 word 词条化截断(实测输出开头
+                // ~20 字符+"…"),originalSentence 字段才是完整句子——
+                // 截断时回退用完整句子显示(2026-08-07 用户实测定位)
                 Expanded(
                   child: Text(
-                    item.word,
+                    _displayWord(item),
                     maxLines: item.wordType == 'word' ? 1 : null,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.titleSmall?.copyWith(
@@ -2800,6 +2805,20 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         ),
       ),
     );
+  }
+
+  /// 词条显示文本:模型会把 phrase/sentence 的 word 词条化截断
+  /// (实测输出开头 ~20 字符+"…"),originalSentence 才是完整句子。
+  /// word 以省略号结尾且存在更长的完整句子时,回退显示完整句子。
+  String _displayWord(Vocabulary item) {
+    if (item.wordType == 'word') return item.word;
+    final w = item.word;
+    if ((w.endsWith('…') || w.endsWith('...')) &&
+        item.originalSentence != null &&
+        item.originalSentence!.length > w.length) {
+      return item.originalSentence!;
+    }
+    return w;
   }
 
   Widget _typeChip(String label, Color color) {

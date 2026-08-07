@@ -132,7 +132,9 @@
 - 2026-08-07 v1.2.13 起思考档位首字节超时 20/25/30s + reasoning 超时 10/15/30s 双路兜底 — 补豆包连 reasoning 都不吐的盲区
 
 ## 坑与教训
-- **豆包视觉模型思考时间服务端不可控,budget_tokens 对它无效** — 参数微调全是徒劳,靠超时降级兜底;思考是"服务端行为"不是"可配置行为"
+- **🚨 2026-08-07 实测实锤:budget_tokens 对豆包完全无效**(决定性问题,三轮修复未根治的根源):同图同 prompt 实测 doubao-seed-2-0-lite-260428——disabled 3.7s / enabled+budget512 29.3s / enabled+budget2048 36.7s / enabled无budget 27.7s / 不传thinking(默认深度思考)61.8s。reasoning 长度不随预算走(334/615/494),**"低/中/高"档位是假的,服务端按默认深度思考**。auto 参数 400 不支持。第二轮(reasoning_effort minimal/low/high)待测
+- **豆包视觉模型默认开启深度思考**(官方文档):不传 thinking = 61.8s 深度思考。App 识图 prompt "简洁思考" 可能被模型理解为"输出简洁"→ word 字段可能自带 "…" 截断(截图实锤:同一屏一个句子完整、一个 "Because reality is n…" 截断,渲染层 v1.2.14 已放开,数据层问题,待实测确认)
+- **豆包视觉模型思考时间服务端不可控,budget_tokens 对它无效** — 参数微调全是徒劳,靠超时降级兜底;思考是"服务端行为"不是"可配置行为"(第一轮实测更新:不是不可控,是**控制参数不对**)
 - DeepSeek chat/reasoner 2026-07-24 停用 → 模型 ID 必须跟随官方 changelog
 - 豆包/DS 思考参数格式不同(豆包 reasoning_effort low/medium,DS low/high/max)→ 槽位化后按端点格式构建
 - 自动更新四层坑:.part 扩展名 → FileProvider authority(camelCase 硬编码)→ open_filex 挂起 → **缺 REQUEST_INSTALL_PACKAGES 权限**(终极根因)。**真机端到端验证是唯一标准,代码推断不算数**
@@ -140,7 +142,34 @@
 - 临时文件命名别用系统组件靠扩展名识别的场景(PackageInstaller 按 .apk 判断)
 - 插件硬编码配置(open_filex authority)须与 Manifest 逐字核对
 
-## 断点快照(2026-08-07)
-- 正在做:文档同步(本次会话)——PLAN.md + memory 已补到 v1.2.14
+## v1.2.15 — 思考参数根治(budget_tokens→reasoning_effort)+ 新 logo(2026-08-07)
+
+**背景**:v1.2.14 用户实测两问题①思考模式时间依然非常长②词汇短语/句子显示省略号。
+
+**实测验证(决定性,6+5+4+3 组真实 API 请求,doubao-seed-2-0-lite-260428 同图同 prompt)**:
+- `thinking.budget_tokens` **完全无效**:512/1024/2048 耗时 27-37s 无差别,reasoning 长度不随预算(334/615/494)
+- **不传 thinking = 默认深度思考 61.8s**(官方文档"默认开启深度思考"实锤)
+- `reasoning_effort` **真实生效**:disabled 3.7s / minimal 2.9s / low 14s(复杂图)/ medium 25.1s / high 26.7s;书本照片场景 disabled 3.2s / minimal 4.5s / low 8.4s
+- **省略号根因**:模型忠实识别输入文本——旧版 UI(maxLines:1)截断后的文本被拍照/识别 → word 字段带 "…"。书本照片输入时思考模式输出**无省略号**(旧 prompt 全档位验证)。新版渲染已放开(v1.2.10/13)+ 数据层无省略号 → 理论上新版拍照无此问题,待用户真机复核
+- auto 参数 400 不支持;medium 档确认支持
+
+**修复**(commit 待):
+- api_endpoint.dart:budget_tokens → reasoning_effort,档位映射(用户决策"整体提速档")低→minimal/中→low/高→medium;副槽位 DS 不认 reasoning_effort 时 postWithReasoningFallback 自动移除降级(已有链路)
+- constants.dart:思考文案按新映射实测更新(低·约3s/中·约15s/高·约25s)
+- process_chat.dart:reasoning 超时阈值适配(低10s/中20s/高30s,防 low 档 13.6s 出 content 被误降级)
+- 新增 test/thinking_params_test.dart(映射回归 6 用例)
+- 验证:analyze 0 error / 40 测试全绿+1 skip
+- 新 logo:用户定稿图(蓝发女仆举 language AI 书,1324px)直接缩放替换 5 密度(用户明确:图是反复改好的成品,不做任何处理)
+- 构建:arm64 瘦身版;发布待用户确认
+
+**省略号真正根因(2026-08-07 晚,用户 v1.2.14 实测截图逐字读出)**:
+- 22:21 截图:phrase word="simply the recycling…" / sentence word="This has never bee…",**但 originalSentence 字段完整**("More often than not, what's mistaken for originality is simply the recycling of a forgotten influence.")
+- **模型把 phrase/sentence 的 word 字段"词条化"**(输出开头 ~20 字符+"…"),originalSentence 才输出完整句子——与 UI 无关、与思考模式无关、与 71 字符硬限制(单行大字图测试)无关
+- 实测链条:prompt 强制完整/思考模式/max_tokens/detail high/换模型(2-1-turbo/2-0-pro)都无法让 word 完整(词条化是模型输出策略);originalSentence 一直是完整的
+- **修复(显示层回退)**:word 以省略号结尾且存在更长的 originalSentence → 显示 originalSentence(详细模式 _displayWord + 总览 WordListTile 同逻辑)
+- 用户线索关键提示:"近几次词汇板块 UI 调整后就这样"+"原来正常"——但代码审查确认 UI 一直放开;数据层词条化是模型近端行为(v1.2.10 时代用户就反馈过截断,当时误判为 UI)
+
+## 断点快照(2026-08-07 晚)
+- 正在做:v1.2.15 构建发布(思考参数根治 + 新 logo)
 - 卡在哪:无
-- 下一步:等用户真机验证 v1.2.14(自动更新 + 句子显示 + 版本号核对);验证结果出来后再决定是否排查思考模式
+- 下一步:构建完成 → 用户确认发布 → 真机验证:①思考档位速度(低=约3s/中=约15s)②拍照识别句子完整(省略号应已消失)

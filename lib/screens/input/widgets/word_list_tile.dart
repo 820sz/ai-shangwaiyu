@@ -36,6 +36,20 @@ class WordListTile extends StatelessWidget {
     return '单词';
   }
 
+  /// 词条显示文本:模型会把 phrase/sentence 的 word 词条化截断
+  /// (实测输出开头 ~20 字符+"…"),originalSentence 才是完整句子。
+  /// word 以省略号结尾且存在更长的完整句子时,回退显示完整句子。
+  String _displayWord(Vocabulary item) {
+    if (item.wordType == 'word') return item.word;
+    final w = item.word;
+    if ((w.endsWith('…') || w.endsWith('...')) &&
+        item.originalSentence != null &&
+        item.originalSentence!.length > w.length) {
+      return item.originalSentence!;
+    }
+    return w;
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -70,11 +84,13 @@ class WordListTile extends StatelessWidget {
                   ),
                 ),
               ),
-            // 单词（短语/句子完整呈现不省略,单词最多两行省略）
+            // 单词（短语/句子完整呈现不省略,单词最多两行省略）。
+            // 模型会把 phrase/sentence 的 word 词条化截断(实测 ~20字符+"…"),
+            // originalSentence 才是完整句子——截断时回退显示完整句子
             Expanded(
               flex: 3,
               child: Text(
-                item.word,
+                _displayWord(item),
                 style: theme.textTheme.bodyMedium?.copyWith(
                   fontWeight: FontWeight.w600,
                 ),
@@ -100,7 +116,8 @@ class WordListTile extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            // 释义（brief）
+            // 释义（brief）——短语/句子释义常是整句翻译,一行必截断,
+            // 与 word 字段同原则:单词两行省略,短语/句子完整多行显示
             Expanded(
               flex: 4,
               child: Text(
@@ -108,7 +125,7 @@ class WordListTile extends StatelessWidget {
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: Colors.grey[600],
                 ),
-                maxLines: 1,
+                maxLines: item.wordType == 'word' ? 2 : null,
                 overflow: TextOverflow.ellipsis,
               ),
             ),

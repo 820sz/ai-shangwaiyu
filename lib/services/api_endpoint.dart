@@ -69,21 +69,26 @@ class ApiEndpointConfig {
 
   bool get isConfigured => apiKey != null;
 
-  /// 思考参数。豆包/火山方舟原生字段是 thinking.budget_tokens
-  /// (限制思考 token 数)——之前用 reasoning_effort 不被火山方舟识别,
-  /// 思考无上限,中度思考一张图 3 分钟+(用户实测)。
-  /// 注意:部分豆包视觉模型可能只认 type 不认 budget_tokens,
-  /// 故预算压得更低(512/1024/2048)并配合文案标注预估耗时。
+  /// 思考参数。
+  /// 2026-08-07 实测(doubao-seed-2-0-lite-260428,同图同 prompt 6 组对照):
+  /// - thinking.budget_tokens 完全无效:512/1024/2048 耗时 27-37s,
+  ///   reasoning 长度不随预算走(334/615/494),服务端按默认深度思考
+  /// - 不传 thinking 最糟:默认开启深度思考,61.8s
+  /// - 正确参数 reasoning_effort(官方分档 minimal/low/medium/high):
+  ///   disabled≈3.7s / minimal≈3s / low≈14s / medium≈25s(复杂图)
+  /// 档位映射(2026-08-07 用户决策"整体提速档"):低→minimal、中→low、高→medium。
+  /// 副槽位(DeepSeek)若不认 reasoning_effort,postWithReasoningFallback
+  /// 会自动移除它降级重试(保留 thinking: enabled),不会报错。
   Map<String, dynamic> buildThinkingParams() {
     switch (thinking) {
       case 'disabled':
         return {'thinking': {'type': 'disabled'}};
       case 'low':
-        return {'thinking': {'type': 'enabled', 'budget_tokens': 512}};
+        return {'thinking': {'type': 'enabled'}, 'reasoning_effort': 'minimal'};
       case 'medium':
-        return {'thinking': {'type': 'enabled', 'budget_tokens': 1024}};
+        return {'thinking': {'type': 'enabled'}, 'reasoning_effort': 'low'};
       case 'high':
-        return {'thinking': {'type': 'enabled', 'budget_tokens': 2048}};
+        return {'thinking': {'type': 'enabled'}, 'reasoning_effort': 'medium'};
       default:
         return {'thinking': {'type': 'disabled'}};
     }
