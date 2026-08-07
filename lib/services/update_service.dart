@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
-import 'package:open_filex/open_filex.dart';
+import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -218,15 +218,27 @@ class UpdateService {
   }
 
   /// 调起系统安装器安装 APK(Android 会引导"未知来源"授权)。
-  /// open_filex 打开失败时不抛异常而是返回 OpenResult——
-  /// 必须检查返回值,否则对话框静默关闭、安装器不拉起(用户以为没反应)。
+  /// 自写 MethodChannel(app/install_apk,见 MainActivity.kt)替代 open_filex——
+  /// open_filex 在部分路径下不回调 result 导致 await 永久挂起
+  /// (用户看到"正在打开安装器"卡死,无超时无错误)。
+  /// 自写通道同步返回成功/失败,并加 15s 超时兜底,任何情况都快速可见。
+  static const MethodChannel _installChannel = MethodChannel(
+    'app/install_apk',
+  );
+
   static Future<void> installApk(String path) async {
-    final result = await OpenFilex.open(
-      path,
-      type: 'application/vnd.android.package-archive',
-    );
-    if (result.type != ResultType.done) {
-      throw Exception('打开安装器失败(${result.type.name}): ${result.message}');
+    try {
+      await _installChannel
+          .invokeMethod('installApk', {'path': path})
+          .timeout(
+            const Duration(seconds: 15),
+            onTimeout: () => throw Exception(
+              '打开安装器 15 秒无响应,可能被系统拦截。'
+              '请在设置中允许「安装未知应用」后重试',
+            ),
+          );
+    } on PlatformException catch (e) {
+      throw Exception('打开安装器失败: ${e.message ?? e.code}');
     }
   }
 }

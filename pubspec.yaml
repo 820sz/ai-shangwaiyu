@@ -1,7 +1,7 @@
 name: readflow
 description: "AI英语阅读学习助手 - 拍照取词、生词归档、AI文章生成、回译练习"
 publish_to: 'none'
-version: 1.2.6+16
+version: 1.2.7+17
 
 environment:
   sdk: ^3.12.2
@@ -30,7 +30,6 @@ dependencies:
   uuid: ^4.5.1
   # 自动更新
   package_info_plus: ^8.0.0
-  open_filex: ^4.5.0
   flutter_markdown: ^0.7.7+1
 
 dev_dependencies:

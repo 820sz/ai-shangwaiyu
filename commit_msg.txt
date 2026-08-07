@@ -1,0 +1,14 @@
+v1.2.7: 自写 MethodChannel 安装通道,弃用 open_filex
+
+- 现象: v1.2.6 自动更新下载完成卡在"正在打开安装器"——installApk 的
+  await 永不返回。open_filex 原生端存在不回调 result 的路径,
+  逐行核对 Java 源码无法静态确认(真机挂起),决定弃用第三方插件
+- 修复: MainActivity.kt 自写 MethodChannel(app/install_apk):
+  FileProvider.getUriForFile + ACTION_VIEW + NEW_TASK + GRANT_READ_URI_PERMISSION,
+  同步返回 success/error(带具体错误信息);Dart 端 15s 超时兜底,
+  任何情况快速可见(不再无限转圈);build.gradle 显式加 androidx.core:core-ktx
+- 移除 open_filex 依赖; authority 保持与 Manifest 一致
+  (packageName.fileProvider.com.crazecoder.openfile)
+- 验证: analyze 0 error, 34 测试全绿
+
+Co-Authored-By: Claude <noreply@anthropic.com>
