@@ -1,15 +1,12 @@
-v1.2.13: 思考兜底补首字节盲区 + 短语/句子完整显示
+v1.2.14: 更换 App logo + 句子显示修复确认
 
-- 问题1: v1.2.12 的思考超时降级只在"收到 reasoning chunk 后"启动
-  计时——豆包可能在服务端闷头思考,连 reasoning 都不吐,计时器
-  从未启动,兜底失效(用户实测仍非常长)
-- 修复: 思考档位首字节超时收紧 20/25/30s,到点无任何字节 →
-  自动降级快速识别(_degradeToFast 统一处理: 取消流/清状态/
-  SnackBar 提示/重发)。两路兜底齐了: reasoning 超时(10/15/30s)
-  + 首字节超时(20/25/30s),总耗时封顶 ≈ 30-40s
-- 问题2: 短语(phrase)漏改——上轮只放开了 sentence。
-  现在 word 类型单行/两行省略,phrase/sentence 完整多行显示
-  (一排显示不完第二排接着),详细+总览模式一致
-- 验证: analyze 0 error, 34 测试全绿
+- logo: 新图标(2048x2048)缩放到 5 密度替换 ic_launcher.png
+  (mdpi48/hdpi72/xhdpi96/xxhdpi144/xxxhdpi192)
+- 句子截断排查: 识别结果页 word 字段自 v1.2.10 起 phrase/sentence
+  已放开 maxLines(v1.2.13 补 phrase), 全项目无其他词汇截断点。
+  用户截图仍截断 → 疑似手机版本 ≤ v1.2.9(旧版 maxLines:1 全截断,
+  桌面曾堆多版本用户可能装到旧版)——v1.2.14 发布后走自动更新
+  并核对设置页版本号
+- 思考模式: 维持 v1.2.13 双路降级现状, 不折腾(待新会话排查)
 
 Co-Authored-By: Claude <noreply@anthropic.com>
