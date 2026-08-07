@@ -444,17 +444,24 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         : thinking == 'high'
         ? 30
         : 0;
-    // 首字节超时:不思考25s,思考模式放宽(思考+出结果)
+    // 首字节超时:不思考25s;思考模式 20/25/30s——
+    // 到点还没收到任何字节(reasoning 都不吐)自动降级快速识别
     final timeoutSeconds = thinking == 'disabled'
         ? 25
         : thinking == 'low'
-        ? 45
+        ? 20
         : thinking == 'medium'
-        ? 60
-        : 90;
+        ? 25
+        : 30;
     _firstByteTimer = Timer(Duration(seconds: timeoutSeconds), () {
       if (mounted && _phase == _StreamPhase.connecting) {
         _subscription?.cancel();
+        if (!_thinkingDegraded && thinking != 'disabled') {
+          // 思考模式等待超时:豆包可能在服务端闷头思考,连 reasoning
+          // 都不吐(计时器没启动)——直接降级快速识别,不再等
+          _degradeToFast(timeoutSeconds);
+          return;
+        }
         setState(() {
           _phase = _StreamPhase.error;
           _errorMessage =
@@ -658,21 +665,24 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     }
   }
 
-  /// 纯思考超过阈值(低10s/中15s/高30s)还没出内容——
-  /// 豆包视觉模型思考时间服务端不可控,直接切断并降级为"不思考"重新识别,
-  /// 总耗时 = 阈值 + 一次快速识别(约 30-40s),不再无限等
-  void _onThinkingTimeout() {
+  /// 思考兜底降级:豆包视觉模型思考时间服务端不可控(参数无效,各档位
+  /// 都离谱,甚至可能连 reasoning chunk 都不吐、首字节迟迟不来)。
+  /// 达到等待上限(纯思考阈值 或 首字节等待)即切断当前流,
+  /// 降级为"不思考"重新识别——总耗时封顶 ≈ 等待上限 + 一次快速识别。
+  void _degradeToFast(int waitedSeconds) {
     if (!mounted) return;
     if (_contentText.isNotEmpty) return; // 已有内容,不需要降级
     if (_phase != _StreamPhase.connecting &&
         _phase != _StreamPhase.streaming) {
       return;
     }
-    debugPrint('ReadFlow: 思考超时($_thinkingTimeoutSeconds s),降级为快速识别');
+    debugPrint('ReadFlow: 思考等待超时($waitedSeconds s),降级为快速识别');
     _subscription?.cancel();
     _subscription = null;
     _firstByteTimer?.cancel();
     _thinkingTimer?.cancel();
+    _thinkingTimeoutTimer?.cancel();
+    _thinkingTimeoutTimer = null;
     setState(() {
       _thinkingDegraded = true;
       _reasoningText = '';
@@ -685,12 +695,17 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          '思考超过 $_thinkingTimeoutSeconds 秒未出结果，已自动切换为快速识别',
+          '思考超过 $waitedSeconds 秒未出结果，已自动切换为快速识别',
         ),
         behavior: SnackBarBehavior.floating,
       ),
     );
     _startStreaming();
+  }
+
+  /// 纯思考超时(已收到 reasoning 但一直没出内容)——低10s/中15s/高30s
+  void _onThinkingTimeout() {
+    _degradeToFast(_thinkingTimeoutSeconds);
   }
 
   void _retry() {
@@ -2692,11 +2707,12 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                   ),
                 ),
                 const SizedBox(width: 8),
-                // 单词占满横幅;句子类型完整呈现(不省略),单词/短语单行
+                // 单词占满横幅;短语/句子完整呈现(一排显示不完第二排接着),
+                // 只有单词类型单行省略
                 Expanded(
                   child: Text(
                     item.word,
-                    maxLines: item.wordType == 'sentence' ? null : 1,
+                    maxLines: item.wordType == 'word' ? 1 : null,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.titleSmall?.copyWith(
                       fontWeight: FontWeight.w700,
