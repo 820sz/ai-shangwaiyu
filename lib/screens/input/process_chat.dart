@@ -407,6 +407,16 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
             msg.contains('Connection')) {
           _retry();
         }
+        return;
+      }
+      // 识别中切后台:系统可能挂起网络导致流静默中断(订阅已结束
+      // 但没进 error 态)——回前台自动重试,不让用户手动点
+      if (mounted &&
+          (_phase == _StreamPhase.connecting ||
+              _phase == _StreamPhase.streaming) &&
+          _subscription == null) {
+        debugPrint('ReadFlow: 识别流被后台中断,回前台自动重试');
+        _retry();
       }
     }
   }
@@ -498,6 +508,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         onError: (e) {
           _firstByteTimer?.cancel();
           _thinkingTimer?.cancel();
+          _subscription = null; // 流已断,供回前台检测
           final msg = e.toString();
           String hint = msg;
           if (msg.contains('Connection timed out') || msg.contains('超时')) {
@@ -529,6 +540,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
 
   void _onStreamDone() {
     _firstByteTimer?.cancel();
+    _subscription = null; // 流已结束,供回前台检测"静默中断"
     if (!mounted) return;
     // cancelOnError=false → onDone 在 onError 后也触发，避免覆盖错误信息
     if (_phase == _StreamPhase.error) return;
@@ -1395,13 +1407,24 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                   });
                 },
               ),
-              // 删除选中（右上角，长按选中后出现）
-              if (_selected.isNotEmpty)
+              // 选中操作（右上角，长按选中后出现）：
+              // 取消选择 + 删除——一次清空所有选中,不用逐个长按取消
+              if (_selected.isNotEmpty) ...[
+                TextButton(
+                  onPressed: () {
+                    setState(() => _selected.clear());
+                  },
+                  child: Text(
+                    '取消选择(${_selected.length})',
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                  ),
+                ),
                 IconButton(
                   icon: Icon(Icons.delete_outline, color: Colors.red[400]),
                   tooltip: '删除选中的 ${_selected.length} 个词汇',
                   onPressed: _deleteSelected,
                 ),
+              ],
               // 详细/总览切换 — 带中文标签，颜色跟随 AppBar 前景色
               TextButton.icon(
                 onPressed: () {
@@ -2670,8 +2693,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                     color: Colors.grey[600],
                     fontStyle: FontStyle.italic,
                   ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
+                  // 例句完整呈现,不省略
                 ),
               ),
             ],

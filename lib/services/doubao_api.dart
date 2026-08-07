@@ -149,7 +149,10 @@ class DoubaoApiService extends BaseApiService {
       ],
       'max_tokens': 2048,
       'temperature': 0,
-      ...config.buildThinkingParams(),
+      // 识图固定不思考:豆包视觉模型思考速度不受 budget_tokens 控制
+      // (实测低度思考都 1 分钟+,用户已无耐心),且思考对结构化识别
+      // 提升有限——速度优先。追问仍可思考(followUpStream 保留参数)
+      'thinking': {'type': 'disabled'},
       if (stream) 'stream': true,
     };
   }
