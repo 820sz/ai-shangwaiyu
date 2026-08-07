@@ -1,19 +1,15 @@
-v1.2.8: 思考提速 + 删除选中 + ✏布局 + 流式滚动/↑↓ + 追加图片识别
+v1.2.9: 安装终极根因——缺 REQUEST_INSTALL_PACKAGES 权限
 
-- 思考提速: buildThinkingParams 改火山方舟原生 budget_tokens
-  (1024/2048/4096)替代 reasoning_effort——后者不被识别导致思考无上限
-  (中度3分钟+)。low≈几秒/medium≈20-40s/high≈1分钟
-- 删除选中: 底部栏加红色"删除(N)"按钮(选中时显示),确认后按索引
-  降序删除,清空选中和追问目标
-- ✏布局重排: 第一行=序号+单词(横幅单行ellipsis)+✏紧凑按钮,
-  类型/词性标签移到第二行 Wrap——不再竖排挤占
-- 追问滚动: 流式跟随改 jumpTo 瞬时跳底(animateTo 动画跟不上频繁
-  更新); 新增↑回顶↓回底浮动按钮(内容不满一屏自动隐藏)
-- 追加图片识别: 图片区"＋追加图片"按钮(结果态)→相册多选→仅识别
-  新图(image_index 加 _streamStartIndex 映射回全局),结果接在旧结果
-  后不覆盖,旧选中保留; 图片区下方 p1/p2/pn 页码条点击跳转对应分组;
-  分组标题改"pN · 📷 图片 N"; _images 单一列表贯穿识别/保存/恢复
-
-验证: analyze 0 error, 34 测试全绿
+- 现象: v1.2.7(自写安装通道)startActivity 成功但安装器从不出现,
+  对话框静默关闭,像什么都没发生
+- 根因: AndroidManifest 只有 INTERNET/ACCESS_NETWORK_STATE 两个权限,
+  缺 REQUEST_INSTALL_PACKAGES——系统安装器对没有该权限的 App 发起的
+  安装请求静默拒绝(不弹界面不报错)。手动装 APK 走文件管理器(有权限),
+  所以手动一直成功、App 内更新从上线起从未成功过——终极解释
+- 修复: Manifest 加 REQUEST_INSTALL_PACKAGES + update_dialog 安装意图
+  发出后检测 App 是否进入后台(WidgetsBindingObserver):
+  未进入后台=安装器没弹出 → 显示引导"系统设置→应用→AI上外语→
+  安装未知应用→允许" + 重试
+- 验证: analyze 0 error, 34 测试全绿
 
 Co-Authored-By: Claude <noreply@anthropic.com>

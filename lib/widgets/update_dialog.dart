@@ -64,16 +64,38 @@ class _DownloadDialog extends StatefulWidget {
   State<_DownloadDialog> createState() => _DownloadDialogState();
 }
 
-class _DownloadDialogState extends State<_DownloadDialog> {
+class _DownloadDialogState extends State<_DownloadDialog>
+    with WidgetsBindingObserver {
   double _progress = 0;
   bool _downloading = true;
   String? _error;
   bool _installing = false;
+  /// 安装意图发出后 App 是否进入过后台。
+  /// 正常情况系统安装器会压到前台 → App 变 paused;
+  /// 若始终 resumed,说明安装器根本没弹出(静默拒绝),需引导用户开权限
+  bool _sawBackground = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _startDownload();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // PackageInstaller 前台时 App 进入 inactive/paused
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      _sawBackground = true;
+    }
   }
 
   Future<void> _startDownload() async {
@@ -81,6 +103,7 @@ class _DownloadDialogState extends State<_DownloadDialog> {
       _downloading = true;
       _error = null;
       _progress = 0;
+      _sawBackground = false;
     });
     try {
       final path = await UpdateService.downloadApk(
@@ -98,7 +121,19 @@ class _DownloadDialogState extends State<_DownloadDialog> {
       });
       // 调起系统安装器,对话框随即关闭
       await UpdateService.installApk(path);
-      if (mounted) Navigator.pop(context);
+      if (!mounted) return;
+      if (!_sawBackground) {
+        // 安装意图发出但 App 从未进入后台 → 安装界面没弹出,
+        // 大概率是系统"安装未知应用"权限被禁,给出明确引导
+        setState(() {
+          _installing = false;
+          _error = '未检测到安装界面弹出。\n'
+              '请前往 系统设置 → 应用 → AI上外语 → '
+              '「安装未知应用」→ 允许,然后点重试。';
+        });
+        return;
+      }
+      Navigator.pop(context);
     } catch (e) {
       if (mounted) {
         setState(() {
