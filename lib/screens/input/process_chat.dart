@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import '../../config/constants.dart';
 import '../../models/saved_session.dart';
 import '../../models/vocabulary.dart';
@@ -183,6 +184,9 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
   final TextEditingController _followUpCtrl = TextEditingController();
   final FocusNode _followUpFocus = FocusNode();
   StreamSubscription<SseChunk>? _followUpSub;
+
+  /// 发送新消息后待滚到底部（用户手动上滑浏览时不打扰,发送时强制跟随）
+  bool _pendingFollowUpScroll = false;
 
   /// 本次会话是否有追问内容（用于退出时提示保存）
   bool _followUpDirty = false;
@@ -1042,6 +1046,25 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                       ),
                     );
                   }
+                  // 流式更新/新消息时自动跟随到底部:
+                  // 发送消息强制跳底;内容更新时若已在底部附近则跟随,
+                  // 用户手动上滑浏览历史时不被拉回
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (!scrollCtrl.hasClients) return;
+                    final pos = scrollCtrl.position;
+                    final nearBottom =
+                        pos.maxScrollExtent - pos.pixels < 150;
+                    if (_pendingFollowUpScroll || nearBottom) {
+                      _pendingFollowUpScroll = false;
+                      if (pos.maxScrollExtent > 0) {
+                        scrollCtrl.animateTo(
+                          pos.maxScrollExtent,
+                          duration: const Duration(milliseconds: 250),
+                          curve: Curves.easeOut,
+                        );
+                      }
+                    }
+                  });
                   return ListView.builder(
                     controller: scrollCtrl,
                     padding: const EdgeInsets.symmetric(
@@ -1068,7 +1091,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                             controller: _followUpCtrl,
                             focusNode: _followUpFocus,
                             minLines: 1,
-                            maxLines: 3,
+                            maxLines: 4,
                             decoration: InputDecoration(
                               hintText: '基于图片内容提问…',
                               border: const OutlineInputBorder(),
@@ -1096,25 +1119,28 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                           ),
                         ),
                         const SizedBox(width: 8),
-                        // 用 ValueListenableBuilder 确保 spinner 状态实时更新
+                        // 生成中显示红色停止按钮——AI 卡住时可主动打断,
+                        // 打断后保留已生成内容,可重新提问
                         ValueListenableBuilder<bool>(
                           valueListenable: _followUpLoading,
                           builder: (ctx, loading, _) {
+                            if (loading) {
+                              return IconButton.filled(
+                                style: IconButton.styleFrom(
+                                  backgroundColor: Colors.red[400],
+                                ),
+                                onPressed: _stopFollowUp,
+                                tooltip: '停止生成',
+                                icon: const Icon(Icons.stop, size: 18),
+                              );
+                            }
                             return IconButton.filled(
-                              onPressed: loading || !hasText
+                              onPressed: !hasText
                                   ? null
                                   : () => _sendFollowUp(
                                       _followUpCtrl.text.trim(),
                                     ),
-                              icon: loading
-                                  ? const SizedBox(
-                                      width: 18,
-                                      height: 18,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                      ),
-                                    )
-                                  : const Icon(Icons.send, size: 18),
+                              icon: const Icon(Icons.send, size: 18),
                             );
                           },
                         ),
@@ -1145,8 +1171,31 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     _followUpCtrl.clear();
     _followUpLoading.value = true;
     _followUpDirty = true;
+    _pendingFollowUpScroll = true; // 发送后强制滚动到最新消息
 
     _doFollowUpStream(text, _followUpMessages.value.length - 1);
+  }
+
+  /// 用户手动停止生成:取消流式订阅,当前 AI 消息保留已生成内容。
+  /// 停止后 _followUpLoading 置 false,输入框恢复可重新提问。
+  void _stopFollowUp() {
+    _followUpSub?.cancel();
+    _followUpSub = null;
+    final msgs = List<_FollowUpMessage>.from(_followUpMessages.value);
+    for (int i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i].role == 'ai' && msgs[i].streaming) {
+        msgs[i] = _FollowUpMessage(
+          role: 'ai',
+          content: msgs[i].content.isEmpty ? '（已停止生成）' : msgs[i].content,
+          reasoningText: msgs[i].reasoningText,
+          streaming: false,
+          model: msgs[i].model,
+        );
+        break;
+      }
+    }
+    _followUpMessages.value = msgs;
+    _followUpLoading.value = false;
   }
 
   Future<void> _doFollowUpStream(String question, int aiMsgIndex) async {
@@ -1228,89 +1277,47 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
   Widget _buildFollowUpBubble(_FollowUpMessage msg) {
     final isUser = msg.role == 'user';
 
+    if (!isUser) {
+      return _AiFollowUpBubble(
+        message: msg,
+        avatar: _aiAvatar(radius: 14, modelName: msg.model ?? _followUpModel),
+      );
+    }
+
+    // 用户气泡（右侧）
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: isUser
-            ? MainAxisAlignment.end
-            : MainAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.end,
         children: [
-          // AI 头像（左侧）— 按生成该消息的模型渲染,切槽位不改历史气泡
-          if (!isUser) ...[
-            _aiAvatar(radius: 14, modelName: msg.model ?? _followUpModel),
-            const SizedBox(width: 8),
-          ],
-          // 气泡
           Flexible(
             child: Container(
               constraints: BoxConstraints(
-                maxWidth: MediaQuery.of(context).size.width * 0.65,
+                maxWidth: MediaQuery.of(context).size.width * 0.75,
               ),
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: isUser
-                    ? const Color(0xFF4A90D9).withAlpha(20)
-                    : Colors.grey[100],
+                color: const Color(0xFF4A90D9).withAlpha(20),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // 模型名标签（仅 AI 消息,旧数据无 model 时不显示）
-                  if (!isUser && msg.model != null)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 4),
-                      child: Text(
-                        msg.model!,
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: Colors.grey[500],
-                        ),
-                      ),
-                    ),
-                  // 推理（仅 AI 消息）
-                  if (msg.reasoningText != null &&
-                      msg.reasoningText!.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 6),
-                      child: Text(
-                        msg.reasoningText!.length > 300
-                            ? '${msg.reasoningText!.substring(0, 300)}…'
-                            : msg.reasoningText!,
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: Colors.orange[400],
-                          fontFamily: 'monospace',
-                        ),
-                      ),
-                    ),
-                  // 正文
-                  if (msg.content.isNotEmpty)
-                    SelectableText(
-                      msg.content,
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: isUser ? Colors.black87 : Colors.grey[800],
-                        height: 1.4,
-                      ),
-                    )
-                  else if (msg.streaming)
-                    const Text(
-                      '…',
-                      style: TextStyle(fontSize: 13, color: Colors.grey),
-                    ),
-                ],
+              child: Text(
+                msg.content,
+                style: const TextStyle(
+                  fontSize: 13,
+                  color: Colors.black87,
+                  height: 1.4,
+                ),
               ),
             ),
           ),
-          // 用户头像（右侧）
-          if (isUser) ...[const SizedBox(width: 8), _userAvatar(radius: 14)],
+          const SizedBox(width: 8),
+          _userAvatar(radius: 14),
         ],
       ),
     );
   }
+
 
   // ═══════════════ Build ═══════════════
 
@@ -2442,9 +2449,28 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 第一行：单词 + 类型标签 + 词性
+            // 第一行：序号 + 单词 + 编辑按钮 + 类型标签 + 词性
             Row(
               children: [
+                // 序号徽章（第1个标1）
+                Container(
+                  width: 22,
+                  height: 22,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: barColor.withAlpha(22),
+                    borderRadius: BorderRadius.circular(11),
+                  ),
+                  child: Text(
+                    '${index + 1}',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: barColor,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     item.word,
@@ -2452,6 +2478,18 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                       fontWeight: FontWeight.w700,
                     ),
                   ),
+                ),
+                // 编辑按钮（右上角）——修改单词/释义/例句,例句自动同步替换
+                IconButton(
+                  icon: const Icon(Icons.edit_outlined, size: 15),
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(
+                    minWidth: 28,
+                    minHeight: 28,
+                  ),
+                  tooltip: '编辑单词',
+                  onPressed: () => _editItem(index),
                 ),
                 _typeChip(item.wordType, barColor),
                 if (item.partOfSpeech != null &&
@@ -2571,7 +2609,20 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
           ..._buildGroupedResults(theme)
         else
           ..._buildFlatResults(theme),
-        const SizedBox(height: 8),
+        const SizedBox(height: 4),
+        // 手动添加词汇：AI 漏识别时用户自行补充
+        Center(
+          child: TextButton.icon(
+            onPressed: _showAddWordDialog,
+            icon: const Icon(Icons.add_circle_outline, size: 16),
+            label: const Text('添加词汇（AI 漏识别时手动补充）'),
+            style: TextButton.styleFrom(
+              foregroundColor: theme.colorScheme.primary,
+              textStyle: const TextStyle(fontSize: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            ),
+          ),
+        ),
         Center(
           child: Text(
             _displayMode == _DisplayMode.detailed
@@ -2595,6 +2646,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         return WordListTile(
           item: item,
           isSelected: isSel,
+          index: i,
           onTap: () {
             showWordDetailSheet(
               context: context,
@@ -2632,9 +2684,15 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     for (int g = 0; g < order.length; g++) {
       final key = order[g];
       final indices = groups[key]!;
-      // 图源标题：找到对应的 image 索引
+      // 图源标题：找到对应的 image 索引；手动补充的词无照片来源，
+      // 单独归入「手动补充」组
       final imgIndex = widget.imageFiles.indexWhere((f) => f.path == key);
-      final label = imgIndex >= 0 ? '📷 图片 ${imgIndex + 1}' : '📷 图片 ${g + 1}';
+      final String label;
+      if (key.isEmpty) {
+        label = '📝 手动补充';
+      } else {
+        label = imgIndex >= 0 ? '📷 图片 ${imgIndex + 1}' : '📷 图片 ${g + 1}';
+      }
       final pageInfo =
           (widget.sourcePage != null && widget.sourcePage!.isNotEmpty)
           ? ' · 第${widget.sourcePage}页'
@@ -2698,6 +2756,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                   isSel ? _selected.remove(i) : _selected.add(i);
                 });
               },
+              index: i,
             ),
           );
         }
@@ -2919,6 +2978,12 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                 decoration: const InputDecoration(labelText: '原文例句'),
                 maxLines: 2,
               ),
+              const SizedBox(height: 8),
+              // 修改原文后例句自动替换提示
+              Text(
+                '修改「原文」后，例句中的「${item.word.length > 12 ? '${item.word.substring(0, 12)}…' : item.word}」会自动替换为新词',
+                style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+              ),
             ],
           ),
         ),
@@ -2941,6 +3006,15 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                 ).showSnackBar(const SnackBar(content: Text('单词不能为空')));
                 return;
               }
+              // 例句中的旧词自动替换为新词（保留原句大小写形态），
+              // 避免「hi is a boy」改成 he 后例句仍是 hi
+              final newSentence = replaceWordInSentence(
+                sentenceCtrl.text.trim().isEmpty
+                    ? (item.originalSentence ?? '')
+                    : sentenceCtrl.text.trim(),
+                item.word,
+                wordText,
+              );
               setState(() {
                 _results[index] = item.copyWith(
                   word: wordText,
@@ -2951,9 +3025,9 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                   grammarNote: grammarCtrl.text.trim().isEmpty
                       ? null
                       : grammarCtrl.text.trim(),
-                  originalSentence: sentenceCtrl.text.trim().isEmpty
+                  originalSentence: newSentence.isEmpty
                       ? null
-                      : sentenceCtrl.text.trim(),
+                      : newSentence,
                 );
               });
               disposeAll();
@@ -2965,9 +3039,375 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
       ),
     );
   }
+
+  /// 手动添加词汇：AI 漏识别时用户自行补充。
+  /// 新词进入 _results 同一数据源——详细/总览/追问/选中/保存/暂存自动同步。
+  void _showAddWordDialog() {
+    final wordCtrl = TextEditingController();
+    final transCtrl = TextEditingController();
+    final posCtrl = TextEditingController();
+    final sentenceCtrl = TextEditingController();
+
+    void disposeAll() {
+      wordCtrl.dispose();
+      transCtrl.dispose();
+      posCtrl.dispose();
+      sentenceCtrl.dispose();
+    }
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('添加词汇'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: wordCtrl,
+                decoration: const InputDecoration(
+                  labelText: '单词/短语（必填）',
+                  hintText: '如：unfettered',
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: transCtrl,
+                decoration: const InputDecoration(labelText: '释义'),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: posCtrl,
+                decoration: const InputDecoration(
+                  labelText: '词性',
+                  hintText: '如：形容词 adj.',
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: sentenceCtrl,
+                decoration: const InputDecoration(
+                  labelText: '例句（可选）',
+                  hintText: '如：The mind wants unfettered freedom.',
+                ),
+                maxLines: 2,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              disposeAll();
+              Navigator.pop(ctx);
+            },
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () {
+              final wordText = wordCtrl.text.trim();
+              if (wordText.isEmpty) {
+                disposeAll();
+                Navigator.pop(ctx);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('单词不能为空')),
+                );
+                return;
+              }
+              final sentence = sentenceCtrl.text.trim();
+              setState(() {
+                _results.add(
+                  Vocabulary(
+                    word: wordText,
+                    translation: transCtrl.text.trim().isEmpty
+                        ? null
+                        : transCtrl.text.trim(),
+                    partOfSpeech: posCtrl.text.trim().isEmpty
+                        ? null
+                        : posCtrl.text.trim(),
+                    originalSentence: sentence.isEmpty ? null : sentence,
+                    photoPath: null, // 手动补充的词无照片来源
+                  ),
+                );
+              });
+              disposeAll();
+              Navigator.pop(ctx);
+            },
+            child: const Text('添加'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 例句中把旧词替换为新词（保留原句大小写形态）：
+/// 原文 "He is a hi boy" 改 hi→he 得 "He is a he boy"（首字母跟随原词大小写）。
+/// 纯函数，可单测。
+String replaceWordInSentence(
+  String sentence,
+  String oldWord,
+  String newWord,
+) {
+  if (sentence.isEmpty ||
+      oldWord.isEmpty ||
+      newWord.isEmpty ||
+      oldWord == newWord) {
+    return sentence;
+  }
+  final re = RegExp('\\b${RegExp.escape(oldWord)}\\b', caseSensitive: false);
+  return sentence.replaceAllMapped(re, (m) {
+    final matched = m.group(0)!;
+    final isUpper =
+        matched.isNotEmpty && matched[0].toUpperCase() == matched[0];
+    if (isUpper && newWord.isNotEmpty) {
+      return newWord[0].toUpperCase() + newWord.substring(1);
+    }
+    return newWord;
+  });
 }
 
 /// 回到顶部浮动小按钮 — 仅在结果态显示，点击后平滑滚动到顶部
+/// 追问 AI 气泡:模型标签 + 可折叠思考过程 + Markdown 渲染正文。
+/// 本地状态承载思考折叠——流式更新重建气泡时状态保留。
+class _AiFollowUpBubble extends StatefulWidget {
+  final _FollowUpMessage message;
+  final Widget avatar;
+
+  const _AiFollowUpBubble({
+    required this.message,
+    required this.avatar,
+  });
+
+  @override
+  State<_AiFollowUpBubble> createState() => _AiFollowUpBubbleState();
+}
+
+class _AiFollowUpBubbleState extends State<_AiFollowUpBubble> {
+  bool _thinkingExpanded = true;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final msg = widget.message;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          widget.avatar,
+          const SizedBox(width: 8),
+          Flexible(
+            child: Container(
+              // 宽气泡:充分利用抽屉横向空间,缓解 Markdown 表格换行错位
+              constraints: BoxConstraints(
+                maxWidth: MediaQuery.of(context).size.width * 0.88,
+              ),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Colors.grey[100],
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // 模型名标签
+                  if (msg.model != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Text(
+                        msg.model!,
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: Colors.grey[500],
+                        ),
+                      ),
+                    ),
+                  // 思考过程（可折叠，标题条点击切换）
+                  if (msg.reasoningText != null &&
+                      msg.reasoningText!.isNotEmpty)
+                    _ThinkingBlock(
+                      text: msg.reasoningText!,
+                      expanded: _thinkingExpanded,
+                      streaming: msg.streaming,
+                      onToggle: () => setState(
+                        () => _thinkingExpanded = !_thinkingExpanded,
+                      ),
+                    ),
+                  // 正文（Markdown 渲染：标题/加粗/表格/列表层级清晰）
+                  if (msg.content.isNotEmpty)
+                    MarkdownBody(
+                      data: msg.content,
+                      selectable: true,
+                      styleSheet: MarkdownStyleSheet.fromTheme(
+                        theme,
+                      ).copyWith(
+                        p: theme.textTheme.bodyMedium?.copyWith(
+                          fontSize: 13,
+                          height: 1.5,
+                          color: Colors.grey[800],
+                        ),
+                        h1: theme.textTheme.titleMedium?.copyWith(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        ),
+                        h2: theme.textTheme.titleMedium?.copyWith(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                        ),
+                        h3: theme.textTheme.titleSmall?.copyWith(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                        ),
+                        strong: theme.textTheme.bodyMedium?.copyWith(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.black87,
+                        ),
+                        tableBorder: TableBorder.all(
+                          color: Colors.grey.shade300,
+                          width: 0.5,
+                        ),
+                        tableHead: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: theme.colorScheme.primary,
+                        ),
+                        tableBody: TextStyle(fontSize: 12, height: 1.4),
+                        tableCellsPadding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 4,
+                        ),
+                        blockquote: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey[600],
+                          fontStyle: FontStyle.italic,
+                        ),
+                        code: TextStyle(
+                          fontSize: 12,
+                          color: Colors.deepOrange[700],
+                          fontFamily: 'monospace',
+                        ),
+                        horizontalRuleDecoration: BoxDecoration(
+                          border: Border(
+                            top: BorderSide(color: Colors.grey[300]!, width: 1),
+                          ),
+                        ),
+                      ),
+                    )
+                  else if (msg.streaming)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      child: Row(
+                        children: [
+                          const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            '正在思考…',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[600],
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  else
+                    const Text(
+                      '（AI 未返回内容）',
+                      style: TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 可折叠思考过程块：标题条点击切换展开/收起；展开时限制高度可滚动
+class _ThinkingBlock extends StatelessWidget {
+  final String text;
+  final bool expanded;
+  final bool streaming;
+  final VoidCallback onToggle;
+
+  const _ThinkingBlock({
+    required this.text,
+    required this.expanded,
+    required this.streaming,
+    required this.onToggle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      decoration: BoxDecoration(
+        color: Colors.orange.withAlpha(10),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 标题条
+          InkWell(
+            onTap: onToggle,
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              child: Row(
+                children: [
+                  const Text('💭', style: TextStyle(fontSize: 11)),
+                  const SizedBox(width: 4),
+                  Text(
+                    streaming ? '思考过程（生成中）' : '思考过程',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Colors.orange[800],
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const Spacer(),
+                  Icon(
+                    expanded ? Icons.expand_less : Icons.expand_more,
+                    size: 16,
+                    color: Colors.orange[600],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (expanded)
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 180),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
+                child: Text(
+                  text,
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: Colors.orange[400],
+                    fontFamily: 'monospace',
+                    height: 1.4,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
 class _ScrollToTopButton extends StatefulWidget {
   final ScrollController scrollCtrl;
   const _ScrollToTopButton({required this.scrollCtrl});

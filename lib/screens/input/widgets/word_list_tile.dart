@@ -10,6 +10,8 @@ class WordListTile extends StatelessWidget {
   final bool isSelected;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
+  /// 序号（从 0 起），null 时不显示（其他页面复用时不干扰）
+  final int? index;
 
   const WordListTile({
     super.key,
@@ -17,6 +19,7 @@ class WordListTile extends StatelessWidget {
     required this.isSelected,
     required this.onTap,
     required this.onLongPress,
+    this.index,
   });
 
   Color _barColor() {
@@ -54,6 +57,19 @@ class WordListTile extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         child: Row(
           children: [
+            // 序号（结果页总览模式显示，其他页面不传则隐藏）
+            if (index != null)
+              SizedBox(
+                width: 24,
+                child: Text(
+                  '${index! + 1}',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey[400],
+                  ),
+                ),
+              ),
             // 单词
             Expanded(
               flex: 3,
