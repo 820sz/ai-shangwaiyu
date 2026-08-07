@@ -70,7 +70,7 @@ class WordListTile extends StatelessWidget {
                   ),
                 ),
               ),
-            // 单词
+            // 单词（句子类型完整呈现,不省略）
             Expanded(
               flex: 3,
               child: Text(
@@ -78,7 +78,7 @@ class WordListTile extends StatelessWidget {
                 style: theme.textTheme.bodyMedium?.copyWith(
                   fontWeight: FontWeight.w600,
                 ),
-                maxLines: 2,
+                maxLines: item.wordType == 'sentence' ? null : 2,
                 overflow: TextOverflow.ellipsis,
               ),
             ),

@@ -241,8 +241,8 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         }
         return v;
       }).toList();
+      // 恢复模式默认不选中(与识别完成一致,长按才选中)
       _selected.clear();
-      _selected.addAll(List.generate(_results.length, (i) => i));
 
       _fullTextParagraphs = List<Map<String, String>>.from(
         s.fullTextParagraphs
@@ -593,17 +593,12 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         setState(() {
           _phase = _StreamPhase.results;
           if (_streamStartIndex == 0) {
-            // 首次识别:整组替换
+            // 首次识别:整组替换,默认不选中(长按才选中)
             _results = results;
             _selected.clear();
-            _selected.addAll(List.generate(results.length, (i) => i));
           } else {
-            // 追加识别:新结果接在旧结果后,新词默认选中,旧选中保留
-            final base = _results.length;
+            // 追加识别:新结果接在旧结果后;新词默认不选中,旧选中保留
             _results = [..._results, ...results];
-            _selected.addAll(
-              List.generate(results.length, (i) => base + i),
-            );
           }
           _streamStartIndex = 0; // 本轮结束复位,下次从头开始
         });
@@ -1400,6 +1395,13 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                   });
                 },
               ),
+              // 删除选中（右上角，长按选中后出现）
+              if (_selected.isNotEmpty)
+                IconButton(
+                  icon: Icon(Icons.delete_outline, color: Colors.red[400]),
+                  tooltip: '删除选中的 ${_selected.length} 个词汇',
+                  onPressed: _deleteSelected,
+                ),
               // 详细/总览切换 — 带中文标签，颜色跟随 AppBar 前景色
               TextButton.icon(
                 onPressed: () {
@@ -1864,34 +1866,6 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
           ),
           const SizedBox(width: 4),
 
-          // 删除选中（长按选中的词汇可删除）— 选中时显示
-          if (_phase == _StreamPhase.results &&
-              _selected.isNotEmpty &&
-              widget.analysisMode != AppConstants.analysisModeFullText)
-            Flexible(
-              flex: 2,
-              child: TextButton.icon(
-                onPressed: _deleteSelected,
-                icon: Icon(
-                  Icons.delete_outline,
-                  size: 16,
-                  color: Colors.red[400],
-                ),
-                label: Text(
-                  '删除(${_selected.length})',
-                  style: TextStyle(fontSize: 12, color: Colors.red[400]),
-                ),
-                style: TextButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 6,
-                    vertical: 8,
-                  ),
-                ),
-              ),
-            ),
-
-          const SizedBox(width: 4),
-
           // 保存词汇（C位）— flex=3，全文翻译模式下隐藏
           if (_phase == _StreamPhase.results &&
               widget.analysisMode != AppConstants.analysisModeFullText)
@@ -2088,44 +2062,6 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
 
   // ═══════════════ 用户气泡 ═══════════════
 
-  /// 追加图片按钮（结果态可点，虚线卡片 + "+"；全文翻译模式无意义）
-  Widget _addImageButton() {
-    final enabled = _phase == _StreamPhase.results &&
-        widget.analysisMode != AppConstants.analysisModeFullText;
-    return GestureDetector(
-      onTap: enabled ? _addMoreImages : null,
-      child: Container(
-        width: 72,
-        height: 100,
-        decoration: BoxDecoration(
-          color: Colors.grey[50],
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: enabled ? Colors.blue[200]! : Colors.grey[300]!,
-          ),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.add,
-              size: 26,
-              color: enabled ? Colors.blue[400] : Colors.grey[300],
-            ),
-            const SizedBox(height: 2),
-            Text(
-              '追加图片',
-              style: TextStyle(
-                fontSize: 10,
-                color: enabled ? Colors.blue[600] : Colors.grey[400],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   /// 追加图片继续识别:不退出当前对话,新图识别结果接在旧结果后,
   /// 按来源图分 p1/p2/pn 组,页码条可点击跳转
   Future<void> _addMoreImages() async {
@@ -2178,100 +2114,122 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                   ),
                 ),
               ] else ...[
-                // 多图水平滚动（尾部追加"＋"按钮）
+                // 多图水平滚动
                 SizedBox(
                   height: count > 1 ? 180 : null,
                   child: count == 1
-                      ? Row(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            GestureDetector(
-                              onTap: _phase == _StreamPhase.results
-                                  ? () => _scrollToImageGroup(0)
-                                  : null,
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(16),
-                                  border: Border.all(
-                                    color: Colors.grey[300]!,
-                                  ),
-                                ),
-                                clipBehavior: Clip.antiAlias,
-                                child: Image.file(
-                                  _images.first,
-                                  width: imgWidth,
-                                  fit: BoxFit.contain,
-                                ),
-                              ),
+                      ? GestureDetector(
+                          onTap: _phase == _StreamPhase.results
+                              ? () => _scrollToImageGroup(0)
+                              : null,
+                          child: Container(
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: Colors.grey[300]!),
                             ),
-                            const SizedBox(width: 6),
-                            // 追加图片按钮（单图）
-                            _addImageButton(),
-                          ],
+                            clipBehavior: Clip.antiAlias,
+                            child: Image.file(
+                              _images.first,
+                              width: imgWidth,
+                              fit: BoxFit.contain,
+                            ),
+                          ),
                         )
                       : ListView.separated(
                           scrollDirection: Axis.horizontal,
-                          itemCount: count + 1, // 尾部追加按钮
+                          itemCount: count,
                           separatorBuilder: (_, _) => const SizedBox(width: 6),
-                          itemBuilder: (_, i) {
-                            // 最后一项 = 追加图片按钮
-                            if (i == count) return _addImageButton();
-                            return GestureDetector(
-                              onTap: _phase == _StreamPhase.results
-                                  ? () => _scrollToImageGroup(i)
-                                  : null,
-                              child: Container(
-                                width: imgWidth,
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(
-                                    color: Colors.grey[300]!,
+                          itemBuilder: (_, i) => GestureDetector(
+                            onTap: _phase == _StreamPhase.results
+                                ? () => _scrollToImageGroup(i)
+                                : null,
+                            child: Container(
+                              width: imgWidth,
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: Colors.grey[300]!),
+                              ),
+                              clipBehavior: Clip.antiAlias,
+                              child: Stack(
+                                children: [
+                                  Image.file(
+                                    _images[i],
+                                    width: imgWidth,
+                                    fit: BoxFit.cover,
                                   ),
-                                ),
-                                clipBehavior: Clip.antiAlias,
-                                child: Stack(
-                                  children: [
-                                    Image.file(
-                                      _images[i],
-                                      width: imgWidth,
-                                      fit: BoxFit.cover,
-                                    ),
-                                    Positioned(
-                                      top: 6,
-                                      left: 6,
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 6,
-                                          vertical: 2,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: Colors.black54,
-                                          borderRadius: BorderRadius.circular(
-                                            8,
-                                          ),
-                                        ),
-                                        child: Text(
-                                          'p${i + 1}/$count',
-                                          style: const TextStyle(
-                                            fontSize: 10,
-                                            color: Colors.white,
-                                          ),
+                                  Positioned(
+                                    top: 6,
+                                    left: 6,
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 6,
+                                        vertical: 2,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: Colors.black54,
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      child: Text(
+                                        'p${i + 1}/$count',
+                                        style: const TextStyle(
+                                          fontSize: 10,
+                                          color: Colors.white,
                                         ),
                                       ),
                                     ),
-                                  ],
-                                ),
+                                  ),
+                                ],
                               ),
-                            );
-                          },
+                            ),
+                          ),
                         ),
                 ),
               ],
               const SizedBox(height: 4),
-              Text(
-                '共 $count 张图片',
-                style: TextStyle(fontSize: 11, color: Colors.grey[400]),
+              // 图片计数 + 追加图片按钮（结果态可点，独立一行不混排）
+              Row(
+                children: [
+                  Text(
+                    '共 $count 张图片',
+                    style: TextStyle(fontSize: 11, color: Colors.grey[400]),
+                  ),
+                  const Spacer(),
+                  if (_phase == _StreamPhase.results &&
+                      widget.analysisMode != AppConstants.analysisModeFullText)
+                    GestureDetector(
+                      onTap: _addMoreImages,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.blue[50],
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: Colors.blue[100]!),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.add,
+                              size: 13,
+                              color: Colors.blue[600],
+                            ),
+                            const SizedBox(width: 2),
+                            Text(
+                              '追加图片',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.blue[600],
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
               ),
               // 页码条：p1/p2/pn — 点击跳到对应图片的识别结果分组
               if (count > 1 && _phase == _StreamPhase.results)
@@ -2642,11 +2600,11 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                   ),
                 ),
                 const SizedBox(width: 8),
-                // 单词占满横幅，不换行不竖排
+                // 单词占满横幅;句子类型完整呈现(不省略),单词/短语单行
                 Expanded(
                   child: Text(
                     item.word,
-                    maxLines: 1,
+                    maxLines: item.wordType == 'sentence' ? null : 1,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.titleSmall?.copyWith(
                       fontWeight: FontWeight.w700,

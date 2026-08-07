@@ -38,12 +38,13 @@ class AppConstants {
 
   // ── 思考模式 ──
   // disabled → thinking: {type: disabled}，完全跳过推理
-  // low/medium/high → thinking: {type: enabled} + reasoning_effort
+  // low/medium/high → thinking: {type: enabled} + budget_tokens
+  // 文案带预估耗时——思考模式实测速度差异大,选择时心里有数
   static const Map<String, String> thinkingOptions = {
     'disabled': '不思考',
-    'low': '低度思考',
-    'medium': '中度思考',
-    'high': '深度思考',
+    'low': '低·约10s',
+    'medium': '中·约30s',
+    'high': '高·约1分钟',
   };
 
   // ── 数据库 ──

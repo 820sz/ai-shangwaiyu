@@ -72,17 +72,18 @@ class ApiEndpointConfig {
   /// 思考参数。豆包/火山方舟原生字段是 thinking.budget_tokens
   /// (限制思考 token 数)——之前用 reasoning_effort 不被火山方舟识别,
   /// 思考无上限,中度思考一张图 3 分钟+(用户实测)。
-  /// budget_tokens: low≈几秒 / medium≈20-40s / high≈1 分钟
+  /// 注意:部分豆包视觉模型可能只认 type 不认 budget_tokens,
+  /// 故预算压得更低(512/1024/2048)并配合文案标注预估耗时。
   Map<String, dynamic> buildThinkingParams() {
     switch (thinking) {
       case 'disabled':
         return {'thinking': {'type': 'disabled'}};
       case 'low':
-        return {'thinking': {'type': 'enabled', 'budget_tokens': 1024}};
+        return {'thinking': {'type': 'enabled', 'budget_tokens': 512}};
       case 'medium':
-        return {'thinking': {'type': 'enabled', 'budget_tokens': 2048}};
+        return {'thinking': {'type': 'enabled', 'budget_tokens': 1024}};
       case 'high':
-        return {'thinking': {'type': 'enabled', 'budget_tokens': 4096}};
+        return {'thinking': {'type': 'enabled', 'budget_tokens': 2048}};
       default:
         return {'thinking': {'type': 'disabled'}};
     }
