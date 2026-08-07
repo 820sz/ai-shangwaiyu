@@ -1,14 +1,19 @@
-v1.2.7: 自写 MethodChannel 安装通道,弃用 open_filex
+v1.2.8: 思考提速 + 删除选中 + ✏布局 + 流式滚动/↑↓ + 追加图片识别
 
-- 现象: v1.2.6 自动更新下载完成卡在"正在打开安装器"——installApk 的
-  await 永不返回。open_filex 原生端存在不回调 result 的路径,
-  逐行核对 Java 源码无法静态确认(真机挂起),决定弃用第三方插件
-- 修复: MainActivity.kt 自写 MethodChannel(app/install_apk):
-  FileProvider.getUriForFile + ACTION_VIEW + NEW_TASK + GRANT_READ_URI_PERMISSION,
-  同步返回 success/error(带具体错误信息);Dart 端 15s 超时兜底,
-  任何情况快速可见(不再无限转圈);build.gradle 显式加 androidx.core:core-ktx
-- 移除 open_filex 依赖; authority 保持与 Manifest 一致
-  (packageName.fileProvider.com.crazecoder.openfile)
-- 验证: analyze 0 error, 34 测试全绿
+- 思考提速: buildThinkingParams 改火山方舟原生 budget_tokens
+  (1024/2048/4096)替代 reasoning_effort——后者不被识别导致思考无上限
+  (中度3分钟+)。low≈几秒/medium≈20-40s/high≈1分钟
+- 删除选中: 底部栏加红色"删除(N)"按钮(选中时显示),确认后按索引
+  降序删除,清空选中和追问目标
+- ✏布局重排: 第一行=序号+单词(横幅单行ellipsis)+✏紧凑按钮,
+  类型/词性标签移到第二行 Wrap——不再竖排挤占
+- 追问滚动: 流式跟随改 jumpTo 瞬时跳底(animateTo 动画跟不上频繁
+  更新); 新增↑回顶↓回底浮动按钮(内容不满一屏自动隐藏)
+- 追加图片识别: 图片区"＋追加图片"按钮(结果态)→相册多选→仅识别
+  新图(image_index 加 _streamStartIndex 映射回全局),结果接在旧结果
+  后不覆盖,旧选中保留; 图片区下方 p1/p2/pn 页码条点击跳转对应分组;
+  分组标题改"pN · 📷 图片 N"; _images 单一列表贯穿识别/保存/恢复
+
+验证: analyze 0 error, 34 测试全绿
 
 Co-Authored-By: Claude <noreply@anthropic.com>

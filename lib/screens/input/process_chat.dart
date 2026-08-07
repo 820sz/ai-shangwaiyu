@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import '../../config/constants.dart';
 import '../../models/saved_session.dart';
@@ -200,9 +201,17 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
   // ── 追问持久化 Key ──
   static const _hiveKeySavedChats = 'saved_follow_up_chats';
 
+  /// 全部图片（初始 = 进入页面时的图；追加识别时动态扩展）。
+  /// 追加的图片继续识别,结果按来源图分 p1/p2/pn 组,不退出当前对话。
+  late final List<File> _images;
+
+  /// 本轮识别从第几张图开始（追加模式 = 上次的图片数；首次 = 0）
+  int _streamStartIndex = 0;
+
   @override
   void initState() {
     super.initState();
+    _images = [...widget.imageFiles];
     WidgetsBinding.instance.addObserver(this);
     _followUpSlotNotifier.value = _followUpSlot;
     _loadSavedConversations();
@@ -219,7 +228,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     try {
       // 图片锚点按实际文件重建
       _imageGroupKeys.clear();
-      for (int i = 0; i < widget.imageFiles.length; i++) {
+      for (int i = 0; i < _images.length; i++) {
         _imageGroupKeys[i] = GlobalKey(debugLabel: 'image_group_$i');
       }
 
@@ -284,8 +293,8 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
       final sessionDir = Directory('${docsDir.path}/sessions/$id');
       await sessionDir.create(recursive: true);
       final copyMap = <String, String>{};
-      for (int i = 0; i < widget.imageFiles.length; i++) {
-        final f = widget.imageFiles[i];
+      for (int i = 0; i < _images.length; i++) {
+        final f = _images[i];
         if (!f.existsSync()) continue;
         final ext = f.path.split('.').last.toLowerCase();
         final safeExt = ['jpg', 'jpeg', 'png', 'webp'].contains(ext)
@@ -428,8 +437,12 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     });
 
     try {
+      // 追加模式:只识别新追加的图片(旧结果保留,AI 对新图从 0 编号)
+      final images = _streamStartIndex == 0
+          ? _images
+          : _images.sublist(_streamStartIndex);
       final stream = _api.extractVocabularyStream(
-        widget.imageFiles,
+        images,
         sourceBook: widget.sourceBook,
         sourcePage: widget.sourcePage,
         analysisMode: widget.analysisMode,
@@ -538,7 +551,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
 
       // 多图分组：为每张图片建锚点 GlobalKey
       _imageGroupKeys.clear();
-      for (int i = 0; i < widget.imageFiles.length; i++) {
+      for (int i = 0; i < _images.length; i++) {
         _imageGroupKeys[i] = GlobalKey(debugLabel: 'image_group_$i');
       }
 
@@ -557,12 +570,13 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
           _phase = _StreamPhase.results;
         });
       } else {
-        // 圈画模式结果 — 多图时按 image_index 映射正确的 photoPath
+        // 圈画模式结果 — 多图时按 image_index 映射正确的 photoPath。
+        // 追加模式:AI 对"本轮新图"从 0 编号,加 _streamStartIndex 映射回全局
         final results = rawMaps.map((r) {
-          final imgIdx = r['image_index'] as int? ?? 0;
-          final photoPath = imgIdx >= 0 && imgIdx < widget.imageFiles.length
-              ? widget.imageFiles[imgIdx].path
-              : widget.imageFiles.first.path;
+          final imgIdx = (r['image_index'] as int? ?? 0) + _streamStartIndex;
+          final photoPath = imgIdx >= 0 && imgIdx < _images.length
+              ? _images[imgIdx].path
+              : _images.last.path;
           return Vocabulary(
             word: r['word'] as String,
             translation: r['translation'] as String?,
@@ -578,9 +592,20 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
 
         setState(() {
           _phase = _StreamPhase.results;
-          _results = results;
-          _selected.clear();
-          _selected.addAll(List.generate(results.length, (i) => i));
+          if (_streamStartIndex == 0) {
+            // 首次识别:整组替换
+            _results = results;
+            _selected.clear();
+            _selected.addAll(List.generate(results.length, (i) => i));
+          } else {
+            // 追加识别:新结果接在旧结果后,新词默认选中,旧选中保留
+            final base = _results.length;
+            _results = [..._results, ...results];
+            _selected.addAll(
+              List.generate(results.length, (i) => base + i),
+            );
+          }
+          _streamStartIndex = 0; // 本轮结束复位,下次从头开始
         });
       }
       // 滚动到 AI 结果区域顶部
@@ -597,6 +622,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
   void _retry() {
     _subscription?.cancel();
     _thinkingTimer?.cancel();
+    _streamStartIndex = 0; // 重试 = 全新识别
     setState(() {
       _phase = _StreamPhase.connecting;
       _reasoningText = '';
@@ -1047,8 +1073,9 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                     );
                   }
                   // 流式更新/新消息时自动跟随到底部:
-                  // 发送消息强制跳底;内容更新时若已在底部附近则跟随,
-                  // 用户手动上滑浏览历史时不被拉回
+                  // 发送消息强制跳底(平滑);流式更新时若在底部附近则瞬时
+                  // 跟随(jumpTo——animateTo 动画在频繁更新时跟不上,
+                  // 表现为"楼层高了不跳");用户手动上滑浏览历史不被拉回
                   WidgetsBinding.instance.addPostFrameCallback((_) {
                     if (!scrollCtrl.hasClients) return;
                     final pos = scrollCtrl.position;
@@ -1057,22 +1084,36 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                     if (_pendingFollowUpScroll || nearBottom) {
                       _pendingFollowUpScroll = false;
                       if (pos.maxScrollExtent > 0) {
-                        scrollCtrl.animateTo(
-                          pos.maxScrollExtent,
-                          duration: const Duration(milliseconds: 250),
-                          curve: Curves.easeOut,
-                        );
+                        if (nearBottom) {
+                          scrollCtrl.jumpTo(pos.maxScrollExtent);
+                        } else {
+                          scrollCtrl.animateTo(
+                            pos.maxScrollExtent,
+                            duration: const Duration(milliseconds: 250),
+                            curve: Curves.easeOut,
+                          );
+                        }
                       }
                     }
                   });
-                  return ListView.builder(
-                    controller: scrollCtrl,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                    itemCount: msgs.length,
-                    itemBuilder: (_, i) => _buildFollowUpBubble(msgs[i]),
+                  return Stack(
+                    children: [
+                      ListView.builder(
+                        controller: scrollCtrl,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        itemCount: msgs.length,
+                        itemBuilder: (_, i) => _buildFollowUpBubble(msgs[i]),
+                      ),
+                      // 回顶/回底小按钮（楼层高时方便跳转）
+                      Positioned(
+                        right: 4,
+                        bottom: 4,
+                        child: _FollowUpScrollButtons(scrollCtrl: scrollCtrl),
+                      ),
+                    ],
                   );
                 },
               ),
@@ -1823,6 +1864,34 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
           ),
           const SizedBox(width: 4),
 
+          // 删除选中（长按选中的词汇可删除）— 选中时显示
+          if (_phase == _StreamPhase.results &&
+              _selected.isNotEmpty &&
+              widget.analysisMode != AppConstants.analysisModeFullText)
+            Flexible(
+              flex: 2,
+              child: TextButton.icon(
+                onPressed: _deleteSelected,
+                icon: Icon(
+                  Icons.delete_outline,
+                  size: 16,
+                  color: Colors.red[400],
+                ),
+                label: Text(
+                  '删除(${_selected.length})',
+                  style: TextStyle(fontSize: 12, color: Colors.red[400]),
+                ),
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 8,
+                  ),
+                ),
+              ),
+            ),
+
+          const SizedBox(width: 4),
+
           // 保存词汇（C位）— flex=3，全文翻译模式下隐藏
           if (_phase == _StreamPhase.results &&
               widget.analysisMode != AppConstants.analysisModeFullText)
@@ -2019,8 +2088,66 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
 
   // ═══════════════ 用户气泡 ═══════════════
 
+  /// 追加图片按钮（结果态可点，虚线卡片 + "+"；全文翻译模式无意义）
+  Widget _addImageButton() {
+    final enabled = _phase == _StreamPhase.results &&
+        widget.analysisMode != AppConstants.analysisModeFullText;
+    return GestureDetector(
+      onTap: enabled ? _addMoreImages : null,
+      child: Container(
+        width: 72,
+        height: 100,
+        decoration: BoxDecoration(
+          color: Colors.grey[50],
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: enabled ? Colors.blue[200]! : Colors.grey[300]!,
+          ),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.add,
+              size: 26,
+              color: enabled ? Colors.blue[400] : Colors.grey[300],
+            ),
+            const SizedBox(height: 2),
+            Text(
+              '追加图片',
+              style: TextStyle(
+                fontSize: 10,
+                color: enabled ? Colors.blue[600] : Colors.grey[400],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 追加图片继续识别:不退出当前对话,新图识别结果接在旧结果后,
+  /// 按来源图分 p1/p2/pn 组,页码条可点击跳转
+  Future<void> _addMoreImages() async {
+    if (_phase != _StreamPhase.results) return;
+    final picked = await ImagePicker().pickMultiImage(imageQuality: 85);
+    if (picked.isEmpty || !mounted) return;
+    final newFiles = picked.map((x) => File(x.path)).toList();
+    setState(() {
+      _streamStartIndex = _images.length; // 从新图开始识别
+      _images.addAll(newFiles);
+      _phase = _StreamPhase.connecting;
+      _reasoningText = '';
+      _contentText = '';
+      _thinkingStartAt = null;
+      _thinkingSeconds = 0;
+      _thinkingExpanded = false;
+    });
+    _startStreaming();
+  }
+
   Widget _buildUserBubble(ThemeData theme) {
-    final count = widget.imageFiles.length;
+    final count = _images.length;
     final imgWidth = MediaQuery.of(context).size.width * 0.55;
 
     return Row(
@@ -2051,74 +2178,93 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                   ),
                 ),
               ] else ...[
-                // 多图水平滚动
+                // 多图水平滚动（尾部追加"＋"按钮）
                 SizedBox(
                   height: count > 1 ? 180 : null,
                   child: count == 1
-                      ? GestureDetector(
-                          onTap: _phase == _StreamPhase.results
-                              ? () => _scrollToImageGroup(0)
-                              : null,
-                          child: Container(
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(16),
-                              border: Border.all(color: Colors.grey[300]!),
+                      ? Row(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            GestureDetector(
+                              onTap: _phase == _StreamPhase.results
+                                  ? () => _scrollToImageGroup(0)
+                                  : null,
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(
+                                    color: Colors.grey[300]!,
+                                  ),
+                                ),
+                                clipBehavior: Clip.antiAlias,
+                                child: Image.file(
+                                  _images.first,
+                                  width: imgWidth,
+                                  fit: BoxFit.contain,
+                                ),
+                              ),
                             ),
-                            clipBehavior: Clip.antiAlias,
-                            child: Image.file(
-                              widget.imageFiles.first,
-                              width: imgWidth,
-                              fit: BoxFit.contain,
-                            ),
-                          ),
+                            const SizedBox(width: 6),
+                            // 追加图片按钮（单图）
+                            _addImageButton(),
+                          ],
                         )
                       : ListView.separated(
                           scrollDirection: Axis.horizontal,
-                          itemCount: count,
+                          itemCount: count + 1, // 尾部追加按钮
                           separatorBuilder: (_, _) => const SizedBox(width: 6),
-                          itemBuilder: (_, i) => GestureDetector(
-                            onTap: _phase == _StreamPhase.results
-                                ? () => _scrollToImageGroup(i)
-                                : null,
-                            child: Container(
-                              width: imgWidth,
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(color: Colors.grey[300]!),
-                              ),
-                              clipBehavior: Clip.antiAlias,
-                              child: Stack(
-                                children: [
-                                  Image.file(
-                                    widget.imageFiles[i],
-                                    width: imgWidth,
-                                    fit: BoxFit.cover,
+                          itemBuilder: (_, i) {
+                            // 最后一项 = 追加图片按钮
+                            if (i == count) return _addImageButton();
+                            return GestureDetector(
+                              onTap: _phase == _StreamPhase.results
+                                  ? () => _scrollToImageGroup(i)
+                                  : null,
+                              child: Container(
+                                width: imgWidth,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: Colors.grey[300]!,
                                   ),
-                                  Positioned(
-                                    top: 6,
-                                    left: 6,
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 6,
-                                        vertical: 2,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: Colors.black54,
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                      child: Text(
-                                        '${i + 1}/$count',
-                                        style: const TextStyle(
-                                          fontSize: 10,
-                                          color: Colors.white,
+                                ),
+                                clipBehavior: Clip.antiAlias,
+                                child: Stack(
+                                  children: [
+                                    Image.file(
+                                      _images[i],
+                                      width: imgWidth,
+                                      fit: BoxFit.cover,
+                                    ),
+                                    Positioned(
+                                      top: 6,
+                                      left: 6,
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 6,
+                                          vertical: 2,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: Colors.black54,
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
+                                        ),
+                                        child: Text(
+                                          'p${i + 1}/$count',
+                                          style: const TextStyle(
+                                            fontSize: 10,
+                                            color: Colors.white,
+                                          ),
                                         ),
                                       ),
                                     ),
-                                  ),
-                                ],
+                                  ],
+                                ),
                               ),
-                            ),
-                          ),
+                            );
+                          },
                         ),
                 ),
               ],
@@ -2127,13 +2273,38 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                 '共 $count 张图片',
                 style: TextStyle(fontSize: 11, color: Colors.grey[400]),
               ),
-              // 多图 + 结果态 → 提示可点击跳转
+              // 页码条：p1/p2/pn — 点击跳到对应图片的识别结果分组
               if (count > 1 && _phase == _StreamPhase.results)
                 Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text(
-                    '点击图片可跳转至对应识别结果',
-                    style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: List.generate(count, (i) {
+                      return InkWell(
+                        onTap: () => _scrollToImageGroup(i),
+                        borderRadius: BorderRadius.circular(6),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.blue[50],
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: Colors.blue[100]!),
+                          ),
+                          child: Text(
+                            'p${i + 1}',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.blue[600],
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      );
+                    }),
                   ),
                 ),
             ],
@@ -2449,7 +2620,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 第一行：序号 + 单词 + 编辑按钮 + 类型标签 + 词性
+            // 第一行：序号 + 单词（横幅单行）+ ✏ 紧凑按钮
             Row(
               children: [
                 // 序号徽章（第1个标1）
@@ -2471,36 +2642,48 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                   ),
                 ),
                 const SizedBox(width: 8),
+                // 单词占满横幅，不换行不竖排
                 Expanded(
                   child: Text(
                     item.word,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.titleSmall?.copyWith(
                       fontWeight: FontWeight.w700,
                     ),
                   ),
                 ),
-                // 编辑按钮（右上角）——修改单词/释义/例句,例句自动同步替换
-                IconButton(
-                  icon: const Icon(Icons.edit_outlined, size: 15),
-                  visualDensity: VisualDensity.compact,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(
-                    minWidth: 28,
-                    minHeight: 28,
+                // 编辑按钮——右上角紧凑小按钮,不挤压单词空间
+                InkWell(
+                  onTap: () => _editItem(index),
+                  borderRadius: BorderRadius.circular(6),
+                  child: Padding(
+                    padding: const EdgeInsets.all(5),
+                    child: Icon(
+                      Icons.edit_outlined,
+                      size: 15,
+                      color: Colors.grey[500],
+                    ),
                   ),
-                  tooltip: '编辑单词',
-                  onPressed: () => _editItem(index),
                 ),
-                _typeChip(item.wordType, barColor),
-                if (item.partOfSpeech != null &&
-                    item.partOfSpeech!.isNotEmpty) ...[
-                  const SizedBox(width: 6),
-                  Flexible(
-                    child: _typeChip(item.partOfSpeech!, Colors.grey[600]!),
-                  ),
-                ],
               ],
             ),
+            // 第二行：类型标签 + 词性
+            if (item.wordType != 'word' ||
+                (item.partOfSpeech != null &&
+                    item.partOfSpeech!.isNotEmpty)) ...[
+              const SizedBox(height: 4),
+              Wrap(
+                spacing: 6,
+                runSpacing: 4,
+                children: [
+                  _typeChip(item.wordType, barColor),
+                  if (item.partOfSpeech != null &&
+                      item.partOfSpeech!.isNotEmpty)
+                    _typeChip(item.partOfSpeech!, Colors.grey[600]!),
+                ],
+              ),
+            ],
             // 释义
             if (item.translation != null && item.translation!.isNotEmpty) ...[
               const SizedBox(height: 6),
@@ -2605,7 +2788,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         ),
         const SizedBox(height: 4),
         // 词汇列表 — 多图时按来源图片分组
-        if (widget.imageFiles.length > 1)
+        if (_images.length > 1)
           ..._buildGroupedResults(theme)
         else
           ..._buildFlatResults(theme),
@@ -2686,12 +2869,15 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
       final indices = groups[key]!;
       // 图源标题：找到对应的 image 索引；手动补充的词无照片来源，
       // 单独归入「手动补充」组
-      final imgIndex = widget.imageFiles.indexWhere((f) => f.path == key);
+      final imgIndex = _images.indexWhere((f) => f.path == key);
       final String label;
       if (key.isEmpty) {
         label = '📝 手动补充';
       } else {
-        label = imgIndex >= 0 ? '📷 图片 ${imgIndex + 1}' : '📷 图片 ${g + 1}';
+        // 页码标注 p1/p2/pn,与图片区页码条一致
+        label = imgIndex >= 0
+            ? 'p${imgIndex + 1} · 📷 图片 ${imgIndex + 1}'
+            : '📷 图片 ${g + 1}';
       }
       final pageInfo =
           (widget.sourcePage != null && widget.sourcePage!.isNotEmpty)
@@ -3034,6 +3220,39 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
               Navigator.pop(ctx);
             },
             child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 删除长按选中的词汇（索引降序删除避免错位），确认后清空选中
+  void _deleteSelected() {
+    final n = _selected.length;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('删除选中词汇'),
+        content: Text('确定删除选中的 $n 个词汇？\n删除后不可恢复。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              setState(() {
+                final toRemove = _selected.toSet();
+                _results = [
+                  for (int i = 0; i < _results.length; i++)
+                    if (!toRemove.contains(i)) _results[i],
+                ];
+                _selected.clear();
+                _queryTargetIndex = null;
+              });
+            },
+            child: Text('删除', style: TextStyle(color: Colors.red[400])),
           ),
         ],
       ),
@@ -3408,6 +3627,88 @@ class _ThinkingBlock extends StatelessWidget {
     );
   }
 }
+
+/// 追问抽屉 回顶/回底 小按钮:监听滚动位置,↑ 未在顶部时显示,↓ 未到底时显示
+class _FollowUpScrollButtons extends StatefulWidget {
+  final ScrollController scrollCtrl;
+  const _FollowUpScrollButtons({required this.scrollCtrl});
+
+  @override
+  State<_FollowUpScrollButtons> createState() => _FollowUpScrollButtonsState();
+}
+
+class _FollowUpScrollButtonsState extends State<_FollowUpScrollButtons> {
+  double _offset = 0;
+  double _maxExtent = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.scrollCtrl.addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    widget.scrollCtrl.removeListener(_onScroll);
+    super.dispose();
+  }
+
+  void _onScroll() {
+    final pos = widget.scrollCtrl.position;
+    setState(() {
+      _offset = pos.pixels;
+      _maxExtent = pos.maxScrollExtent;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final atTop = _offset < 40;
+    final atBottom = _maxExtent - _offset < 40;
+    // 内容不满一屏时隐藏
+    if (atTop && atBottom) return const SizedBox.shrink();
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (!atTop)
+          _smallButton(Icons.keyboard_arrow_up, () {
+            widget.scrollCtrl.animateTo(
+              0,
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOut,
+            );
+          }),
+        if (!atBottom) ...[
+          const SizedBox(height: 4),
+          _smallButton(Icons.keyboard_arrow_down, () {
+            widget.scrollCtrl.animateTo(
+              widget.scrollCtrl.position.maxScrollExtent,
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOut,
+            );
+          }),
+        ],
+      ],
+    );
+  }
+
+  Widget _smallButton(IconData icon, VoidCallback onTap) {
+    return Material(
+      color: Colors.white,
+      elevation: 2,
+      shape: const CircleBorder(),
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(6),
+          child: Icon(icon, size: 16, color: Colors.grey[600]),
+        ),
+      ),
+    );
+  }
+}
+
 class _ScrollToTopButton extends StatefulWidget {
   final ScrollController scrollCtrl;
   const _ScrollToTopButton({required this.scrollCtrl});

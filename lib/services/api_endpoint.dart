@@ -69,19 +69,20 @@ class ApiEndpointConfig {
 
   bool get isConfigured => apiKey != null;
 
-  /// 思考参数(OpenAI 兼容格式,豆包/DeepSeek 均识别)。
-  /// 端点不认 reasoning_effort 时由 [BaseApiService.postWithReasoningFallback]
-  /// 逐级降级重试,不会卡死。
+  /// 思考参数。豆包/火山方舟原生字段是 thinking.budget_tokens
+  /// (限制思考 token 数)——之前用 reasoning_effort 不被火山方舟识别,
+  /// 思考无上限,中度思考一张图 3 分钟+(用户实测)。
+  /// budget_tokens: low≈几秒 / medium≈20-40s / high≈1 分钟
   Map<String, dynamic> buildThinkingParams() {
     switch (thinking) {
       case 'disabled':
         return {'thinking': {'type': 'disabled'}};
       case 'low':
-        return {'thinking': {'type': 'enabled'}, 'reasoning_effort': 'low'};
+        return {'thinking': {'type': 'enabled', 'budget_tokens': 1024}};
       case 'medium':
-        return {'thinking': {'type': 'enabled'}, 'reasoning_effort': 'medium'};
+        return {'thinking': {'type': 'enabled', 'budget_tokens': 2048}};
       case 'high':
-        return {'thinking': {'type': 'enabled'}, 'reasoning_effort': 'high'};
+        return {'thinking': {'type': 'enabled', 'budget_tokens': 4096}};
       default:
         return {'thinking': {'type': 'disabled'}};
     }
