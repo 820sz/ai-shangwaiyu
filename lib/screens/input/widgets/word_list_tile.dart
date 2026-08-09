@@ -80,7 +80,8 @@ class WordListTile extends StatelessWidget {
                 style: theme.textTheme.bodyMedium?.copyWith(
                   fontWeight: FontWeight.w600,
                 ),
-                maxLines: item.wordType == 'word' ? 2 : null,
+                // 不限行:一排放不下自动换行(2026-08-10 用户核心诉求)
+                maxLines: null,
                 overflow: TextOverflow.ellipsis,
               ),
             ),
@@ -111,7 +112,8 @@ class WordListTile extends StatelessWidget {
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: Colors.grey[600],
                 ),
-                maxLines: item.wordType == 'word' ? 2 : null,
+                // 不限行:一排放不下自动换行(2026-08-10 用户核心诉求)
+                maxLines: null,
                 overflow: TextOverflow.ellipsis,
               ),
             ),

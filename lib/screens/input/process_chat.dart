@@ -2642,7 +2642,8 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                 Expanded(
                   child: Text(
                     item.displayWordText,
-                    maxLines: item.wordType == 'word' ? 1 : null,
+                    // 不限行:一排放不下自动换行(用户核心诉求,2026-08-10)
+                    maxLines: null,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.titleSmall?.copyWith(
                       fontWeight: FontWeight.w700,
