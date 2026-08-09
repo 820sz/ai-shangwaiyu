@@ -80,9 +80,10 @@ class WordListTile extends StatelessWidget {
                 style: theme.textTheme.bodyMedium?.copyWith(
                   fontWeight: FontWeight.w600,
                 ),
-                // 不限行:一排放不下自动换行(2026-08-10 用户核心诉求)
+                // 不限行 + 永不打省略号:一排放不下自动换行
+                // (2026-08-10 用户实测终局修复:maxLines:null + visible)
                 maxLines: null,
-                overflow: TextOverflow.ellipsis,
+                overflow: TextOverflow.visible,
               ),
             ),
             const SizedBox(width: 8),
@@ -112,9 +113,10 @@ class WordListTile extends StatelessWidget {
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: Colors.grey[600],
                 ),
-                // 不限行:一排放不下自动换行(2026-08-10 用户核心诉求)
+                // 不限行 + 永不打省略号:一排放不下自动换行
+                // (2026-08-10 用户实测终局修复:maxLines:null + visible)
                 maxLines: null,
-                overflow: TextOverflow.ellipsis,
+                overflow: TextOverflow.visible,
               ),
             ),
             const SizedBox(width: 4),
