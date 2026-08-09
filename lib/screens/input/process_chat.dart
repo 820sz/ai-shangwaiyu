@@ -847,17 +847,22 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
   /// 退出确认：有识别结果或未保存追问时弹窗询问。
   /// 「暂时离开」= 暂存整个会话(结果+追问+图片副本)后退出,
   /// 下次从「输入」页"继续上次会话"恢复。
+  /// 2026-08-09 修复:v1.2.10 起默认不选中,旧条件(须有选中词)导致
+  /// 返回弹窗永不出现——改为只要有识别结果就弹,未选中时提供"保存全部"。
   Future<bool> _onWillPop() async {
     // 先处理识别结果保存确认
-    if (_phase == _StreamPhase.results &&
-        _results.isNotEmpty &&
-        _selected.isNotEmpty) {
+    if (_phase == _StreamPhase.results && _results.isNotEmpty) {
+      final hasSel = _selected.isNotEmpty;
       final result = await showDialog<String>(
         context: context,
         barrierDismissible: false,
         builder: (ctx) => AlertDialog(
           title: const Text('保存识别的生词？'),
-          content: Text('你选中了 ${_selected.length} 个词，是否保存到词库？'),
+          content: Text(
+            hasSel
+                ? '你选中了 ${_selected.length} 个词，是否保存到词库？'
+                : '识别出 ${_results.length} 个词（未选中），是否全部保存到词库？',
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx, 'cancel'),
@@ -873,13 +878,13 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
             ),
             FilledButton(
               onPressed: () => Navigator.pop(ctx, 'save'),
-              child: const Text('保存并退出'),
+              child: Text(hasSel ? '保存并退出' : '保存全部'),
             ),
           ],
         ),
       );
       if (result == 'save') {
-        await _saveAndReturn();
+        await _saveAndReturn(saveAll: !hasSel);
         return false; // _saveAndReturn 已 pop
       }
       if (result == 'temporary') {
@@ -930,8 +935,13 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
 
   // ═══════════════ 保存 ═══════════════
 
-  Future<void> _saveAndReturn() async {
-    final selected = _selected.map((i) => _results[i]).toList();
+  Future<void> _saveAndReturn({bool saveAll = false}) async {
+    // saveAll=true:未选中任何词时从返回弹窗"保存全部"进入,保存所有结果
+    final selected = (saveAll
+            ? List.generate(_results.length, (i) => i)
+            : _selected)
+        .map((i) => _results[i])
+        .toList();
     if (selected.isEmpty) return;
 
     // 1. 弹出分类选择

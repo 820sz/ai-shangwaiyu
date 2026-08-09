@@ -1,13 +1,11 @@
-v1.2.17: 识图思考砍掉中/高档,只留 不思考/低度
+v1.2.18: 修复返回结果页无保存弹窗(回归)
 
-- 用户决策(2026-08-08):中/高思考调了多轮仍慢,直接砍掉——
-  识图只留 不思考 + 低度思考(低=reasoning_effort minimal≈3s)
-- 存量 medium/high 设置自动迁移到 low(getter + 设置页 _migrateThinking),
-  UI 选项表 thinkingOptions 同步只剩 disabled/low
-- 词条截断结论(08-08 实测):v1.2.16 提示词(禁止截断/禁止省略号)已使模型
-  完整输出——同段内容 4 组实测(2-0-lite/2-1-turbo × 禁用/minimal)全部 0 截断,
-  App 流式重组→解析→显示链路逐行核查无截断点;用户端截断现象均为 ≤v1.2.15
-  旧提示词的识别数据,重新识别即完整
+- 回归根因:v1.2.10 起识别完默认不选中(长按才选中),而返回确认弹窗
+  的条件要求 _selected.isNotEmpty——没选中任何词时返回=直接静默退出,
+  "保存/暂时离开/不保存/取消"弹窗永远不出现(用户 08-09 实测反馈)
+- 修复:只要有识别结果(_results.isNotEmpty)就弹窗;未选中时文案
+  "识别出 N 个词(未选中),是否全部保存到词库?" + 按钮"保存全部",
+  _saveAndReturn 加 saveAll 参数(保存全部结果)
 - 验证:analyze 0 error / 40 测试全绿+1 skip
 
 Co-Authored-By: Claude <noreply@anthropic.com>
