@@ -135,6 +135,27 @@ class Vocabulary {
     return DateTime.now();
   }
 
+  /// 词条显示文本：模型会把长句 word 词条化截断（输出开头 ~20 字符+省略号，
+  /// 省略号形态不固定：…/.../⋯ 等），original_sentence 字段才是完整句子——
+  /// word 疑似被截断（含省略号变体，或 phrase/sentence 明显短于完整句子）
+  /// 且存在更长的完整句子时，回退显示完整句子。单词类型正常不带省略号，不误触发。
+  String get displayWordText {
+    final w = word;
+    final os = originalSentence;
+    final hasEllipsis =
+        w.contains('…') || w.contains('...') || w.contains('⋯');
+    final isShortened = (wordType == 'phrase' || wordType == 'sentence') &&
+        os != null &&
+        os.length > w.length + 5;
+    if ((hasEllipsis || isShortened) &&
+        os != null &&
+        os.isNotEmpty &&
+        os.length > w.length) {
+      return os;
+    }
+    return w;
+  }
+
   /// 显示用：单词 + 音标或简单标注
   String get displayLabel {
     if (wordType == 'sentence') {
