@@ -1,15 +1,13 @@
-v1.2.16: 砍思考降级链路 + 提示词根治词条截断 + 新logo
+v1.2.17: 识图思考砍掉中/高档,只留 不思考/低度
 
-- 思考:删除整个降级链路(_degradeToFast/_onThinkingTimeout/_thinkingDegraded/
-  纯思考超时)——reasoning_effort 生效后思考时长可控(实测低≈3s/中≈14s/高≈25s),
-  原降级=等满阈值+完整重跑一次识别,总耗时反而巨长(用户实测确认)。思考模式
-  首字节超时放宽 60s 只报错不自动重试;Dio receiveTimeout 180s 为最终兜底
-- 词条截断根治(23:04 截图逐字读):word 字段被模型词条化截断(开头~20字符+"…"),
-  且提示词把 original_sentence 标为"可选"→ 模型大量省略 → v1.2.15 显示回退无源可用。
-  ①提示词强制 word 完整输出、禁止截断/省略号;短语/句子 original_sentence 必填(治本)
-  ②显示回退去掉 word 类型豁免:任何类型 word 以省略号结尾且存在更长完整句子时
-  显示 originalSentence(双保险)
-- 新 logo:用户新定稿(1364x1364)直接缩放替换 5 密度,不做任何处理
+- 用户决策(2026-08-08):中/高思考调了多轮仍慢,直接砍掉——
+  识图只留 不思考 + 低度思考(低=reasoning_effort minimal≈3s)
+- 存量 medium/high 设置自动迁移到 low(getter + 设置页 _migrateThinking),
+  UI 选项表 thinkingOptions 同步只剩 disabled/low
+- 词条截断结论(08-08 实测):v1.2.16 提示词(禁止截断/禁止省略号)已使模型
+  完整输出——同段内容 4 组实测(2-0-lite/2-1-turbo × 禁用/minimal)全部 0 截断,
+  App 流式重组→解析→显示链路逐行核查无截断点;用户端截断现象均为 ≤v1.2.15
+  旧提示词的识别数据,重新识别即完整
 - 验证:analyze 0 error / 40 测试全绿+1 skip
 
 Co-Authored-By: Claude <noreply@anthropic.com>

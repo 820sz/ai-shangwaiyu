@@ -2,9 +2,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:readflow/config/constants.dart';
 
 void main() {
-  test('思考模式选项完整(disabled/low/medium/high)', () {
-    expect(AppConstants.thinkingOptions.keys,
-        containsAll(['disabled', 'low', 'medium', 'high']));
+  test('思考模式选项(2026-08-08 砍中/高,只留 disabled/low)', () {
+    expect(AppConstants.thinkingOptions.keys, ['disabled', 'low']);
   });
 
   test('数据库版本为 5(含 reference_answers + article translation 迁移)', () {

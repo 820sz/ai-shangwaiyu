@@ -61,10 +61,10 @@ class ApiEndpointConfig {
 
   String get thinking {
     final v = _box.get(hiveThinking);
-    return (v is String &&
-            (v == 'disabled' || v == 'low' || v == 'medium' || v == 'high'))
-        ? v
-        : 'disabled';
+    if (v == 'medium' || v == 'high') {
+      return 'low'; // 2026-08-08 砍掉中/高档,存量设置自动迁移到低
+    }
+    return (v == 'low' || v == 'disabled') ? v : 'disabled';
   }
 
   bool get isConfigured => apiKey != null;
@@ -76,7 +76,8 @@ class ApiEndpointConfig {
   /// - 不传 thinking 最糟:默认开启深度思考,61.8s
   /// - 正确参数 reasoning_effort(官方分档 minimal/low/medium/high):
   ///   disabled≈3.7s / minimal≈3s / low≈14s / medium≈25s(复杂图)
-  /// 档位映射(2026-08-07 用户决策"整体提速档"):低→minimal、中→low、高→medium。
+  /// 2026-08-08 用户决策:识图只留 不思考/低度 两档(中/高砍掉)。
+  /// 低→reasoning_effort=minimal(≈3s)。存量 medium/high 由 [thinking] getter 迁移到 low。
   /// 副槽位(DeepSeek)若不认 reasoning_effort,postWithReasoningFallback
   /// 会自动移除它降级重试(保留 thinking: enabled),不会报错。
   Map<String, dynamic> buildThinkingParams() {
@@ -85,10 +86,6 @@ class ApiEndpointConfig {
         return {'thinking': {'type': 'disabled'}};
       case 'low':
         return {'thinking': {'type': 'enabled'}, 'reasoning_effort': 'minimal'};
-      case 'medium':
-        return {'thinking': {'type': 'enabled'}, 'reasoning_effort': 'low'};
-      case 'high':
-        return {'thinking': {'type': 'enabled'}, 'reasoning_effort': 'medium'};
       default:
         return {'thinking': {'type': 'disabled'}};
     }

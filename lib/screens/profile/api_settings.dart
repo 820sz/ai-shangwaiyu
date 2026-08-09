@@ -65,14 +65,13 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
     _secondaryThinking = _migrateThinking(AppConstants.keyDeepseekThinking);
   }
 
-  /// 读思考模式并迁移旧值(minimal → disabled),非法值一律 disabled
+  /// 读思考模式并迁移旧值(minimal → disabled;medium/high → low,
+  /// 2026-08-08 识图只留 不思考/低度 两档),非法值一律 disabled
   String _migrateThinking(String hiveKey) {
     final saved = _box.get(hiveKey) as String?;
     if (saved == 'minimal') return 'disabled';
-    if (saved == 'disabled' ||
-        saved == 'low' ||
-        saved == 'medium' ||
-        saved == 'high') {
+    if (saved == 'medium' || saved == 'high') return 'low';
+    if (saved == 'disabled' || saved == 'low') {
       return saved!;
     }
     return 'disabled';

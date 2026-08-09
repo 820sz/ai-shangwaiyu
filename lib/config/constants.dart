@@ -37,17 +37,16 @@ class AppConstants {
   static const int maxSavedSessions = 5;
 
   // ── 思考模式 ──
-  // disabled → thinking: {type: disabled}，完全跳过推理
-  // low/medium/high → thinking: {type: enabled} + reasoning_effort
-  // (2026-08-07 实测 doubao-seed-2-0-lite-260428:budget_tokens 对豆包完全无效,
-  //   reasoning_effort 真实生效——minimal≈3s / low≈14s / medium≈25s 复杂图;
-  //   档位映射按用户决策"整体提速档":低→minimal、中→low、高→medium)
+  // (2026-08-08 用户决策:识图只留 不思考/低度 两档——中/高思考调了多轮仍慢,
+  //   存量 medium/high 设置自动迁移到 low)
+  // disabled → thinking: {type: disabled},完全跳过推理
+  // low → thinking: {type: enabled} + reasoning_effort: minimal
+  //   (2026-08-07 实测 doubao-seed-2-0-lite-260428:minimal≈3s 复杂图;
+  //    budget_tokens 对豆包完全无效)
   // 文案带预估耗时——思考模式实测速度差异大,选择时心里有数
   static const Map<String, String> thinkingOptions = {
     'disabled': '不思考',
     'low': '低·约3s',
-    'medium': '中·约15s',
-    'high': '高·约25s',
   };
 
   // ── 数据库 ──
