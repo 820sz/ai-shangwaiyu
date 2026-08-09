@@ -366,11 +366,14 @@ class DoubaoApiService extends BaseApiService {
         final imgIdx = group['image_index'] as int? ?? 0;
         final items = group['items'] as List<dynamic>? ?? [];
         for (final e in items) {
+          final word = e['word']?.toString() ?? '';
+          final type = e['word_type']?.toString() ?? 'word';
+          final os = e['original_sentence']?.toString() ?? '';
           allItems.add({
-            'word': e['word']?.toString() ?? '',
+            'word': cleanTruncatedWord(word, type, os),
             'translation': e['translation']?.toString() ?? '',
-            'word_type': e['word_type']?.toString() ?? 'word',
-            'original_sentence': e['original_sentence']?.toString() ?? '',
+            'word_type': type,
+            'original_sentence': os,
             'part_of_speech': e['part_of_speech']?.toString(),
             'grammar_note': e['grammar_note']?.toString(),
             'image_index': imgIdx,
@@ -384,17 +387,39 @@ class DoubaoApiService extends BaseApiService {
     final items = parsed['items'] as List<dynamic>?;
     if (items == null) return [];
     return items
-        .map((e) => {
-              'word': e['word']?.toString() ?? '',
-              'translation': e['translation']?.toString() ?? '',
-              'word_type': e['word_type']?.toString() ?? 'word',
-              'original_sentence':
-                  e['original_sentence']?.toString() ?? '',
-              'part_of_speech': e['part_of_speech']?.toString(),
-              'grammar_note': e['grammar_note']?.toString(),
-            })
+        .map((e) {
+          final word = e['word']?.toString() ?? '';
+          final type = e['word_type']?.toString() ?? 'word';
+          final os = e['original_sentence']?.toString() ?? '';
+          return {
+            'word': cleanTruncatedWord(word, type, os),
+            'translation': e['translation']?.toString() ?? '',
+            'word_type': type,
+            'original_sentence': os,
+            'part_of_speech': e['part_of_speech']?.toString(),
+            'grammar_note': e['grammar_note']?.toString(),
+          };
+        })
         .where((m) => m['word']!.isNotEmpty)
         .toList();
+  }
+
+  /// 词条化截断清洗(数据层治本):模型可能把长句 word 截断成
+  /// "开头~20字符+省略号"(省略号形态不固定:…/.../⋯/……/.. 等),
+  /// original_sentence 字段才是完整句子。word 带截断特征且存在更长的
+  /// 完整句时,用完整句替换 word 数据本身——显示/保存/编辑全走完整句子。
+  /// 正常单词/短语不带省略号特征,不受影响(如 "compound with" 不匹配)。
+  static String cleanTruncatedWord(
+    String word,
+    String wordType,
+    String originalSentence,
+  ) {
+    if (originalSentence.isEmpty) return word;
+    if (originalSentence.length <= word.length) return word;
+    // 截断特征:尾部 2+ 个点(…/⋯/../.../…… 等任意形态)
+    final truncRe = RegExp(r'([…⋯]{1,}|\.{2,})$');
+    if (truncRe.hasMatch(word)) return originalSentence;
+    return word;
   }
 
   // ── 模型列表（混合：先调API，失败则用内置清单兜底） ──
