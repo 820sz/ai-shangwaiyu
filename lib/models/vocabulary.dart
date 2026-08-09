@@ -137,17 +137,13 @@ class Vocabulary {
 
   /// 词条显示文本：模型会把长句 word 词条化截断（输出开头 ~20 字符+省略号，
   /// 省略号形态不固定：…/.../⋯ 等），original_sentence 字段才是完整句子——
-  /// word 疑似被截断（含省略号变体，或 phrase/sentence 明显短于完整句子）
-  /// 且存在更长的完整句子时，回退显示完整句子。单词类型正常不带省略号，不误触发。
+  /// word 含省略号且存在更长的完整句子时，回退显示完整句子。
+  /// 注意：不能按长度回退——短语（如 "compound with"）word 天然短于原句，
+  /// 按长度判断会把正常短语误回退成整个句子（v1.2.20 用户实测回归）。
   String get displayWordText {
     final w = word;
     final os = originalSentence;
-    final hasEllipsis =
-        w.contains('…') || w.contains('...') || w.contains('⋯');
-    final isShortened = (wordType == 'phrase' || wordType == 'sentence') &&
-        os != null &&
-        os.length > w.length + 5;
-    if ((hasEllipsis || isShortened) &&
+    if ((w.contains('…') || w.contains('...') || w.contains('⋯')) &&
         os != null &&
         os.isNotEmpty &&
         os.length > w.length) {

@@ -33,10 +33,10 @@ void main() {
       expect(v.displayWordText, 'Because reality is never enough.');
     });
 
-    test('sentence 类型 word 明显短于完整句(无省略号)→ 回退', () {
-      final v = make('Because reality',
-          sentence: 'Because reality is never enough.');
-      expect(v.displayWordText, 'Because reality is never enough.');
+    test('正常短语 word 短于原句(无省略号)→ 不回退(防误回退整句)', () {
+      final v = make('compound with', type: 'phrase',
+          sentence: 'The compound with the longest chain is unstable.');
+      expect(v.displayWordText, 'compound with');
     });
 
     test('word 完整(与例句等长)→ 不回退', () {
