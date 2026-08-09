@@ -50,43 +50,62 @@ class UpdateService {
 
   /// 检查 GitHub 最新 Release。
   /// 返回 [UpdateInfo]；未配置仓库/无 APK 资源/网络失败均返回 null(静默)。
+  /// 2026-08-09 修复:检查接口裸连 api.github.com(国内经常连不上,
+  /// 用户实测"收不到自动更新")——改为直连 + 镜像前缀竞速,谁先回谁胜。
   static Future<UpdateInfo?> checkLatestRelease() async {
     if (AppConstants.githubOwner.isEmpty) return null;
-    try {
-      final resp = await _dio.get(
+    final base =
         'https://api.github.com/repos/'
-        '${AppConstants.githubOwner}/${AppConstants.githubRepo}/releases/latest',
-        options: _apiOpts(),
-      );
-      final data = resp.data as Map<String, dynamic>?;
-      if (data == null) return null;
+        '${AppConstants.githubOwner}/${AppConstants.githubRepo}/releases/latest';
+    final candidates = <String>[
+      base,
+      for (final p in _mirrorPrefixes) '$p$base',
+    ];
 
-      final tag = (data['tag_name'] as String? ?? '').replaceFirst(
-        RegExp(r'^v'), '',
-      );
-      final body = data['body'] as String? ?? '';
-      final assets = data['assets'] as List? ?? [];
-
-      // 找第一个 APK 资源
-      String? apkUrl;
-      for (final asset in assets) {
-        if (asset is Map && (asset['name'] as String? ?? '').endsWith('.apk')) {
-          apkUrl = asset['browser_download_url'] as String?;
-          break;
+    Map<String, dynamic>? data;
+    final completer = Completer<void>();
+    for (final url in candidates) {
+      unawaited(() async {
+        try {
+          final resp = await _dio.get(url, options: _apiOpts());
+          final d = resp.data as Map<String, dynamic>?;
+          if (d != null && !completer.isCompleted) {
+            data = d;
+            completer.complete();
+          }
+        } catch (_) {
+          // 单候选失败:等别的候选
         }
-      }
-      if (tag.isEmpty || apkUrl == null) return null;
-
-      final current = await _currentVersion();
-      return UpdateInfo(
-        version: tag,
-        downloadUrl: apkUrl,
-        releaseNotes: body,
-        currentVersion: current,
-      );
-    } catch (_) {
-      return null; // 检查失败不打扰用户
+      }());
     }
+    // 总预算 15s:到点还没有任何候选成功 → 静默返回 null
+    await completer.future.timeout(const Duration(seconds: 15), onTimeout: () {});
+    if (data == null) return null;
+    final d = data!; // 竞速闭包内赋值,编译期无法收窄,此处强制非空
+
+    final tag = (d['tag_name'] as String? ?? '').replaceFirst(
+      RegExp(r'^v'), '',
+    );
+    final body = d['body'] as String? ?? '';
+    final assets = d['assets'] as List? ?? [];
+
+    // 找第一个 APK 资源
+    String? apkUrl;
+    for (final asset in assets) {
+      if (asset is Map && (asset['name'] as String? ?? '').endsWith('.apk')) {
+        apkUrl = asset['browser_download_url'] as String?;
+        break;
+      }
+    }
+    if (tag.isEmpty || apkUrl == null) return null;
+
+    final current = await _currentVersion();
+    return UpdateInfo(
+      version: tag,
+      downloadUrl: apkUrl,
+      releaseNotes: body,
+      currentVersion: current,
+    );
   }
 
   /// 当前安装版本号,如 "1.0.0"
