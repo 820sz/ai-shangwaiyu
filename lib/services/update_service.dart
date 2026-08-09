@@ -51,7 +51,9 @@ class UpdateService {
   /// 检查 GitHub 最新 Release。
   /// 返回 [UpdateInfo]；未配置仓库/无 APK 资源/网络失败均返回 null(静默)。
   /// 2026-08-09 修复:检查接口裸连 api.github.com(国内经常连不上,
-  /// 用户实测"收不到自动更新")——改为直连 + 镜像前缀竞速,谁先回谁胜。
+  /// 用户实测"收不到自动更新")——改为直连 + 镜像前缀竞速。
+  /// 2026-08-10 修复:竞速"先到先得"会拿镜像缓存的旧 latest 响应(用户实测
+  /// "自动更新还是 20 版本")——改为收集所有成功响应,取 tag 版本号最大者。
   static Future<UpdateInfo?> checkLatestRelease() async {
     if (AppConstants.githubOwner.isEmpty) return null;
     final base =
@@ -62,26 +64,26 @@ class UpdateService {
       for (final p in _mirrorPrefixes) '$p$base',
     ];
 
-    Map<String, dynamic>? data;
-    final completer = Completer<void>();
+    final responses = <Map<String, dynamic>>[];
+    final pending = <Future<void>>[];
     for (final url in candidates) {
-      unawaited(() async {
+      pending.add(() async {
         try {
           final resp = await _dio.get(url, options: _apiOpts());
           final d = resp.data as Map<String, dynamic>?;
-          if (d != null && !completer.isCompleted) {
-            data = d;
-            completer.complete();
-          }
+          if (d != null) responses.add(d);
         } catch (_) {
-          // 单候选失败:等别的候选
+          // 单候选失败:忽略,等别的候选
         }
       }());
     }
-    // 总预算 15s:到点还没有任何候选成功 → 静默返回 null
-    await completer.future.timeout(const Duration(seconds: 15), onTimeout: () {});
-    if (data == null) return null;
-    final d = data!; // 竞速闭包内赋值,编译期无法收窄,此处强制非空
+    // 等所有候选都回(镜像快、直连慢,15s 内),取版本最高的响应
+    await Future.wait(pending).timeout(
+      const Duration(seconds: 15),
+      onTimeout: () => <void>[],
+    );
+    if (responses.isEmpty) return null;
+    final d = pickLatest(responses);
 
     final tag = (d['tag_name'] as String? ?? '').replaceFirst(
       RegExp(r'^v'), '',
@@ -106,6 +108,22 @@ class UpdateService {
       releaseNotes: body,
       currentVersion: current,
     );
+  }
+
+  /// 从多个 latest 响应中取 tag 版本号最高者。
+  /// 镜像节点可能缓存旧响应,不能"先到先得",必须取最新。
+  static Map<String, dynamic> pickLatest(List<Map<String, dynamic>> responses) {
+    return responses.reduce((a, b) {
+      final va = (a['tag_name'] as String? ?? '').replaceFirst(
+        RegExp(r'^v'),
+        '',
+      );
+      final vb = (b['tag_name'] as String? ?? '').replaceFirst(
+        RegExp(r'^v'),
+        '',
+      );
+      return compareVersions(va, vb) >= 0 ? a : b;
+    });
   }
 
   /// 当前安装版本号,如 "1.0.0"
