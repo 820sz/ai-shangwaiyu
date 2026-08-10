@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../models/vocabulary.dart';
+import 'example_sentence.dart';
 
 /// 单词详情 BottomSheet
 /// [onSave] 单独保存此词（async，等保存完成才关 sheet）
@@ -81,8 +82,9 @@ void showWordDetailSheet({
                   color: Colors.grey[100],
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: Text(
-                  item.originalSentence!,
+                child: ExampleSentence(
+                  sentence: item.originalSentence!,
+                  highlightWord: item.word,
                   style: TextStyle(fontStyle: FontStyle.italic, color: Colors.grey[700]),
                 ),
               ),

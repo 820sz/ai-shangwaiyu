@@ -49,5 +49,38 @@ class MainActivity : FlutterActivity() {
                 result.error("OPEN_FAILED", "打开安装器失败: ${e.message}", null)
             }
         }
+
+        // 分享文本通道(ACTION_SEND + 系统分享面板):文章全文翻译的
+        // "保存"出口——用户可存到微信/备忘录/文件管理器。
+        // 零新依赖(share_plus 需拉包),自写 20 行原生代码。
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "app/share_text",
+        ).setMethodCallHandler { call, result ->
+            if (call.method != "shareText") {
+                result.notImplemented()
+                return@setMethodCallHandler
+            }
+            val text = call.argument<String>("text")
+            if (text.isNullOrEmpty()) {
+                result.error("BAD_ARGS", "分享内容为空", null)
+                return@setMethodCallHandler
+            }
+            try {
+                val title = call.argument<String>("title") ?: "翻译"
+                val send = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_TEXT, text)
+                    putExtra(Intent.EXTRA_SUBJECT, title)
+                    putExtra(Intent.EXTRA_TITLE, title)
+                }
+                val chooser = Intent.createChooser(send, "保存/分享翻译")
+                chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(chooser)
+                result.success("ok")
+            } catch (e: Exception) {
+                result.error("SHARE_FAILED", "打开分享面板失败: ${e.message}", null)
+            }
+        }
     }
 }

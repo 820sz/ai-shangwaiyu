@@ -1,11 +1,10 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:flutter_markdown/flutter_markdown.dart';
 import '../../config/constants.dart';
 import '../../models/saved_session.dart';
 import '../../models/vocabulary.dart';
@@ -18,77 +17,17 @@ import 'widgets/word_detail_sheet.dart';
 import 'widgets/fulltext_result_card.dart';
 import 'widgets/category_picker.dart';
 import 'widgets/sub_category_input.dart';
+import 'widgets/example_sentence.dart';
+import 'widgets/follow_up_models.dart';
+import 'widgets/follow_up_bubble.dart';
+import 'widgets/scroll_buttons.dart';
+import 'widgets/model_avatars.dart';
 
 /// 流式处理阶段
 enum _StreamPhase { connecting, streaming, results, error }
 
 /// 展示模式
 enum _DisplayMode { detailed, quick }
-
-/// 追问对话消息
-class _FollowUpMessage {
-  final String role; // 'user' | 'ai'
-  final String content;
-  final String? reasoningText;
-  final bool streaming; // AI 是否仍在生成
-  /// 生成此消息的模型名(仅 AI 消息有值)。
-  /// 头像/标签按消息自身的模型渲染——切槽位不改变历史气泡;
-  /// null = 旧版本数据,渲染时回退当前模型。
-  final String? model;
-
-  const _FollowUpMessage({
-    required this.role,
-    required this.content,
-    this.reasoningText,
-    this.streaming = false,
-    this.model,
-  });
-
-  _FollowUpMessage copyWith({
-    String? content,
-    String? reasoningText,
-    bool? streaming,
-  }) => _FollowUpMessage(
-    role: role,
-    content: content ?? this.content,
-    reasoningText: reasoningText ?? this.reasoningText,
-    streaming: streaming ?? this.streaming,
-    model: model,
-  );
-}
-
-/// 保存的追问对话
-class _SavedConversation {
-  final String id; // timestamp
-  final String title; // 第一个用户问题
-  final String dateLabel;
-  final List<Map<String, dynamic>>
-  messages; // [{role, content, reasoningText?}]
-
-  const _SavedConversation({
-    required this.id,
-    required this.title,
-    required this.dateLabel,
-    required this.messages,
-  });
-
-  Map<String, dynamic> toJson() => {
-    'id': id,
-    'title': title,
-    'dateLabel': dateLabel,
-    'messages': messages,
-  };
-
-  factory _SavedConversation.fromJson(Map<String, dynamic> json) =>
-      _SavedConversation(
-        id: json['id'] as String,
-        title: json['title'] as String,
-        dateLabel: json['dateLabel'] as String,
-        messages: (json['messages'] as List)
-            .map((e) => Map<String, dynamic>.from(e as Map))
-            .toList(),
-      );
-}
 
 /// 对话式 AI 识词结果页（流式版）
 class ProcessChatScreen extends StatefulWidget {
@@ -178,7 +117,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
   String get _followUpModel => _followUpEndpoint.model;
 
   // ── 追问抽屉（ValueNotifier 确保跨路由更新） ──
-  final ValueNotifier<List<_FollowUpMessage>> _followUpMessages = ValueNotifier(
+  final ValueNotifier<List<FollowUpMessage>> _followUpMessages = ValueNotifier(
     [],
   );
   final ValueNotifier<bool> _followUpLoading = ValueNotifier(false);
@@ -200,7 +139,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
   String? _followUpContextOverride;
 
   /// 已保存的历史对话
-  List<_SavedConversation> _savedConversations = [];
+  List<FollowUpSavedConversation> _savedConversations = [];
 
   // ── 追问持久化 Key ──
   static const _hiveKeySavedChats = 'saved_follow_up_chats';
@@ -262,7 +201,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
       _followUpMessages.value = s.followUpMessages
           .where((m) => m['content']?.toString().isNotEmpty ?? false)
           .map(
-            (m) => _FollowUpMessage(
+            (m) => FollowUpMessage(
               role: m['role']?.toString() == 'user' ? 'user' : 'ai',
               content: m['content']?.toString() ?? '',
               reasoningText: m['reasoningText']?.toString(),
@@ -696,7 +635,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
       if (raw is List) {
         _savedConversations = raw
             .map(
-              (e) => _SavedConversation.fromJson(
+              (e) => FollowUpSavedConversation.fromJson(
                 Map<String, dynamic>.from(e as Map),
               ),
             )
@@ -719,7 +658,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
               ? '${firstUserMsg.substring(0, 30)}…'
               : firstUserMsg)
         : '追问记录';
-    final conv = _SavedConversation(
+    final conv = FollowUpSavedConversation(
       id: now.millisecondsSinceEpoch.toString(),
       title: title.length > 30 ? '${title.substring(0, 30)}…' : title,
       dateLabel:
@@ -750,10 +689,10 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
   }
 
   /// 加载历史对话到当前追问抽屉
-  void _loadFollowUpConversation(_SavedConversation conv) {
+  void _loadFollowUpConversation(FollowUpSavedConversation conv) {
     _followUpMessages.value = conv.messages
         .map(
-          (m) => _FollowUpMessage(
+          (m) => FollowUpMessage(
             role: m['role'] as String,
             content: m['content'] as String,
             reasoningText: m['reasoningText'] as String?,
@@ -1079,7 +1018,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
             const Divider(),
             // ── 消息列表（ValueListenableBuilder 确保流式更新） ──
             Expanded(
-              child: ValueListenableBuilder<List<_FollowUpMessage>>(
+              child: ValueListenableBuilder<List<FollowUpMessage>>(
                 valueListenable: _followUpMessages,
                 builder: (ctx, msgs, child) {
                   if (msgs.isEmpty) {
@@ -1129,7 +1068,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                       Positioned(
                         right: 4,
                         bottom: 4,
-                        child: _FollowUpScrollButtons(scrollCtrl: scrollCtrl),
+                        child: FollowUpScrollButtons(scrollCtrl: scrollCtrl),
                       ),
                     ],
                   );
@@ -1217,9 +1156,9 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
 
   void _sendFollowUp(String text) {
     if (text.isEmpty) return;
-    final userMsg = _FollowUpMessage(role: 'user', content: text);
+    final userMsg = FollowUpMessage(role: 'user', content: text);
     // 捕获发送时实际生效的模型(副槽位未配置会回落到主)——该楼回复就记它
-    final aiMsg = _FollowUpMessage(
+    final aiMsg = FollowUpMessage(
       role: 'ai',
       content: '',
       streaming: true,
@@ -1240,10 +1179,10 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
   void _stopFollowUp() {
     _followUpSub?.cancel();
     _followUpSub = null;
-    final msgs = List<_FollowUpMessage>.from(_followUpMessages.value);
+    final msgs = List<FollowUpMessage>.from(_followUpMessages.value);
     for (int i = msgs.length - 1; i >= 0; i--) {
       if (msgs[i].role == 'ai' && msgs[i].streaming) {
-        msgs[i] = _FollowUpMessage(
+        msgs[i] = FollowUpMessage(
           role: 'ai',
           content: msgs[i].content.isEmpty ? '（已停止生成）' : msgs[i].content,
           reasoningText: msgs[i].reasoningText,
@@ -1278,9 +1217,9 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     }
 
     void updateMsg({bool done = false}) {
-      final msgs = List<_FollowUpMessage>.from(_followUpMessages.value);
+      final msgs = List<FollowUpMessage>.from(_followUpMessages.value);
       if (aiMsgIndex < msgs.length) {
-        msgs[aiMsgIndex] = _FollowUpMessage(
+        msgs[aiMsgIndex] = FollowUpMessage(
           role: 'ai',
           content: done
               ? (content.isNotEmpty ? content : '（AI 未返回内容）')
@@ -1333,13 +1272,13 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     }
   }
 
-  Widget _buildFollowUpBubble(_FollowUpMessage msg) {
+  Widget _buildFollowUpBubble(FollowUpMessage msg) {
     final isUser = msg.role == 'user';
 
     if (!isUser) {
-      return _AiFollowUpBubble(
+      return AiFollowUpBubble(
         message: msg,
-        avatar: _aiAvatar(radius: 14, modelName: msg.model ?? _followUpModel),
+        avatar: aiAvatar(radius: 14, modelName: msg.model ?? _followUpModel),
       );
     }
 
@@ -1371,7 +1310,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
             ),
           ),
           const SizedBox(width: 8),
-          _userAvatar(radius: 14),
+          userAvatar(context: context, radius: 14),
         ],
       ),
     );
@@ -1486,7 +1425,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                       Positioned(
                         right: 12,
                         bottom: 8,
-                        child: _ScrollToTopButton(scrollCtrl: _scrollCtrl),
+                        child: ScrollToTopButton(scrollCtrl: _scrollCtrl),
                       ),
                   ],
                 ),
@@ -1947,152 +1886,6 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     );
   }
 
-  // ═══════════════ 头像 ═══════════════
-
-  Widget _userAvatar({double radius = 16}) {
-    return CircleAvatar(
-      radius: radius,
-      backgroundColor: Theme.of(context).colorScheme.primary,
-      child: Icon(Icons.person, size: radius * 1.1, color: Colors.white),
-    );
-  }
-
-  /// AI 头像：品牌Logo（ClipOval + errorBuilder 兜底）。
-  /// [modelName] 为空时用主槽位模型 —— 追问抽屉必须显式传
-  /// 当前追问槽位的模型名，否则头像永远按主模型显示。
-  Widget _aiAvatar({
-    bool error = false,
-    double radius = 16,
-    String? modelName,
-  }) {
-    final name = modelName ?? _currentModel;
-    final asset = _iconAssetFor(name);
-    final color = error ? Colors.red[400]! : _colorFor(name);
-    final double size = radius * 2;
-
-    // 错误状态：红底 + 错误图标
-    if (error) {
-      return CircleAvatar(
-        radius: radius,
-        backgroundColor: color,
-        child: Icon(
-          Icons.error_outline,
-          size: radius * 1.0,
-          color: Colors.white,
-        ),
-      );
-    }
-
-    // 有品牌 Logo 路径 → ClipOval + Image.asset（加载失败时 errorBuilder 兜底）
-    if (asset != null) {
-      return ClipOval(
-        child: Image.asset(
-          asset,
-          width: size,
-          height: size,
-          fit: BoxFit.cover,
-          errorBuilder: (context, err, stack) =>
-              _avatarFallback(radius, color, name),
-        ),
-      );
-    }
-
-    // 无品牌 Logo → 纯色 + 首字母
-    return _avatarFallback(radius, color, name);
-  }
-
-  /// 品牌 Logo 加载失败或无品牌时的兜底：纯色圆 + 首字母
-  Widget _avatarFallback(double radius, Color color, String modelName) {
-    return CircleAvatar(
-      radius: radius,
-      backgroundColor: color,
-      child: _avatarText(radius, modelName),
-    );
-  }
-
-  Widget _avatarText(double radius, String modelName) {
-    final label = modelName.isNotEmpty ? modelName[0].toUpperCase() : 'AI';
-    return Text(
-      label,
-      style: TextStyle(
-        fontSize: radius * 0.85,
-        fontWeight: FontWeight.bold,
-        color: Colors.white,
-      ),
-    );
-  }
-
-  String? _iconAssetFor(String modelName) {
-    final m = modelName.toLowerCase();
-    if (m.contains('doubao') || m.contains('seed') || m.contains('ark')) {
-      return 'assets/icons/doubao-color.png';
-    }
-    if (m.contains('deepseek')) {
-      return 'assets/icons/deepseek-color.png';
-    }
-    if (m.contains('gpt') || m.contains('openai')) {
-      return 'assets/icons/openai.png';
-    }
-    if (m.contains('claude') || m.contains('anthropic')) {
-      return 'assets/icons/claude-color.png';
-    }
-    if (m.contains('gemini')) {
-      return 'assets/icons/gemini-color.png';
-    }
-    if (m.contains('qwen') || m.contains('tongyi')) {
-      return 'assets/icons/qwen-color.png';
-    }
-    if (m.contains('glm') || m.contains('chatglm') || m.contains('zhipu')) {
-      return 'assets/icons/zhipu-color.png';
-    }
-    if (m.contains('moonshot') || m.contains('kimi')) {
-      return 'assets/icons/kimi-color.png';
-    }
-    if (m.contains('google')) {
-      return 'assets/icons/google-color.png';
-    }
-    if (m.contains('iflytek') || m.contains('spark')) {
-      return 'assets/icons/iflytekcloud-color.png';
-    }
-    return null;
-  }
-
-  Color _colorFor(String modelName) {
-    final m = modelName.toLowerCase();
-    if (m.contains('doubao') || m.contains('seed') || m.contains('ark'))
-      return const Color(0xFF3D7A5C);
-    if (m.contains('deepseek')) return const Color(0xFF4A6CF7);
-    if (m.contains('gpt') || m.contains('openai'))
-      return const Color(0xFF10A37F);
-    if (m.contains('claude') || m.contains('anthropic'))
-      return const Color(0xFFD97757);
-    if (m.contains('gemini')) return const Color(0xFF4285F4);
-    if (m.contains('qwen') || m.contains('tongyi'))
-      return const Color(0xFF6B4CE6);
-    if (m.contains('glm') || m.contains('zhipu'))
-      return const Color(0xFF5B8DEF);
-    if (m.contains('moonshot') || m.contains('kimi'))
-      return const Color(0xFF8B5CF6);
-    if (m.contains('baidu') || m.contains('ernie'))
-      return const Color(0xFF2932E1);
-    if (m.contains('google')) return const Color(0xFF4285F4);
-    if (m.contains('iflytek') || m.contains('spark'))
-      return const Color(0xFF1677FF);
-    // 稳定兜底色
-    final colors = const [
-      Color(0xFFE53935),
-      Color(0xFF43A047),
-      Color(0xFF1E88E5),
-      Color(0xFFFB8C00),
-      Color(0xFF8E24AA),
-      Color(0xFF00ACC1),
-    ];
-    var hash = 0;
-    for (var i = 0; i < modelName.length; i++) {
-      hash = modelName.codeUnitAt(i) + ((hash << 5) - hash);
-    }
-    return colors[hash.abs() % colors.length];
-  }
 
   // ═══════════════ 用户气泡 ═══════════════
 
@@ -2305,7 +2098,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         const SizedBox(width: 10),
         Column(
           children: [
-            _userAvatar(),
+            userAvatar(context: context),
             const SizedBox(height: 2),
             Text('我', style: TextStyle(fontSize: 9, color: Colors.grey[400])),
           ],
@@ -2322,7 +2115,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
       children: [
         Column(
           children: [
-            _aiAvatar(error: _phase == _StreamPhase.error),
+            aiAvatar(error: _phase == _StreamPhase.error, modelName: _currentModel),
             const SizedBox(height: 2),
             Text(
               _providerName,
@@ -2703,14 +2496,16 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                   color: Colors.grey[50],
                   borderRadius: BorderRadius.circular(6),
                 ),
-                child: Text(
-                  item.originalSentence!,
+                // 冗长例句限行 3 行 + 展开;出处句中目标词加粗
+                // (2026-08-10 用户需求:例句精简 + 词汇标粗)
+                child: ExampleSentence(
+                  sentence: item.originalSentence!,
+                  highlightWord: item.word,
                   style: TextStyle(
                     fontSize: 12,
                     color: Colors.grey[600],
                     fontStyle: FontStyle.italic,
                   ),
-                  // 例句完整呈现,不省略
                 ),
               ),
             ],
@@ -3385,379 +3180,5 @@ String replaceWordInSentence(
 }
 
 /// 回到顶部浮动小按钮 — 仅在结果态显示，点击后平滑滚动到顶部
-/// 追问 AI 气泡:模型标签 + 可折叠思考过程 + Markdown 渲染正文。
-/// 本地状态承载思考折叠——流式更新重建气泡时状态保留。
-class _AiFollowUpBubble extends StatefulWidget {
-  final _FollowUpMessage message;
-  final Widget avatar;
 
-  const _AiFollowUpBubble({
-    required this.message,
-    required this.avatar,
-  });
 
-  @override
-  State<_AiFollowUpBubble> createState() => _AiFollowUpBubbleState();
-}
-
-class _AiFollowUpBubbleState extends State<_AiFollowUpBubble> {
-  bool _thinkingExpanded = true;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final msg = widget.message;
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          widget.avatar,
-          const SizedBox(width: 8),
-          Flexible(
-            child: Container(
-              // 宽气泡:充分利用抽屉横向空间,缓解 Markdown 表格换行错位
-              constraints: BoxConstraints(
-                maxWidth: MediaQuery.of(context).size.width * 0.88,
-              ),
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: Colors.grey[100],
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // 模型名标签
-                  if (msg.model != null)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 6),
-                      child: Text(
-                        msg.model!,
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: Colors.grey[500],
-                        ),
-                      ),
-                    ),
-                  // 思考过程（可折叠，标题条点击切换）
-                  if (msg.reasoningText != null &&
-                      msg.reasoningText!.isNotEmpty)
-                    _ThinkingBlock(
-                      text: msg.reasoningText!,
-                      expanded: _thinkingExpanded,
-                      streaming: msg.streaming,
-                      onToggle: () => setState(
-                        () => _thinkingExpanded = !_thinkingExpanded,
-                      ),
-                    ),
-                  // 正文（Markdown 渲染：标题/加粗/表格/列表层级清晰）
-                  if (msg.content.isNotEmpty)
-                    MarkdownBody(
-                      data: msg.content,
-                      selectable: true,
-                      styleSheet: MarkdownStyleSheet.fromTheme(
-                        theme,
-                      ).copyWith(
-                        p: theme.textTheme.bodyMedium?.copyWith(
-                          fontSize: 13,
-                          height: 1.5,
-                          color: Colors.grey[800],
-                        ),
-                        h1: theme.textTheme.titleMedium?.copyWith(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                        ),
-                        h2: theme.textTheme.titleMedium?.copyWith(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                        ),
-                        h3: theme.textTheme.titleSmall?.copyWith(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                        ),
-                        strong: theme.textTheme.bodyMedium?.copyWith(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.black87,
-                        ),
-                        tableBorder: TableBorder.all(
-                          color: Colors.grey.shade300,
-                          width: 0.5,
-                        ),
-                        tableHead: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                          color: theme.colorScheme.primary,
-                        ),
-                        tableBody: TextStyle(fontSize: 12, height: 1.4),
-                        tableCellsPadding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 4,
-                        ),
-                        blockquote: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey[600],
-                          fontStyle: FontStyle.italic,
-                        ),
-                        code: TextStyle(
-                          fontSize: 12,
-                          color: Colors.deepOrange[700],
-                          fontFamily: 'monospace',
-                        ),
-                        horizontalRuleDecoration: BoxDecoration(
-                          border: Border(
-                            top: BorderSide(color: Colors.grey[300]!, width: 1),
-                          ),
-                        ),
-                      ),
-                    )
-                  else if (msg.streaming)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 6),
-                      child: Row(
-                        children: [
-                          const SizedBox(
-                            width: 14,
-                            height: 14,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            '正在思考…',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey[600],
-                            ),
-                          ),
-                        ],
-                      ),
-                    )
-                  else
-                    const Text(
-                      '（AI 未返回内容）',
-                      style: TextStyle(fontSize: 12, color: Colors.grey),
-                    ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// 可折叠思考过程块：标题条点击切换展开/收起；展开时限制高度可滚动
-class _ThinkingBlock extends StatelessWidget {
-  final String text;
-  final bool expanded;
-  final bool streaming;
-  final VoidCallback onToggle;
-
-  const _ThinkingBlock({
-    required this.text,
-    required this.expanded,
-    required this.streaming,
-    required this.onToggle,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 6),
-      decoration: BoxDecoration(
-        color: Colors.orange.withAlpha(10),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // 标题条
-          InkWell(
-            onTap: onToggle,
-            borderRadius: BorderRadius.circular(8),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              child: Row(
-                children: [
-                  const Text('💭', style: TextStyle(fontSize: 11)),
-                  const SizedBox(width: 4),
-                  Text(
-                    streaming ? '思考过程（生成中）' : '思考过程',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: Colors.orange[800],
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const Spacer(),
-                  Icon(
-                    expanded ? Icons.expand_less : Icons.expand_more,
-                    size: 16,
-                    color: Colors.orange[600],
-                  ),
-                ],
-              ),
-            ),
-          ),
-          if (expanded)
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 180),
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
-                child: Text(
-                  text,
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: Colors.orange[400],
-                    fontFamily: 'monospace',
-                    height: 1.4,
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-/// 追问抽屉 回顶/回底 小按钮:监听滚动位置,↑ 未在顶部时显示,↓ 未到底时显示
-class _FollowUpScrollButtons extends StatefulWidget {
-  final ScrollController scrollCtrl;
-  const _FollowUpScrollButtons({required this.scrollCtrl});
-
-  @override
-  State<_FollowUpScrollButtons> createState() => _FollowUpScrollButtonsState();
-}
-
-class _FollowUpScrollButtonsState extends State<_FollowUpScrollButtons> {
-  double _offset = 0;
-  double _maxExtent = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    widget.scrollCtrl.addListener(_onScroll);
-  }
-
-  @override
-  void dispose() {
-    widget.scrollCtrl.removeListener(_onScroll);
-    super.dispose();
-  }
-
-  void _onScroll() {
-    final pos = widget.scrollCtrl.position;
-    setState(() {
-      _offset = pos.pixels;
-      _maxExtent = pos.maxScrollExtent;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final atTop = _offset < 40;
-    final atBottom = _maxExtent - _offset < 40;
-    // 内容不满一屏时隐藏
-    if (atTop && atBottom) return const SizedBox.shrink();
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (!atTop)
-          _smallButton(Icons.keyboard_arrow_up, () {
-            widget.scrollCtrl.animateTo(
-              0,
-              duration: const Duration(milliseconds: 200),
-              curve: Curves.easeOut,
-            );
-          }),
-        if (!atBottom) ...[
-          const SizedBox(height: 4),
-          _smallButton(Icons.keyboard_arrow_down, () {
-            widget.scrollCtrl.animateTo(
-              widget.scrollCtrl.position.maxScrollExtent,
-              duration: const Duration(milliseconds: 200),
-              curve: Curves.easeOut,
-            );
-          }),
-        ],
-      ],
-    );
-  }
-
-  Widget _smallButton(IconData icon, VoidCallback onTap) {
-    return Material(
-      color: Colors.white,
-      elevation: 2,
-      shape: const CircleBorder(),
-      child: InkWell(
-        customBorder: const CircleBorder(),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(6),
-          child: Icon(icon, size: 16, color: Colors.grey[600]),
-        ),
-      ),
-    );
-  }
-}
-
-class _ScrollToTopButton extends StatefulWidget {
-  final ScrollController scrollCtrl;
-  const _ScrollToTopButton({required this.scrollCtrl});
-
-  @override
-  State<_ScrollToTopButton> createState() => _ScrollToTopButtonState();
-}
-
-class _ScrollToTopButtonState extends State<_ScrollToTopButton> {
-  bool _visible = false;
-
-  @override
-  void initState() {
-    super.initState();
-    widget.scrollCtrl.addListener(_onScroll);
-  }
-
-  @override
-  void dispose() {
-    widget.scrollCtrl.removeListener(_onScroll);
-    super.dispose();
-  }
-
-  void _onScroll() {
-    final show = widget.scrollCtrl.hasClients && widget.scrollCtrl.offset > 200;
-    if (show != _visible && mounted) {
-      setState(() => _visible = show);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (!_visible) return const SizedBox.shrink();
-    final cs = Theme.of(context).colorScheme;
-    return Material(
-      elevation: 3,
-      shape: const CircleBorder(),
-      color: cs.primary,
-      child: InkWell(
-        customBorder: const CircleBorder(),
-        onTap: () {
-          widget.scrollCtrl.animateTo(
-            0,
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeOut,
-          );
-        },
-        child: const Padding(
-          padding: EdgeInsets.all(8),
-          child: Icon(Icons.arrow_upward, size: 18, color: Colors.white),
-        ),
-      ),
-    );
-  }
-}

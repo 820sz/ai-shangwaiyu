@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../models/vocabulary.dart';
 import '../../providers/vocab_provider.dart';
+import '../input/widgets/example_sentence.dart';
 
 class VocabDetailScreen extends StatefulWidget {
   final Vocabulary vocab;
@@ -78,8 +79,9 @@ class _VocabDetailScreenState extends State<VocabDetailScreen> {
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(color: Colors.grey[200]!),
                 ),
-                child: Text(
-                  _vocab.originalSentence!,
+                child: ExampleSentence(
+                  sentence: _vocab.originalSentence!,
+                  highlightWord: _vocab.word,
                   style: theme.textTheme.bodyLarge
                       ?.copyWith(height: 1.6, fontStyle: FontStyle.italic),
                 ),

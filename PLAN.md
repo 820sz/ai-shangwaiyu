@@ -1,9 +1,9 @@
 # PLAN.md — AI上外语 (readflow)
 
 ## 状态
-- 当前版本:**v1.2.19**(commit 6935ae5,Release 已发 = Latest,带 app-release.apk)
-- 当前阶段:🔵 修复发布 → **需手动安装 v1.2.19**(自动更新链路首次真机启用)
-- 状态协议:DONE_WITH_CONCERNS(词条截断真机仍复现,API 实测与真机矛盾,待用户照片+模型复现;自动更新待真机验证)
+- 当前版本:**v1.2.26**(待发布;代码完成,analyze 0 error / 77 测试全绿)
+- 当前阶段:✅ 例句精简+标粗 / 翻译复制保存 / process_chat 拆分,三项代码完成,待构建+真机验收
+- 状态协议:DONE_WITH_CONCERNS(拆分是纯搬移+改名,行为零变化;UI 效果待真机验证)
 
 ## 需求摘要
 **项目**:AI上外语(Flutter 英语学习 App,D:\readflow)
@@ -26,6 +26,33 @@
 **被否掉的方案**:只改设置页标签不角色化;单一 API 槽位。
 
 ## 版本记录(最新在前)
+
+### v1.2.26 — 例句精简+出处词标粗 / 全文翻译复制保存 / process_chat 拆分(2026-08-10,待发布)
+- **例句精简(方案1)**:新组件 `widgets/example_sentence.dart`——出处例句限行 3 行 + 超限显示"展开/收起";**出处句中目标词加粗**(buildHighlightSpans 纯函数,12 测试:大小写不敏感/词边界守卫防 "cat" 标进 "concatenate"/变形词不标/词条化截断词不标/word==整句不标)。三处接入:识别结果页详细模式、词详情 BottomSheet、词库词汇详情页
+- **全文翻译复制/保存**:AppBar 加 ⋮ 菜单(翻译存在时)——"复制全文翻译"(内置 Clipboard)+"保存/分享翻译"(自写原生通道 app/share_text,ACTION_SEND 系统分享面板,零新依赖;存到微信/备忘录/文件管理器)
+- **process_chat 拆分(安全拆,用户确认)**:3766 → 3184 行(-582),4 个新文件:follow_up_models(FollowUpMessage/FollowUpSavedConversation 公开化)/ follow_up_bubble(AiFollowUpBubble+ThinkingBlock)/ scroll_buttons(FollowUpScrollButtons+ScrollToTopButton)/ model_avatars(userAvatar/aiAvatar 等 6 方法)。纯搬移+改名,行为零变化,每批 analyze+测试全绿。顺手归位 1 处错位注释
+- 验证:analyze 21 存量 info 零新增 / 77 测试全绿(+12 新增)
+- 待真机:①例句 3 行+展开、目标词标粗效果 ②翻译菜单两项 ③拆分后整体流程(识别/追问/保存/恢复)走一遍
+
+### v1.2.25 — 词条截断终局:overflow ellipsis→visible(2026-08-10,commit 4d2cd2b,**用户真机验证已解决**)
+- 最终生效改动:详细/总览词条 Text `overflow: TextOverflow.ellipsis` → `visible`(maxLines 早已 null)。从 Flutter 语义封死省略号路径
+- 血泪教训:用户从第一天说是 UI 层(10+ 截图),CC 死磕数据层一整晚(提示词/test/回退/清洗),实际 Expanded 一直在、maxLines 早 null,该早把 ellipsis 换 visible
+- 保留防线(无害):displayWordText 省略号回退(v1.2.20/21)+ cleanTruncatedWord 数据清洗(v1.2.24)——仅词条带省略号时触发
+
+### v1.2.24 — 数据层治本:解析后清洗词条化截断(commit fb618e0)
+- cleanTruncatedWord:word 带截断特征(…/⋯/../.../…… 任意形态)且存在更长完整句 → 用 originalSentence 替换 word 数据本身(9 测试)。方向事后证明非根因,但作为数据防线保留
+
+### v1.2.23 — 修复版本号(commit b92c7dd)
+- v1.2.21/22 构建时忘 bump pubspec,APK 安装界面/设置页仍显示 1.2.20(用户实测"安装界面变成20"),白装两次。**发布铁律:bump 版本 + aapt 验证 versionName**
+
+### v1.2.22 — 更新检查取最新 tag(commit aaa59a0)
+- 检查竞速"先到先得"会拿镜像缓存的旧 latest 响应 → 误判"已是最新"(用户实测"自动更新还是20")。改为收集所有响应取 tag 最大(pickLatest,5 测试)
+
+### v1.2.21 — 词条不限行(commit b206c6b)
+- 详细/总览 word/translation Text 去掉 maxLines(word 类型原 1/2 行省略),一排放不下自动换行;TextPainter 验证换行引擎正常
+
+### v1.2.20 — 词条回退放宽(commit 3728717)+ 回滚误回退(commit 691aad2)
+- displayWordText 回退条件放宽(省略号变体 contains);**isShortened 按长度回退是回归**(短语"compound with"误回退成整句,用户实测),已回滚只留省略号特征
 
 ### v1.2.19 — 自动更新检查加镜像竞速(2026-08-09,commit 6935ae5)
 - 根因(用户实测"收不到自动更新"):checkLatestRelease 裸连 api.github.com(国内经常连不上,10s 超时静默失败)——下载有 6 镜像竞速,检查却没有
@@ -126,23 +153,21 @@
 - 练习真实评分:DB v4 reference_answers 列,词集合重叠率;旧练习保留长度启发式
 - DeepSeek chat/reasoner 2026-07-24 停用 → 默认 deepseek-v4-flash;两槽位支持 /models
 
-## 验证目标(当前版)
-- [x] flutter analyze 0 error / 40 测试全绿(v1.2.19)
-- [ ] **真机**:手动安装 v1.2.19 → 返回结果页弹保存弹窗(含"保存全部")
-- [ ] **真机**:装 v1.2.19 后重启 App → 后续新版本自动更新可收到(检查镜像竞速)
-- [ ] **真机**:词条截断复现——需用户提供 ①识别原照片 ②配置的模型名,精确复现 API 实测与真机矛盾点
-- [ ] **真机**:新 logo 效果
+## 验证目标(当前版 v1.2.26)
+- [x] flutter analyze 0 error(21 存量 info 零新增)/ 77 测试全绿(+12 例句标粗匹配)
+- [ ] **真机**:例句限行 3 行+展开/收起;出处句中目标词标粗(详细模式/词详情/词库详情三处)
+- [ ] **真机**:文章页 AppBar ⋮ 菜单 → 复制全文翻译(剪贴板)、保存/分享翻译(系统分享面板)
+- [ ] **真机**:拆分后全流程回归——识别/追问/保存会话/恢复会话/模型头像切槽位
 
 ## 当前任务 / 待办
-- [ ] 用户手动安装 v1.2.19(微信/QQ 传 APK;修复自动更新的代码在本版,必须手动过渡一次)
-- [ ] 词条截断:等用户照片+模型名 → test_trunc2.py 压缩路径对照实验 → 定位后修复
-- [ ] 若修复后用户仍嫌例句框长(v1.2.16 起 original_sentence 必填),再评估例句展示精简
+- [ ] 构建 v1.2.26(bump pubspec + aapt 验证 versionName)→ 用户真机验收
 - [ ] 发布流程:先 build 完成再 gh release create(两次踩坑:挂了旧/空 APK)
 
 ## Backlog
 - [ ] 成就徽章系统 / 词汇量测试 / Material You 动态主题(研究期已列,未排期)
-- [ ] process_chat 2359 行拆分 5-6 文件(审查建议)
-- [ ] 全文翻译结果可复制/保存(审查发现的功能缺口)
+- [~] process_chat 剩余大头拆分(追问面板 UI/AI 区/底部栏 ~1500 行,强依赖 State 需建回调接口)— v1.2.26 安全拆已完成 582 行,二期单独评估
+- [x] 全文翻译结果可复制/保存 — **v1.2.26 完成**(复制+系统分享面板)
+- [x] 例句框精简 — **v1.2.26 完成**(限行 3 行+展开+出处词标粗)
 - [~] 模型列表拉取时区分"已开通"状态 — v1.2.0 已按模型族过滤;方舟"已开通"精确语义仍待查
 - [ ] 腾讯云 COS 主源发布(用户开通中,需 bucket 访问域名)→ update_service 改 COS,镜像退兜底
 
@@ -152,6 +177,9 @@
 - [x] 自动更新链路修复链:1.2.3 .part→.apk → 1.2.5 FileProvider authority → 1.2.9 REQUEST_INSTALL_PACKAGES(**等待真机端到端确认**)
 
 ## 决策记录
+- 2026-08-10 例句精简=限行 3 行+展开(方案1)+ 出处词标粗(用户追加)— 冗长例句压缩列表高度,词条仍完整可读;标粗匹配保守(找不到/变形不标,绝不改变例句内容)
+- 2026-08-10 process_chat 拆分=安全拆(用户确认):只搬零/低依赖模块,强依赖 State 的追问面板/气泡/AI 区留待二期单独评估 — 用户铁律"不要越改bug越多",纯搬移行为零变化
+- 2026-08-10 全文翻译保存=自写原生 share_text 通道(ACTION_SEND),不用 share_plus — 零新依赖;open_filex 已因挂起 bug 弃用,不可复用
 - 2026-08-03 主/副 API 角色分工(主=多模态,副=专项文本,副未配置全走主)— 用户指定;识别与生成解耦
 - 2026-08-03 追问槽位独立记录 keyFollowUpSlot — 追问是识图上下文问答,模型自由
 - 2026-08-03 复用现有 Hive key 不迁移 — 老配置自动成为主/副
@@ -198,8 +226,8 @@
 - **修复(显示层回退)**:word 以省略号结尾且存在更长的 originalSentence → 显示 originalSentence(详细模式 _displayWord + 总览 WordListTile 同逻辑)
 - 用户线索关键提示:"近几次词汇板块 UI 调整后就这样"+"原来正常"——但代码审查确认 UI 一直放开;数据层词条化是模型近端行为(v1.2.10 时代用户就反馈过截断,当时误判为 UI)
 
-## 断点快照(2026-08-07 晚)
-- 正在做:**v1.2.15 已发布**(commit 65faa23,Release 带 APK,自动更新可到)
-- 卡在哪:无
-- 下一步:等用户真机验证:①思考档位速度(低=约3s/中=约15s)②短语/句子完整显示(word 词条化截断 → 回退 originalSentence)③新 logo 效果;有问题开新会话
-- 备注:D:\readflow 根目录 9 个 test_thinking*.py 是思考参数实测脚本(可复测),已随 commit 入库
+## 断点快照(2026-08-10)
+- 正在做:**v1.2.26 三项代码完成**(例句精简+标粗 / 翻译复制保存 / process_chat 拆分)
+- 卡在哪:无;验证:analyze 0 error / 77 测试全绿
+- 下一步:①bump pubspec 1.2.25+35→1.2.26+36 → ②flutter build apk --release --target-platform android-arm64 → ③aapt dump badging 验证 versionName=1.2.26 → ④gh release create v1.2.26(先 build 完再 release!)→ ⑤用户真机验收三件事(见验证目标)+ 全流程回归
+- 备注:auto 更新链路用户已确认真机跑通(v1.2.25 卸载重装是手动;自动更新提示已收到——镜像竞速生效)

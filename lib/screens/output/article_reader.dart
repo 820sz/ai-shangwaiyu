@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../models/article.dart';
 import '../../providers/article_provider.dart';
@@ -16,6 +17,42 @@ class ArticleReaderScreen extends StatefulWidget {
 class _ArticleReaderScreenState extends State<ArticleReaderScreen> {
   bool _showTranslation = false;
 
+  /// 分享通道:与 MainActivity.kt 的 app/share_text 对应
+  static const MethodChannel _shareChannel = MethodChannel('app/share_text');
+
+  /// 复制全文翻译到剪贴板(内置 API,零依赖)
+  Future<void> _copyTranslation(Article article) async {
+    final text = article.translation ?? '';
+    if (text.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('全文翻译已复制(${text.length} 字),可到微信/备忘录粘贴'),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  /// 保存出口:调系统分享面板,可存到微信/备忘录/文件管理器
+  Future<void> _shareTranslation(Article article) async {
+    try {
+      await _shareChannel.invokeMethod('shareText', {
+        'text': article.translation ?? '',
+        'title': article.title,
+      });
+    } on PlatformException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('打开分享面板失败:${e.message}'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -26,14 +63,17 @@ class _ArticleReaderScreenState extends State<ArticleReaderScreen> {
         ? provider.exercisesByArticle[article.id] ?? []
         : <dynamic>[];
 
+    // 全文翻译存在时才显示"复制/保存"菜单(旧文章无翻译数据)
+    final hasTranslation =
+        article.translation != null && article.translation!.isNotEmpty;
+
     return Scaffold(
       appBar: AppBar(
         title: Text(article.title),
         actions: [
           TextButton(
             onPressed: () {
-              if (article.translation == null ||
-                  article.translation!.isEmpty) {
+              if (!hasTranslation) {
                 // 旧文章无翻译数据(DB v5 之前的文章)——提示而不是无反应
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
@@ -47,6 +87,41 @@ class _ArticleReaderScreenState extends State<ArticleReaderScreen> {
             },
             child: Text(_showTranslation ? '隐藏翻译' : '显示翻译'),
           ),
+          if (hasTranslation)
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert),
+              tooltip: '翻译操作',
+              onSelected: (value) {
+                switch (value) {
+                  case 'copy':
+                    _copyTranslation(article);
+                  case 'share':
+                    _shareTranslation(article);
+                }
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(
+                  value: 'copy',
+                  child: Row(
+                    children: [
+                      Icon(Icons.copy_all, size: 18, color: Colors.grey),
+                      SizedBox(width: 8),
+                      Text('复制全文翻译'),
+                    ],
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'share',
+                  child: Row(
+                    children: [
+                      Icon(Icons.save_alt, size: 18, color: Colors.grey),
+                      SizedBox(width: 8),
+                      Text('保存/分享翻译'),
+                    ],
+                  ),
+                ),
+              ],
+            ),
         ],
       ),
       body: ListView(
