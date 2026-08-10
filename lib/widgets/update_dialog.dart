@@ -70,9 +70,12 @@ class _DownloadDialogState extends State<_DownloadDialog>
   bool _downloading = true;
   String? _error;
   bool _installing = false;
-  /// 安装意图发出后 App 是否进入过后台。
-  /// 正常情况系统安装器会压到前台 → App 变 paused;
-  /// 若始终 resumed,说明安装器根本没弹出(静默拒绝),需引导用户开权限
+  /// 安装阶段是否检测到 App 进入过后台。
+  /// 正常情况系统安装器弹出会把 App 压到后台(paused);
+  /// 若安装意图发出后始终 resumed,说明安装器根本没弹(静默拒绝),
+  /// 需引导用户开"安装未知应用"权限。
+  /// 只在 _installing == true 时记录——下载期间的任意后台化不算(F2:
+  /// 用户下载时切去别的 App,回来安装被拒,不能误判"见过安装界面")。
   bool _sawBackground = false;
 
   @override
@@ -90,6 +93,7 @@ class _DownloadDialogState extends State<_DownloadDialog>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (!_installing) return; // 只有安装阶段才观察后台化
     // PackageInstaller 前台时 App 进入 inactive/paused
     if (state == AppLifecycleState.inactive ||
         state == AppLifecycleState.paused ||
@@ -118,9 +122,15 @@ class _DownloadDialogState extends State<_DownloadDialog>
       setState(() {
         _downloading = false;
         _installing = true;
+        _sawBackground = false; // 安装阶段重新计时
       });
       // 调起系统安装器,对话框随即关闭
       await UpdateService.installApk(path);
+      if (!mounted) return;
+      // 原生端(MainActivity)在 startActivity 后同步回 'ok',
+      // App 被安装器压到后台的 lifecycle 事件稍后才到——留窗口再判定,
+      // 否则正常安装也会误报"未检测到安装界面弹出"
+      await Future.delayed(const Duration(milliseconds: 800));
       if (!mounted) return;
       if (!_sawBackground) {
         // 安装意图发出但 App 从未进入后台 → 安装界面没弹出,

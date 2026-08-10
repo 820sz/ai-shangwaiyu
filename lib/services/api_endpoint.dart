@@ -13,6 +13,12 @@ class ApiEndpointConfig {
   final String defaultBaseUrl;
   final String defaultModel;
 
+  /// 槽位模型是否支持 reasoning_effort 的 minimal 分档。
+  /// 豆包/Ark 支持 minimal;DeepSeek 只认 low/medium/high——
+  /// 发错枚举直接 400,且流式路径的降级逻辑读不到错误体(F6),
+  /// 所以必须在这里发对,不能指望降级兜底。
+  final bool supportsMinimalEffort;
+
   const ApiEndpointConfig({
     required this.hiveKey,
     required this.hiveModel,
@@ -20,6 +26,7 @@ class ApiEndpointConfig {
     required this.hiveThinking,
     required this.defaultBaseUrl,
     required this.defaultModel,
+    this.supportsMinimalEffort = true,
   });
 
   /// 主槽位:多模态(识图/全文翻译/素材推荐/追问默认)
@@ -30,9 +37,11 @@ class ApiEndpointConfig {
     hiveThinking: AppConstants.keyDoubaoThinking,
     defaultBaseUrl: AppConstants.doubaoBaseUrl,
     defaultModel: AppConstants.doubaoVisionModel,
+    supportsMinimalEffort: true,
   );
 
-  /// 副槽位:专项文本(文章生成/回译/建议),未配置则全部走主
+  /// 副槽位:专项文本(文章生成/回译/建议),未配置则全部走主。
+  /// DeepSeek 只认 low/medium/high,不认 minimal。
   static const secondary = ApiEndpointConfig(
     hiveKey: AppConstants.keyDeepseekApiKey,
     hiveModel: AppConstants.keyDeepseekModel,
@@ -40,6 +49,7 @@ class ApiEndpointConfig {
     hiveThinking: AppConstants.keyDeepseekThinking,
     defaultBaseUrl: AppConstants.deepseekBaseUrl,
     defaultModel: AppConstants.deepseekChatModel,
+    supportsMinimalEffort: false,
   );
 
   Box get _box => Hive.box(AppConstants.hiveBoxSettings);
@@ -62,7 +72,15 @@ class ApiEndpointConfig {
   String get thinking {
     final v = _box.get(hiveThinking);
     if (v == 'medium' || v == 'high') {
-      return 'low'; // 2026-08-08 砍掉中/高档,存量设置自动迁移到低
+      // 2026-08-08 砍掉中/高档,存量设置自动迁移到低。
+      // 必须写回 Hive:否则设置页/状态条读原始值显示"不思考",
+      // 实际请求却带着 thinking:enabled(F4)——UI 与行为打架。
+      _box.put(hiveThinking, 'low');
+      return 'low';
+    }
+    if (v == 'minimal') {
+      _box.put(hiveThinking, 'disabled'); // 更早版本的 minimal 档已并入不思考
+      return 'disabled';
     }
     return (v == 'low' || v == 'disabled') ? v : 'disabled';
   }
@@ -85,7 +103,11 @@ class ApiEndpointConfig {
       case 'disabled':
         return {'thinking': {'type': 'disabled'}};
       case 'low':
-        return {'thinking': {'type': 'enabled'}, 'reasoning_effort': 'minimal'};
+        // 豆包槽位发 minimal(≈3s);DeepSeek 槽位发 low(它不认 minimal,F6)
+        return {
+          'thinking': {'type': 'enabled'},
+          'reasoning_effort': supportsMinimalEffort ? 'minimal' : 'low',
+        };
       default:
         return {'thinking': {'type': 'disabled'}};
     }

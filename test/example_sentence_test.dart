@@ -121,5 +121,15 @@ void main() {
       final spans = buildHighlightSpans(sentence: 'a cat', highlightWord: 'cat');
       expectBold(spans, 'cat');
     });
+
+    test('toLowerCase 改变码点长度时保守跳过,不崩(土耳其 İ)', () {
+      // 'İ'.toLowerCase() = 'i̇'(1→2 码点),lower 索引无法映射回原串,必须跳过而非 RangeError
+      final spans = buildHighlightSpans(
+        sentence: 'İstanbul is the capital.',
+        highlightWord: 'stanbul',
+        style: style,
+      );
+      expectPlain(spans);
+    });
   });
 }

@@ -127,14 +127,23 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
               title: '检查更新',
               subtitle: '检查 GitHub 最新版本',
               onTap: () async {
-                final info = await UpdateService.checkLatestRelease();
-                if (!context.mounted) return;
-                if (info == null || !info.hasUpdate) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('当前已是最新版本')),
-                  );
-                } else {
-                  showUpdateDialog(context, info);
+                try {
+                  final info = await UpdateService.checkLatestRelease();
+                  if (!context.mounted) return;
+                  if (info == null || !info.hasUpdate) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('当前已是最新版本')),
+                    );
+                  } else {
+                    showUpdateDialog(context, info);
+                  }
+                } catch (e) {
+                  // F3:检查失败(网络全断)必须明说,不能伪装成"已是最新"
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('检查更新失败:$e')),
+                    );
+                  }
                 }
               },
             ),

@@ -33,9 +33,9 @@ class _VocabDetailScreenState extends State<VocabDetailScreen> {
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          // 单词大字
+          // 单词大字:截断词条回退显示完整句子(F8,与列表/横幅一致)
           Text(
-            _vocab.word,
+            _vocab.displayWordText,
             style: theme.textTheme.headlineMedium
                 ?.copyWith(fontWeight: FontWeight.bold),
           ),

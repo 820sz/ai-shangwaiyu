@@ -74,6 +74,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
   DateTime? _thinkingStartAt;
   int _thinkingSeconds = 0;
   Timer? _thinkingTimer; // 每秒刷新思考耗时显示
+  DateTime? _lastChunkAt; // 心跳:最后收到数据的时间,用于回前台静默中断检测
 
   // (2026-08-08 移除思考超时降级链路:reasoning_effort 生效后思考时长可控
   // ~3-25s,原降级是"等满阈值+重跑一次完整识别",总耗时反而巨长——
@@ -90,10 +91,9 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
 
   String get _currentModel => _api.modelName;
   String get _currentThinking {
-    final v = Hive.box(
-      AppConstants.hiveBoxSettings,
-    ).get(AppConstants.keyDoubaoThinking);
-    return (v is String && v.isNotEmpty) ? v : 'disabled';
+    // 走 ApiEndpointConfig.thinking:读即迁移(medium/high→low 写回),
+    // 避免 UI 显示"不思考"而实际请求带着 thinking(F4)
+    return _api.config.thinking;
   }
 
   /// 追问当前槽位:'primary' / 'secondary'(Hive 持久化,默认主)
@@ -344,6 +344,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
       if (_phase == _StreamPhase.error && mounted) {
         final msg = _errorMessage ?? '';
         if (msg.contains('超时') ||
+            msg.contains('Receive timeout') || // Dio 接收超时原文
             msg.contains('连接') ||
             msg.contains('网络') ||
             msg.contains('Socket') ||
@@ -352,13 +353,16 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         }
         return;
       }
-      // 识别中切后台:系统可能挂起网络导致流静默中断(订阅已结束
-      // 但没进 error 态)——回前台自动重试,不让用户手动点
+      // 识别中切后台:系统可能挂起网络导致流静默中断——
+      // 流内没有 error/onDone 通知,只能用"最后收到数据的时间"心跳检测
+      // (旧实现用 _subscription == null 判断,但订阅在 streaming 中永不为
+      // null,该分支是死代码;改判 30s 无新 chunk)
       if (mounted &&
-          (_phase == _StreamPhase.connecting ||
-              _phase == _StreamPhase.streaming) &&
-          _subscription == null) {
-        debugPrint('ReadFlow: 识别流被后台中断,回前台自动重试');
+          _phase == _StreamPhase.streaming &&
+          _lastChunkAt != null &&
+          DateTime.now().difference(_lastChunkAt!) >
+              const Duration(seconds: 30)) {
+        debugPrint('ReadFlow: 识别流疑似静默中断(30s 无数据),回前台自动重试');
         _retry();
       }
     }
@@ -368,6 +372,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
 
   void _startStreaming() {
     _firstByteTimer?.cancel();
+    _lastChunkAt = null; // 新流开始,重置心跳
     final thinking = _currentThinking;
     // 首字节超时(只报错,不降级重跑):不思考25s;思考模式60s——
     // reasoning_effort 生效后(2026-08-07 实测低≈3s/中≈14s/高≈25s)
@@ -401,6 +406,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
       _subscription = stream.listen(
         (chunk) {
           _firstByteTimer?.cancel();
+          _lastChunkAt = DateTime.now(); // 心跳更新
           if (!mounted) return;
 
           if (chunk.isReasoning) {
@@ -469,6 +475,8 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
       );
     } catch (e) {
       _firstByteTimer?.cancel();
+      _thinkingTimer?.cancel();
+      _thinkingStartAt = null;
       if (mounted) {
         setState(() {
           _phase = _StreamPhase.error;
@@ -478,8 +486,19 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     }
   }
 
+  /// LLM 返回的 image_index 可能是 int/字符串/浮点(该模型族结构输出不可靠),
+  /// 全量安全解析;解析失败按 0 处理,绝不抛 TypeError 毁掉整批识别。
+  int _safeImageIndex(Object? raw) {
+    if (raw is int) return raw;
+    if (raw is num) return raw.toInt();
+    if (raw is String) return int.tryParse(raw) ?? 0;
+    return 0;
+  }
+
   void _onStreamDone() {
     _firstByteTimer?.cancel();
+    _thinkingTimer?.cancel(); // 思考计时在流结束/出错/重试都必须停,否则 setState 永转
+    _thinkingStartAt = null;
     _subscription = null; // 流已结束,供回前台检测"静默中断"
     if (!mounted) return;
     // cancelOnError=false → onDone 在 onError 后也触发，避免覆盖错误信息
@@ -525,10 +544,13 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         // 圈画模式结果 — 多图时按 image_index 映射正确的 photoPath。
         // 追加模式:AI 对"本轮新图"从 0 编号,加 _streamStartIndex 映射回全局
         final results = rawMaps.map((r) {
-          final imgIdx = (r['image_index'] as int? ?? 0) + _streamStartIndex;
+          final imgIdx = _safeImageIndex(r['image_index']) + _streamStartIndex;
+          // 越界(模型幻觉组号)回退第一张而非最后一张:
+          // 识别从第一张开始,0 更可能是"模型忘标"而非"标到最后一本",
+          // 避免把词悄悄绑到最后一本书上
           final photoPath = imgIdx >= 0 && imgIdx < _images.length
               ? _images[imgIdx].path
-              : _images.last.path;
+              : _images[0].path;
           return Vocabulary(
             word: r['word'] as String,
             translation: r['translation'] as String?,
@@ -569,7 +591,10 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
   void _retry() {
     _subscription?.cancel();
     _thinkingTimer?.cancel();
-    _streamStartIndex = 0; // 重试 = 全新识别
+    // 追加模式失败重试:保留 _streamStartIndex,只重识别"本轮追加的图"。
+    // 旧实现无条件置 0 → 追加失败重试时全量重识别,onDone 走首轮分支
+    // 整组替换 _results 并清空 _selected,把批量1 的结果和选中静默丢掉。
+    // 首次识别失败时 _streamStartIndex 本来就是 0,语义不变 = 全新识别。
     setState(() {
       _phase = _StreamPhase.connecting;
       _reasoningText = '';
@@ -823,8 +848,14 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         ),
       );
       if (result == 'save') {
-        await _saveAndReturn(saveAll: !hasSel);
-        return false; // _saveAndReturn 已 pop
+        final saved = await _saveAndReturn(saveAll: !hasSel);
+        // 用户在分类选择处取消:返回键已被消费,必须给反馈,否则像没点一样
+        if (!saved && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('已取消保存,没有词被存入词库')),
+          );
+        }
+        return false; // _saveAndReturn 成功时已 pop
       }
       if (result == 'temporary') {
         // 暂存含追问消息,直接退出;暂存失败不阻断退出(会话仍在,
@@ -874,18 +905,21 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
 
   // ═══════════════ 保存 ═══════════════
 
-  Future<void> _saveAndReturn({bool saveAll = false}) async {
+  /// 保存选中/全部结果并退出。返回是否真正完成了保存——
+  /// 用户在分类选择处取消时返回 false,调用方需给出提示,
+  /// 否则返回键被消费却毫无反馈(2026-08-11 code-review F10)。
+  Future<bool> _saveAndReturn({bool saveAll = false}) async {
     // saveAll=true:未选中任何词时从返回弹窗"保存全部"进入,保存所有结果
     final selected = (saveAll
             ? List.generate(_results.length, (i) => i)
             : _selected)
         .map((i) => _results[i])
         .toList();
-    if (selected.isEmpty) return;
+    if (selected.isEmpty) return false;
 
     // 1. 弹出分类选择
     final category = await showCategoryPicker(context);
-    if (category == null || !mounted) return; // 用户取消
+    if (category == null || !mounted) return false; // 用户取消 → 调用方提示
 
     // 2. 弹出子分类输入（可跳过）
     final subInfo = await showSubCategoryInput(
@@ -893,7 +927,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
       category: category,
       prefill: widget.sourceBook ?? '',
     );
-    if (!mounted) return;
+    if (!mounted) return false;
 
     try {
       final categorized = selected.map((v) {
@@ -905,12 +939,14 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
       }).toList();
       await context.read<VocabProvider>().saveVocabularies(categorized);
       if (mounted) Navigator.pop(context, true);
+      return true;
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('保存失败：$e')));
       }
+      return false;
     }
   }
 
@@ -1527,9 +1563,11 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
   void _askAiAboutWord(int index) {
     if (index >= _results.length) return;
     final item = _results[index];
+    // 截断词条(带省略号残片)模型看不懂,传完整句(F7)
+    final aiWord = item.displayWordText;
     // 预填追问上下文
     final ctx = StringBuffer();
-    ctx.writeln('单词：${item.word}');
+    ctx.writeln('单词：$aiWord');
     if (item.translation != null && item.translation!.isNotEmpty) {
       ctx.writeln('释义：${item.translation}');
     }
@@ -1544,7 +1582,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     }
     // 打开追问抽屉，预填问题但等用户发送
     _openFollowUp(
-      prefillQuestion: '请详细解释 "${item.word}" 的用法',
+      prefillQuestion: '请详细解释 "$aiWord" 的用法',
       followUpContext: ctx.toString(),
     );
   }
@@ -2959,7 +2997,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
               const SizedBox(height: 8),
               // 修改原文后例句自动替换提示
               Text(
-                '修改「原文」后，例句中的「${item.word.length > 12 ? '${item.word.substring(0, 12)}…' : item.word}」会自动替换为新词',
+                '修改「原文」后，例句中的「${item.displayWordText.length > 12 ? '${item.displayWordText.substring(0, 12)}…' : item.displayWordText}」会自动替换为新词',
                 style: TextStyle(fontSize: 11, color: Colors.grey[500]),
               ),
             ],

@@ -41,9 +41,15 @@ class _ExampleSentenceState extends State<ExampleSentence> {
     final theme = Theme.of(context);
     return LayoutBuilder(
       builder: (context, constraints) {
-        // 量真实渲染宽度下,限行是否溢出——溢出才显示"展开/收起"
+        // 用与渲染完全一致的 spans(含标粗)测量溢出——加粗更宽,
+        // 若用纯文本测会低估,导致"加粗后才溢出"的句子没有展开按钮
+        final spans = buildHighlightSpans(
+          sentence: widget.sentence,
+          highlightWord: widget.highlightWord,
+          style: style,
+        );
         final tp = TextPainter(
-          text: TextSpan(style: style, text: widget.sentence),
+          text: TextSpan(style: style, children: spans),
           maxLines: widget.collapsedLines,
           textDirection: TextDirection.ltr,
           textScaler: MediaQuery.textScalerOf(context),
@@ -53,14 +59,7 @@ class _ExampleSentenceState extends State<ExampleSentence> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text.rich(
-              TextSpan(
-                style: style,
-                children: buildHighlightSpans(
-                  sentence: widget.sentence,
-                  highlightWord: widget.highlightWord,
-                  style: style,
-                ),
-              ),
+              TextSpan(style: style, children: spans),
               maxLines: _expanded ? null : widget.collapsedLines,
               overflow: _expanded ? TextOverflow.visible : TextOverflow.ellipsis,
             ),
@@ -110,6 +109,9 @@ List<TextSpan> buildHighlightSpans({
   final lower = sentence.toLowerCase();
   final w = word.toLowerCase();
   if (w.length > lower.length || lower == w) return [plain];
+  // toLowerCase 可能改变码点长度(如 'İ'→'i̇'),导致 lower 的索引无法映射回原串
+  // → substring 越界 RangeError。标粗是增强,绝不因它崩渲染:长度不一致时保守跳过
+  if (lower.length != sentence.length) return [plain];
 
   final bold = (style ?? const TextStyle()).copyWith(fontWeight: FontWeight.bold);
   final spans = <TextSpan>[];

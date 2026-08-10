@@ -363,7 +363,15 @@ class DoubaoApiService extends BaseApiService {
     if (itemsByImage != null && itemsByImage.isNotEmpty) {
       final allItems = <Map<String, dynamic>>[];
       for (final group in itemsByImage) {
-        final imgIdx = group['image_index'] as int? ?? 0;
+        // 安全解析:该模型族可能返回字符串/浮点 image_index(结构输出不可靠)
+        final rawIdx = group['image_index'];
+        final imgIdx = rawIdx is int
+            ? rawIdx
+            : rawIdx is num
+                ? rawIdx.toInt()
+                : rawIdx is String
+                    ? int.tryParse(rawIdx) ?? 0
+                    : 0;
         final items = group['items'] as List<dynamic>? ?? [];
         for (final e in items) {
           final word = e['word']?.toString() ?? '';

@@ -45,9 +45,9 @@ void showWordDetailSheet({
                 ),
               ),
             ),
-            // 单词大标题
+            // 单词大标题:截断词条回退显示完整句子(F8,与列表/横幅一致)
             Text(
-              item.word,
+              item.displayWordText,
               style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 6),
@@ -84,6 +84,8 @@ void showWordDetailSheet({
                 ),
                 child: ExampleSentence(
                   sentence: item.originalSentence!,
+                  // 传原始 word:非截断词正常标粗;截断词匹配不到自动原样
+                  // (数据层没有"截断前的真实词",保守不标,绝不误标)
                   highlightWord: item.word,
                   style: TextStyle(fontStyle: FontStyle.italic, color: Colors.grey[700]),
                 ),

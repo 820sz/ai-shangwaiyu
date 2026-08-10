@@ -49,42 +49,58 @@ class UpdateService {
       );
 
   /// 检查 GitHub 最新 Release。
-  /// 返回 [UpdateInfo]；未配置仓库/无 APK 资源/网络失败均返回 null(静默)。
+  /// 返回 [UpdateInfo]；未配置仓库返回 null(静默);网络全失败抛异常(调用方提示),
+  /// 绝不谎报"已是最新"。
   /// 2026-08-09 修复:检查接口裸连 api.github.com(国内经常连不上,
   /// 用户实测"收不到自动更新")——改为直连 + 镜像前缀竞速。
   /// 2026-08-10 修复:竞速"先到先得"会拿镜像缓存的旧 latest 响应(用户实测
   /// "自动更新还是 20 版本")——改为收集所有成功响应,取 tag 版本号最大者。
+  /// 2026-08-11 修复(F3):直连(权威)被 15s 截断收割——直连 >15s 时 stale
+  /// 镜像响应胜出,又回到"自动更新还是 20 版本"。改直连独立等 20s 优先,
+  /// 直连失败才用镜像;全失败抛异常,不再静默 null。
   static Future<UpdateInfo?> checkLatestRelease() async {
     if (AppConstants.githubOwner.isEmpty) return null;
     final base =
         'https://api.github.com/repos/'
         '${AppConstants.githubOwner}/${AppConstants.githubRepo}/releases/latest';
-    final candidates = <String>[
-      base,
-      for (final p in _mirrorPrefixes) '$p$base',
-    ];
 
-    final responses = <Map<String, dynamic>>[];
+    // 权威直连独立等待(Dio 自带 10s receiveTimeout,外框 20s 兜底),
+    // 不被镜像的竞速截断打断——直连成功就完全信任它
+    final direct = await _fetchRelease(base).timeout(
+      const Duration(seconds: 20),
+      onTimeout: () => null,
+    );
+    if (direct != null) return _buildInfo(direct);
+
+    // 直连失败:并发收镜像(15s 截断),取版本最高者(可能 stale,但优于无响应)
+    final mirrorResponses = <Map<String, dynamic>>[];
     final pending = <Future<void>>[];
-    for (final url in candidates) {
-      pending.add(() async {
-        try {
-          final resp = await _dio.get(url, options: _apiOpts());
-          final d = resp.data as Map<String, dynamic>?;
-          if (d != null) responses.add(d);
-        } catch (_) {
-          // 单候选失败:忽略,等别的候选
-        }
-      }());
+    for (final p in _mirrorPrefixes) {
+      pending.add(_fetchRelease('$p$base').then((d) {
+        if (d != null) mirrorResponses.add(d);
+      }));
     }
-    // 等所有候选都回(镜像快、直连慢,15s 内),取版本最高的响应
     await Future.wait(pending).timeout(
       const Duration(seconds: 15),
       onTimeout: () => <void>[],
     );
-    if (responses.isEmpty) return null;
-    final d = pickLatest(responses);
+    if (mirrorResponses.isEmpty) {
+      throw Exception('无法连接 GitHub,请检查网络后重试');
+    }
+    return _buildInfo(pickLatest(mirrorResponses));
+  }
 
+  static Future<Map<String, dynamic>?> _fetchRelease(String url) async {
+    try {
+      final resp = await _dio.get(url, options: _apiOpts());
+      final d = resp.data as Map<String, dynamic>?;
+      return (d != null && d.isNotEmpty) ? d : null;
+    } catch (_) {
+      return null; // 单候选失败:忽略,等别的候选
+    }
+  }
+
+  static Future<UpdateInfo?> _buildInfo(Map<String, dynamic> d) async {
     final tag = (d['tag_name'] as String? ?? '').replaceFirst(
       RegExp(r'^v'), '',
     );
