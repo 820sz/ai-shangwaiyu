@@ -1,9 +1,9 @@
 # PLAN.md — AI上外语 (readflow)
 
 ## 状态
-- 当前版本:**v1.2.26**(待发布;代码完成,analyze 0 error / 77 测试全绿)
-- 当前阶段:✅ 例句精简+标粗 / 翻译复制保存 / process_chat 拆分,三项代码完成,待构建+真机验收
-- 状态协议:DONE_WITH_CONCERNS(拆分是纯搬移+改名,行为零变化;UI 效果待真机验证)
+- 当前版本:**v1.2.26**(Release 已发 = Latest,资产 size 21672281 与本地核对一致)
+- 当前阶段:✅ 例句精简+标粗 / 翻译复制保存 / process_chat 拆分,**用户真机验收通过**(2026-08-10)
+- 状态协议:DONE(代码验证全绿 + 真机验收通过)
 
 ## 需求摘要
 **项目**:AI上外语(Flutter 英语学习 App,D:\readflow)
@@ -27,12 +27,12 @@
 
 ## 版本记录(最新在前)
 
-### v1.2.26 — 例句精简+出处词标粗 / 全文翻译复制保存 / process_chat 拆分(2026-08-10,待发布)
+### v1.2.26 — 例句精简+出处词标粗 / 全文翻译复制保存 / process_chat 拆分(2026-08-10,Release 已发 = Latest,**用户真机验收通过**)
 - **例句精简(方案1)**:新组件 `widgets/example_sentence.dart`——出处例句限行 3 行 + 超限显示"展开/收起";**出处句中目标词加粗**(buildHighlightSpans 纯函数,12 测试:大小写不敏感/词边界守卫防 "cat" 标进 "concatenate"/变形词不标/词条化截断词不标/word==整句不标)。三处接入:识别结果页详细模式、词详情 BottomSheet、词库词汇详情页
 - **全文翻译复制/保存**:AppBar 加 ⋮ 菜单(翻译存在时)——"复制全文翻译"(内置 Clipboard)+"保存/分享翻译"(自写原生通道 app/share_text,ACTION_SEND 系统分享面板,零新依赖;存到微信/备忘录/文件管理器)
 - **process_chat 拆分(安全拆,用户确认)**:3766 → 3184 行(-582),4 个新文件:follow_up_models(FollowUpMessage/FollowUpSavedConversation 公开化)/ follow_up_bubble(AiFollowUpBubble+ThinkingBlock)/ scroll_buttons(FollowUpScrollButtons+ScrollToTopButton)/ model_avatars(userAvatar/aiAvatar 等 6 方法)。纯搬移+改名,行为零变化,每批 analyze+测试全绿。顺手归位 1 处错位注释
-- 验证:analyze 21 存量 info 零新增 / 77 测试全绿(+12 新增)
-- 待真机:①例句 3 行+展开、目标词标粗效果 ②翻译菜单两项 ③拆分后整体流程(识别/追问/保存/恢复)走一遍
+- 验证:analyze 21 存量 info 零新增 / 77 测试全绿(+12 新增);aapt versionName=1.2.26;资产 size 21672281 核对一致
+- 真机验收(2026-08-10 用户):例句标粗/展开 ✓ 翻译菜单两项 ✓ 拆分后全流程回归 ✓
 
 ### v1.2.25 — 词条截断终局:overflow ellipsis→visible(2026-08-10,commit 4d2cd2b,**用户真机验证已解决**)
 - 最终生效改动:详细/总览词条 Text `overflow: TextOverflow.ellipsis` → `visible`(maxLines 早已 null)。从 Flutter 语义封死省略号路径
@@ -155,9 +155,9 @@
 
 ## 验证目标(当前版 v1.2.26)
 - [x] flutter analyze 0 error(21 存量 info 零新增)/ 77 测试全绿(+12 例句标粗匹配)
-- [ ] **真机**:例句限行 3 行+展开/收起;出处句中目标词标粗(详细模式/词详情/词库详情三处)
-- [ ] **真机**:文章页 AppBar ⋮ 菜单 → 复制全文翻译(剪贴板)、保存/分享翻译(系统分享面板)
-- [ ] **真机**:拆分后全流程回归——识别/追问/保存会话/恢复会话/模型头像切槽位
+- [x] **真机**:例句限行 3 行+展开/收起;出处句中目标词标粗(详细模式/词详情/词库详情三处)— 用户 2026-08-10 验收通过
+- [x] **真机**:文章页 AppBar ⋮ 菜单 → 复制全文翻译(剪贴板)、保存/分享翻译(系统分享面板)— 用户 2026-08-10 验收通过
+- [x] **真机**:拆分后全流程回归——识别/追问/保存会话/恢复会话/模型头像切槽位 — 用户 2026-08-10 验收通过
 
 ## 当前任务 / 待办
 - [ ] 构建 v1.2.26(bump pubspec + aapt 验证 versionName)→ 用户真机验收
@@ -227,7 +227,6 @@
 - 用户线索关键提示:"近几次词汇板块 UI 调整后就这样"+"原来正常"——但代码审查确认 UI 一直放开;数据层词条化是模型近端行为(v1.2.10 时代用户就反馈过截断,当时误判为 UI)
 
 ## 断点快照(2026-08-10)
-- 正在做:**v1.2.26 三项代码完成**(例句精简+标粗 / 翻译复制保存 / process_chat 拆分)
-- 卡在哪:无;验证:analyze 0 error / 77 测试全绿
-- 下一步:①bump pubspec 1.2.25+35→1.2.26+36 → ②flutter build apk --release --target-platform android-arm64 → ③aapt dump badging 验证 versionName=1.2.26 → ④gh release create v1.2.26(先 build 完再 release!)→ ⑤用户真机验收三件事(见验证目标)+ 全流程回归
-- 备注:auto 更新链路用户已确认真机跑通(v1.2.25 卸载重装是手动;自动更新提示已收到——镜像竞速生效)
+- 正在做:**v1.2.26 已发布且用户真机验收通过**——DONE,无卡点
+- 下一步:无排期任务。Backlog 可选:process_chat 二期拆分(强依赖区)/ COS 主源(等 bucket 域名)/ 成就徽章等新功能;有新需求开新会话
+- 备注:auto 更新链路真机跑通 ✓;分类器故障时发布命令 `!` 前缀用户自跑最稳(gh release create 路径用正斜杠)
