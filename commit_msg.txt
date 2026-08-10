@@ -1,3 +1,0 @@
-docs: PLAN.md 同步 v1.2.18/1.2.19 记录与待办
-
-Co-Authored-By: Claude <noreply@anthropic.com>
