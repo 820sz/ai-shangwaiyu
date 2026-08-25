@@ -30,8 +30,10 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
   late final TextEditingController _secondaryModelCtrl;
   String _secondaryThinking = 'disabled';
 
-  /// 模型列表(异步填充)
-  List<String> _primaryModels = DoubaoApiService.fallbackDoubaoModels;
+  /// 模型列表(异步填充)。
+  /// 主槽位 = 主槽位兜底清单(豆包系 + DeepSeek 视觉模型,2026-08-21);
+  /// 副槽位 = DeepSeek 文本清单。
+  List<String> _primaryModels = AppConstants.primaryFallbackModels;
   List<String> _secondaryModels = AppConstants.deepseekFallbackModels;
 
   /// 加载中
@@ -133,14 +135,15 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
     });
 
     // 两槽位拉取 /models 后按模型族过滤:
-    // 主=豆包系列,副=DeepSeek 系列 —— 方舟聚合端点会混入他族模型,过滤避免误导
+    // 主=不过滤(用户可配豆包/DeepSeek 视觉等任意兼容端点);
+    // 副=DeepSeek 系列 —— 方舟聚合端点会混入他族模型,过滤避免误导
     if (apiKey.isNotEmpty) {
       final models = await DoubaoApiService.fetchModels(
         baseUrl,
         apiKey,
-        allowPrefixes: isPrimary ? const ['doubao'] : const ['deepseek'],
+        allowPrefixes: isPrimary ? const [] : const ['deepseek'],
         fallback: isPrimary
-            ? DoubaoApiService.fallbackDoubaoModels
+            ? AppConstants.primaryFallbackModels
             : AppConstants.deepseekFallbackModels,
       );
       if (mounted) {

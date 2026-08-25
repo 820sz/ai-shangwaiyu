@@ -2,8 +2,8 @@
 
 ## 状态
 - 当前版本:**v1.2.26**(Release 已发 = Latest,资产 size 21672281 与本地核对一致)
-- 当前阶段:✅ 例句精简+标粗 / 翻译复制保存 / process_chat 拆分,**用户真机验收通过**(2026-08-10)
-- 状态协议:DONE(代码验证全绿 + 真机验收通过)
+- 当前阶段:🟡 **v1.3.0 开发中** — 用户人工测试 6 项(0~5)修复,范围已确认全做,设计待用户确认后动工
+- 状态协议:NEEDS_CONTEXT(设计已出,等用户 30 秒确认)
 
 ## 需求摘要
 **项目**:AI上外语(Flutter 英语学习 App,D:\readflow)
@@ -26,6 +26,39 @@
 **被否掉的方案**:只改设置页标签不角色化;单一 API 槽位。
 
 ## 版本记录(最新在前)
+
+### v1.3.0 — 用户人工测试 6 项修复(2026-08-XX,开发中)
+**背景**:用户真机人工测试发现 6 项:
+- 0. 主 API 界面无法唤起 DeepSeek 模型(似乎与豆包捆绑);DS 已上线识图模型需兼容调取
+- 1. 追问抽屉 AI 回复思考档位被砍(用户本意只砍识图的思考)
+- 2. 用户手动补充的词汇需要 AI 自动补全(释义/词性等,现需全手动)
+- 3. 识别结果页需要"AI 二次识别补充"(入口不能在底部 UI)
+- 4. 追问抽屉用户消息支持"编辑修改"
+- 5. 追问抽屉的 AI 收不到识别结果(截图实锤:"这页主要讲了什么"→ AI 称未收到内容)
+
+**根因与设计**:
+- **问题 0**:主槽位 fetchModels 按前缀硬过滤 `['doubao']` + 兜底/菜单清单纯豆包系(模型列表里根本没有 DS 模型,手动填 ID 才能用)。修复:主槽位列表不过滤、兜底清单加 DS 视觉模型 `deepseek-v4-flash-vision-exp`(DS 2026-08-21 官方上线多模态,/chat/completions OpenAI 兼容);追问抽屉主分组/底部栏菜单从"硬编码豆包清单"改为"当前主槽位模型 + 主槽位兜底清单";请求体 detail 字段仅豆包系发(DS 不认未知字段防 400);思考档位映射按模型族(豆包 minimal/low/medium/high,DS low/medium/high,F6 fallback 保底);头像判断加 DS 视觉
+- **问题 1**:v1.2.17 本意只砍识图,但实现把全局 thinkingOptions 砍成 2 档 + ApiEndpointConfig.thinking 把 medium/high 迁移成 low,追问档位一并丢失。修复:新增独立追问思考档位 keyFollowUpThinking(4 档:不思考/低/中/高),追问面板读写它;识图保持 2 档(8-08 决策不变);追问请求按追问档位构造思考参数(DS 不认枚举有 fallback)
+- **问题 5**:_doFollowUpStream 默认上下文只有"已识别词汇"列表(全文翻译模式下为空!)+ followUpStream 是纯文本请求不带图。修复:默认上下文 = 词汇列表 + 全文翻译段落(原文+译文);支持图片:主槽位且模型支持视觉时附识别图片 data URI,图片被拒(400)自动降级纯文本重试
+- **问题 2**:手动添加词汇对话框新增「✨ AI 补全」按钮——填词后点按调当前追问端点(JSON 返回 释义/词性/例句/语法)回填表单可改;无 AI 配置时禁用
+- **问题 3**:识别结果 AppBar 右上角新增"再识别"图标(避开底部栏)——对当前全部图片重新识别,提示词"只找遗漏不重复已有词",按 word 去重合并
+- **问题 4**:追问用户气泡长按 → 编辑 → 替换该消息 + 删除其后 AI 回复 + 自动重新发送生成(防手误重问)
+
+**验证目标**:analyze 0 error / 单测(思考映射/请求体构建/合并去重/上下文组装)/ 真机验收清单(6 项逐一)
+
+**阶段 1 完成(2026-08-25)**:问题 0/1/5 代码+验证全绿:
+- analyze 21 存量 info 零新增(0 error / 0 warning)
+- 96 测试全绿(+19:follow_up_context 4 / model_capability 10 / thinking_params 扩展 5)
+- 修改文件:constants.dart(deepseekVisionModel/keyFollowUpThinking/followUpThinkingOptions/primaryFallbackModels)、api_endpoint.dart(supportsMinimalEffort 按模型名推断 + buildThinkingParamsFor 4 档)、doubao_api.dart(shouldSendDetailFlag/modelSupportsImages/追随带图+降级/imageDataUrisFor)、api_settings.dart(主槽位不过滤)、input_home.dart(菜单换新清单)、process_chat.dart(追问档位独立/上下文+图片/菜单清单)、新文件 utils/follow_up_context.dart + 2 个新测试文件
+- ⚠️ 环境踩坑:本会话 flutter 命令需 FLUTTER_ALREADY_LOCKED=true + 全盘权限(danger-full-access)才能跑(沙箱只读 D:\flutter 导致 lockfile CreateFile failed 5);analyze 首跑 169s 后续 ~10s;docker 外的网络需梯子
+
+**阶段 2 完成(2026-08-25)**:问题 2/3/4 代码+验证全绿:
+- analyze 0 error / 0 warning,104 测试全绿(+8:parseWordInfo 4 / mergeSupplementResults 4)
+- 问题 2:`completeWordInfo` 非流式补全(思考 disabled,端点=当前追问槽位)+ `parseWordInfo` 纯函数 + 添加词汇对话框「✨ AI 补全」(只回填空字段;未配置禁用)
+- 问题 3:`_supplementMode` + `_reRecognize`(入口 AppBar auto_awesome 图标)+ `extractVocabularyStream(excludeWords)` 提示词加"已识别清单只找遗漏" + `mergeSupplementResults` 去重合并 + 空结果回结果页提示
+- 问题 4:用户气泡长按编辑 → `_editFollowUpMessage`:替换 + 截断其后消息 + 自动重发
+- 新文件:utils/supplement_merge.dart;测试:supplement_and_word_info_test.dart
+- 待办:阶段 3(构建 v1.3.0 + 真机验收 6 项 + Release)
 
 ### v1.2.26 — 例句精简+出处词标粗 / 全文翻译复制保存 / process_chat 拆分(2026-08-10,Release 已发 = Latest,**用户真机验收通过**)
 - **例句精简(方案1)**:新组件 `widgets/example_sentence.dart`——出处例句限行 3 行 + 超限显示"展开/收起";**出处句中目标词加粗**(buildHighlightSpans 纯函数,12 测试:大小写不敏感/词边界守卫防 "cat" 标进 "concatenate"/变形词不标/词条化截断词不标/word==整句不标)。三处接入:识别结果页详细模式、词详情 BottomSheet、词库词汇详情页
@@ -159,9 +192,12 @@
 - [x] **真机**:文章页 AppBar ⋮ 菜单 → 复制全文翻译(剪贴板)、保存/分享翻译(系统分享面板)— 用户 2026-08-10 验收通过
 - [x] **真机**:拆分后全流程回归——识别/追问/保存会话/恢复会话/模型头像切槽位 — 用户 2026-08-10 验收通过
 
-## 当前任务 / 待办
-- [ ] 构建 v1.2.26(bump pubspec + aapt 验证 versionName)→ 用户真机验收
-- [ ] 发布流程:先 build 完成再 gh release create(两次踩坑:挂了旧/空 APK)
+## 当前任务 / 待办(v1.3.0)
+- [ ] 用户确认设计(问题 2 触发方式 / 问题 3 入口位置两个选择)
+- [ ] 阶段 1 曳光弹:主槽位解绑豆包(问题 0)+ 追问思考档位独立(问题 1)+ 追问上下文携带(问题 5)→ 真机/接口验证通过
+- [ ] 阶段 2 核心:AI 补全(问题 2)+ 二次识别(问题 3)+ 消息编辑(问题 4)
+- [ ] 阶段 3 打磨:错误处理/加载态/降级链路
+- [ ] 发布:bump pubspec v1.3.0 + aapt 验证 versionName + 全量测试 + Release(先 build 完成再 gh release create)
 
 ## Backlog
 - [ ] 成就徽章系统 / 词汇量测试 / Material You 动态主题(研究期已列,未排期)
@@ -177,6 +213,10 @@
 - [x] 自动更新链路修复链:1.2.3 .part→.apk → 1.2.5 FileProvider authority → 1.2.9 REQUEST_INSTALL_PACKAGES(**等待真机端到端确认**)
 
 ## 决策记录
+- 2026-08-XX v1.3.0 问题2 手动加词 AI 补全=**手动点「✨ AI 补全」按钮**(用户拍板,非保存自动)— 不耗 token 不等待,回填表单可改
+- 2026-08-XX v1.3.0 问题3 二次识别入口=**AppBar 右上角图标**(用户拍板,非底部 UI、非列表区)— 与全选/详细切换并列
+- 2026-08-XX v1.3.0 追问思考档位**独立存储**(keyFollowUpThinking,4 档)— v1.2.17 只砍识图,追问档位不该连坐;识图维持 2 档
+- 2026-08-XX v1.3.0 问题 5 追问携带识别结果=**词汇+全文翻译段落+图片(data URI)**,图片被拒自动降级纯文本 — AI 真正"看到"页面,旧文本模型不崩
 - 2026-08-10 例句精简=限行 3 行+展开(方案1)+ 出处词标粗(用户追加)— 冗长例句压缩列表高度,词条仍完整可读;标粗匹配保守(找不到/变形不标,绝不改变例句内容)
 - 2026-08-10 process_chat 拆分=安全拆(用户确认):只搬零/低依赖模块,强依赖 State 的追问面板/气泡/AI 区留待二期单独评估 — 用户铁律"不要越改bug越多",纯搬移行为零变化
 - 2026-08-10 全文翻译保存=自写原生 share_text 通道(ACTION_SEND),不用 share_plus — 零新依赖;open_filex 已因挂起 bug 弃用,不可复用
@@ -226,7 +266,8 @@
 - **修复(显示层回退)**:word 以省略号结尾且存在更长的 originalSentence → 显示 originalSentence(详细模式 _displayWord + 总览 WordListTile 同逻辑)
 - 用户线索关键提示:"近几次词汇板块 UI 调整后就这样"+"原来正常"——但代码审查确认 UI 一直放开;数据层词条化是模型近端行为(v1.2.10 时代用户就反馈过截断,当时误判为 UI)
 
-## 断点快照(2026-08-10)
-- 正在做:**v1.2.26 已发布且用户真机验收通过**——DONE,无卡点
-- 下一步:无排期任务。Backlog 可选:process_chat 二期拆分(强依赖区)/ COS 主源(等 bucket 域名)/ 成就徽章等新功能;有新需求开新会话
+## 断点快照(2026-08-XX)
+- 正在做:**v1.3.0 设计完成,等用户确认**——6 项根因全部定位(见 v1.3.0 设计)
+- 下一步:用户确认设计后按阶段 1(问题 0/1/5)→ 阶段 2(问题 2/3/4)动工
+- 关键事实:DeepSeek 2026-08-21 上线 `deepseek-v4-flash-vision-exp`(官方视觉 API,OpenAI 兼容);主槽位模型列表过滤是问题 0 根因
 - 备注:auto 更新链路真机跑通 ✓;分类器故障时发布命令 `!` 前缀用户自跑最稳(gh release create 路径用正斜杠)

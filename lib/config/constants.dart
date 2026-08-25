@@ -11,11 +11,28 @@ class AppConstants {
   /// DeepSeek 文本模型(2026-07-24 起 deepseek-chat/reasoner 已停用,仅剩 v4 系列)
   static const String deepseekBaseUrl = 'https://api.deepseek.com';
   static const String deepseekChatModel = 'deepseek-v4-flash';
+  /// DeepSeek 多模态(视觉)模型 — 2026-08-21 官方上线,OpenAI 兼容 /chat/completions
+  static const String deepseekVisionModel = 'deepseek-v4-flash-vision-exp';
 
   /// 副槽位(专项文本)内置模型清单 — 拉取 /models 失败时的兜底
   static const List<String> deepseekFallbackModels = [
     'deepseek-v4-flash', // 快速通用,默认
     'deepseek-v4-pro',   // 高能力,思考模式
+  ];
+
+  /// 主槽位(多模态)内置模型清单 — 拉取 /models 失败时的兜底。
+  /// 2026-08-21:主槽位不再绑死豆包——加入 DeepSeek 视觉模型(用户可配 DS key 走识图)。
+  static const List<String> primaryFallbackModels = [
+    'doubao-seed-2-0-mini-260715',   // 最快：速度和成本优先
+    'doubao-seed-1-6-flash-250615',  // 闪推：上一代极速
+    'doubao-seed-2-1-turbo-260628',  // 新 turbo
+    'doubao-seed-2-0-lite-260428',   // 当前默认
+    'doubao-seed-2-1-pro-260628',
+    'doubao-seed-2-0-pro-260215',
+    'doubao-seed-1-6-vision-250815',
+    'doubao-seed-1-6-250615',
+    'doubao-seed-evolving',
+    'deepseek-v4-flash-vision-exp',  // DeepSeek 视觉(2026-08-21 上线)
   ];
 
   // ── 本地存储 Key ──
@@ -31,6 +48,17 @@ class AppConstants {
   static const String keyDeepseekThinking = 'deepseek_thinking';
   /// 追问对话使用的槽位:primary=多模态 / secondary=专项文本
   static const String keyFollowUpSlot = 'follow_up_slot';
+  /// 追问对话的思考档位(独立于识图档位)— v1.3.0 起追问恢复 4 档:
+  /// 识图(槽位 thinking)只留 2 档是 2026-08-08 用户对应识别延迟的决策,
+  /// 追问抽屉不该连坐,v1.3.0 拆分独立存储。
+  static const String keyFollowUpThinking = 'follow_up_thinking';
+  /// 追问思考档位(4 档,跨模型族通用文案;识图仍用 [thinkingOptions] 2 档)
+  static const Map<String, String> followUpThinkingOptions = {
+    'disabled': '不思考',
+    'low': '低',
+    'medium': '中',
+    'high': '高',
+  };
   /// 暂存的识图会话列表(SavedSession.toJson 的 List)
   static const String keySavedSessions = 'saved_sessions';
   /// 最多保留的暂存会话数

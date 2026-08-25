@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -11,6 +11,8 @@ import '../../models/vocabulary.dart';
 import '../../providers/vocab_provider.dart';
 import '../../services/api_endpoint.dart';
 import '../../services/doubao_api.dart';
+import '../../utils/follow_up_context.dart';
+import '../../utils/supplement_merge.dart';
 import 'widgets/word_list_tile.dart';
 import 'widgets/ai_result_header.dart';
 import 'widgets/word_detail_sheet.dart';
@@ -116,6 +118,19 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
   /// 追问当前显示的模型名(按槽位)
   String get _followUpModel => _followUpEndpoint.model;
 
+  /// 追问思考档位 — 独立存储(keyFollowUpThinking,4 档):
+  /// v1.2.17 只该砍识图思考档位,追问不该连坐(v1.3.0 问题 1)。
+  /// 非法值一律回 disabled,保证请求与 UI 一致。
+  String get _followUpThinking {
+    final v = Hive.box(
+      AppConstants.hiveBoxSettings,
+    ).get(AppConstants.keyFollowUpThinking);
+    return (v is String &&
+            (v == 'disabled' || v == 'low' || v == 'medium' || v == 'high'))
+        ? v
+        : 'disabled';
+  }
+
   // ── 追问抽屉（ValueNotifier 确保跨路由更新） ──
   final ValueNotifier<List<FollowUpMessage>> _followUpMessages = ValueNotifier(
     [],
@@ -150,6 +165,10 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
 
   /// 本轮识别从第几张图开始（追加模式 = 上次的图片数；首次 = 0）
   int _streamStartIndex = 0;
+
+  /// 补充识别模式(v1.3.0 问题 3):对全部图片重新识别,只并入遗漏项。
+  /// 为 true 时 [_onStreamDone] 走去重合并分支,结束后复位。
+  bool _supplementMode = false;
 
   @override
   void initState() {
@@ -401,6 +420,9 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         sourceBook: widget.sourceBook,
         sourcePage: widget.sourcePage,
         analysisMode: widget.analysisMode,
+        // 补充识别:告知已有词,只找遗漏(v1.3.0 问题 3)
+        excludeWords:
+            _supplementMode ? _results.map((v) => v.word).toList() : const [],
       );
 
       _subscription = stream.listen(
@@ -510,6 +532,22 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         analysisMode: widget.analysisMode,
       );
       if (rawMaps.isEmpty) {
+        if (_supplementMode) {
+          // 补充识别没找到遗漏 → 回结果页 + 提示,不算错误(v1.3.0 问题 3)
+          setState(() {
+            _supplementMode = false;
+            _phase = _StreamPhase.results;
+          });
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('AI 未发现新的遗漏内容'),
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+          }
+          return;
+        }
         final msg = widget.analysisMode == AppConstants.analysisModeFullText
             ? 'AI 未识别到可翻译的文字内容。'
             : 'AI 未识别到标记的单词，请确认图片中有标记痕迹。';
@@ -566,15 +604,19 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
 
         setState(() {
           _phase = _StreamPhase.results;
-          if (_streamStartIndex == 0) {
+          if (_streamStartIndex == 0 && !_supplementMode) {
             // 首次识别:整组替换,默认不选中(长按才选中)
             _results = results;
             _selected.clear();
+          } else if (_supplementMode) {
+            // 补充识别:只并入遗漏项,按 (word, wordType) 去重(v1.3.0 问题 3)
+            _results = mergeSupplementResults(_results, results);
           } else {
             // 追加识别:新结果接在旧结果后;新词默认不选中,旧选中保留
             _results = [..._results, ...results];
           }
           _streamStartIndex = 0; // 本轮结束复位,下次从头开始
+          _supplementMode = false; // 补充识别结束复位
         });
       }
       // 滚动到 AI 结果区域顶部
@@ -1098,7 +1140,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                           vertical: 8,
                         ),
                         itemCount: msgs.length,
-                        itemBuilder: (_, i) => _buildFollowUpBubble(msgs[i]),
+                        itemBuilder: (_, i) => _buildFollowUpBubble(msgs[i], i),
                       ),
                       // 回顶/回底小按钮（楼层高时方便跳转）
                       Positioned(
@@ -1238,18 +1280,31 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     String content = '';
 
     String finalContext;
+    List<String>? imageUris = <String>[];
     if (_followUpContextOverride != null) {
+      // 外部预设上下文(如"询问 AI 详解")优先;已带完整文本,不再附图
       finalContext = _followUpContextOverride!;
       _followUpContextOverride = null; // 一次性消费
+      imageUris = null;
     } else {
-      final ctx = StringBuffer();
-      if (_results.isNotEmpty) {
-        ctx.writeln('已识别的词汇：');
-        for (final v in _results) {
-          ctx.writeln('- ${v.word}: ${v.translation ?? ""} (${v.wordType})');
+      // 默认上下文 = 识别词汇 + 全文翻译段落(v1.3.0 问题 5:
+      // 原实现只有词汇列表,全文翻译模式下为空 → AI 说"没收到内容")
+      finalContext = buildFollowUpContext(
+        results: _results,
+        paragraphs: _fullTextParagraphs,
+      );
+      // 模型支持视觉且当前页有图 → 附识别图片,AI 能真正"看到"页面;
+      // 不支持时只发文本(避免每次追问 400),服务层另有图片被拒降级兜底
+      if (modelSupportsImages(_followUpEndpoint.model) && _images.isNotEmpty) {
+        try {
+          imageUris = await _api.imageDataUrisFor(_images);
+        } catch (e) {
+          debugPrint('ReadFlow followUp image prep fallback: $e');
+          imageUris = null;
         }
+      } else {
+        imageUris = null;
       }
-      finalContext = ctx.toString();
     }
 
     void updateMsg({bool done = false}) {
@@ -1274,6 +1329,8 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         question,
         context: finalContext,
         endpoint: _followUpEndpoint,
+        imageDataUris: imageUris,
+        thinkingLevel: _followUpThinking,
       );
 
       _followUpSub = stream.listen(
@@ -1308,7 +1365,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     }
   }
 
-  Widget _buildFollowUpBubble(FollowUpMessage msg) {
+  Widget _buildFollowUpBubble(FollowUpMessage msg, int index) {
     final isUser = msg.role == 'user';
 
     if (!isUser) {
@@ -1318,7 +1375,8 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
       );
     }
 
-    // 用户气泡（右侧）
+    // 用户气泡（右侧）— 长按可编辑(v1.3.0 问题 4):
+    // 手误打错字误发后可改,改完自动重新发送并重新生成 AI 回复
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(
@@ -1326,21 +1384,24 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         mainAxisAlignment: MainAxisAlignment.end,
         children: [
           Flexible(
-            child: Container(
-              constraints: BoxConstraints(
-                maxWidth: MediaQuery.of(context).size.width * 0.75,
-              ),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: const Color(0xFF4A90D9).withAlpha(20),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Text(
-                msg.content,
-                style: const TextStyle(
-                  fontSize: 13,
-                  color: Colors.black87,
-                  height: 1.4,
+            child: GestureDetector(
+              onLongPress: () => _showEditFollowUpDialog(index, msg.content),
+              child: Container(
+                constraints: BoxConstraints(
+                  maxWidth: MediaQuery.of(context).size.width * 0.75,
+                ),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF4A90D9).withAlpha(20),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  msg.content,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: Colors.black87,
+                    height: 1.4,
+                  ),
                 ),
               ),
             ),
@@ -1350,6 +1411,68 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         ],
       ),
     );
+  }
+
+  /// 追问消息编辑对话框:长按用户气泡 → 改文本 → 确认后重发。
+  void _showEditFollowUpDialog(int index, String original) {
+    final ctrl = TextEditingController(text: original);
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('编辑提问'),
+        content: TextField(
+          controller: ctrl,
+          minLines: 1,
+          maxLines: 5,
+          autofocus: true,
+          decoration: const InputDecoration(
+            border: OutlineInputBorder(),
+            isDense: true,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              ctrl.dispose();
+              Navigator.pop(ctx);
+            },
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () {
+              final newText = ctrl.text.trim();
+              ctrl.dispose();
+              Navigator.pop(ctx);
+              if (newText.isEmpty || newText == original) return;
+              _editFollowUpMessage(index, newText);
+            },
+            child: const Text('修改并重新发送'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 编辑追问用户消息:替换内容 + 删除其后消息 + 重新生成 AI 回复。
+  void _editFollowUpMessage(int index, String newText) {
+    final msgs = List<FollowUpMessage>.from(_followUpMessages.value);
+    if (index < 0 || index >= msgs.length) return;
+    _followUpSub?.cancel(); // 若有正在生成的流,先停
+    msgs[index] = FollowUpMessage(role: 'user', content: newText);
+    final trimmed = msgs.take(index + 1).toList();
+    final aiMsg = FollowUpMessage(
+      role: 'ai',
+      content: '',
+      streaming: true,
+      model: _followUpModel,
+    );
+    trimmed.add(aiMsg);
+    _followUpMessages.value = trimmed;
+    _followUpLoading.value = true;
+    _followUpDirty = true;
+    _pendingFollowUpScroll = true;
+    _doFollowUpStream(newText, trimmed.length - 1);
   }
 
 
@@ -1378,6 +1501,13 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
             // 暂存入口已移入返回确认弹窗的「暂时离开」——不再占用 AppBar
             if (_phase == _StreamPhase.results &&
                 widget.analysisMode != AppConstants.analysisModeFullText) ...[
+              // AI 再识别补漏(v1.3.0 问题 3)— 入口在 AppBar,不占底部 UI:
+              // 发现大量疏漏时对同图重新识别,只并入遗漏项
+              IconButton(
+                icon: const Icon(Icons.auto_awesome),
+                tooltip: 'AI 再识别（补漏）',
+                onPressed: _reRecognize,
+              ),
               IconButton(
                 icon: const Icon(Icons.checklist),
                 tooltip: '全选/全不选',
@@ -1600,6 +1730,13 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
   Widget _buildCompactModelPickerInner() {
     final secConfigured = ApiEndpointConfig.secondary.isConfigured;
     final isSecondary = _followUpSlot == 'secondary' && secConfigured;
+    // 主分组模型 = 已保存的主模型 + 主槽位兜底清单(去重,保证当前值可选;
+    // 2026-08-21 起含 DeepSeek 视觉模型,主槽位不再绑死豆包)
+    final primaryModels = <String>{
+      if (ApiEndpointConfig.primary.model.isNotEmpty)
+        ApiEndpointConfig.primary.model,
+      ...AppConstants.primaryFallbackModels,
+    }.toList();
     // 副分组模型 = 已保存的副模型 + 内置清单(去重,保证当前值可选)
     final secModels = <String>{
       if (ApiEndpointConfig.secondary.model.isNotEmpty)
@@ -1627,7 +1764,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
       itemBuilder: (_) => [
         // ── 主 API(多模态) ──
         groupTitle(isSecondary ? '主 API(多模态)' : '主 API'),
-        ...DoubaoApiService.fallbackDoubaoModels.map((m) {
+        ...primaryModels.map((m) {
           final isSel = _followUpSlot == 'primary' && m == _followUpModel;
           return PopupMenuItem(
             value: 'primary:$m',
@@ -1671,9 +1808,9 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
             );
           }),
         const PopupMenuDivider(),
-        // ── 思考模式(写入当前追问槽位) ──
-        ...AppConstants.thinkingOptions.entries.map((e) {
-          final isSel = e.key == _followUpEndpoint.thinking;
+        // ── 思考模式(追问独立档位,4 档 — v1.3.0 问题 1:识图砍 2 档不该连坐) ──
+        ...AppConstants.followUpThinkingOptions.entries.map((e) {
+          final isSel = e.key == _followUpThinking;
           return PopupMenuItem(
             value: 'think:${e.key}',
             height: 30,
@@ -1710,11 +1847,8 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
           box.put(AppConstants.keyDeepseekModel, v.substring(10));
           box.put(AppConstants.keyFollowUpSlot, 'secondary');
         } else if (v.startsWith('think:')) {
-          // 思考模式写入当前追问槽位对应的 key
-          final key = _followUpSlot == 'secondary'
-              ? AppConstants.keyDeepseekThinking
-              : AppConstants.keyDoubaoThinking;
-          box.put(key, v.substring(6));
+          // 追问思考档位独立存储——不再写入槽位识图档位(v1.3.0 问题 1)
+          box.put(AppConstants.keyFollowUpThinking, v.substring(6));
         }
         // 抽屉是独立路由,用 notifier 驱动头像/模型标签重建
         _followUpSlotNotifier.value = _followUpSlot;
@@ -1769,7 +1903,11 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
               offset: const Offset(0, -360),
               padding: EdgeInsets.zero,
               itemBuilder: (_) => [
-                ...DoubaoApiService.fallbackDoubaoModels.map((m) {
+                // 当前主槽位模型 + 主槽位兜底清单(2026-08-21 含 DeepSeek 视觉)
+                ...<String>{
+                  if (_currentModel.isNotEmpty) _currentModel,
+                  ...AppConstants.primaryFallbackModels,
+                }.toList().map((m) {
                   final isSel = m == _currentModel;
                   return PopupMenuItem(
                     value: 'model:$m',
@@ -1937,6 +2075,28 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     setState(() {
       _streamStartIndex = _images.length; // 从新图开始识别
       _images.addAll(newFiles);
+      _phase = _StreamPhase.connecting;
+      _reasoningText = '';
+      _contentText = '';
+      _thinkingStartAt = null;
+      _thinkingSeconds = 0;
+      _thinkingExpanded = false;
+    });
+    _startStreaming();
+  }
+
+  /// AI 再识别补漏(v1.3.0 问题 3):对当前全部图片重新识别,
+  /// 提示词告知已有词只找遗漏,结果按 word 去重合并进列表。
+  /// 入口在 AppBar(识别结果页,不在底部 UI)。
+  void _reRecognize() {
+    if (_phase != _StreamPhase.results ||
+        widget.analysisMode == AppConstants.analysisModeFullText ||
+        _images.isEmpty) {
+      return;
+    }
+    setState(() {
+      _supplementMode = true;
+      _streamStartIndex = 0; // 全量重识别
       _phase = _StreamPhase.connecting;
       _reasoningText = '';
       _contentText = '';
@@ -3091,11 +3251,13 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
 
   /// 手动添加词汇：AI 漏识别时用户自行补充。
   /// 新词进入 _results 同一数据源——详细/总览/追问/选中/保存/暂存自动同步。
+  /// v1.3.0 问题 2：加「✨ AI 补全」——填词后一键调 AI 回填 释义/词性/例句/语法。
   void _showAddWordDialog() {
     final wordCtrl = TextEditingController();
     final transCtrl = TextEditingController();
     final posCtrl = TextEditingController();
     final sentenceCtrl = TextEditingController();
+    bool completing = false;
 
     void disposeAll() {
       wordCtrl.dispose();
@@ -3104,88 +3266,154 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
       sentenceCtrl.dispose();
     }
 
+    /// 只回填空字段——用户手动填过的内容不覆盖
+    void applyWordInfo(Map<String, String> info) {
+      if (transCtrl.text.trim().isEmpty) transCtrl.text = info['translation'] ?? '';
+      if (posCtrl.text.trim().isEmpty) posCtrl.text = info['part_of_speech'] ?? '';
+      if (sentenceCtrl.text.trim().isEmpty) {
+        sentenceCtrl.text = info['original_sentence'] ?? '';
+      }
+    }
+
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        title: const Text('添加词汇'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: wordCtrl,
-                decoration: const InputDecoration(
-                  labelText: '单词/短语（必填）',
-                  hintText: '如：unfettered',
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocalState) => AlertDialog(
+          title: const Text('添加词汇'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: wordCtrl,
+                  decoration: const InputDecoration(
+                    labelText: '单词/短语（必填）',
+                    hintText: '如：unfettered',
+                  ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: transCtrl,
-                decoration: const InputDecoration(labelText: '释义'),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: posCtrl,
-                decoration: const InputDecoration(
-                  labelText: '词性',
-                  hintText: '如：形容词 adj.',
+                const SizedBox(height: 12),
+                TextField(
+                  controller: transCtrl,
+                  decoration: const InputDecoration(labelText: '释义'),
                 ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: sentenceCtrl,
-                decoration: const InputDecoration(
-                  labelText: '例句（可选）',
-                  hintText: '如：The mind wants unfettered freedom.',
+                const SizedBox(height: 12),
+                TextField(
+                  controller: posCtrl,
+                  decoration: const InputDecoration(
+                    labelText: '词性',
+                    hintText: '如：形容词 adj.',
+                  ),
                 ),
-                maxLines: 2,
-              ),
-            ],
+                const SizedBox(height: 12),
+                TextField(
+                  controller: sentenceCtrl,
+                  decoration: const InputDecoration(
+                    labelText: '例句（可选）',
+                    hintText: '如：The mind wants unfettered freedom.',
+                  ),
+                  maxLines: 2,
+                ),
+                const SizedBox(height: 8),
+                // ✨ AI 补全：填词后一键回填释义/词性/例句
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: OutlinedButton.icon(
+                    onPressed: completing ||
+                            wordCtrl.text.trim().isEmpty ||
+                            !_followUpEndpoint.isConfigured
+                        ? null
+                        : () async {
+                            setLocalState(() => completing = true);
+                            try {
+                              final info = await _api.completeWordInfo(
+                                wordCtrl.text.trim(),
+                                endpoint: _followUpEndpoint,
+                              );
+                              if (info['translation']?.isEmpty ?? true) {
+                                ScaffoldMessenger.of(ctx).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'AI 未返回有效信息，请手动填写或换个词试试',
+                                    ),
+                                    behavior: SnackBarBehavior.floating,
+                                  ),
+                                );
+                              } else {
+                                applyWordInfo(info);
+                              }
+                            } catch (e) {
+                              ScaffoldMessenger.of(ctx).showSnackBar(
+                                SnackBar(
+                                  content: Text('AI 补全失败：$e'),
+                                  behavior: SnackBarBehavior.floating,
+                                ),
+                              );
+                            } finally {
+                              setLocalState(() => completing = false);
+                            }
+                          },
+                    icon: completing
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.auto_awesome, size: 16),
+                    label: Text(completing ? '补全中…' : '✨ AI 补全'),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              disposeAll();
-              Navigator.pop(ctx);
-            },
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () {
-              final wordText = wordCtrl.text.trim();
-              if (wordText.isEmpty) {
+          actions: [
+            TextButton(
+              onPressed: () {
                 disposeAll();
                 Navigator.pop(ctx);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('单词不能为空')),
-                );
-                return;
-              }
-              final sentence = sentenceCtrl.text.trim();
-              setState(() {
-                _results.add(
-                  Vocabulary(
-                    word: wordText,
-                    translation: transCtrl.text.trim().isEmpty
-                        ? null
-                        : transCtrl.text.trim(),
-                    partOfSpeech: posCtrl.text.trim().isEmpty
-                        ? null
-                        : posCtrl.text.trim(),
-                    originalSentence: sentence.isEmpty ? null : sentence,
-                    photoPath: null, // 手动补充的词无照片来源
-                  ),
-                );
-              });
-              disposeAll();
-              Navigator.pop(ctx);
-            },
-            child: const Text('添加'),
-          ),
-        ],
+              },
+              child: const Text('取消'),
+            ),
+            TextButton(
+              onPressed: () {
+                final wordText = wordCtrl.text.trim();
+                if (wordText.isEmpty) {
+                  disposeAll();
+                  Navigator.pop(ctx);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('单词不能为空')),
+                  );
+                  return;
+                }
+                final sentence = sentenceCtrl.text.trim();
+                setState(() {
+                  _results.add(
+                    Vocabulary(
+                      word: wordText,
+                      translation: transCtrl.text.trim().isEmpty
+                          ? null
+                          : transCtrl.text.trim(),
+                      partOfSpeech: posCtrl.text.trim().isEmpty
+                          ? null
+                          : posCtrl.text.trim(),
+                      originalSentence: sentence.isEmpty ? null : sentence,
+                      photoPath: null, // 手动补充的词无照片来源
+                    ),
+                  );
+                });
+                disposeAll();
+                Navigator.pop(ctx);
+              },
+              child: const Text('添加'),
+            ),
+          ],
+        ),
       ),
     );
   }

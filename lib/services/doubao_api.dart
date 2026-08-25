@@ -15,6 +15,25 @@ class SseChunk {
   const SseChunk({required this.text, required this.isReasoning});
 }
 
+/// 是否发送 image_url 的 detail 字段 — 豆包/Ark 系支持,DeepSeek 视觉模型
+/// 不认此字段(未知参数可能 400),只发 url。纯函数,可单测。
+bool shouldSendDetailFlag(String model) {
+  final m = model.toLowerCase();
+  return m.contains('doubao') || m.contains('seed') || m.contains('ark');
+}
+
+/// 模型是否支持图片输入 — 判断追问能否附带识别图片:
+/// 豆包/Ark 系全支持;DeepSeek 只有 vision 系列支持(纯文本模型发图必 400);
+/// 未知厂商默认不带图(稳妥,避免每次追问 400→降级重试的双倍耗时)。
+bool modelSupportsImages(String model) {
+  final m = model.toLowerCase();
+  if (m.contains('doubao') || m.contains('seed') || m.contains('ark')) {
+    return true;
+  }
+  if (m.contains('deepseek')) return m.contains('vision');
+  return false;
+}
+
 /// 多模态 API 服务(主槽位):识图/全文翻译/追问。
 /// 原豆包服务,配置源收敛到 ApiEndpointConfig.primary。
 class DoubaoApiService extends BaseApiService {
@@ -107,6 +126,7 @@ class DoubaoApiService extends BaseApiService {
     String? sourcePage,
     bool stream = false,
     String analysisMode = AppConstants.analysisModeMarked,
+    List<String> excludeWords = const [],
   }) {
     final bookHint = sourceBook != null && sourceBook.isNotEmpty
         ? '，出处书籍："$sourceBook"' : '';
@@ -115,6 +135,10 @@ class DoubaoApiService extends BaseApiService {
     final countHint = imageUris.length > 1
         ? '（共${imageUris.length}张图片）'
         : '';
+    // 补充识别模式:告知已识别词,只找遗漏,禁止重复(v1.3.0 问题 3)
+    final excludeHint = excludeWords.isEmpty
+        ? ''
+        : '\n补充识别：以下内容已经识别过，请找出照片中遗漏的标记内容，只输出遗漏项，不要重复输出任何一条：${excludeWords.take(200).join(' | ')}';
 
     final (String systemPrompt, String userPrompt) = switch (analysisMode) {
       AppConstants.analysisModeFullText => (
@@ -127,7 +151,7 @@ class DoubaoApiService extends BaseApiService {
         '''你是英语学习助手。识别照片中被标记的英语内容。输出JSON，格式：
 {"items":[{"word":"完整原文","translation":"中文释义","word_type":"word|phrase|sentence","part_of_speech":"词性(可选)","original_sentence":"完整句子(短语/句子必填,单词可选)"}]}
 要求：1.word 必须与照片中的文本完全一致——单词、短语、句子一律完整输出,禁止截断,禁止用省略号(…)代替后半部分。2.短语/句子必须在 original_sentence 中给出其所在的完整句子(必填,不可省略)。3.单词给词性。${imageUris.length > 1 ? '多图格式：{"items_by_image":[{"image_index":0,"items":[...]},...]}' : ''}无标记返回{"items":[]}。只输出JSON。简洁思考。''',
-        '识别标记的英语内容$bookHint$pageHint$countHint'
+        '识别标记的英语内容$bookHint$pageHint$countHint$excludeHint'
       ),
     };
 
@@ -141,7 +165,11 @@ class DoubaoApiService extends BaseApiService {
             for (final uri in imageUris)
               {
                 'type': 'image_url',
-                'image_url': {'url': uri, 'detail': 'low'},
+                // detail 仅豆包系发:DeepSeek 视觉模型不认未知字段(400)
+                'image_url': {
+                  'url': uri,
+                  if (shouldSendDetailFlag(modelName)) 'detail': 'low',
+                },
               },
             {'type': 'text', 'text': userPrompt},
           ],
@@ -195,6 +223,7 @@ class DoubaoApiService extends BaseApiService {
     String? sourceBook,
     String? sourcePage,
     String analysisMode = AppConstants.analysisModeMarked,
+    List<String> excludeWords = const [],
   }) async* {
     if (imageFiles.isEmpty) throw Exception('没有可识别的图片');
     if (!config.isConfigured) {
@@ -212,6 +241,7 @@ class DoubaoApiService extends BaseApiService {
       sourcePage: sourcePage,
       stream: true,
       analysisMode: analysisMode,
+      excludeWords: excludeWords,
     );
 
     final response = await postWithReasoningFallback(
@@ -280,13 +310,14 @@ class DoubaoApiService extends BaseApiService {
 
   // ── 追问对话（text-only 流式） ──
 
-  /// 基于已有识别结果发送追问，返回流式 SSE 块。
-  /// [endpoint] 指定槽位(主/副),null 用本服务默认槽位(主)。
-  Stream<SseChunk> followUpStream(
-    String question, {
-    required String context,
+  /// AI 自动补全单词信息(v1.3.0 问题 2):
+  /// 用户手动补充词汇时只填词,点「✨ AI 补全」调 [endpoint](默认当前追问端点)
+  /// 非流式拿 释义/词性/例句/语法,回填表单可改。
+  /// 思考强制 disabled(快速补全,不等待思考)。
+  Future<Map<String, String>> completeWordInfo(
+    String word, {
     ApiEndpointConfig? endpoint,
-  }) async* {
+  }) async {
     final cfg = endpoint ?? config;
     if (!cfg.isConfigured) {
       throw Exception('请先在设置中配置 API Key');
@@ -298,28 +329,178 @@ class DoubaoApiService extends BaseApiService {
         {
           'role': 'system',
           'content':
-              '你是英语学习助手。基于图片识别结果回答用户追问。简洁准确，根据材料量自行决定回答长度。',
+              '你是英语学习助手。用户给出一个英语单词或短语，请返回 JSON：'
+              '{"translation":"中文释义","part_of_speech":"词性(如 n./v./adj./phrase)","original_sentence":"包含该词的完整英文例句","grammar_note":"语法要点(可选,单词可省)"}。'
+              '只输出 JSON。',
         },
-        {
-          'role': 'user',
-          'content': '$context\n\n用户提问：$question',
-        },
+        {'role': 'user', 'content': word},
       ],
-      'temperature': 0.3,
-      'max_tokens': 2048,
-      ...cfg.buildThinkingParams(),
-      'stream': true,
+      'temperature': 0,
+      'max_tokens': 1024,
+      'thinking': {'type': 'disabled'},
     };
 
     final response = await postWithReasoningFallback(
-      '/chat/completions', body, cfg: cfg,
-      responseType: ResponseType.stream);
+        '/chat/completions', body, cfg: cfg);
+    final content = BaseApiService.extractContent(response.data);
+    return parseWordInfo(content);
+  }
 
+  /// 解析 AI 补全返回的 JSON(纯静态,可单测)。
+  /// 兼容 ```json 包裹;缺字段回空串,绝不抛异常——用户仍可手动填。
+  static Map<String, String> parseWordInfo(String content) {
+    String jsonStr = content.trim();
+    if (jsonStr.startsWith('```')) {
+      final start = jsonStr.indexOf('\n');
+      final end = jsonStr.lastIndexOf('```');
+      if (start != -1 && end != -1) {
+        jsonStr = jsonStr.substring(start + 1, end).trim();
+      }
+    }
+    try {
+      final parsed = jsonDecode(jsonStr);
+      if (parsed is! Map) return {};
+      String s(String key) => parsed[key]?.toString().trim() ?? '';
+      return {
+        'translation': s('translation'),
+        'part_of_speech': s('part_of_speech'),
+        'original_sentence': s('original_sentence'),
+        'grammar_note': s('grammar_note'),
+      };
+    } catch (_) {
+      return {};
+    }
+  }
+
+  /// 将图片文件转为 data URI 列表(供追问附带识别图片)。
+  /// 复用 [extractVocabularyStream] 同款压缩逻辑,大图缩至 2048 内。
+  Future<List<String>> imageDataUrisFor(List<File> files) async {
+    return Future.wait(files.map((f) => _imageToDataUri(f)), eagerError: true);
+  }
+
+  /// 基于已有识别结果发送追问,返回流式 SSE 块。
+  /// [endpoint] 指定槽位(主/副),null 用本服务默认槽位(主)。
+  /// [imageDataUris] 非空时以多模态消息发送(模型能"看到"识别图片);
+  /// 若模型不支持图片(4xx/错误信息含图相关词)→ 自动降级为纯文本重试一次。
+  /// [thinkingLevel] 追问思考档位(独立于槽位识图档位),null 用槽位档位。
+  Stream<SseChunk> followUpStream(
+    String question, {
+    required String context,
+    ApiEndpointConfig? endpoint,
+    List<String>? imageDataUris,
+    String? thinkingLevel,
+  }) async* {
+    final cfg = endpoint ?? config;
+    if (!cfg.isConfigured) {
+      throw Exception('请先在设置中配置 API Key');
+    }
+
+    final userContent = buildFollowUpUserContent(
+      context: context,
+      question: question,
+      imageDataUris: imageDataUris,
+      model: cfg.model,
+    );
+
+    final body = {
+      'model': cfg.model,
+      'messages': [
+        {
+          'role': 'system',
+          'content':
+              '你是英语学习助手。基于图片识别结果回答用户追问。简洁准确，根据材料量自行决定回答长度。',
+        },
+        {'role': 'user', 'content': userContent},
+      ],
+      'temperature': 0.3,
+      'max_tokens': 2048,
+      ...cfg.buildThinkingParamsFor(thinkingLevel ?? cfg.thinking),
+      'stream': true,
+    };
+
+    try {
+      final response = await postWithReasoningFallback(
+        '/chat/completions', body, cfg: cfg,
+        responseType: ResponseType.stream);
+      yield* _parseSseStream(_responseStream(response));
+    } catch (e) {
+      // 带图但模型不支持图片 → 降级纯文本重试一次(每次追问最多 1 次降级)
+      if (imageDataUris != null && imageDataUris.isNotEmpty && _imageRejected(e)) {
+        debugPrint('ReadFlow followUp image rejected, retry text-only: $e');
+        final retryBody = {
+          ...body,
+          'messages': [
+            body['messages'][0],
+            {
+              'role': 'user',
+              'content': buildFollowUpUserContent(
+                context: context,
+                question: question,
+                imageDataUris: null,
+                model: cfg.model,
+              ),
+            },
+          ],
+        };
+        final retry = await postWithReasoningFallback(
+          '/chat/completions', retryBody, cfg: cfg,
+          responseType: ResponseType.stream);
+        yield* _parseSseStream(_responseStream(retry));
+        return;
+      }
+      rethrow;
+    }
+  }
+
+  /// 组装追问 user content:有图 → content parts(image_url + text),无图 → 纯文本。
+  /// OpenAl 兼容多模态格式;detail 仅豆包系发。纯函数,可单测。
+  static Object buildFollowUpUserContent({
+    required String context,
+    required String question,
+    required List<String>? imageDataUris,
+    required String model,
+  }) {
+    if (imageDataUris == null || imageDataUris.isEmpty) {
+      return '$context\n\n用户提问：$question';
+    }
+    return [
+      for (final uri in imageDataUris)
+        {
+          'type': 'image_url',
+          'image_url': {
+            'url': uri,
+            if (shouldSendDetailFlag(model)) 'detail': 'low',
+          },
+        },
+      {'type': 'text', 'text': '$context\n\n用户提问：$question'},
+    ];
+  }
+
+  /// 判断错误是否"模型不支持图片"——带图追问失败时据此降级纯文本。
+  /// 覆盖 DioException(400/422/参数错误)与描述含图相关关键词的错误。
+  static bool _imageRejected(Object e) {
+    final msg = e.toString().toLowerCase();
+    if (msg.contains('image') ||
+        msg.contains('vision') ||
+        msg.contains('multimodal') ||
+        msg.contains('picture')) {
+      return true;
+    }
+    if (e is DioException) {
+      final code = e.response?.statusCode;
+      if (code == 400 || code == 422 || code == 415) return true;
+    }
+    return false;
+  }
+
+  /// 从响应中取流式 body(统一 postWithReasoningFallback 的两种返回形态)
+  Stream<List<int>> _responseStream(Response response) {
     final data = response.data;
     if (data is! ResponseBody) {
-      throw Exception('API 未返回流式响应：${data is Map ? data['error'] ?? data : data}');
+      throw Exception(
+          'API 未返回流式响应：${data is Map ? data['error'] ?? data : data}');
     }
-    yield* _parseSseStream(data.stream);
+    return data.stream;
   }
 
   // ── 静态解析方法（供 ProcessChatScreen 调用） ──
@@ -432,29 +613,17 @@ class DoubaoApiService extends BaseApiService {
 
   // ── 模型列表（混合：先调API，失败则用内置清单兜底） ──
 
-  /// 豆包常用模型 ID 列表（API 不通时的兜底，按推荐速度排序）
-  static const List<String> fallbackDoubaoModels = [
-    'doubao-seed-2-0-mini-260715',   // 最快：速度和成本优先
-    'doubao-seed-1-6-flash-250615',  // 闪推：上一代极速
-    'doubao-seed-2-1-turbo-260628',  // 新 turbo
-    'doubao-seed-2-0-lite-260428',   // 当前默认
-    'doubao-seed-2-1-pro-260628',
-    'doubao-seed-2-0-pro-260215',
-    'doubao-seed-1-6-vision-250815',
-    'doubao-seed-1-6-250615',
-    'doubao-seed-evolving',
-  ];
-
   /// 获取模型列表：先尝试 GET /models，再按允许前缀过滤，最后内置清单兜底。
-  /// [allowPrefixes] 只保留前缀匹配的模型(如豆包槽位只留 doubao 系列)——
-  /// 方舟聚合端点会返回非本族模型(如 deepseek)，混入列表会误导用户。
+  /// [allowPrefixes] 只保留前缀匹配的模型(如副槽位只留 deepseek 系列)——
+  /// 方舟聚合端点会返回非本族模型，混入列表会误导用户。
+  /// 主槽位传空列表 = 不过滤(用户可能配 DeepSeek 视觉等任意兼容端点)。
   /// 拉取成功但过滤为空(用户用的是其他兼容端点)→ 返回全部拉取结果；
   /// 拉取失败 → 返回内置清单。
   static Future<List<String>> fetchModels(
     String baseUrl,
     String apiKey, {
     List<String> allowPrefixes = const [],
-    List<String> fallback = fallbackDoubaoModels,
+    List<String> fallback = AppConstants.primaryFallbackModels,
   }) async {
     try {
       final dio = Dio(BaseOptions(

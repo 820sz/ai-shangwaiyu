@@ -17,7 +17,9 @@ class ApiEndpointConfig {
   /// 豆包/Ark 支持 minimal;DeepSeek 只认 low/medium/high——
   /// 发错枚举直接 400,且流式路径的降级逻辑读不到错误体(F6),
   /// 所以必须在这里发对,不能指望降级兜底。
-  final bool supportsMinimalEffort;
+  /// 2026-08-21:主槽位可能被用户配成 DeepSeek 视觉模型
+  /// (deepseek-v4-flash-vision-exp),按当前模型名推断,不再写死豆包。
+  bool get supportsMinimalEffort => !model.toLowerCase().contains('deepseek');
 
   const ApiEndpointConfig({
     required this.hiveKey,
@@ -26,7 +28,6 @@ class ApiEndpointConfig {
     required this.hiveThinking,
     required this.defaultBaseUrl,
     required this.defaultModel,
-    this.supportsMinimalEffort = true,
   });
 
   /// 主槽位:多模态(识图/全文翻译/素材推荐/追问默认)
@@ -37,7 +38,6 @@ class ApiEndpointConfig {
     hiveThinking: AppConstants.keyDoubaoThinking,
     defaultBaseUrl: AppConstants.doubaoBaseUrl,
     defaultModel: AppConstants.doubaoVisionModel,
-    supportsMinimalEffort: true,
   );
 
   /// 副槽位:专项文本(文章生成/回译/建议),未配置则全部走主。
@@ -49,7 +49,6 @@ class ApiEndpointConfig {
     hiveThinking: AppConstants.keyDeepseekThinking,
     defaultBaseUrl: AppConstants.deepseekBaseUrl,
     defaultModel: AppConstants.deepseekChatModel,
-    supportsMinimalEffort: false,
   );
 
   Box get _box => Hive.box(AppConstants.hiveBoxSettings);
@@ -99,15 +98,32 @@ class ApiEndpointConfig {
   /// 副槽位(DeepSeek)若不认 reasoning_effort,postWithReasoningFallback
   /// 会自动移除它降级重试(保留 thinking: enabled),不会报错。
   Map<String, dynamic> buildThinkingParams() {
-    switch (thinking) {
-      case 'disabled':
-        return {'thinking': {'type': 'disabled'}};
+    return buildThinkingParamsFor(thinking);
+  }
+
+  /// 按指定档位构建思考参数(纯函数,供追问等独立档位场景复用)。
+  /// [level]: disabled / low / medium / high
+  /// - disabled → thinking.type=disabled,完全跳过推理
+  /// - low → 豆包系发 minimal(≈3s);DeepSeek 系发 low(不认 minimal,F6)
+  /// - medium/high → 两族都认(豆包 minimal/low/medium/high;DS low/medium/high)
+  Map<String, dynamic> buildThinkingParamsFor(String level) {
+    switch (level) {
       case 'low':
-        // 豆包槽位发 minimal(≈3s);DeepSeek 槽位发 low(它不认 minimal,F6)
         return {
           'thinking': {'type': 'enabled'},
           'reasoning_effort': supportsMinimalEffort ? 'minimal' : 'low',
         };
+      case 'medium':
+        return {
+          'thinking': {'type': 'enabled'},
+          'reasoning_effort': 'medium',
+        };
+      case 'high':
+        return {
+          'thinking': {'type': 'enabled'},
+          'reasoning_effort': 'high',
+        };
+      case 'disabled':
       default:
         return {'thinking': {'type': 'disabled'}};
     }

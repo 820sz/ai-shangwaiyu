@@ -70,4 +70,48 @@ void main() {
       expect(p, isNotNull);
     }
   });
+
+  // ── v1.3.0:追问独立档位 buildThinkingParamsFor(4 档,非迁移路径) ──
+
+  test('buildThinkingParamsFor(disabled) → thinking.type=disabled', () async {
+    final p = ApiEndpointConfig.primary.buildThinkingParamsFor('disabled');
+    expect(p['thinking'], {'type': 'disabled'});
+    expect(p.containsKey('reasoning_effort'), isFalse);
+  });
+
+  test('buildThinkingParamsFor(low) 豆包系 → minimal', () async {
+    final p = ApiEndpointConfig.primary.buildThinkingParamsFor('low');
+    expect(p['thinking'], {'type': 'enabled'});
+    expect(p['reasoning_effort'], 'minimal');
+  });
+
+  test('buildThinkingParamsFor(medium/high) 豆包系 → medium/high(不迁移)', () async {
+    expect(
+      ApiEndpointConfig.primary.buildThinkingParamsFor('medium')['reasoning_effort'],
+      'medium',
+    );
+    expect(
+      ApiEndpointConfig.primary.buildThinkingParamsFor('high')['reasoning_effort'],
+      'high',
+    );
+  });
+
+  test('主槽位配 DeepSeek 模型 → low 发 low(不认 minimal)且 4 档可用', () async {
+    final box = Hive.box(AppConstants.hiveBoxSettings);
+    await box.put(AppConstants.keyDoubaoModel, 'deepseek-v4-flash-vision-exp');
+    expect(
+      ApiEndpointConfig.primary.buildThinkingParamsFor('low')['reasoning_effort'],
+      'low',
+    );
+    expect(
+      ApiEndpointConfig.primary.buildThinkingParamsFor('medium')['reasoning_effort'],
+      'medium',
+    );
+    expect(
+      ApiEndpointConfig.primary.buildThinkingParamsFor('high')['reasoning_effort'],
+      'high',
+    );
+    // 恢复默认豆包模型,避免影响其他测试
+    await box.put(AppConstants.keyDoubaoModel, '');
+  });
 }

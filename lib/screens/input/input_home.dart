@@ -7,7 +7,6 @@ import 'package:hive_flutter/hive_flutter.dart';
 import '../../providers/vocab_provider.dart';
 import '../../config/constants.dart';
 import '../../models/saved_session.dart';
-import '../../services/doubao_api.dart';
 import 'process_chat.dart';
 import 'widgets/analysis_mode_picker.dart';
 import 'widgets/my_materials_section.dart';
@@ -325,7 +324,7 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
               offset: const Offset(0, 200),
               constraints: const BoxConstraints(maxWidth: 280),
               itemBuilder: (_) => [
-                ...DoubaoApiService.fallbackDoubaoModels.map((m) {
+                ...AppConstants.primaryFallbackModels.map((m) {
                   final isSel = m == _currentModel;
                   return PopupMenuItem(
                     value: 'model:$m',
