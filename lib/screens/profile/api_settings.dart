@@ -134,14 +134,16 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
       }
     });
 
-    // 两槽位拉取 /models 后按模型族过滤:
-    // 主=不过滤(用户可配豆包/DeepSeek 视觉等任意兼容端点);
+    // 两槽位拉取 /models 后按能力/模型族过滤:
+    // 主=只留视觉候选(isVisionCandidate:vision/doubao-seed 系),砍掉未开通的
+    //   老文本/角色/纯文本 DS 模型(v1.3.0-2 用户实测"一堆乱模型"问题);
     // 副=DeepSeek 系列 —— 方舟聚合端点会混入他族模型,过滤避免误导
     if (apiKey.isNotEmpty) {
       final models = await DoubaoApiService.fetchModels(
         baseUrl,
         apiKey,
         allowPrefixes: isPrimary ? const [] : const ['deepseek'],
+        keepFilter: isPrimary ? isVisionCandidate : null,
         fallback: isPrimary
             ? AppConstants.primaryFallbackModels
             : AppConstants.deepseekFallbackModels,
@@ -171,6 +173,7 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
 
   void _showModelPicker({required bool isPrimary}) {
     final modelCtrl = isPrimary ? _primaryModelCtrl : _secondaryModelCtrl;
+    final urlCtrl = isPrimary ? _primaryUrlCtrl : _secondaryUrlCtrl;
     final models = isPrimary ? _primaryModels : _secondaryModels;
     final currentModel = modelCtrl.text.trim();
     final bottomSafe = MediaQuery.of(context).padding.bottom;
@@ -188,6 +191,23 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
         bottomSafe: bottomSafe,
         onSelected: (id) {
           modelCtrl.text = id;
+          // 防呆:选中 DeepSeek 模型但端点还是方舟(默认/volces)时提示配对
+          // (v1.3.0-2 用户实测:ark key + DS 模型名 → 识别失败"API Key 无效")
+          final url = urlCtrl.text.trim();
+          final isArkUrl =
+              url.isEmpty || url.contains('volces.com') || url.contains('ark.cn-');
+          if (id.toLowerCase().contains('deepseek') && isArkUrl) {
+            ScaffoldMessenger.of(ctx).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'DeepSeek 模型需搭配：Base URL https://api.deepseek.com '
+                  '+ DeepSeek 官方 Key（sk- 开头）。否则会提示 API 无效。',
+                ),
+                behavior: SnackBarBehavior.floating,
+                duration: Duration(seconds: 6),
+              ),
+            );
+          }
           Navigator.pop(ctx);
         },
       ),
@@ -213,7 +233,10 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
           _SectionHeader(title: '主 API(多模态)'),
           const SizedBox(height: 4),
           Text(
-            '拍照识词 / 全文翻译 / 素材推荐 / 追问默认。需支持图片识别的模型。',
+            '拍照识词 / 全文翻译 / 素材推荐 / 追问默认。需支持图片识别的模型。\n'
+            '模型列表按视觉能力过滤。DeepSeek 视觉模型（deepseek-v4-flash-vision-exp）'
+            '需搭配 Base URL https://api.deepseek.com + DeepSeek 官方 Key（sk- 开头，'
+            '非方舟 ark- Key）；豆包模型用方舟 Key + 方舟 Base URL。',
             style: TextStyle(fontSize: 11, color: Colors.grey[500]),
           ),
           const SizedBox(height: 8),

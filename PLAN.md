@@ -1,8 +1,8 @@
 # PLAN.md — AI上外语 (readflow)
 
 ## 状态
-- 当前版本:**v1.3.0**(Release 已发 = Latest,https://github.com/820sz/ai-shangwaiyu/releases/tag/v1.3.0)
-- 当前阶段:✅ v1.3.0 六项修复全部完成,代码验证全绿(analyze 0/0 + 104 测试),Release 已发,**等用户真机验收 6 项**
+- 当前版本:**v1.3.1**(Release 已发 = Latest,v1.3.0 被 v1.3.1 覆盖)
+- 当前阶段:✅ v1.3.1 已发(模型列表过滤+端点防呆),**等用户按正确配置真机验收**
 - 状态协议:DONE_WITH_CONCERNS(真机验收未做)
 
 ## 需求摘要
@@ -26,6 +26,16 @@
 **被否掉的方案**:只改设置页标签不角色化;单一 API 槽位。
 
 ## 版本记录(最新在前)
+
+### v1.3.1 — 模型列表过滤+端点配对防呆(2026-08-25,构建发布中)
+**背景**:v1.3.0 真机测试失败:用户主槽位(方舟 ark- key + 空 Base URL)手输 DS 官方模型名 deepseek-v4-flash-vision-exp → 识别失败"API Key 无效"(实为端点/模型不匹配:该模型只存在于 api.deepseek.com);且主槽位"不过滤"后方舟 /models 全量展示(未开通的 doubao-1-5* / character / deepseek-r1/v3 转售)用户投诉"一堆乱模型"。
+**修复**:
+- 主槽位模型列表按**视觉候选过滤**(isVisionCandidate:含 vision 或 doubao-seed 系;隐藏 1-5 老文本/character/纯文本 DS 转售);过滤后为空回退内置视觉清单
+- 选择器选中 DeepSeek 模型但端点为方舟(空/volces)→ SnackBar 即时提示配对
+- 识别失败 401/403 且模型=DS视觉+端点为方舟 → 明确提示"模型与端点不匹配:需 api.deepseek.com + sk- Key",不再误导"Key 无效"
+- 设置页主 API 说明文案补充配对说明
+- 验证:analyze 0/0,107 测试全绿(+3 isVisionCandidate)
+- ⚠️ 用户配置真相:主槽位单槽位只能配一家店——ark- 开头=方舟(豆包/doubao-seed 系+方舟版DS),sk- 开头=DeepSeek 官方(api.deepseek.com,deepseek-v4-flash-vision-exp 只在这家)。识图想用 DS 视觉 → 主槽位整体切到 DS 官方配置
 
 ### v1.3.0 — 用户人工测试 6 项修复(2026-08-25,构建完成,发布中)
 **背景**:用户真机人工测试发现 6 项(见下),范围确认 6 项全做,4 阶段完成。

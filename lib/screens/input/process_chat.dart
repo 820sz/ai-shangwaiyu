@@ -482,7 +482,18 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
           if (msg.contains('Connection timed out') || msg.contains('超时')) {
             hint = '网络连接超时，请检查网络或关闭VPN后重试';
           } else if (msg.contains('401') || msg.contains('403')) {
-            hint = 'API Key 无效，请前往设置重新填写';
+            // v1.3.0-2:DeepSeek 视觉模型被填在方舟端点下(ark key)必 401——
+            // 明确提示端点/Key 配对,别误导成"key 无效"让用户白改
+            final m = _currentModel.toLowerCase();
+            if (m.contains('deepseek') &&
+                m.contains('vision') &&
+                !ApiEndpointConfig.primary.baseUrl.contains('deepseek.com')) {
+              hint = '模型与端点不匹配：DeepSeek 视觉模型需搭配 '
+                  'Base URL https://api.deepseek.com 和 DeepSeek 官方 Key（sk- 开头，'
+                  '非方舟 ark- Key）。请到「我的 → API 设置」修改。';
+            } else {
+              hint = 'API Key 无效，请前往设置重新填写';
+            }
           } else if (msg.contains('404')) {
             hint = '模型不存在或无权限，请检查模型名称';
           }

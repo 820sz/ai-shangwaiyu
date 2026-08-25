@@ -6,8 +6,34 @@ import 'package:readflow/services/doubao_api.dart';
 /// - shouldSendDetailFlag:detail 字段仅豆包/Ark 系发送(DeepSeek 不认未知字段)
 /// - modelSupportsImages:豆包系全支持;DeepSeek 仅 vision 系列;未知厂商默认否
 void main() {
-  group('shouldSendDetailFlag', () {
-    test('豆包系全部发送 detail', () {
+  group('isVisionCandidate — 主槽位视觉模型过滤(v1.3.0-2 用户实测"一堆乱模型")', () {
+    test('保留:vision 模型 + 豆包 seed 系', () {
+      expect(isVisionCandidate('deepseek-v4-flash-vision-exp'), isTrue);
+      expect(isVisionCandidate('doubao-seed-2-1-turbo-260628'), isTrue);
+      expect(isVisionCandidate('doubao-seed-2-0-lite-260428'), isTrue);
+      expect(isVisionCandidate('doubao-seed-1-6-vision-250815'), isTrue);
+      expect(isVisionCandidate('doubao-seed-1-6-250615'), isTrue); // 新一代系保留
+    });
+
+    test('隐藏:方舟老文本模型(用户没开通的一堆)', () {
+      expect(isVisionCandidate('doubao-1-5-lite-32k-250115'), isFalse);
+      expect(isVisionCandidate('doubao-1-5-pro-256k-250115'), isFalse);
+      expect(isVisionCandidate('doubao-1-5-pro-32k-250115'), isFalse);
+      expect(isVisionCandidate('doubao-1-5-pro-32k-character-250228'), isFalse);
+      expect(isVisionCandidate('doubao-1-5-pro-32k-character-250715'), isFalse);
+    });
+
+    test('隐藏:方舟原 DS 转售文本模型(与官方 DS 视觉不同名)', () {
+      expect(isVisionCandidate('deepseek-v4-flash-ga-260731'), isFalse);
+      expect(isVisionCandidate('deepseek-v4-pro-260425'), isFalse);
+      expect(isVisionCandidate('deepseek-v4-pro-ga-260813'), isFalse);
+      expect(isVisionCandidate('deepseek-r1-250120'), isFalse);
+      expect(isVisionCandidate('deepseek-r1-distill-qwen-32b-250120'), isFalse);
+      expect(isVisionCandidate('deepseek-v3-1-250821'), isFalse);
+    });
+  });
+
+  group('shouldSendDetailFlag', () {    test('豆包系全部发送 detail', () {
       for (final m in [
         'doubao-seed-2-1-turbo-260628',
         'doubao-seed-2-0-lite-260428',

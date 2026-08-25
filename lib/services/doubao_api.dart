@@ -15,6 +15,18 @@ class SseChunk {
   const SseChunk({required this.text, required this.isReasoning});
 }
 
+/// 主槽位(视觉)模型候选判断 — 只保留可能支持图片识别的模型。
+/// 方舟 /models 返回全平台模型(含未开通的老文本模型/角色模型/纯文本 DS 转售),
+/// 全量展示会误导用户(v1.3.0-2 用户实测截图实锤)。
+/// 保留:含 vision 的模型(任何厂商)+ 豆包 seed 系(新一代多模态);
+/// 隐藏:doubao-1-5* 老文本、*character* 角色、deepseek-r1/v3 纯文本等。
+bool isVisionCandidate(String id) {
+  final m = id.toLowerCase();
+  if (m.contains('vision')) return true;
+  if (m.startsWith('doubao-seed')) return true;
+  return false;
+}
+
 /// 是否发送 image_url 的 detail 字段 — 豆包/Ark 系支持,DeepSeek 视觉模型
 /// 不认此字段(未知参数可能 400),只发 url。纯函数,可单测。
 bool shouldSendDetailFlag(String model) {
@@ -613,16 +625,17 @@ class DoubaoApiService extends BaseApiService {
 
   // ── 模型列表（混合：先调API，失败则用内置清单兜底） ──
 
-  /// 获取模型列表：先尝试 GET /models，再按允许前缀过滤，最后内置清单兜底。
+  /// 获取模型列表：先尝试 GET /models，再按允许前缀/能力过滤，最后内置清单兜底。
   /// [allowPrefixes] 只保留前缀匹配的模型(如副槽位只留 deepseek 系列)——
   /// 方舟聚合端点会返回非本族模型，混入列表会误导用户。
-  /// 主槽位传空列表 = 不过滤(用户可能配 DeepSeek 视觉等任意兼容端点)。
-  /// 拉取成功但过滤为空(用户用的是其他兼容端点)→ 返回全部拉取结果；
+  /// [keepFilter] 按能力过滤(如主槽位 [isVisionCandidate]);过滤后为空
+  /// (该端点没有视觉模型)→ 返回内置视觉清单,不显示全量。
   /// 拉取失败 → 返回内置清单。
   static Future<List<String>> fetchModels(
     String baseUrl,
     String apiKey, {
     List<String> allowPrefixes = const [],
+    bool Function(String)? keepFilter,
     List<String> fallback = AppConstants.primaryFallbackModels,
   }) async {
     try {
@@ -649,6 +662,11 @@ class DoubaoApiService extends BaseApiService {
               .where((id) => allowPrefixes.any((p) => id.startsWith(p)))
               .toList();
           if (filtered.isNotEmpty) return filtered;
+        }
+        if (ids.isNotEmpty && keepFilter != null) {
+          final kept = ids.where(keepFilter).toList();
+          if (kept.isNotEmpty) return kept;
+          return List.of(fallback); // 无视觉模型 → 内置视觉清单
         }
         if (ids.isNotEmpty) return ids;
       }
