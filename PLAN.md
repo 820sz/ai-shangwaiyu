@@ -1,9 +1,9 @@
 # PLAN.md — AI上外语 (readflow)
 
 ## 状态
-- 当前版本:**v1.2.26**(Release 已发 = Latest,资产 size 21672281 与本地核对一致)
-- 当前阶段:🟡 **v1.3.0 开发中** — 用户人工测试 6 项(0~5)修复,范围已确认全做,设计待用户确认后动工
-- 状态协议:NEEDS_CONTEXT(设计已出,等用户 30 秒确认)
+- 当前版本:**v1.3.0**(Release 已发 = Latest,https://github.com/820sz/ai-shangwaiyu/releases/tag/v1.3.0)
+- 当前阶段:✅ v1.3.0 六项修复全部完成,代码验证全绿(analyze 0/0 + 104 测试),Release 已发,**等用户真机验收 6 项**
+- 状态协议:DONE_WITH_CONCERNS(真机验收未做)
 
 ## 需求摘要
 **项目**:AI上外语(Flutter 英语学习 App,D:\readflow)
@@ -27,8 +27,8 @@
 
 ## 版本记录(最新在前)
 
-### v1.3.0 — 用户人工测试 6 项修复(2026-08-XX,开发中)
-**背景**:用户真机人工测试发现 6 项:
+### v1.3.0 — 用户人工测试 6 项修复(2026-08-25,构建完成,发布中)
+**背景**:用户真机人工测试发现 6 项(见下),范围确认 6 项全做,4 阶段完成。
 - 0. 主 API 界面无法唤起 DeepSeek 模型(似乎与豆包捆绑);DS 已上线识图模型需兼容调取
 - 1. 追问抽屉 AI 回复思考档位被砍(用户本意只砍识图的思考)
 - 2. 用户手动补充的词汇需要 AI 自动补全(释义/词性等,现需全手动)
@@ -59,6 +59,12 @@
 - 问题 4:用户气泡长按编辑 → `_editFollowUpMessage`:替换 + 截断其后消息 + 自动重发
 - 新文件:utils/supplement_merge.dart;测试:supplement_and_word_info_test.dart
 - 待办:阶段 3(构建 v1.3.0 + 真机验收 6 项 + Release)
+
+## 验证目标(当前版 v1.3.0)
+- [x] flutter analyze 0 error / 0 warning(21 存量 info 零新增)
+- [x] flutter test 104 全绿(+19 阶段1:+8 阶段2)
+- [x] APK:versionName=1.3.0 versionCode=37(aapt 验证);构建 20.7MB arm64;libapp.so 含新代码字符串(follow_up_thinking/deepseek-v4-flash-vision-exp/补充识别/修改并重新发送)
+- [ ] 真机验收(待用户):0 主槽位选 DS 视觉模型识别 / 1 追问 4 档 / 2 AI 补全 / 3 再识别补漏 / 4 编辑重发 / 5 追问"这页讲了什么"能答
 
 ### v1.2.26 — 例句精简+出处词标粗 / 全文翻译复制保存 / process_chat 拆分(2026-08-10,Release 已发 = Latest,**用户真机验收通过**)
 - **例句精简(方案1)**:新组件 `widgets/example_sentence.dart`——出处例句限行 3 行 + 超限显示"展开/收起";**出处句中目标词加粗**(buildHighlightSpans 纯函数,12 测试:大小写不敏感/词边界守卫防 "cat" 标进 "concatenate"/变形词不标/词条化截断词不标/word==整句不标)。三处接入:识别结果页详细模式、词详情 BottomSheet、词库词汇详情页
@@ -266,8 +272,9 @@
 - **修复(显示层回退)**:word 以省略号结尾且存在更长的 originalSentence → 显示 originalSentence(详细模式 _displayWord + 总览 WordListTile 同逻辑)
 - 用户线索关键提示:"近几次词汇板块 UI 调整后就这样"+"原来正常"——但代码审查确认 UI 一直放开;数据层词条化是模型近端行为(v1.2.10 时代用户就反馈过截断,当时误判为 UI)
 
-## 断点快照(2026-08-XX)
-- 正在做:**v1.3.0 设计完成,等用户确认**——6 项根因全部定位(见 v1.3.0 设计)
-- 下一步:用户确认设计后按阶段 1(问题 0/1/5)→ 阶段 2(问题 2/3/4)动工
+## 断点快照(2026-08-25)
+- 正在做:**v1.3.0 发布完成,等用户真机验收 6 项**(0 主槽位 DS 视觉 / 1 追问 4 档 / 2 AI 补全 / 3 再识别 / 4 编辑重发 / 5 追问上下文)
+- 下一步:用户真机验收 → 有问题按验收清单修,无问题状态转 DONE
 - 关键事实:DeepSeek 2026-08-21 上线 `deepseek-v4-flash-vision-exp`(官方视觉 API,OpenAI 兼容);主槽位模型列表过滤是问题 0 根因
-- 备注:auto 更新链路真机跑通 ✓;分类器故障时发布命令 `!` 前缀用户自跑最稳(gh release create 路径用正斜杠)
+- 环境备忘:**本会话跑 flutter 命令必须 `FLUTTER_ALREADY_LOCKED=true` + 全盘权限(danger-full-access)**,否则 D:\flutter lockfile CreateFile failed 5 挂死;构建命令要开梯子;analyze 首跑 ~170s
+- 备注:auto 更新链路真机跑通 ✓;发布命令 gh release create/upload 本会话直跑成功,无需用户自跑;gh release create 路径用正斜杠
