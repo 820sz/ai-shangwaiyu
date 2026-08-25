@@ -1,5 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:provider/provider.dart';
+import '../../../config/constants.dart';
+import '../../../models/bookmark.dart';
+import '../../../providers/bookmark_provider.dart';
 import 'follow_up_models.dart';
 
 /// 追问 AI 气泡:模型标签 + 可折叠思考过程 + Markdown 渲染正文。
@@ -50,18 +55,28 @@ class _AiFollowUpBubbleState extends State<AiFollowUpBubble> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // 模型名标签
-                  if (msg.model != null)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 6),
-                      child: Text(
-                        msg.model!,
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: Colors.grey[500],
-                        ),
-                      ),
+                  // 模型名标签 + 收藏星标(流式完成后显示,v1.4.0 问题 8)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Row(
+                      children: [
+                        if (msg.model != null)
+                          Expanded(
+                            child: Text(
+                              msg.model!,
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: Colors.grey[500],
+                              ),
+                            ),
+                          )
+                        else
+                          const Spacer(),
+                        if (!msg.streaming && msg.content.isNotEmpty)
+                          _AiBookmarkStar(message: msg),
+                      ],
                     ),
+                  ),
                   // 思考过程（可折叠，标题条点击切换）
                   if (msg.reasoningText != null &&
                       msg.reasoningText!.isNotEmpty)
@@ -74,62 +89,95 @@ class _AiFollowUpBubbleState extends State<AiFollowUpBubble> {
                       ),
                     ),
                   // 正文（Markdown 渲染：标题/加粗/表格/列表层级清晰）
+                  // v1.4.0 问题 7:SelectionArea 自定义工具栏——
+                  // 长按选择后有「复制」和「取消选择」(用户实测:选完只能按返回键)
                   if (msg.content.isNotEmpty)
-                    MarkdownBody(
-                      data: msg.content,
-                      selectable: true,
-                      styleSheet: MarkdownStyleSheet.fromTheme(
-                        theme,
-                      ).copyWith(
-                        p: theme.textTheme.bodyMedium?.copyWith(
-                          fontSize: 13,
-                          height: 1.5,
-                          color: Colors.grey[800],
-                        ),
-                        h1: theme.textTheme.titleMedium?.copyWith(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                        ),
-                        h2: theme.textTheme.titleMedium?.copyWith(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                        ),
-                        h3: theme.textTheme.titleSmall?.copyWith(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                        ),
-                        strong: theme.textTheme.bodyMedium?.copyWith(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.black87,
-                        ),
-                        tableBorder: TableBorder.all(
-                          color: Colors.grey.shade300,
-                          width: 0.5,
-                        ),
-                        tableHead: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                          color: theme.colorScheme.primary,
-                        ),
-                        tableBody: TextStyle(fontSize: 12, height: 1.4),
-                        tableCellsPadding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 4,
-                        ),
-                        blockquote: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey[600],
-                          fontStyle: FontStyle.italic,
-                        ),
-                        code: TextStyle(
-                          fontSize: 12,
-                          color: Colors.deepOrange[700],
-                          fontFamily: 'monospace',
-                        ),
-                        horizontalRuleDecoration: BoxDecoration(
-                          border: Border(
-                            top: BorderSide(color: Colors.grey[300]!, width: 1),
+                    SelectionArea(
+                      contextMenuBuilder: (context, state) {
+                        // 自定义工具栏:复制全部 + 取消选择
+                        // (用户实测:系统选择后没有"叉",只能按返回键)
+                        final items = <ContextMenuButtonItem>[
+                          ContextMenuButtonItem(
+                            label: '复制全部',
+                            onPressed: () {
+                              Clipboard.setData(
+                                ClipboardData(text: msg.content),
+                              );
+                              state.hideToolbar();
+                            },
+                          ),
+                          ContextMenuButtonItem(
+                            label: '取消选择',
+                            onPressed: () {
+                              state.hideToolbar();
+                              state.clearSelection();
+                            },
+                          ),
+                        ];
+                        return AdaptiveTextSelectionToolbar.buttonItems(
+                          anchors: state.contextMenuAnchors,
+                          buttonItems: items,
+                        );
+                      },
+                      child: MarkdownBody(
+                        data: msg.content,
+                        selectable: false,
+                        styleSheet: MarkdownStyleSheet.fromTheme(
+                          theme,
+                        ).copyWith(
+                          p: theme.textTheme.bodyMedium?.copyWith(
+                            fontSize: 13,
+                            height: 1.5,
+                            color: Colors.grey[800],
+                          ),
+                          h1: theme.textTheme.titleMedium?.copyWith(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                          ),
+                          h2: theme.textTheme.titleMedium?.copyWith(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                          ),
+                          h3: theme.textTheme.titleSmall?.copyWith(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                          ),
+                          strong: theme.textTheme.bodyMedium?.copyWith(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.black87,
+                          ),
+                          tableBorder: TableBorder.all(
+                            color: Colors.grey.shade300,
+                            width: 0.5,
+                          ),
+                          tableHead: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: theme.colorScheme.primary,
+                          ),
+                          tableBody: TextStyle(fontSize: 12, height: 1.4),
+                          tableCellsPadding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 4,
+                          ),
+                          blockquote: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                            fontStyle: FontStyle.italic,
+                          ),
+                          code: TextStyle(
+                            fontSize: 12,
+                            color: Colors.deepOrange[700],
+                            fontFamily: 'monospace',
+                          ),
+                          horizontalRuleDecoration: BoxDecoration(
+                            border: Border(
+                              top: BorderSide(
+                                color: Colors.grey[300]!,
+                                width: 1,
+                              ),
+                            ),
                           ),
                         ),
                       ),
@@ -166,6 +214,59 @@ class _AiFollowUpBubbleState extends State<AiFollowUpBubble> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 追问回答的收藏星标:点击收藏/取消收藏该条回答(v1.4.0 问题 8)
+class _AiBookmarkStar extends StatelessWidget {
+  final FollowUpMessage message;
+
+  const _AiBookmarkStar({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<BookmarkProvider>(
+      builder: (ctx, bp, _) {
+        final content = message.content;
+        final saved = bp.isBookmarked(
+          AppConstants.bookmarkSourceFollowUp,
+          content,
+        );
+        return InkWell(
+          onTap: () {
+            final title = content
+                .split('\n')
+                .firstWhere((l) => l.trim().isNotEmpty, orElse: () => '')
+                .trim();
+            bp.toggle(
+              Bookmark(
+                source: AppConstants.bookmarkSourceFollowUp,
+                title: title.length > 60 ? title.substring(0, 60) : title,
+                content: content,
+                model: message.model,
+              ),
+            );
+            ScaffoldMessenger.of(context)
+              ..hideCurrentSnackBar()
+              ..showSnackBar(
+                SnackBar(
+                  content: Text(saved ? '已取消收藏' : '已收藏到收藏夹'),
+                  behavior: SnackBarBehavior.floating,
+                  duration: const Duration(seconds: 2),
+                ),
+              );
+          },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+            child: Icon(
+              saved ? Icons.star : Icons.star_border,
+              size: 16,
+              color: saved ? Colors.amber[700] : Colors.grey[400],
+            ),
+          ),
+        );
+      },
     );
   }
 }

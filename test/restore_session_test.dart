@@ -3,10 +3,12 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:provider/provider.dart';
 
 import 'package:readflow/config/constants.dart';
 import 'package:readflow/models/saved_session.dart';
 import 'package:readflow/models/vocabulary.dart';
+import 'package:readflow/providers/bookmark_provider.dart';
 import 'package:readflow/screens/input/process_chat.dart';
 
 /// 复现「继续上次会话」恢复模式渲染问题:
@@ -45,10 +47,13 @@ void main() {
     );
 
     await tester.pumpWidget(MaterialApp(
-      home: ProcessChatScreen(
-        imageFiles: const [],
-        analysisMode: AppConstants.analysisModeMarked,
-        restoreSession: s,
+      home: ChangeNotifierProvider(
+        create: (_) => BookmarkProvider(),
+        child: ProcessChatScreen(
+          imageFiles: const [],
+          analysisMode: AppConstants.analysisModeMarked,
+          restoreSession: s,
+        ),
       ),
     ));
     await tester.pump();

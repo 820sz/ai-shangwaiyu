@@ -133,7 +133,7 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
             ),
             const SizedBox(height: 12),
             Text(
-              '拍照取词',
+              '拍照识文',
               style: theme.textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.w600,
               ),

@@ -12,6 +12,9 @@ class WordListTile extends StatelessWidget {
   final VoidCallback onLongPress;
   /// 序号（从 0 起），null 时不显示（其他页面复用时不干扰）
   final int? index;
+  /// 收藏星标(v1.4.0 问题 8):非 null 时显示;分别控制显示与状态
+  final VoidCallback? onBookmark;
+  final bool bookmarked;
 
   const WordListTile({
     super.key,
@@ -20,6 +23,8 @@ class WordListTile extends StatelessWidget {
     required this.onTap,
     required this.onLongPress,
     this.index,
+    this.onBookmark,
+    this.bookmarked = false,
   });
 
   Color _barColor() {
@@ -120,6 +125,22 @@ class WordListTile extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 4),
+            // 收藏星标(可选)——好句子/词条单独收藏进收藏夹
+            if (onBookmark != null)
+              InkWell(
+                onTap: onBookmark,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 2,
+                    vertical: 4,
+                  ),
+                  child: Icon(
+                    bookmarked ? Icons.star : Icons.star_border,
+                    size: 16,
+                    color: bookmarked ? Colors.amber[700] : Colors.grey[400],
+                  ),
+                ),
+              ),
             // 箭头指示
             Icon(Icons.chevron_right, size: 18, color: Colors.grey[300]),
           ],

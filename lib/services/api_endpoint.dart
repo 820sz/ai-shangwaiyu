@@ -53,6 +53,29 @@ class ApiEndpointConfig {
 
   Box get _box => Hive.box(AppConstants.hiveBoxSettings);
 
+  /// 清洗用户粘贴的 Base URL(纯函数,可单测)— v1.3.2:
+  /// 真机粘贴常带 全角冒号(:)/空格/换行/BOM → Dio 抛
+  /// "Illegal scheme character (at character 5)"(用户实测截图实锤)。
+  /// 规则:去 BOM/首尾空白/全部内部空白/全角冒号与斜杠 → 半角。
+  static String cleanBaseUrl(String raw) {
+    var s = raw.replaceAll('\uFEFF', '');
+    s = s.replaceAll('\uFF1A', ':'); // 全角冒号
+    s = s.replaceAll('\uFF0F', '/'); // 全角斜杠
+    s = s.replaceAll(RegExp(r'\s+'), ''); // 所有空白(含空格/换行/制表)
+    return s.trim();
+  }
+
+  /// 清洗后的 URL 是否可作请求端点(必须以 http:// 或 https:// 开头)
+  static String? normalizedBaseUrl(String raw) {
+    final cleaned = cleanBaseUrl(raw);
+    if (cleaned.isEmpty) return null;
+    final lower = cleaned.toLowerCase();
+    if (!(lower.startsWith('http://') || lower.startsWith('https://'))) {
+      return null;
+    }
+    return cleaned;
+  }
+
   String? get apiKey {
     final v = _box.get(hiveKey);
     return (v is String && v.isNotEmpty) ? v : null;
@@ -60,7 +83,18 @@ class ApiEndpointConfig {
 
   String get baseUrl {
     final v = _box.get(hiveBaseUrl);
-    return (v is String && v.isNotEmpty) ? v : defaultBaseUrl;
+    if (v is String && v.isNotEmpty) {
+      // 清洗后合法 → 用;非法(残留全角/坏链接)回默认,绝不让 Dio 解析崩
+      return normalizedBaseUrl(v) ?? defaultBaseUrl;
+    }
+    // 未填 URL → 按 Key 前缀自动配对端点(v1.4.0,用户实测"方舟 key + DS 模型"错配):
+    // sk- = DeepSeek 官方(api.deepseek.com,deepseek-v4-flash-vision-exp 只在这家);
+    // ark-/其他 = 槽位默认(主=方舟,副=DeepSeek 官方)
+    final key = apiKey ?? '';
+    if (key.toLowerCase().startsWith('sk-')) {
+      return AppConstants.deepseekBaseUrl;
+    }
+    return defaultBaseUrl;
   }
 
   String get model {

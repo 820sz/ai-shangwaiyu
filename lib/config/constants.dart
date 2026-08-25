@@ -79,7 +79,12 @@ class AppConstants {
 
   // ── 数据库 ──
   static const String dbName = 'readflow.db';
-  static const int dbVersion = 5;
+  static const int dbVersion = 6;
+
+  // ── 收藏夹 ──
+  /// 收藏来源:追问答案 / 词汇卡片
+  static const String bookmarkSourceFollowUp = 'follow_up';
+  static const String bookmarkSourceVocab = 'vocab';
 
   // ── 分类系统 ──
   static const List<String> learningCategories = [

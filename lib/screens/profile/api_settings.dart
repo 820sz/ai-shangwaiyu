@@ -91,21 +91,51 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
   }
 
   Future<void> _save() async {
+    // URL 清洗+校验(v1.3.2):粘贴带全角冒号/空格/换行 → 清洗;
+    // 清洗后非空但不以 http(s):// 开头 → 警告并重置为默认,绝不存坏值
+    final primaryKey = _primaryKeyCtrl.text.replaceAll(RegExp(r'\s+'), '');
+    final secondaryKey = _secondaryKeyCtrl.text.replaceAll(RegExp(r'\s+'), '');
+    // 未填 URL 按 Key 前缀补默认端点(v1.4.0):sk- → DeepSeek 官方,零配置错配
+    final primaryUrlRaw = ApiEndpointConfig.cleanBaseUrl(_primaryUrlCtrl.text);
+    final primaryUrlValid = ApiEndpointConfig.normalizedBaseUrl(primaryUrlRaw);
+    final primaryUrlSaved = primaryUrlValid ??
+        (primaryKey.toLowerCase().startsWith('sk-')
+            ? AppConstants.deepseekBaseUrl
+            : '');
+    final secondaryUrlRaw = ApiEndpointConfig.cleanBaseUrl(_secondaryUrlCtrl.text);
+    final secondaryUrlValid = ApiEndpointConfig.normalizedBaseUrl(secondaryUrlRaw);
+    final secondaryUrlSaved = secondaryUrlValid ??
+        (secondaryKey.toLowerCase().startsWith('sk-')
+            ? AppConstants.deepseekBaseUrl
+            : '');
+    final badUrl =
+        (primaryUrlRaw.isNotEmpty && primaryUrlValid == null) ||
+        (secondaryUrlRaw.isNotEmpty && secondaryUrlValid == null);
+    final autoUrl =
+        (primaryUrlRaw.isEmpty && (primaryKey.toLowerCase().startsWith('sk-'))) ||
+        (secondaryUrlRaw.isEmpty && (secondaryKey.toLowerCase().startsWith('sk-')));
+
     // 主槽位(复用原豆包 key,老配置无需迁移)
-    await _box.put(AppConstants.keyDoubaoApiKey, _primaryKeyCtrl.text.trim());
-    await _box.put(AppConstants.keyDoubaoBaseUrl, _primaryUrlCtrl.text.trim());
+    await _box.put(AppConstants.keyDoubaoApiKey, primaryKey);
+    await _box.put(AppConstants.keyDoubaoBaseUrl, primaryUrlSaved);
     await _box.put(AppConstants.keyDoubaoModel, _primaryModelCtrl.text.trim());
     await _box.put(AppConstants.keyDoubaoThinking, _primaryThinking);
     // 副槽位(复用原 DeepSeek key)
-    await _box.put(AppConstants.keyDeepseekApiKey, _secondaryKeyCtrl.text.trim());
-    await _box.put(AppConstants.keyDeepseekBaseUrl, _secondaryUrlCtrl.text.trim());
+    await _box.put(AppConstants.keyDeepseekApiKey, secondaryKey);
+    await _box.put(AppConstants.keyDeepseekBaseUrl, secondaryUrlSaved);
     await _box.put(AppConstants.keyDeepseekModel, _secondaryModelCtrl.text.trim());
     await _box.put(AppConstants.keyDeepseekThinking, _secondaryThinking);
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('API 设置已保存 · 模型变更后重新拍照生效'),
+        SnackBar(
+          content: Text(
+            badUrl
+                ? 'Base URL 格式不正确(需 http/https 开头),已重置为默认端点;请检查后重新填写'
+                : autoUrl
+                    ? 'API 设置已保存 · 检测到 DeepSeek Key,已自动使用 https://api.deepseek.com'
+                    : 'API 设置已保存 · 模型变更后重新拍照生效',
+          ),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -123,8 +153,14 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
         : ApiEndpointConfig.secondary.defaultBaseUrl;
 
     final apiKey = keyCtrl.text.trim();
-    final baseUrl =
-        urlCtrl.text.trim().isNotEmpty ? urlCtrl.text.trim() : defaultUrl;
+    final urlRaw = ApiEndpointConfig.cleanBaseUrl(urlCtrl.text);
+    // 未填 URL 时按 Key 前缀自动配端点:sk- → DeepSeek 官方(否则拉方舟 /models
+    // 会失败回退豆包清单,用户看不到自己的 DS 模型——v1.3.1 实测痛点)
+    final baseUrl = urlRaw.isNotEmpty
+        ? (ApiEndpointConfig.normalizedBaseUrl(urlRaw) ?? defaultUrl)
+        : (apiKey.toLowerCase().startsWith('sk-')
+            ? AppConstants.deepseekBaseUrl
+            : defaultUrl);
 
     setState(() {
       if (isPrimary) {

@@ -395,34 +395,45 @@ class DoubaoApiService extends BaseApiService {
   /// [imageDataUris] 非空时以多模态消息发送(模型能"看到"识别图片);
   /// 若模型不支持图片(4xx/错误信息含图相关词)→ 自动降级为纯文本重试一次。
   /// [thinkingLevel] 追问思考档位(独立于槽位识图档位),null 用槽位档位。
+  /// [history] 本轮之前的对话(user/ai 交替,v1.4.0 问题 13 根因修复:
+  /// 原实现只发 system+当前问题 → AI 完全没有上下楼记忆,"
+  /// 连上一楼的对话都没印象")。材料上下文(识别结果/翻译)放 system。
   Stream<SseChunk> followUpStream(
     String question, {
     required String context,
     ApiEndpointConfig? endpoint,
     List<String>? imageDataUris,
     String? thinkingLevel,
+    List<Map<String, String>> history = const [],
   }) async* {
     final cfg = endpoint ?? config;
     if (!cfg.isConfigured) {
       throw Exception('请先在设置中配置 API Key');
     }
 
-    final userContent = buildFollowUpUserContent(
-      context: context,
+    // 最后一条 user 消息:纯问题(+可选图片)由纯函数组装;材料上下文放 system
+    final lastUserContent = buildFollowUpLastUserContent(
       question: question,
       imageDataUris: imageDataUris,
       model: cfg.model,
     );
 
+    final systemContent = context.trim().isEmpty
+        ? '你是英语学习助手。回答用户追问。简洁准确，根据材料量自行决定回答长度。'
+        : '你是英语学习助手。基于图片识别结果回答用户追问。简洁准确，根据材料量自行决定回答长度。\n\n'
+            '识别材料上下文：\n$context';
+
     final body = {
       'model': cfg.model,
       'messages': [
-        {
-          'role': 'system',
-          'content':
-              '你是英语学习助手。基于图片识别结果回答用户追问。简洁准确，根据材料量自行决定回答长度。',
-        },
-        {'role': 'user', 'content': userContent},
+        {'role': 'system', 'content': systemContent},
+        // 历史对话(上下楼记忆)— 仅已完成消息,最近 20 条由调用方截断
+        for (final h in history)
+          {
+            'role': h['role'],
+            'content': h['content'],
+          },
+        {'role': 'user', 'content': lastUserContent},
       ],
       'temperature': 0.3,
       'max_tokens': 2048,
@@ -443,15 +454,9 @@ class DoubaoApiService extends BaseApiService {
           ...body,
           'messages': [
             body['messages'][0],
-            {
-              'role': 'user',
-              'content': buildFollowUpUserContent(
-                context: context,
-                question: question,
-                imageDataUris: null,
-                model: cfg.model,
-              ),
-            },
+            for (final h in history)
+              {'role': h['role'], 'content': h['content']},
+            {'role': 'user', 'content': '用户提问：$question'},
           ],
         };
         final retry = await postWithReasoningFallback(
@@ -464,16 +469,17 @@ class DoubaoApiService extends BaseApiService {
     }
   }
 
-  /// 组装追问 user content:有图 → content parts(image_url + text),无图 → 纯文本。
-  /// OpenAl 兼容多模态格式;detail 仅豆包系发。纯函数,可单测。
-  static Object buildFollowUpUserContent({
-    required String context,
+  /// 组装追问最后一轮 user content(v1.4.0):
+  /// 有图 → content parts(image_url + text=问题);无图 → 纯问题文本。
+  /// 材料上下文不走这里——已放 system 消息。OpenAI 兼容多模态格式;
+  /// detail 仅豆包系发。纯函数,可单测。
+  static Object buildFollowUpLastUserContent({
     required String question,
     required List<String>? imageDataUris,
     required String model,
   }) {
     if (imageDataUris == null || imageDataUris.isEmpty) {
-      return '$context\n\n用户提问：$question';
+      return '用户提问：$question';
     }
     return [
       for (final uri in imageDataUris)
@@ -484,7 +490,7 @@ class DoubaoApiService extends BaseApiService {
             if (shouldSendDetailFlag(model)) 'detail': 'low',
           },
         },
-      {'type': 'text', 'text': '$context\n\n用户提问：$question'},
+      {'type': 'text', 'text': '用户提问：$question'},
     ];
   }
 

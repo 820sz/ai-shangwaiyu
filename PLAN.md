@@ -1,8 +1,8 @@
 # PLAN.md — AI上外语 (readflow)
 
 ## 状态
-- 当前版本:**v1.3.1**(Release 已发 = Latest,v1.3.0 被 v1.3.1 覆盖)
-- 当前阶段:✅ v1.3.1 已发(模型列表过滤+端点防呆),**等用户按正确配置真机验收**
+- 当前版本:**v1.4.0**(Release 已发 = Latest,https://github.com/820sz/ai-shangwaiyu/releases/tag/v1.4.0)
+- 当前阶段:✅ v1.4.0 发布完成(追问记忆/复制交互/收藏夹/全文翻译增强/API 自动端点/崩溃日志),**等用户真机验收 8 项(6~13)+ 之前 3 项回归(0/1/5)**
 - 状态协议:DONE_WITH_CONCERNS(真机验收未做)
 
 ## 需求摘要
@@ -27,7 +27,30 @@
 
 ## 版本记录(最新在前)
 
-### v1.3.1 — 模型列表过滤+端点配对防呆(2026-08-25,构建发布中)
+### v1.4.0 — 追问记忆+复制交互+收藏夹+全文翻译增强(2026-08-26,开发完成待发)
+**背景**:用户睡前留言 8 项(6~13),含一个核心 bug(追问失忆)+ 一批新功能/改名。
+**实现**:
+- **13 追问失忆(根因修复)**:followUpStream 的历史消息从未发送,messages 永远只有 system+当前问题 → AI 无任何上下楼记忆。修复:history 参数(最近 20 条已完成对话,排除当前问题自身)+ 材料上下文(识别结果/翻译)放 system 消息;最后一轮 user 只放"用户提问:xx"(带图时 parts)。纯函数 buildFollowUpLastUserContent 可测
+- **7 复制交互**:词条长按两层逻辑(未选中→选中;已选中→复制菜单:原文/释义/全部,中文"复制");追问 AI 文本 SelectionArea + 自定义工具栏「复制全部/取消选择」(用户实测选完只能按返回键)
+- **11 改名**:拍照取词→拍照识文;my_materials 空态文案同步
+- **12 改名**:追问抽屉标题"追问对话"→"追问抽屉"
+- **10 全文翻译追加图片**:按钮对 fullText 模式放开;追加时段落累计(不替换)
+- **6 全文翻译讲解导引**:段落卡「✨ AI 讲解」按钮+点击原文 → 追问详解该段(带原文+译文上下文)
+- **9 收藏夹**:DB v6 bookmarks 表(source/title/content/source_word/model/created_at)+ Bookmark model + BookmarkProvider + 我的页「收藏夹」入口 + BookmarksScreen(详情/复制/删除)
+- **8 收藏 UI**:追问 AI 气泡星标(流式完成后显示)+ 词汇卡片星标(总览 WordListTile + 详细模式),词汇收藏=原文+释义+例句,独立于生词本
+- **API 自动端点(v1.4.0 配套)**:Base URL 为空时按 Key 前缀自动配对——sk-→api.deepseek.com,ark-/其他→槽位默认(主=方舟);保存时自动补默认 URL 并提示;模型列表拉取同样按 key 推断端点(根治"方舟 key + DS 模型"错配)
+- 验证:analyze 0 error / 0 warning;118 测试全绿(+3 bookmark 往返;DB v6 断言更新)
+- 待办:构建发布 + 用户真机验收 8 项 + 之前的 3 项(0/1/5)回归
+
+### v1.3.2 — 崩溃日志落盘 + Base URL/Key 清洗 + 诊断入口(2026-08-25,构建完成待发)
+**背景**:用户实测:①Base URL 粘贴带全角冒号/空格 → Dio 抛 "Illegal scheme character (at character 5)"(截图实锤)②"改回豆包模型后第一次识别必闪退,第二次正常",无日志只能盲猜。
+**修复**:
+- CrashLogger:FlutterError/zone 异常全局捕获落盘 文档目录/crash_log.txt;我的页新增「诊断信息」入口(crash 日志+API 配置摘要 key 打码,可清空)——下次闪退自证根因,不再打地鼠
+- cleanBaseUrl/normalizedBaseUrl:全角冒号/斜杠/空白/换行/BOM 清洗;非法(非 http(s) 开头)回默认端点,绝不进 Dio
+- 设置页保存:URL 清洗+非法重置为默认+提示;API Key 去全部空白
+- 验证:analyze 0/0;115 测试全绿(+8 base_url_clean)
+
+### v1.3.1 — 模型列表过滤+端点配对防呆(2026-08-25,已发布)
 **背景**:v1.3.0 真机测试失败:用户主槽位(方舟 ark- key + 空 Base URL)手输 DS 官方模型名 deepseek-v4-flash-vision-exp → 识别失败"API Key 无效"(实为端点/模型不匹配:该模型只存在于 api.deepseek.com);且主槽位"不过滤"后方舟 /models 全量展示(未开通的 doubao-1-5* / character / deepseek-r1/v3 转售)用户投诉"一堆乱模型"。
 **修复**:
 - 主槽位模型列表按**视觉候选过滤**(isVisionCandidate:含 vision 或 doubao-seed 系;隐藏 1-5 老文本/character/纯文本 DS 转售);过滤后为空回退内置视觉清单
@@ -282,9 +305,8 @@
 - **修复(显示层回退)**:word 以省略号结尾且存在更长的 originalSentence → 显示 originalSentence(详细模式 _displayWord + 总览 WordListTile 同逻辑)
 - 用户线索关键提示:"近几次词汇板块 UI 调整后就这样"+"原来正常"——但代码审查确认 UI 一直放开;数据层词条化是模型近端行为(v1.2.10 时代用户就反馈过截断,当时误判为 UI)
 
-## 断点快照(2026-08-25)
-- 正在做:**v1.3.0 发布完成,等用户真机验收 6 项**(0 主槽位 DS 视觉 / 1 追问 4 档 / 2 AI 补全 / 3 再识别 / 4 编辑重发 / 5 追问上下文)
-- 下一步:用户真机验收 → 有问题按验收清单修,无问题状态转 DONE
-- 关键事实:DeepSeek 2026-08-21 上线 `deepseek-v4-flash-vision-exp`(官方视觉 API,OpenAI 兼容);主槽位模型列表过滤是问题 0 根因
-- 环境备忘:**本会话跑 flutter 命令必须 `FLUTTER_ALREADY_LOCKED=true` + 全盘权限(danger-full-access)**,否则 D:\flutter lockfile CreateFile failed 5 挂死;构建命令要开梯子;analyze 首跑 ~170s
-- 备注:auto 更新链路真机跑通 ✓;发布命令 gh release create/upload 本会话直跑成功,无需用户自跑;gh release create 路径用正斜杠
+## 断点快照(2026-08-26)
+- 正在做:**v1.4.0 发布完成,等用户真机验收**——8 项(6~13)+ 3 项回归(0/1/5)
+- 验收清单(重点):①追问聊 3 轮问"我上一楼问了什么"能答(#13)②词条长按两下出复制菜单(#7)③追问长按文字有「取消选择」④全文翻译点「AI 讲解」/追加图片(6/10)⑤追问答案☆收藏→我的-收藏夹(#8/9)⑥拍照识文/追问抽屉改名(11/12)⑦主槽位只填 sk- key 模型列表自动是 DS(API 自动端点)⑧出问题先看「我的-诊断信息」
+- 环境备忘:**本会话跑 flutter 命令必须 `FLUTTER_ALREADY_LOCKED=true` + 全盘权限(danger-full-access)**,否则 D:\flutter lockfile CreateFile failed 5 挂死;构建命令要开梯子
+- 备注:auto 更新链路真机跑通 ✓;gh release create/upload 本会话直跑成功;PLAN.md 编辑注意版本标题完整性

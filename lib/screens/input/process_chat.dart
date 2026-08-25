@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:path_provider/path_provider.dart';
@@ -8,7 +9,9 @@ import 'package:image_picker/image_picker.dart';
 import '../../config/constants.dart';
 import '../../models/saved_session.dart';
 import '../../models/vocabulary.dart';
+import '../../models/bookmark.dart';
 import '../../providers/vocab_provider.dart';
+import '../../providers/bookmark_provider.dart';
 import '../../services/api_endpoint.dart';
 import '../../services/doubao_api.dart';
 import '../../utils/follow_up_context.dart';
@@ -577,7 +580,8 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
 
       if (widget.analysisMode == AppConstants.analysisModeFullText) {
         // 全文翻译结果：Map{original, translation}
-        _fullTextParagraphs = rawMaps
+        // 追加图片时新段落接在旧段落后,不替换(v1.4.0 问题 10)
+        final newParas = rawMaps
             .map(
               (r) => {
                 'original': r['original'] as String? ?? '',
@@ -586,8 +590,12 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
             )
             .where((m) => m['original']!.isNotEmpty)
             .toList();
+        _fullTextParagraphs = _streamStartIndex == 0
+            ? newParas
+            : [..._fullTextParagraphs, ...newParas];
         setState(() {
           _phase = _StreamPhase.results;
+          _streamStartIndex = 0;
         });
       } else {
         // 圈画模式结果 — 多图时按 image_index 映射正确的 photoPath。
@@ -1066,7 +1074,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                   ),
                   const SizedBox(width: 6),
                   const Text(
-                    '追问对话',
+                    '追问抽屉',
                     style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
                   ),
                   const SizedBox(width: 8),
@@ -1336,12 +1344,29 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     }
 
     try {
+      // 上下楼记忆(v1.4.0 问题 13 根因修复):把当前轮之前的已完成对话
+      // (user/ai 交替)发给模型——原实现只发 system+当前问题,AI 没有任何
+      // 对话历史。取最近 20 条防上下文膨胀;跳过当前问题自身
+      // (aiMsgIndex-1 = 本轮 user 消息,编辑重发时同样成立)。
+      final journal = _followUpMessages.value;
+      final recent = <Map<String, String>>[];
+      for (int i = aiMsgIndex - 2;
+          i >= 0 && recent.length < 20;
+          i--) {
+        final m = journal[i];
+        if (m.role != 'user' && m.role != 'ai') continue;
+        if (m.content.isEmpty) continue;
+        if (m.streaming) continue; // 流式中的残影不进历史
+        recent.add({'role': m.role, 'content': m.content});
+      }
+      final history = recent.reversed.toList();
       final stream = _api.followUpStream(
         question,
         context: finalContext,
         endpoint: _followUpEndpoint,
         imageDataUris: imageUris,
         thinkingLevel: _followUpThinking,
+        history: history,
       );
 
       _followUpSub = stream.listen(
@@ -2230,8 +2255,8 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                     style: TextStyle(fontSize: 11, color: Colors.grey[400]),
                   ),
                   const Spacer(),
-                  if (_phase == _StreamPhase.results &&
-                      widget.analysisMode != AppConstants.analysisModeFullText)
+                  // 追加图片:圈画/全文翻译模式都支持(v1.4.0 问题 10)
+                  if (_phase == _StreamPhase.results)
                     GestureDetector(
                       onTap: _addMoreImages,
                       child: Container(
@@ -2404,16 +2429,30 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
           ),
         ),
         const SizedBox(height: 12),
-        // 段落卡片
+        // 段落卡片(点击原文/「AI 讲解」→ 追问详解该段,v1.4.0 问题 6)
         ...List.generate(_fullTextParagraphs.length, (i) {
           final p = _fullTextParagraphs[i];
           return FulltextResultCard(
             index: i,
             original: p['original'] ?? '',
             translation: p['translation'] ?? '',
+            onAskExplain: () => _askAiAboutParagraph(i),
           );
         }),
       ],
+    );
+  }
+
+  /// 全文翻译段落 → 追问详解(带原文+译文上下文,AI 待命)
+  void _askAiAboutParagraph(int index) {
+    if (index < 0 || index >= _fullTextParagraphs.length) return;
+    final p = _fullTextParagraphs[index];
+    final ctx = StringBuffer()
+      ..writeln('原文段落：${p['original'] ?? ''}')
+      ..writeln('译文：${p['translation'] ?? ''}');
+    _openFollowUp(
+      prefillQuestion: '请详细讲解这段英文的语法结构、重点词汇和含义',
+      followUpContext: ctx.toString(),
     );
   }
 
@@ -2596,9 +2635,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
 
     return GestureDetector(
       onTap: () => setState(() => _queryTargetIndex = index),
-      onLongPress: () => setState(() {
-        isSel ? _selected.remove(index) : _selected.add(index);
-      }),
+      onLongPress: () => _onWordLongPress(index),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
         margin: const EdgeInsets.only(bottom: 8),
@@ -2663,6 +2700,23 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                       Icons.edit_outlined,
                       size: 15,
                       color: Colors.grey[500],
+                    ),
+                  ),
+                ),
+                // 收藏星标——好句子/词条单独收藏(v1.4.0 问题 8)
+                InkWell(
+                  onTap: () => _toggleVocabBookmark(item),
+                  borderRadius: BorderRadius.circular(6),
+                  child: Padding(
+                    padding: const EdgeInsets.all(5),
+                    child: Icon(
+                      _isVocabBookmarked(item)
+                          ? Icons.star
+                          : Icons.star_border,
+                      size: 15,
+                      color: _isVocabBookmarked(item)
+                          ? Colors.amber[700]
+                          : Colors.grey[400],
                     ),
                   ),
                 ),
@@ -2840,11 +2894,9 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
               onRemove: () => setState(() => _selected.remove(i)),
             );
           },
-          onLongPress: () {
-            setState(() {
-              isSel ? _selected.remove(i) : _selected.add(i);
-            });
-          },
+          onLongPress: () => _onWordLongPress(i),
+          onBookmark: () => _toggleVocabBookmark(item),
+          bookmarked: _isVocabBookmarked(item),
         );
       }
     });
@@ -2938,11 +2990,9 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                   onRemove: () => setState(() => _selected.remove(i)),
                 );
               },
-              onLongPress: () {
-                setState(() {
-                  isSel ? _selected.remove(i) : _selected.add(i);
-                });
-              },
+              onLongPress: () => _onWordLongPress(i),
+              onBookmark: () => _toggleVocabBookmark(item),
+              bookmarked: _isVocabBookmarked(item),
               index: i,
             ),
           );
@@ -3223,6 +3273,141 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
             child: const Text('保存'),
           ),
         ],
+      ),
+    );
+  }
+
+  /// 词汇卡片收藏(v1.4.0 问题 8):原文+释义+例句作为收藏内容,
+  /// 独立于生词本——觉得句子好可单独收藏
+  void _toggleVocabBookmark(Vocabulary v) {
+    context.read<BookmarkProvider>().toggle(
+          Bookmark(
+            source: AppConstants.bookmarkSourceVocab,
+            title: v.displayWordText,
+            content: _vocabBookmarkContent(v),
+            sourceWord: v.word,
+          ),
+        );
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            context
+                    .read<BookmarkProvider>()
+                    .isBookmarked(AppConstants.bookmarkSourceVocab,
+                        _vocabBookmarkContent(v))
+                ? '已收藏到收藏夹'
+                : '已取消收藏',
+          ),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+  }
+
+  String _vocabBookmarkContent(Vocabulary v) {
+    return [
+      v.displayWordText,
+      if (v.translation != null && v.translation!.isNotEmpty)
+        '释义：${v.translation}',
+      if (v.originalSentence != null && v.originalSentence!.isNotEmpty)
+        '例句：${v.originalSentence}',
+    ].join('\n');
+  }
+
+  bool _isVocabBookmarked(Vocabulary v) {
+    return context
+        .read<BookmarkProvider>()
+        .isBookmarked(
+            AppConstants.bookmarkSourceVocab, _vocabBookmarkContent(v));
+  }
+
+  /// 词条长按(v1.4.0 问题 7 两层逻辑):
+  /// 未选中 → 选中(现有选中操作);已选中 → 弹出复制菜单。
+  /// 取消选中由 AppBar「取消选择(N)」承担,避免长按行为二义。
+  void _onWordLongPress(int index) {
+    if (_selected.contains(index)) {
+      _showWordCopyMenu(index);
+    } else {
+      setState(() => _selected.add(index));
+    }
+  }
+
+  /// 词条复制菜单:原文 / 释义(存在时)/ 全部(原文+释义+例句)
+  void _showWordCopyMenu(int index) {
+    final item = _results[index];
+    final word = item.displayWordText;
+    final translation = item.translation ?? '';
+    final sentence = item.originalSentence ?? '';
+
+    void copy(String text, String label) {
+      Clipboard.setData(ClipboardData(text: text));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('已复制$label'),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    }
+
+    showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  '复制「${word.length > 20 ? '${word.substring(0, 20)}…' : word}」',
+                  style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                ),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.copy_outlined, size: 20),
+              title: const Text('复制原文', style: TextStyle(fontSize: 14)),
+              onTap: () {
+                copy(word, '原文');
+                Navigator.pop(ctx);
+              },
+            ),
+            if (translation.isNotEmpty)
+              ListTile(
+                leading: const Icon(Icons.translate, size: 20),
+                title: const Text('复制释义', style: TextStyle(fontSize: 14)),
+                onTap: () {
+                  copy(translation, '释义');
+                  Navigator.pop(ctx);
+                },
+              ),
+            ListTile(
+              leading: const Icon(Icons.content_copy, size: 20),
+              title: const Text('复制全部', style: TextStyle(fontSize: 14)),
+              onTap: () {
+                copy(
+                  [
+                    word,
+                    if (translation.isNotEmpty) '释义：$translation',
+                    if (sentence.isNotEmpty) '例句：$sentence',
+                  ].join('\n'),
+                  '全部',
+                );
+                Navigator.pop(ctx);
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
       ),
     );
   }

@@ -6,6 +6,7 @@ import '../models/vocabulary.dart';
 import '../models/article.dart';
 import '../models/exercise.dart';
 import '../models/learning_record.dart';
+import '../models/bookmark.dart';
 
 /// 本地 SQLite 数据库服务 — 生词、文章、练习、学习记录全部落本地
 class DatabaseService {
@@ -98,6 +99,19 @@ class DatabaseService {
         created_at TEXT NOT NULL
       )
     ''');
+
+    // 收藏夹(v1.4.0 问题 8/9):追问答案 + 词汇卡片,碎片知识收集
+    await db.execute('''
+      CREATE TABLE bookmarks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        source TEXT NOT NULL,
+        title TEXT,
+        content TEXT NOT NULL,
+        source_word TEXT,
+        model TEXT,
+        created_at TEXT NOT NULL
+      )
+    ''');
   }
 
   static Future<void> _onUpgrade(Database db, int oldV, int newV) async {
@@ -141,6 +155,22 @@ class DatabaseService {
       try {
         await db.execute("ALTER TABLE articles ADD COLUMN translation TEXT");
       } catch (e) { debugPrint('ReadFlow DB migration v5 translation: $e'); }
+    }
+    if (oldV < 6) {
+      // 收藏夹表(v1.4.0)——老用户升级补建
+      try {
+        await db.execute('''
+          CREATE TABLE IF NOT EXISTS bookmarks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source TEXT NOT NULL,
+            title TEXT,
+            content TEXT NOT NULL,
+            source_word TEXT,
+            model TEXT,
+            created_at TEXT NOT NULL
+          )
+        ''');
+      } catch (e) { debugPrint('ReadFlow DB migration v6 bookmarks: $e'); }
     }
   }
 
@@ -470,5 +500,38 @@ class DatabaseService {
   static Future<void> deleteMemory(String key) async {
     final db = await database;
     await db.delete('memory', where: 'key = ?', whereArgs: [key]);
+  }
+
+  // ═══════════════ 收藏夹 CRUD ═══════════════
+
+  static Future<int> insertBookmark(Bookmark b) async {
+    final db = await database;
+    return db.insert('bookmarks', b.toMap());
+  }
+
+  static Future<int> deleteBookmark(int id) async {
+    final db = await database;
+    return db.delete('bookmarks', where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// 按来源+内容查找(判断是否已收藏,避免重复收藏)
+  static Future<Bookmark?> findBookmark(
+      String source, String content) async {
+    final db = await database;
+    final rows = await db.query(
+      'bookmarks',
+      where: 'source = ? AND content = ?',
+      whereArgs: [source, content],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    return Bookmark.fromMap(rows.first);
+  }
+
+  static Future<List<Bookmark>> getBookmarks() async {
+    final db = await database;
+    final rows =
+        await db.query('bookmarks', orderBy: 'created_at DESC, id DESC');
+    return rows.map((r) => Bookmark.fromMap(r)).toList();
   }
 }

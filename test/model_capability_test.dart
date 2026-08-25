@@ -74,27 +74,24 @@ void main() {
     });
   });
 
-  group('followUp 用户消息组装(多模态/纯文本)', () {
-    final parts = DoubaoApiService.buildFollowUpUserContent(
-      context: '词汇上下文',
+  group('followUp 最后一条 user 消息组装(多模态/纯文本)', () {
+    final parts = DoubaoApiService.buildFollowUpLastUserContent(
       question: '这页讲了什么?',
       imageDataUris: ['data:image/png;base64,AAAA'],
       model: 'deepseek-v4-flash-vision-exp',
     ) as List<dynamic>;
 
-    test('带图 → content parts 含 image_url + text', () {
+    test('带图 → content parts 含 image_url + text(只有问题,无重复上下文)', () {
       expect(parts, hasLength(2));
       expect(parts[0]['type'], 'image_url');
       expect(parts[0]['image_url']['url'], 'data:image/png;base64,AAAA');
       expect(parts[0]['image_url']['detail'], isNull); // DS 不发 detail
       expect(parts[1]['type'], 'text');
-      expect(parts[1]['text'], contains('这页讲了什么'));
-      expect(parts[1]['text'], contains('词汇上下文'));
+      expect(parts[1]['text'], '用户提问：这页讲了什么?');
     });
 
     test('豆包系带图 → 发 detail: low', () {
-      final doubaoParts = DoubaoApiService.buildFollowUpUserContent(
-        context: 'c',
+      final doubaoParts = DoubaoApiService.buildFollowUpLastUserContent(
         question: 'q',
         imageDataUris: ['data:image/png;base64,AAAA'],
         model: 'doubao-seed-2-1-turbo-260628',
@@ -102,15 +99,14 @@ void main() {
       expect(doubaoParts[0]['image_url']['detail'], 'low');
     });
 
-    test('无图 → 纯文本字符串(副槽位文本模型兼容)', () {
-      final text = DoubaoApiService.buildFollowUpUserContent(
-        context: '词汇上下文',
+    test('无图 → 纯问题文本', () {
+      final text = DoubaoApiService.buildFollowUpLastUserContent(
         question: '这页讲了什么?',
         imageDataUris: null,
         model: 'deepseek-v4-flash',
       );
       expect(text, isA<String>());
-      expect(text, contains('词汇上下文\n\n用户提问：这页讲了什么?'));
+      expect(text, '用户提问：这页讲了什么?');
     });
   });
 }
