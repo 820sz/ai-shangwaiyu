@@ -657,9 +657,18 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
       _scrollToAiSection();
     } catch (e) {
       if (!mounted) return;
+      // v1.4.2:解析失败必须展示 AI 原文片段——思考模式输出格式/截断问题
+      // 从此一眼定位,不再盲猜(用户实测 DS 思考模式"思考一会就报错")
+      final raw = _contentText.trim();
+      final rawSnippet = raw.isEmpty
+          ? '(流未收到内容)'
+          : raw.length > 400
+              ? '${raw.substring(0, 400)}…'
+              : raw;
       setState(() {
         _phase = _StreamPhase.error;
-        _errorMessage = 'AI 返回内容解析失败，请重试。\n${e.toString()}';
+        _errorMessage = 'AI 返回内容解析失败，请重试。\n${e.toString()}\n\n'
+            'AI 返回原文(前 400 字):\n$rawSnippet';
       });
     }
   }
@@ -1387,21 +1396,12 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
 
     try {
       // 上下楼记忆(v1.4.0 问题 13 根因修复):把当前轮之前的已完成对话
-      // (user/ai 交替)发给模型——原实现只发 system+当前问题,AI 没有任何
-      // 对话历史。取最近 20 条防上下文膨胀;跳过当前问题自身
-      // (aiMsgIndex-1 = 本轮 user 消息,编辑重发时同样成立)。
-      final journal = _followUpMessages.value;
-      final recent = <Map<String, String>>[];
-      for (int i = aiMsgIndex - 2;
-          i >= 0 && recent.length < 20;
-          i--) {
-        final m = journal[i];
-        if (m.role != 'user' && m.role != 'ai') continue;
-        if (m.content.isEmpty) continue;
-        if (m.streaming) continue; // 流式中的残影不进历史
-        recent.add({'role': m.role, 'content': m.content});
-      }
-      final history = recent.reversed.toList();
+      // (user/ai 交替)发给模型;role 映射在纯函数内完成
+      // (ai→assistant,否则第二问必 400,v1.4.2)
+      final history = buildFollowUpHistory(
+        _followUpMessages.value,
+        aiMsgIndex,
+      );
       final stream = _api.followUpStream(
         question,
         context: finalContext,
@@ -2472,21 +2472,71 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         ),
         const SizedBox(height: 12),
         // 段落卡片(点击原文/「AI 讲解」→ 追问详解该段,v1.4.0 问题 6)
-        // 卡片锚点与段落数对齐(点击 pN 跳转用,v1.4.1)
+        // 多轮追加时按图片分组显示(如"p1 识别结果…"开头),不再挤在一起(v1.4.2)
         ..._syncFullTextCardKeys(),
-        ...List.generate(_fullTextParagraphs.length, (i) {
-          final p = _fullTextParagraphs[i];
-          return KeyedSubtree(
-            key: i < _fullTextCardKeys.length ? _fullTextCardKeys[i] : null,
-            child: FulltextResultCard(
-              index: i,
-              original: p['original'] ?? '',
-              translation: p['translation'] ?? '',
-              onAskExplain: () => _askAiAboutParagraph(i),
-            ),
-          );
-        }),
+        ..._buildFullTextGrouped(theme),
       ],
+    );
+  }
+
+  /// 全文翻译段落:多图(多轮)按图片分组渲染,单图平铺
+  List<Widget> _buildFullTextGrouped(ThemeData theme) {
+    final widgets = <Widget>[];
+    if (_fullTextGroupStarts.length <= 1) {
+      for (var i = 0; i < _fullTextParagraphs.length; i++) {
+        widgets.add(_fullTextCard(i));
+      }
+      return widgets;
+    }
+    for (var g = 0; g < _fullTextGroupStarts.length; g++) {
+      final start = _fullTextGroupStarts[g];
+      final end = g + 1 < _fullTextGroupStarts.length
+          ? _fullTextGroupStarts[g + 1]
+          : _fullTextParagraphs.length;
+      if (start >= end) continue; // 空轮(理论上不会)
+      widgets.add(
+        Container(
+          width: double.infinity,
+          margin: const EdgeInsets.only(top: 4, bottom: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.primary.withAlpha(12),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.image_outlined,
+                  size: 15, color: theme.colorScheme.primary),
+              const SizedBox(width: 6),
+              Text(
+                'p${g + 1} 识别结果 · 第 ${g + 1} 张图片',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: theme.colorScheme.primary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+      for (var i = start; i < end; i++) {
+        widgets.add(_fullTextCard(i));
+      }
+    }
+    return widgets;
+  }
+
+  Widget _fullTextCard(int i) {
+    final p = _fullTextParagraphs[i];
+    return KeyedSubtree(
+      key: i < _fullTextCardKeys.length ? _fullTextCardKeys[i] : null,
+      child: FulltextResultCard(
+        index: i,
+        original: p['original'] ?? '',
+        translation: p['translation'] ?? '',
+        onAskExplain: () => _askAiAboutParagraph(i),
+      ),
     );
   }
 
@@ -3337,8 +3387,8 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
 
   /// 词汇卡片收藏(v1.4.0 问题 8):原文+释义+例句作为收藏内容,
   /// 独立于生词本——觉得句子好可单独收藏
-  void _toggleVocabBookmark(Vocabulary v) {
-    context.read<BookmarkProvider>().toggle(
+  Future<void> _toggleVocabBookmark(Vocabulary v) async {
+    final saved = await context.read<BookmarkProvider>().toggle(
           Bookmark(
             source: AppConstants.bookmarkSourceVocab,
             title: v.displayWordText,
@@ -3346,18 +3396,13 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
             sourceWord: v.word,
           ),
         );
+    // await 之后按真实结果提示(异步时序导致提示相反是 v1.4.1 的缺陷)
+    if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(
         SnackBar(
-          content: Text(
-            context
-                    .read<BookmarkProvider>()
-                    .isBookmarked(AppConstants.bookmarkSourceVocab,
-                        _vocabBookmarkContent(v))
-                ? '已收藏到收藏夹'
-                : '已取消收藏',
-          ),
+          content: Text(saved ? '已收藏到收藏夹' : '已取消收藏'),
           behavior: SnackBarBehavior.floating,
           duration: const Duration(seconds: 2),
         ),

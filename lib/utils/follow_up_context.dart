@@ -1,4 +1,29 @@
 import '../models/vocabulary.dart';
+import '../screens/input/widgets/follow_up_models.dart';
+
+/// 构建追问历史消息(v1.4.2 纯函数,可单测):
+/// - 取 [aiMsgIndex] 之前已完成的消息(排除当前问题自身 aiMsgIndex-1)
+/// - **role 映射:ai → assistant**——OpenAI 兼容协议只认 user/assistant,
+///   直接发 "ai" 会 400(用户实测追问第二问必崩的根因)
+/// - 流式残影(streaming)不进历史;取最近 [max] 条防上下文膨胀
+List<Map<String, String>> buildFollowUpHistory(
+  List<FollowUpMessage> messages,
+  int aiMsgIndex, {
+  int max = 20,
+}) {
+  final recent = <Map<String, String>>[];
+  for (int i = aiMsgIndex - 2; i >= 0 && recent.length < max; i--) {
+    final m = messages[i];
+    if (m.role != 'user' && m.role != 'ai') continue;
+    if (m.content.isEmpty) continue;
+    if (m.streaming) continue;
+    recent.add({
+      'role': m.role == 'ai' ? 'assistant' : 'user',
+      'content': m.content,
+    });
+  }
+  return recent.reversed.toList();
+}
 
 /// 构建追问默认上下文(纯函数,可单测)。
 ///

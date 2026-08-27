@@ -234,12 +234,12 @@ class _AiBookmarkStar extends StatelessWidget {
           content,
         );
         return InkWell(
-          onTap: () {
+          onTap: () async {
             final title = content
                 .split('\n')
                 .firstWhere((l) => l.trim().isNotEmpty, orElse: () => '')
                 .trim();
-            bp.toggle(
+            final nowSaved = await bp.toggle(
               Bookmark(
                 source: AppConstants.bookmarkSourceFollowUp,
                 title: title.length > 60 ? title.substring(0, 60) : title,
@@ -247,11 +247,13 @@ class _AiBookmarkStar extends StatelessWidget {
                 model: message.model,
               ),
             );
+            // await 后按真实结果提示(v1.4.2 修复提示相反)
+            if (!context.mounted) return;
             ScaffoldMessenger.of(context)
               ..hideCurrentSnackBar()
               ..showSnackBar(
                 SnackBar(
-                  content: Text(saved ? '已取消收藏' : '已收藏到收藏夹'),
+                  content: Text(nowSaved ? '已收藏到收藏夹' : '已取消收藏'),
                   behavior: SnackBarBehavior.floating,
                   duration: const Duration(seconds: 2),
                 ),

@@ -28,7 +28,9 @@ class BookmarkProvider extends ChangeNotifier {
   }
 
   /// 收藏/取消收藏(切换)。[build] 由调用方构造完整 Bookmark。
-  Future<void> toggle(Bookmark build) async {
+  /// 返回 true = 已收藏(刚插入);false = 已取消(刚删除)。
+  /// 调用方据此提示,避免异步时序导致提示文案相反(v1.4.2)。
+  Future<bool> toggle(Bookmark build) async {
     try {
       final existed = await DatabaseService.findBookmark(
         build.source,
@@ -37,6 +39,8 @@ class BookmarkProvider extends ChangeNotifier {
       if (existed != null) {
         await DatabaseService.deleteBookmark(existed.id!);
         _items = _items.where((b) => b.id != existed.id).toList();
+        notifyListeners();
+        return false;
       } else {
         final id = await DatabaseService.insertBookmark(build);
         _items = [
@@ -51,10 +55,12 @@ class BookmarkProvider extends ChangeNotifier {
           ),
           ..._items,
         ];
+        notifyListeners();
+        return true;
       }
-      notifyListeners();
     } catch (e) {
       debugPrint('ReadFlow bookmark toggle: $e');
+      return false;
     }
   }
 

@@ -125,7 +125,9 @@ class WordListTile extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 4),
-            // 收藏星标(可选)——好句子/词条单独收藏进收藏夹
+            // 收藏星标(可选)——好句子/词条单独收藏进收藏夹。
+            // v1.4.2:星标取代箭头位(原两者并排把单词列挤窄,
+            // 长词被拆行——用户实测"fascinates→fascin ates")
             if (onBookmark != null)
               InkWell(
                 onTap: onBookmark,
@@ -140,9 +142,10 @@ class WordListTile extends StatelessWidget {
                     color: bookmarked ? Colors.amber[700] : Colors.grey[400],
                   ),
                 ),
-              ),
-            // 箭头指示
-            Icon(Icons.chevron_right, size: 18, color: Colors.grey[300]),
+              )
+            else
+              // 无收藏功能时保留箭头指示
+              Icon(Icons.chevron_right, size: 18, color: Colors.grey[300]),
           ],
         ),
       ),

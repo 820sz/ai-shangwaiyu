@@ -187,7 +187,7 @@ class DoubaoApiService extends BaseApiService {
           ],
         },
       ],
-      'max_tokens': 2048,
+      'max_tokens': 4096,
       'temperature': 0,
       ...config.buildThinkingParams(),
       if (stream) 'stream': true,
@@ -436,7 +436,7 @@ class DoubaoApiService extends BaseApiService {
         {'role': 'user', 'content': lastUserContent},
       ],
       'temperature': 0.3,
-      'max_tokens': 2048,
+      'max_tokens': 4096,
       ...cfg.buildThinkingParamsFor(thinkingLevel ?? cfg.thinking),
       'stream': true,
     };

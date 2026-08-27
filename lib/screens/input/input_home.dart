@@ -324,7 +324,12 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
               offset: const Offset(0, 200),
               constraints: const BoxConstraints(maxWidth: 280),
               itemBuilder: (_) => [
-                ...AppConstants.primaryFallbackModels.map((m) {
+                // 当前配置模型 + 内置清单去重(首页菜单跟随 API 设置,
+                // 用户配置了清单外的模型也能显示/切换,v1.4.2)
+                ...<String>{
+                  if (_currentModel.isNotEmpty) _currentModel,
+                  ...AppConstants.primaryFallbackModels,
+                }.toList().map((m) {
                   final isSel = m == _currentModel;
                   return PopupMenuItem(
                     value: 'model:$m',
