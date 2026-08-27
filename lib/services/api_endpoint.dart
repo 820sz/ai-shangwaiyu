@@ -65,12 +65,19 @@ class ApiEndpointConfig {
     return s.trim();
   }
 
-  /// 清洗后的 URL 是否可作请求端点(必须以 http:// 或 https:// 开头)
+  /// 清洗后的 URL 是否可作请求端点,并归一协议(v1.4.1):
+  /// 云端 API 全站强制 https——用户存的 http://api.deepseek.com 会被
+  /// CloudFront 301/302 重定向,Dio 跨协议跳转抛 bad response
+  /// (用户真机截图:302 Redirection 实锤)。http:// → https:// 直接归一。
   static String? normalizedBaseUrl(String raw) {
-    final cleaned = cleanBaseUrl(raw);
+    var cleaned = cleanBaseUrl(raw);
     if (cleaned.isEmpty) return null;
     final lower = cleaned.toLowerCase();
-    if (!(lower.startsWith('http://') || lower.startsWith('https://'))) {
+    if (lower.startsWith('http://')) {
+      cleaned = 'https://${cleaned.substring('http://'.length)}';
+    }
+    if (!(cleaned.toLowerCase().startsWith('http://') ||
+        cleaned.toLowerCase().startsWith('https://'))) {
       return null;
     }
     return cleaned;

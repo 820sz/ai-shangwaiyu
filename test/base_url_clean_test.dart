@@ -51,6 +51,17 @@ void main() {
       );
     });
 
+    test('http:// → 归一 https://(云端 301/302 重定向导致 Dio 报错)', () {
+      expect(
+        ApiEndpointConfig.normalizedBaseUrl('http://api.deepseek.com'),
+        'https://api.deepseek.com',
+      );
+      expect(
+        ApiEndpointConfig.normalizedBaseUrl('http://ark.cn-beijing.volces.com'),
+        'https://ark.cn-beijing.volces.com',
+      );
+    });
+
     test('空 → null(走默认端点)', () {
       expect(ApiEndpointConfig.normalizedBaseUrl(''), isNull);
       expect(ApiEndpointConfig.normalizedBaseUrl('   '), isNull);

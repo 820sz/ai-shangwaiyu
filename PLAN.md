@@ -1,9 +1,9 @@
 # PLAN.md — AI上外语 (readflow)
 
 ## 状态
-- 当前版本:**v1.4.0**(Release 已发 = Latest,https://github.com/820sz/ai-shangwaiyu/releases/tag/v1.4.0)
-- 当前阶段:✅ v1.4.0 发布完成(追问记忆/复制交互/收藏夹/全文翻译增强/API 自动端点/崩溃日志),**等用户真机验收 8 项(6~13)+ 之前 3 项回归(0/1/5)**
-- 状态协议:DONE_WITH_CONCERNS(真机验收未做)
+- 当前版本:**v1.4.1**(Release 已发 = Latest,https://github.com/820sz/ai-shangwaiyu/releases/tag/v1.4.1)
+- 当前阶段:✅ v1.4.1 已发(http→https 根因修复+收藏星/错误中文/翻译跳转),**等用户真机复测**
+- 状态协议:DONE_WITH_CONCERNS(真机复测未做)
 
 ## 需求摘要
 **项目**:AI上外语(Flutter 英语学习 App,D:\readflow)
@@ -26,6 +26,19 @@
 **被否掉的方案**:只改设置页标签不角色化;单一 API 槽位。
 
 ## 版本记录(最新在前)
+
+### v1.4.1 — DeepSeek API 根因修复(http→https)+ 收藏星/错误中文/翻译跳转(2026-08-27,已发布)
+**背景**:用户真机实测 v1.4.0 全崩:DS API 从来用不了(识别 302/追问 400-404/模型读不出);收藏星点无反应;全文翻译追加后 p1/p2 跳不回去;诊断信息被认为虚设。
+**根因(实测实锤)**:用户 Base URL = `http://api.deepseek.com`(无 s)——DS 官方 CloudFront 对 http 返回 301/302,Dio 跨协议重定向抛 bad response。**DS 模型全链路(识别/追问/模型拉取)都指望这个端点,所以全线失败**。curl 实测:http → 301;https → 正常鉴权响应。
+**修复**:
+- normalizedBaseUrl:http:// → https:// 自动归一(测试覆盖)
+- 设置页 Key 框 hint 修正(不再是 URL 灰字:"sk- 开头=DeepSeek 官方 · ark- 开头=火山方舟");URL 框"留空按 Key 类型自动使用";主 API 说明文案更新
+- 收藏星标 UI 跟随:_isVocabBookmarked 由 context.read 改 context.watch(收藏/取消后星标实时变化,不重建的根因)
+- 错误信息友好化:BaseApiService.friendlyError——优先服务端 error message + 常见状态码中文指引(识别页/追问页统一),不再满屏 DioException 英文
+- 全文翻译 p1/p2 跳转:_fullTextGroupStarts 记录每轮识别段落起点 + 段卡 GlobalKey,_scrollToImageGroup 全文翻译分支跳对应段
+- 模型拉取:兼容 {"data":[]} / {"models":[]} / 纯数组;lastFetchNote 记录结果(诊断信息页"模型列表加载"可见:成功 N 个/结构异常/失败原因)
+- 验证:analyze 0/0;119 测试全绿(+1 http→https);aapt 1.4.1+41
+- ⚠️ 教训:用户配置错误(手填 http://)导致的连锁失败,必须靠"诊断信息可读化"暴露真实状态,不能只改提示文案
 
 ### v1.4.0 — 追问记忆+复制交互+收藏夹+全文翻译增强(2026-08-26,开发完成待发)
 **背景**:用户睡前留言 8 项(6~13),含一个核心 bug(追问失忆)+ 一批新功能/改名。

@@ -13,6 +13,7 @@ import '../../models/bookmark.dart';
 import '../../providers/vocab_provider.dart';
 import '../../providers/bookmark_provider.dart';
 import '../../services/api_endpoint.dart';
+import '../../services/base_api.dart';
 import '../../services/doubao_api.dart';
 import '../../utils/follow_up_context.dart';
 import '../../utils/supplement_merge.dart';
@@ -172,6 +173,14 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
   /// 补充识别模式(v1.3.0 问题 3):对全部图片重新识别,只并入遗漏项。
   /// 为 true 时 [_onStreamDone] 走去重合并分支,结束后复位。
   bool _supplementMode = false;
+
+  /// 全文翻译:每轮识别的段落起点(imageIndex → 段落下标)。
+  /// 追加图片后点击 p1/p2 定位到该图第一段(v1.4.1 用户实测:
+  /// 追加后点 p1/p2 永远停在追加结果上,没法回到第一张图)。
+  final List<int> _fullTextGroupStarts = [];
+
+  /// 全文翻译段落卡片锚点(与 _fullTextParagraphs 对齐)
+  final List<GlobalKey> _fullTextCardKeys = [];
 
   @override
   void initState() {
@@ -481,24 +490,22 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
           _thinkingTimer?.cancel();
           _subscription = null; // 流已断,供回前台检测
           final msg = e.toString();
-          String hint = msg;
+          String hint;
           if (msg.contains('Connection timed out') || msg.contains('超时')) {
             hint = '网络连接超时，请检查网络或关闭VPN后重试';
-          } else if (msg.contains('401') || msg.contains('403')) {
-            // v1.3.0-2:DeepSeek 视觉模型被填在方舟端点下(ark key)必 401——
-            // 明确提示端点/Key 配对,别误导成"key 无效"让用户白改
+          } else {
+            // v1.4.1:显示服务端真实错误(中文指引),不再一屏 DioException 英文
+            hint = BaseApiService.friendlyError(e);
+            // 特例:DS 视觉模型配在方舟端点下(旧配置残留)加强提示
             final m = _currentModel.toLowerCase();
-            if (m.contains('deepseek') &&
+            if ((msg.contains('401') || msg.contains('403')) &&
+                m.contains('deepseek') &&
                 m.contains('vision') &&
                 !ApiEndpointConfig.primary.baseUrl.contains('deepseek.com')) {
               hint = '模型与端点不匹配：DeepSeek 视觉模型需搭配 '
-                  'Base URL https://api.deepseek.com 和 DeepSeek 官方 Key（sk- 开头，'
-                  '非方舟 ark- Key）。请到「我的 → API 设置」修改。';
-            } else {
-              hint = 'API Key 无效，请前往设置重新填写';
+                  'https://api.deepseek.com 和 DeepSeek 官方 Key（sk- 开头）。'
+                  '现在 Base URL 留空即可自动配对，请到「我的 → API 设置」重新保存。';
             }
-          } else if (msg.contains('404')) {
-            hint = '模型不存在或无权限，请检查模型名称';
           }
           if (mounted) {
             setState(() {
@@ -593,6 +600,14 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         _fullTextParagraphs = _streamStartIndex == 0
             ? newParas
             : [..._fullTextParagraphs, ...newParas];
+        // 记录每轮识别起点(点击 pN 跳转用,v1.4.1)
+        if (_streamStartIndex == 0) {
+          _fullTextGroupStarts
+            ..clear()
+            ..add(0);
+        } else {
+          _fullTextGroupStarts.add(_fullTextParagraphs.length - newParas.length);
+        }
         setState(() {
           _phase = _StreamPhase.results;
           _streamStartIndex = 0;
@@ -696,8 +711,35 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     });
   }
 
-  /// 点击聊天栏图片 → 滚动到对应分组的识别结果
+  /// 点击聊天栏图片/页码条 → 滚动到对应分组的识别结果
+  /// (v1.4.1:全文翻译模式滚到该图第一段,不再永远停在追加结果)
   void _scrollToImageGroup(int imageIndex) {
+    if (widget.analysisMode == AppConstants.analysisModeFullText) {
+      if (imageIndex >= 0 && imageIndex < _fullTextGroupStarts.length) {
+        final start = _fullTextGroupStarts[imageIndex];
+        if (start < _fullTextCardKeys.length) {
+          final ctx = _fullTextCardKeys[start].currentContext;
+          if (ctx != null && _scrollCtrl.hasClients) {
+            Scrollable.ensureVisible(
+              ctx,
+              alignment: 0.05,
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeOut,
+            );
+            return;
+          }
+        }
+      }
+      // 找不到对应段(单次多图无分组信息)→ 滚回顶部(图片区)
+      if (_scrollCtrl.hasClients) {
+        _scrollCtrl.animateTo(
+          0,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+      return;
+    }
     final key = _imageGroupKeys[imageIndex];
     if (key == null || !_scrollCtrl.hasClients) return;
     final ctx = key.currentContext;
@@ -1384,10 +1426,10 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         },
         onError: (e) {
           if (mounted) {
-            // 保留已流式显示的内容，追加错误信息
+            // 保留已流式显示的内容,追加友好错误(v1.4.1:不再一屏 DioException 英文)
             content = content.isNotEmpty
-                ? '$content\n\n[错误] 请求失败：$e'
-                : '请求失败：$e';
+                ? '$content\n\n[错误] ${BaseApiService.friendlyError(e)}'
+                : BaseApiService.friendlyError(e);
             updateMsg(done: true);
           }
         },
@@ -1395,7 +1437,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
       );
     } catch (e) {
       if (mounted) {
-        content = '请求失败：$e';
+        content = BaseApiService.friendlyError(e);
         updateMsg(done: true);
       }
     }
@@ -2430,17 +2472,33 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         ),
         const SizedBox(height: 12),
         // 段落卡片(点击原文/「AI 讲解」→ 追问详解该段,v1.4.0 问题 6)
+        // 卡片锚点与段落数对齐(点击 pN 跳转用,v1.4.1)
+        ..._syncFullTextCardKeys(),
         ...List.generate(_fullTextParagraphs.length, (i) {
           final p = _fullTextParagraphs[i];
-          return FulltextResultCard(
-            index: i,
-            original: p['original'] ?? '',
-            translation: p['translation'] ?? '',
-            onAskExplain: () => _askAiAboutParagraph(i),
+          return KeyedSubtree(
+            key: i < _fullTextCardKeys.length ? _fullTextCardKeys[i] : null,
+            child: FulltextResultCard(
+              index: i,
+              original: p['original'] ?? '',
+              translation: p['translation'] ?? '',
+              onAskExplain: () => _askAiAboutParagraph(i),
+            ),
           );
         }),
       ],
     );
+  }
+
+  /// 全文翻译段落锚点列表与段落数对齐(重建时补齐/截断)
+  List<Widget> _syncFullTextCardKeys() {
+    while (_fullTextCardKeys.length < _fullTextParagraphs.length) {
+      _fullTextCardKeys.add(GlobalKey(debugLabel: 'fulltext_card'));
+    }
+    while (_fullTextCardKeys.length > _fullTextParagraphs.length) {
+      _fullTextCardKeys.removeLast();
+    }
+    return const <Widget>[];
   }
 
   /// 全文翻译段落 → 追问详解(带原文+译文上下文,AI 待命)
@@ -3317,8 +3375,9 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
   }
 
   bool _isVocabBookmarked(Vocabulary v) {
+    // 用 watch:收藏/取消后星标实时变化(用 read 不会重建,v1.4.0 实测"点星没反应"根因)
     return context
-        .read<BookmarkProvider>()
+        .watch<BookmarkProvider>()
         .isBookmarked(
             AppConstants.bookmarkSourceVocab, _vocabBookmarkContent(v));
   }

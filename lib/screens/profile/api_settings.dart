@@ -269,22 +269,22 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
           _SectionHeader(title: '主 API(多模态)'),
           const SizedBox(height: 4),
           Text(
-            '拍照识词 / 全文翻译 / 素材推荐 / 追问默认。需支持图片识别的模型。\n'
-            '模型列表按视觉能力过滤。DeepSeek 视觉模型（deepseek-v4-flash-vision-exp）'
-            '需搭配 Base URL https://api.deepseek.com + DeepSeek 官方 Key（sk- 开头，'
-            '非方舟 ark- Key）；豆包模型用方舟 Key + 方舟 Base URL。',
+            '拍照识文 / 全文翻译 / 素材推荐 / 追问默认。需支持图片识别的模型。\n'
+            '模型列表按视觉能力过滤。Key 填 sk- 开头(DeepSeek 官方)时,'
+            'Base URL 留空自动使用 https://api.deepseek.com;ark- 开头(火山方舟)'
+            '自动使用方舟端点。DeepSeek 视觉模型为 deepseek-v4-flash-vision-exp。',
             style: TextStyle(fontSize: 11, color: Colors.grey[500]),
           ),
           const SizedBox(height: 8),
           _ApiField(
             controller: _primaryKeyCtrl,
             label: 'API Key',
-            hint: '默认端点：${ApiEndpointConfig.primary.defaultBaseUrl}',
+            hint: 'sk- 开头 = DeepSeek 官方 · ark- 开头 = 火山方舟',
           ),
           _ApiField(
             controller: _primaryUrlCtrl,
             label: 'Base URL',
-            hint: '留空用默认',
+            hint: '留空按 Key 类型自动使用',
           ),
           _ModelRow(
             controller: _primaryModelCtrl,
@@ -310,7 +310,7 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
           _ApiField(
             controller: _secondaryKeyCtrl,
             label: 'API Key',
-            hint: '默认端点：${ApiEndpointConfig.secondary.defaultBaseUrl}',
+            hint: 'sk- 开头 = DeepSeek 官方',
           ),
           _ApiField(
             controller: _secondaryUrlCtrl,

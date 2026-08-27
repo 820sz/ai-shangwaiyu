@@ -631,6 +631,10 @@ class DoubaoApiService extends BaseApiService {
 
   // ── 模型列表（混合：先调API，失败则用内置清单兜底） ──
 
+  /// 最近一次 fetchModels 的摘要(诊断信息展示用,v1.4.1):
+  /// 用户"模型选择没读到模型"时,诊断页可直接看到拉取成功/失败的真实原因
+  static String lastFetchNote = '尚未拉取';
+
   /// 获取模型列表：先尝试 GET /models，再按允许前缀/能力过滤，最后内置清单兜底。
   /// [allowPrefixes] 只保留前缀匹配的模型(如副槽位只留 deepseek 系列)——
   /// 方舟聚合端点会返回非本族模型，混入列表会误导用户。
@@ -656,10 +660,22 @@ class DoubaoApiService extends BaseApiService {
       ));
 
       final response = await dio.get('/models');
-      final data = response.data['data'] as List<dynamic>?;
-      if (data != null && data.isNotEmpty) {
-        final ids = data
-            .map((e) => e['id']?.toString() ?? '')
+      final respData = response.data;
+      // 兼容多种返回结构:OpenAI 标准 {"data":[...]} / {"models":[...]} / 纯数组
+      List<dynamic>? rawList;
+      if (respData is Map) {
+        final d = respData['data'];
+        if (d is List) {
+          rawList = d;
+        } else if (respData['models'] is List) {
+          rawList = respData['models'] as List;
+        }
+      } else if (respData is List) {
+        rawList = respData;
+      }
+      if (rawList != null && rawList.isNotEmpty) {
+        final ids = rawList
+            .map((e) => e is Map ? e['id']?.toString() ?? '' : '')
             .where((id) => id.isNotEmpty)
             .toList();
         ids.sort();
@@ -667,17 +683,34 @@ class DoubaoApiService extends BaseApiService {
           final filtered = ids
               .where((id) => allowPrefixes.any((p) => id.startsWith(p)))
               .toList();
-          if (filtered.isNotEmpty) return filtered;
+          if (filtered.isNotEmpty) {
+            lastFetchNote = '拉取成功 ${filtered.length} 个模型(已过滤)';
+            return filtered;
+          }
         }
         if (ids.isNotEmpty && keepFilter != null) {
           final kept = ids.where(keepFilter).toList();
-          if (kept.isNotEmpty) return kept;
-          return List.of(fallback); // 无视觉模型 → 内置视觉清单
+          if (kept.isNotEmpty) {
+            lastFetchNote = '拉取成功 ${kept.length} 个模型(视觉过滤)';
+            return kept;
+          }
+          lastFetchNote = '拉取成功但无视觉模型,回退内置清单';
+          return List.of(fallback);
         }
-        if (ids.isNotEmpty) return ids;
+        if (ids.isNotEmpty) {
+          lastFetchNote = '拉取成功 ${ids.length} 个模型';
+          return ids;
+        }
       }
-    } catch (_) {
-      // API 不通，走兜底
+      // 拉取成功但结构/内容异常 → 记录响应便于排查
+      // ("模型选择没读到模型"不再盲猜,v1.4.1)
+      final respStr = respData.toString();
+      lastFetchNote = '响应结构异常: '
+          '${respStr.length > 200 ? respStr.substring(0, 200) : respStr}';
+      debugPrint('ReadFlow fetchModels 响应结构异常: $lastFetchNote');
+    } catch (e) {
+      lastFetchNote = '拉取失败: ${BaseApiService.friendlyError(e)}';
+      debugPrint('ReadFlow fetchModels 失败: $lastFetchNote');
     }
     return List.of(fallback);
   }

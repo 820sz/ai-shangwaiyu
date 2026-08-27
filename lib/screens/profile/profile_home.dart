@@ -7,6 +7,7 @@ import '../../providers/article_provider.dart';
 import '../../providers/bookmark_provider.dart';
 import '../../config/constants.dart';
 import '../../services/api_endpoint.dart';
+import '../../services/doubao_api.dart';
 import '../../utils/crash_logger.dart';
 import '../../widgets/stats_chart.dart';
 import '../../widgets/update_dialog.dart';
@@ -257,6 +258,9 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
       'Key: ${maskKey(ApiEndpointConfig.secondary.apiKey)}',
       'Base URL: ${briefUrl(box.get(AppConstants.keyDeepseekBaseUrl) as String?)}',
       '模型: ${ApiEndpointConfig.secondary.model}',
+      '',
+      '── 模型列表加载 ──',
+      DoubaoApiService.lastFetchNote,
       '',
       '── 崩溃日志 ──',
       log.isEmpty ? '(无崩溃记录)' : log,
