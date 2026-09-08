@@ -96,7 +96,7 @@ void main() {
     );
   });
 
-  test('主槽位配 DeepSeek 模型 → low 发 low(不认 minimal)且 4 档可用', () async {
+  test('主槽位配 DeepSeek 模型 → 官方档位 low/high/max,medium 归一 high', () async {
     final box = Hive.box(AppConstants.hiveBoxSettings);
     await box.put(AppConstants.keyDoubaoModel, 'deepseek-v4-flash-vision-exp');
     expect(
@@ -105,13 +105,33 @@ void main() {
     );
     expect(
       ApiEndpointConfig.primary.buildThinkingParamsFor('medium')['reasoning_effort'],
-      'medium',
+      'high', // DS 官方无 medium → 归一为临近档 high(v1.4.4)
     );
     expect(
       ApiEndpointConfig.primary.buildThinkingParamsFor('high')['reasoning_effort'],
       'high',
     );
+    expect(
+      ApiEndpointConfig.primary.buildThinkingParamsFor('max')['reasoning_effort'],
+      'max', // DS 官方档位含 max
+    );
     // 恢复默认豆包模型,避免影响其他测试
     await box.put(AppConstants.keyDoubaoModel, '');
+  });
+
+  test('DS 档位表:官方只有 low/high/max(无 medium)+ 存量 medium 迁移 low', () async {
+    expect(AppConstants.deepseekThinkingOptions.keys, [
+      'disabled', 'low', 'high', 'max',
+    ]);
+    final box = Hive.box(AppConstants.hiveBoxSettings);
+    await box.put(AppConstants.keyDoubaoModel, 'deepseek-v4-flash-vision-exp');
+    await box.put(AppConstants.keyDoubaoThinking, 'medium');
+    // thinking getter 对 DS 的 medium → 迁移写回 low(不把非法档发出去)
+    expect(ApiEndpointConfig.primary.thinking, 'low');
+    expect(box.get(AppConstants.keyDoubaoThinking), 'low');
+    // 豆包模型 medium → 迁移 low(2026-08-08 决策)
+    await box.put(AppConstants.keyDoubaoModel, '');
+    await box.put(AppConstants.keyDoubaoThinking, 'medium');
+    expect(ApiEndpointConfig.primary.thinking, 'low');
   });
 }

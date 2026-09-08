@@ -1,9 +1,9 @@
 # PLAN.md — AI上外语 (readflow)
 
 ## 状态
-- 当前版本:**v1.4.2**(Release 已发 = Latest,https://github.com/820sz/ai-shangwaiyu/releases/tag/v1.4.2)
-- 当前阶段:✅ v1.4.2 已发(追问 role 映射/收藏提示/总览布局/全文翻译分组/DS 思考诊断),**等用户真机复测**
-- 状态协议:DONE_WITH_CONCERNS(真机复测未做;DS 思考模式根因待用户复测定位)
+- 当前版本:**v1.4.4**(Release 已建 = Latest,v1.4.4 tag 已存在,资产待确认;上版 v1.4.3)
+- 当前阶段:✅ v1.4.4 已发(DS 思考官方格式/识别纪律/编辑铅笔/选中取消/分类合并),**等用户真机复测**
+- 状态协议:DONE_WITH_CONCERNS(真机复测未做)
 
 ## 需求摘要
 **项目**:AI上外语(Flutter 英语学习 App,D:\readflow)

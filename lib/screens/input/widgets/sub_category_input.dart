@@ -7,10 +7,14 @@ class CategorySubInfo {
   final String materialName;
   /// 自动构建的分层路径，如 '书籍/三体'
   final String materialPath;
+  /// 页码/附注(仅"书籍"类:独立于路径,v1.4.4——避免"同一本书按页码
+  /// 每页一类"的混乱;其余类别此字段为 null)
+  final String? sourcePage;
 
   const CategorySubInfo({
     required this.materialName,
     required this.materialPath,
+    this.sourcePage,
   });
 }
 
@@ -71,7 +75,7 @@ class _SubCategoryInputSheetState extends State<_SubCategoryInputSheet> {
 
   static const _hints = <String, List<String>>{
     '教材': ['教材名称（如：新概念英语）', '单元/册（如：第2册）'],
-    '书籍': ['书名（如：哈利波特与魔法石）', '章节/页码（可选）'],
+    '书籍': ['书名（如：哈利波特与魔法石）', '页码（如：3-5页，同一本书自动合并）'],
     '外刊': ['刊物名称（如：The Economist）', '期号/日期（可选）'],
     '碎片文章': ['来源（如：微信公众号/知乎）', '标题/链接（可选）'],
     '其他': ['材料名称或备注', '更多信息（可选）'],
@@ -142,12 +146,18 @@ class _SubCategoryInputSheetState extends State<_SubCategoryInputSheet> {
     final name = _nameCtrl.text.trim();
     final extra = _extraCtrl.text.trim();
     final materialName = name.isNotEmpty ? name : widget.category;
+    // v1.4.4:书籍类的第二输入框是"页码/章节",存 sourcePage(独立字段),
+    // 不拼进 material_path——同一本书无论存哪页都归入同一个路径,
+    // 杜绝"同一本书按页码每页一类"的混乱;教材/外刊的层级信息(单元/
+    // 期号)仍拼进路径,层级浏览有意义。
+    final isBook = widget.category == '书籍';
     final segments = <String>[widget.category];
     if (name.isNotEmpty) segments.add(name);
-    if (extra.isNotEmpty) segments.add(extra);
+    if (!isBook && extra.isNotEmpty) segments.add(extra);
     return CategorySubInfo(
       materialName: materialName,
       materialPath: segments.join('/'),
+      sourcePage: isBook && extra.isNotEmpty ? extra : null,
     );
   }
 
@@ -215,7 +225,9 @@ class _SubCategoryInputSheetState extends State<_SubCategoryInputSheet> {
                       : p;
                   return ChoiceChip(
                     label: Text(display,
-                        style: const TextStyle(fontSize: 12)),
+                        style: const TextStyle(fontSize: 12),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis),
                     selected: false,
                     onSelected: (_) => _applyHistory(p),
                     visualDensity: VisualDensity.compact,

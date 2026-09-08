@@ -53,7 +53,8 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
     _primaryModelCtrl = TextEditingController(
       text: _box.get(AppConstants.keyDoubaoModel, defaultValue: '') as String? ?? '',
     );
-    _primaryThinking = _migrateThinking(AppConstants.keyDoubaoThinking);
+    _primaryThinking =
+        _migrateThinking(AppConstants.keyDoubaoThinking, _primaryModelCtrl.text);
 
     _secondaryKeyCtrl = TextEditingController(
       text: _box.get(AppConstants.keyDeepseekApiKey, defaultValue: '') as String? ?? '',
@@ -64,15 +65,22 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
     _secondaryModelCtrl = TextEditingController(
       text: _box.get(AppConstants.keyDeepseekModel, defaultValue: '') as String? ?? '',
     );
-    _secondaryThinking = _migrateThinking(AppConstants.keyDeepseekThinking);
+    _secondaryThinking =
+        _migrateThinking(AppConstants.keyDeepseekThinking, _secondaryModelCtrl.text);
   }
 
-  /// 读思考模式并迁移旧值(minimal → disabled;medium/high → low,
-  /// 2026-08-08 识图只留 不思考/低度 两档),非法值一律 disabled
-  String _migrateThinking(String hiveKey) {
+  /// 读思考模式并迁移旧值(v1.4.3 按模型族):
+  /// - minimal → disabled(并入不思考)
+  /// - medium/high:DeepSeek 系保留(官方支持 4 档);豆包/其他迁移 low
+  ///   (2026-08-08 决策:豆包中/高思考慢,只留两档)
+  /// - 非法值一律 disabled
+  String _migrateThinking(String hiveKey, String model) {
     final saved = _box.get(hiveKey) as String?;
+    final isDs = model.toLowerCase().contains('deepseek');
     if (saved == 'minimal') return 'disabled';
-    if (saved == 'medium' || saved == 'high') return 'low';
+    if (saved == 'medium' || saved == 'high') {
+      return isDs ? saved! : 'low';
+    }
     if (saved == 'disabled' || saved == 'low') {
       return saved!;
     }
@@ -295,6 +303,7 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
           ),
           _ThinkingDropdown(
             value: _primaryThinking,
+            options: AppConstants.thinkingOptionsFor(_primaryModelCtrl.text),
             onChanged: (v) => setState(() => _primaryThinking = v),
           ),
           const SizedBox(height: 24),
@@ -326,6 +335,7 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
           ),
           _ThinkingDropdown(
             value: _secondaryThinking,
+            options: AppConstants.thinkingOptionsFor(_secondaryModelCtrl.text),
             onChanged: (v) => setState(() => _secondaryThinking = v),
           ),
           const SizedBox(height: 16),
@@ -449,15 +459,23 @@ class _ModelRow extends StatelessWidget {
   }
 }
 
-/// 思考模式下拉(两槽位共用)
+/// 思考模式下拉(两槽位共用,v1.4.3 按模型族展示档位:
+/// DS 系 4 档(不思考/低/中/高),豆包系 2 档)
 class _ThinkingDropdown extends StatelessWidget {
   final String value;
+  final Map<String, String> options;
   final ValueChanged<String> onChanged;
 
-  const _ThinkingDropdown({required this.value, required this.onChanged});
+  const _ThinkingDropdown({
+    required this.value,
+    required this.options,
+    required this.onChanged,
+  });
 
   @override
   Widget build(BuildContext context) {
+    // 当前值必须存在于档位表(模型族切换后旧值可能非法,如 DS→豆包时的高档)
+    final validValue = options.containsKey(value) ? value : options.keys.first;
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: InputDecorator(
@@ -468,11 +486,11 @@ class _ThinkingDropdown extends StatelessWidget {
         ),
         child: DropdownButtonHideUnderline(
           child: DropdownButton<String>(
-            value: value,
+            value: validValue,
             isExpanded: true,
             isDense: true,
             style: const TextStyle(fontSize: 14, color: Colors.black87),
-            items: AppConstants.thinkingOptions.entries
+            items: options.entries
                 .map((e) => DropdownMenuItem(
                       value: e.key,
                       child: Text(e.value),

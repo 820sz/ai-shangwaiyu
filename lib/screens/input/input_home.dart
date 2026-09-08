@@ -7,6 +7,7 @@ import 'package:hive_flutter/hive_flutter.dart';
 import '../../providers/vocab_provider.dart';
 import '../../config/constants.dart';
 import '../../models/saved_session.dart';
+import '../../services/doubao_api.dart';
 import 'process_chat.dart';
 import 'widgets/analysis_mode_picker.dart';
 import 'widgets/my_materials_section.dart';
@@ -324,12 +325,8 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
               offset: const Offset(0, 200),
               constraints: const BoxConstraints(maxWidth: 280),
               itemBuilder: (_) => [
-                // 当前配置模型 + 内置清单去重(首页菜单跟随 API 设置,
-                // 用户配置了清单外的模型也能显示/切换,v1.4.2)
-                ...<String>{
-                  if (_currentModel.isNotEmpty) _currentModel,
-                  ...AppConstants.primaryFallbackModels,
-                }.toList().map((m) {
+                // 按端点族/最近拉取结果展示(配了 DS 就显示 DS 模型,v1.4.3)
+                ...primaryModelChoices().map((m) {
                   final isSel = m == _currentModel;
                   return PopupMenuItem(
                     value: 'model:$m',
@@ -345,7 +342,8 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
                   );
                 }),
                 const PopupMenuDivider(),
-                ...AppConstants.thinkingOptions.entries.map((e) {
+                ...AppConstants.thinkingOptionsFor(_currentModel).entries
+                    .map((e) {
                   final isSel = e.key == _currentThinking;
                   return PopupMenuItem(
                     value: 'think:${e.key}',
@@ -410,7 +408,8 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
               borderRadius: BorderRadius.circular(8),
             ),
             child: Text(
-              AppConstants.thinkingOptions[_currentThinking] ?? '不思考',
+              AppConstants.thinkingOptionsFor(_currentModel)[_currentThinking] ??
+                  '不思考',
               style: TextStyle(fontSize: 11, color: Colors.orange[700]),
             ),
           ),

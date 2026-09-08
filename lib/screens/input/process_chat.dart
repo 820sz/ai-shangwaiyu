@@ -97,10 +97,17 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
 
   String get _currentModel => _api.modelName;
   String get _currentThinking {
-    // 走 ApiEndpointConfig.thinking:读即迁移(medium/high→low 写回),
-    // 避免 UI 显示"不思考"而实际请求带着 thinking(F4)
-    return _api.config.thinking;
+    // 自动降级重试时强制不思考(一次性,_startStreaming 消费复位),
+    // v1.4.3 DS V4 系列思考模式 "reasoning-only" 已知问题
+    return _forceDisabledThinking ? 'disabled' : _api.config.thinking;
   }
+
+  /// 思考失败自动降级标记(DS V4 生态已知问题:
+  /// thinking 开启时只返回 reasoning_content,content 为空 → 解析失败)
+  bool _forceDisabledThinking = false;
+
+  /// 本轮请求实际使用的思考档位(_onStreamDone 检测 reasoning-only 用)
+  String _lastRequestThinking = 'disabled';
 
   /// 追问当前槽位:'primary' / 'secondary'(Hive 持久化,默认主)
   String get _followUpSlot {
@@ -404,7 +411,11 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
   void _startStreaming() {
     _firstByteTimer?.cancel();
     _lastChunkAt = null; // 新流开始,重置心跳
-    final thinking = _currentThinking;
+    // 一次性消费降级标记:本轮强制不思考,后续恢复用户档位
+    final forceDisabled = _forceDisabledThinking;
+    _forceDisabledThinking = false;
+    final thinking = forceDisabled ? 'disabled' : _currentThinking;
+    _lastRequestThinking = thinking;
     // 首字节超时(只报错,不降级重跑):不思考25s;思考模式60s——
     // reasoning_effort 生效后(2026-08-07 实测低≈3s/中≈14s/高≈25s)
     // 思考模式直接等真实结果,Dio receiveTimeout 180s 是最终兜底。
@@ -547,6 +558,27 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     // cancelOnError=false → onDone 在 onError 后也触发，避免覆盖错误信息
     if (_phase == _StreamPhase.error) return;
 
+    // v1.4.3 DS V4 思考模式已知问题(生态多个代理实测):
+    // thinking 开启时模型只输出 reasoning_content,content 为空 →
+    // "思考一会就报错"。检测到 reasoning-only → 自动切不思考重试一次,
+    // 并明确告知用户(不静默)。
+    if (_contentText.trim().isEmpty &&
+        _reasoningText.isNotEmpty &&
+        _lastRequestThinking != 'disabled') {
+      _forceDisabledThinking = true;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text('思考模式下该模型只返回了思考过程(DeepSeek V4 已知问题),已自动切换不思考重试'),
+            behavior: SnackBarBehavior.floating,
+            duration: Duration(seconds: 4),
+          ),
+        );
+      _retry();
+      return;
+    }
+
     try {
       final rawMaps = DoubaoApiService.parseResponse(
         _contentText,
@@ -657,9 +689,27 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
       _scrollToAiSection();
     } catch (e) {
       if (!mounted) return;
-      // v1.4.2:解析失败必须展示 AI 原文片段——思考模式输出格式/截断问题
-      // 从此一眼定位,不再盲猜(用户实测 DS 思考模式"思考一会就报错")
+      // v1.4.4:解析失败 + 思考档且内容疑似截断(JSON 未闭合)→ 自动降级重试一次
       final raw = _contentText.trim();
+      if (_lastRequestThinking != 'disabled' &&
+          raw.isNotEmpty &&
+          !raw.endsWith('}') &&
+          !raw.endsWith(']')) {
+        _forceDisabledThinking = true;
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            const SnackBar(
+              content: Text('识别内容疑似被截断,已自动切换不思考重试'),
+              behavior: SnackBarBehavior.floating,
+              duration: Duration(seconds: 4),
+            ),
+          );
+        _retry();
+        return;
+      }
+      // v1.4.2:解析失败必须展示 AI 原文片段——思考模式输出格式/截断问题
+      // 从此一眼定位,不再盲猜
       final rawSnippet = raw.isEmpty
           ? '(流未收到内容)'
           : raw.length > 400
@@ -1047,6 +1097,8 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
           category: category,
           materialPath: subInfo?.materialPath,
           sourceBook: subInfo?.materialName ?? v.sourceBook,
+          // 书籍类页码独立字段(v1.4.4)
+          sourcePage: subInfo?.sourcePage ?? v.sourcePage,
         );
       }).toList();
       await context.read<VocabProvider>().saveVocabularies(categorized);
@@ -1453,8 +1505,8 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
       );
     }
 
-    // 用户气泡（右侧）— 长按可编辑(v1.3.0 问题 4):
-    // 手误打错字误发后可改,改完自动重新发送并重新生成 AI 回复
+    // 用户气泡（右侧）— v1.4.4:右上角铅笔图标独立编辑入口(不再依赖长按);
+    // 长按保留作为备份
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(
@@ -1468,18 +1520,38 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                 constraints: BoxConstraints(
                   maxWidth: MediaQuery.of(context).size.width * 0.75,
                 ),
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.fromLTRB(12, 8, 6, 8),
                 decoration: BoxDecoration(
                   color: const Color(0xFF4A90D9).withAlpha(20),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Text(
-                  msg.content,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    color: Colors.black87,
-                    height: 1.4,
-                  ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        msg.content,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: Colors.black87,
+                          height: 1.4,
+                        ),
+                      ),
+                    ),
+                    // 编辑铅笔图标:每条用户消息角落常驻(v1.4.4)
+                    InkWell(
+                      onTap: () => _showEditFollowUpDialog(index, msg.content),
+                      borderRadius: BorderRadius.circular(8),
+                      child: const Padding(
+                        padding: EdgeInsets.all(4),
+                        child: Icon(
+                          Icons.edit_outlined,
+                          size: 14,
+                          color: Colors.grey,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -1808,13 +1880,8 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
   Widget _buildCompactModelPickerInner() {
     final secConfigured = ApiEndpointConfig.secondary.isConfigured;
     final isSecondary = _followUpSlot == 'secondary' && secConfigured;
-    // 主分组模型 = 已保存的主模型 + 主槽位兜底清单(去重,保证当前值可选;
-    // 2026-08-21 起含 DeepSeek 视觉模型,主槽位不再绑死豆包)
-    final primaryModels = <String>{
-      if (ApiEndpointConfig.primary.model.isNotEmpty)
-        ApiEndpointConfig.primary.model,
-      ...AppConstants.primaryFallbackModels,
-    }.toList();
+    // 主分组模型 = 按端点族/最近拉取结果(配了 DS 就显示 DS,v1.4.3)
+    final primaryModels = primaryModelChoices();
     // 副分组模型 = 已保存的副模型 + 内置清单(去重,保证当前值可选)
     final secModels = <String>{
       if (ApiEndpointConfig.secondary.model.isNotEmpty)
@@ -1981,11 +2048,8 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
               offset: const Offset(0, -360),
               padding: EdgeInsets.zero,
               itemBuilder: (_) => [
-                // 当前主槽位模型 + 主槽位兜底清单(2026-08-21 含 DeepSeek 视觉)
-                ...<String>{
-                  if (_currentModel.isNotEmpty) _currentModel,
-                  ...AppConstants.primaryFallbackModels,
-                }.toList().map((m) {
+                // 按端点族/最近拉取结果展示(user:配了 DS 不显示豆包,v1.4.3)
+                ...primaryModelChoices().map((m) {
                   final isSel = m == _currentModel;
                   return PopupMenuItem(
                     value: 'model:$m',
@@ -2018,7 +2082,9 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                   );
                 }),
                 const PopupMenuDivider(),
-                ...AppConstants.thinkingOptions.entries.map((e) {
+                // 思考档位按模型族:DS 4 档/豆包 2 档(v1.4.3)
+                ...AppConstants.thinkingOptionsFor(_currentModel).entries
+                    .map((e) {
                   final isSel = e.key == _currentThinking;
                   return PopupMenuItem(
                     value: 'think:${e.key}',
@@ -2464,7 +2530,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
               ),
               const SizedBox(height: 4),
               Text(
-                '$_currentModel · ${AppConstants.thinkingOptions[_currentThinking] ?? "不思考"}',
+                '$_currentModel · ${AppConstants.thinkingOptionsFor(_currentModel)[_currentThinking] ?? "不思考"}',
                 style: TextStyle(fontSize: 10, color: Colors.grey[500]),
               ),
             ],
@@ -2941,7 +3007,8 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
           sentenceCount: sentences,
           modelName: _currentModel,
           thinkingLabel:
-              AppConstants.thinkingOptions[_currentThinking] ?? '不思考',
+              AppConstants.thinkingOptionsFor(_currentModel)[_currentThinking] ??
+                  '不思考',
         ),
         const SizedBox(height: 8),
         // 选中计数
@@ -3129,6 +3196,8 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         category: category,
         materialPath: subInfo?.materialPath,
         sourceBook: subInfo?.materialName ?? _results[index].sourceBook,
+        // 书籍类页码独立字段(v1.4.4),不参与材料路径分组
+        sourcePage: subInfo?.sourcePage ?? _results[index].sourcePage,
       );
       await context.read<VocabProvider>().saveVocabularies([item]);
       if (mounted) {
@@ -3427,93 +3496,17 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
             AppConstants.bookmarkSourceVocab, _vocabBookmarkContent(v));
   }
 
-  /// 词条长按(v1.4.0 问题 7 两层逻辑):
-  /// 未选中 → 选中(现有选中操作);已选中 → 弹出复制菜单。
-  /// 取消选中由 AppBar「取消选择(N)」承担,避免长按行为二义。
+  /// 词条长按(v1.4.4 用户最新指示):
+  /// 未选中 → 选中(多选批量);已选中 → **取消该词选中**(单个取消,
+  /// 误选可即时修正)。复制功能迁至词详情弹窗(v1.4.4),长按不再弹菜单。
   void _onWordLongPress(int index) {
-    if (_selected.contains(index)) {
-      _showWordCopyMenu(index);
-    } else {
-      setState(() => _selected.add(index));
-    }
-  }
-
-  /// 词条复制菜单:原文 / 释义(存在时)/ 全部(原文+释义+例句)
-  void _showWordCopyMenu(int index) {
-    final item = _results[index];
-    final word = item.displayWordText;
-    final translation = item.translation ?? '';
-    final sentence = item.originalSentence ?? '';
-
-    void copy(String text, String label) {
-      Clipboard.setData(ClipboardData(text: text));
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('已复制$label'),
-            behavior: SnackBarBehavior.floating,
-            duration: const Duration(seconds: 2),
-          ),
-        );
+    setState(() {
+      if (_selected.contains(index)) {
+        _selected.remove(index);
+      } else {
+        _selected.add(index);
       }
-    }
-
-    showModalBottomSheet<void>(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  '复制「${word.length > 20 ? '${word.substring(0, 20)}…' : word}」',
-                  style: TextStyle(fontSize: 12, color: Colors.grey[500]),
-                ),
-              ),
-            ),
-            ListTile(
-              leading: const Icon(Icons.copy_outlined, size: 20),
-              title: const Text('复制原文', style: TextStyle(fontSize: 14)),
-              onTap: () {
-                copy(word, '原文');
-                Navigator.pop(ctx);
-              },
-            ),
-            if (translation.isNotEmpty)
-              ListTile(
-                leading: const Icon(Icons.translate, size: 20),
-                title: const Text('复制释义', style: TextStyle(fontSize: 14)),
-                onTap: () {
-                  copy(translation, '释义');
-                  Navigator.pop(ctx);
-                },
-              ),
-            ListTile(
-              leading: const Icon(Icons.content_copy, size: 20),
-              title: const Text('复制全部', style: TextStyle(fontSize: 14)),
-              onTap: () {
-                copy(
-                  [
-                    word,
-                    if (translation.isNotEmpty) '释义：$translation',
-                    if (sentence.isNotEmpty) '例句：$sentence',
-                  ].join('\n'),
-                  '全部',
-                );
-                Navigator.pop(ctx);
-              },
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
+    });
   }
 
   /// 删除长按选中的词汇（索引降序删除避免错位），确认后清空选中

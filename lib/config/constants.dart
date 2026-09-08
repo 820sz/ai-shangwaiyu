@@ -77,6 +77,25 @@ class AppConstants {
     'low': '低·约3s',
   };
 
+  /// DeepSeek 系思考档位(v1.4.4 修正):
+  /// DS 官方 reasoning_effort 只有 **low / high / max**(无 medium!
+  /// 官方 llm-deepseek 源码 serialize.ts 明确校验:非 low/high/max 直接报错)。
+  /// 参考:https://api-docs.deepseek.com/zh-cn/guides/thinking_mode/
+  static const Map<String, String> deepseekThinkingOptions = {
+    'disabled': '不思考',
+    'low': '低',
+    'high': '高',
+    'max': '极致',
+  };
+
+  /// 按模型族取思考档位表:
+  /// DeepSeek 系 4 档(官方 low/high/max);豆包/其他维持 2 档。
+  static Map<String, String> thinkingOptionsFor(String model) {
+    return model.toLowerCase().contains('deepseek')
+        ? deepseekThinkingOptions
+        : thinkingOptions;
+  }
+
   // ── 数据库 ──
   static const String dbName = 'readflow.db';
   static const int dbVersion = 6;

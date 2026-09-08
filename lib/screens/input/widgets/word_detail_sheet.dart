@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../../models/vocabulary.dart';
 import 'example_sentence.dart';
 
@@ -105,6 +106,27 @@ void showWordDetailSheet({
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
                 _actionButton(ctx, Icons.edit_outlined, '编辑', onEdit),
+                // 复制(v1.4.4:词条复制入口从长按菜单迁入详情页)
+                _actionButton(ctx, Icons.copy_outlined, '复制', () {
+                  final buf = [
+                    item.displayWordText,
+                    if (item.translation != null && item.translation!.isNotEmpty)
+                      '释义：${item.translation}',
+                    if (item.originalSentence != null &&
+                        item.originalSentence!.isNotEmpty)
+                      '例句：${item.originalSentence}',
+                  ].join('\n');
+                  Clipboard.setData(ClipboardData(text: buf));
+                  if (ctx.mounted) {
+                    ScaffoldMessenger.of(ctx).showSnackBar(
+                      const SnackBar(
+                        content: Text('已复制'),
+                        behavior: SnackBarBehavior.floating,
+                        duration: Duration(seconds: 2),
+                      ),
+                    );
+                  }
+                }),
                 // 保存按钮：等 async 保存完成再关 sheet
                 TextButton.icon(
                   onPressed: () async {

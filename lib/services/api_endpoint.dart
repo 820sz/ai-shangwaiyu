@@ -111,8 +111,19 @@ class ApiEndpointConfig {
 
   String get thinking {
     final v = _box.get(hiveThinking);
+    final isDs = model.toLowerCase().contains('deepseek');
     if (v == 'medium' || v == 'high') {
-      // 2026-08-08 砍掉中/高档,存量设置自动迁移到低。
+      // v1.4.3:DeepSeek 系官方支持高思考,不再迁移;
+      // v1.4.4:官方 reasoning_effort 只有 low/high/max——存量 medium 迁移为
+      // low(官方合法档),避免发非法档位导致 API 异常。
+      if (isDs) {
+        if (v == 'medium') {
+          _box.put(hiveThinking, 'low');
+          return 'low';
+        }
+        return v;
+      }
+      // 豆包维持 2026-08-08 决策——中/高慢,迁移到 low。
       // 必须写回 Hive:否则设置页/状态条读原始值显示"不思考",
       // 实际请求却带着 thinking:enabled(F4)——UI 与行为打架。
       _box.put(hiveThinking, 'low');
@@ -143,12 +154,29 @@ class ApiEndpointConfig {
   }
 
   /// 按指定档位构建思考参数(纯函数,供追问等独立档位场景复用)。
-  /// [level]: disabled / low / medium / high
+  /// [level]: disabled / low / medium / high / max
   /// - disabled → thinking.type=disabled,完全跳过推理
-  /// - low → 豆包系发 minimal(≈3s);DeepSeek 系发 low(不认 minimal,F6)
-  /// - medium/high → 两族都认(豆包 minimal/low/medium/high;DS low/medium/high)
+  /// - low → 豆包系发 minimal(≈3s);DeepSeek 系发 low(官方档)
+  /// - medium → **仅豆包**:DS 官方无 medium(只有 low/high/max),
+  ///   防御性归一为 high(存量 medium 值已由 [thinking] 迁移,此处兜底)
+  /// - high/max → 豆包 high;DS high/max(官方档)
   Map<String, dynamic> buildThinkingParamsFor(String level) {
-    switch (level) {
+    // DeepSeek 官方档位只有 low/high/max;任何非官方档位(如 legacy medium)
+    // 归一为最近的官方档,绝不能把非法枚举发给官方 API(dsh llm-deepseek
+    // serialize.ts 对非 low/high/max 直接抛 UNSUPPORTED_REASONING_EFFORT)
+    final String effective;
+    if (supportsMinimalEffort) {
+      effective = level; // 豆包:minimal/low/medium/high 全合法
+    } else {
+      effective = switch (level) {
+        'medium' || 'standard' => 'high', // DS 无 medium → 临近档 high
+        'max' => 'max',
+        'high' => 'high',
+        'low' => 'low',
+        _ => 'disabled',
+      };
+    }
+    switch (effective) {
       case 'low':
         return {
           'thinking': {'type': 'enabled'},
@@ -164,7 +192,11 @@ class ApiEndpointConfig {
           'thinking': {'type': 'enabled'},
           'reasoning_effort': 'high',
         };
-      case 'disabled':
+      case 'max':
+        return {
+          'thinking': {'type': 'enabled'},
+          'reasoning_effort': 'max',
+        };
       default:
         return {'thinking': {'type': 'disabled'}};
     }

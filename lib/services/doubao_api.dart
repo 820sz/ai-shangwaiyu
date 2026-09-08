@@ -27,6 +27,28 @@ bool isVisionCandidate(String id) {
   return false;
 }
 
+/// 主槽位模型菜单清单(v1.4.3 用户实测"配了 DS 还显示豆包待选"):
+/// 1. 优先最近一次 /models 拉取的真实列表([DoubaoApiService.lastModels]);
+/// 2. 否则按当前端点族:deepseek.com → DS 三件套;方舟/其他 → 豆包系;
+/// 3. 始终包含当前配置模型(去重,保证菜单能显示当前选中项)。
+List<String> primaryModelChoices() {
+  final model = ApiEndpointConfig.primary.model;
+  final hasDsEndpoint =
+      ApiEndpointConfig.primary.baseUrl.toLowerCase().contains('deepseek.com');
+  final List<String> base = hasDsEndpoint
+      ? [
+          AppConstants.deepseekVisionModel,
+          AppConstants.deepseekChatModel,
+          ...AppConstants.deepseekFallbackModels,
+        ]
+      : List.of(AppConstants.primaryFallbackModels);
+  final source = DoubaoApiService.lastModels ?? base;
+  return <String>{
+    if (model.isNotEmpty) model,
+    ...source,
+  }.toList();
+}
+
 /// 是否发送 image_url 的 detail 字段 — 豆包/Ark 系支持,DeepSeek 视觉模型
 /// 不认此字段(未知参数可能 400),只发 url。纯函数,可单测。
 bool shouldSendDetailFlag(String model) {
@@ -147,10 +169,14 @@ class DoubaoApiService extends BaseApiService {
     final countHint = imageUris.length > 1
         ? '（共${imageUris.length}张图片）'
         : '';
-    // 补充识别模式:告知已识别词,只找遗漏,禁止重复(v1.3.0 问题 3)
+    // 补充识别模式(v1.4.4 加固):已识别清单 + "绝不重复/只找标记/宁少勿错"
     final excludeHint = excludeWords.isEmpty
         ? ''
-        : '\n补充识别：以下内容已经识别过，请找出照片中遗漏的标记内容，只输出遗漏项，不要重复输出任何一条：${excludeWords.take(200).join(' | ')}';
+        : '\n补充识别模式：以下内容已经识别过了，绝对不要重复输出任何一条：\n'
+            '${excludeWords.take(200).join(' | ')}\n'
+            '只输出这次新发现的、且在照片上有明确手写标记痕迹的内容。\n'
+            '如果你无法确定某个内容是否有标记，宁可漏掉也不要输出。\n'
+            '如果本页没有新的标记内容，直接返回 {"items": []}。';
 
     final (String systemPrompt, String userPrompt) = switch (analysisMode) {
       AppConstants.analysisModeFullText => (
@@ -160,12 +186,21 @@ class DoubaoApiService extends BaseApiService {
         '请翻译这些阅读材料照片中的全文内容$bookHint$pageHint$countHint'
       ),
       _ => (
-        '''你是英语学习助手。识别照片中被标记的英语内容。输出JSON，格式：
+        '''你是英语学习助手。识别照片中"被标注"的英语内容。输出JSON，格式：
 {"items":[{"word":"完整原文","translation":"中文释义","word_type":"word|phrase|sentence","part_of_speech":"词性(可选)","original_sentence":"完整句子(短语/句子必填,单词可选)"}]}
-要求：1.word 必须与照片中的文本完全一致——单词、短语、句子一律完整输出,禁止截断,禁止用省略号(…)代替后半部分。2.短语/句子必须在 original_sentence 中给出其所在的完整句子(必填,不可省略)。3.单词给词性。${imageUris.length > 1 ? '多图格式：{"items_by_image":[{"image_index":0,"items":[...]},...]}' : ''}无标记返回{"items":[]}。只输出JSON。简洁思考。''',
+标记定义：手写笔迹圈画、下划线、波浪线、荧光笔、方框、星号、书签贴等读者标注痕迹。
+识别纪律(v1.4.4)：
+1. 只输出有明确标记痕迹的内容；正文中未作任何标记的文字一律不要输出。
+2. 如果不能确定某个内容是否被标记，宁可漏掉，也不要输出。
+3. word 必须与照片中的文本完全一致——单词、短语、句子一律完整输出,禁止截断,禁止用省略号(…)代替后半部分。
+4. 短语/句子必须在 original_sentence 中给出其所在的完整句子(必填,不可省略)。
+5. 单词给词性。${imageUris.length > 1 ? '多图格式：{"items_by_image":[{"image_index":0,"items":[...]},...]}' : ''}
+无任何标记返回{"items":[]}。只输出JSON。简洁思考。''',
         '识别标记的英语内容$bookHint$pageHint$countHint$excludeHint'
       ),
     };
+
+    final isDs = modelName.toLowerCase().contains('deepseek');
 
     return {
       'model': modelName,
@@ -187,9 +222,15 @@ class DoubaoApiService extends BaseApiService {
           ],
         },
       ],
-      'max_tokens': 4096,
-      'temperature': 0,
+      // v1.4.4 对齐 DS 官方:max_tokens 是 reasoning+content 总预算,
+      // 思考档位开到 8192 防"思考吃满预算导致 content 为空/截断"
+      'max_tokens': isDs ? 8192 : 4096,
+      // DS 官方/样例请求不带 temperature(dsh llm-deepseek 只在显式配置时才发),
+      // 思考模式与其组合可能引发不稳定——DS 请求省略,豆包保留 0(确定性)
+      if (!isDs) 'temperature': 0,
       ...config.buildThinkingParams(),
+      // DS 官方流式要求/样例带 usage 上报(dsh 也带)
+      if (isDs) 'stream_options': {'include_usage': true},
       if (stream) 'stream': true,
     };
   }
@@ -435,8 +476,10 @@ class DoubaoApiService extends BaseApiService {
           },
         {'role': 'user', 'content': lastUserContent},
       ],
-      'temperature': 0.3,
-      'max_tokens': 4096,
+      // v1.4.4 对齐 DS 官方:max_tokens 含 reasoning 总预算,思考档 8192;
+      // DS 官方样例请求不带 temperature(dsh 源码同款),省略防思考模式异常
+      'max_tokens': cfg.model.toLowerCase().contains('deepseek') ? 8192 : 4096,
+      if (!cfg.model.toLowerCase().contains('deepseek')) 'temperature': 0.3,
       ...cfg.buildThinkingParamsFor(thinkingLevel ?? cfg.thinking),
       'stream': true,
     };
@@ -635,6 +678,10 @@ class DoubaoApiService extends BaseApiService {
   /// 用户"模型选择没读到模型"时,诊断页可直接看到拉取成功/失败的真实原因
   static String lastFetchNote = '尚未拉取';
 
+  /// 最近一次 /models 拉取结果缓存(v1.4.3):
+  /// 首页/底部栏/追问菜单优先展示真实模型列表,而非内置清单。
+  static List<String>? lastModels;
+
   /// 获取模型列表：先尝试 GET /models，再按允许前缀/能力过滤，最后内置清单兜底。
   /// [allowPrefixes] 只保留前缀匹配的模型(如副槽位只留 deepseek 系列)——
   /// 方舟聚合端点会返回非本族模型，混入列表会误导用户。
@@ -685,6 +732,7 @@ class DoubaoApiService extends BaseApiService {
               .toList();
           if (filtered.isNotEmpty) {
             lastFetchNote = '拉取成功 ${filtered.length} 个模型(已过滤)';
+            lastModels = filtered;
             return filtered;
           }
         }
@@ -692,6 +740,7 @@ class DoubaoApiService extends BaseApiService {
           final kept = ids.where(keepFilter).toList();
           if (kept.isNotEmpty) {
             lastFetchNote = '拉取成功 ${kept.length} 个模型(视觉过滤)';
+            lastModels = kept;
             return kept;
           }
           lastFetchNote = '拉取成功但无视觉模型,回退内置清单';
@@ -699,6 +748,7 @@ class DoubaoApiService extends BaseApiService {
         }
         if (ids.isNotEmpty) {
           lastFetchNote = '拉取成功 ${ids.length} 个模型';
+          lastModels = ids;
           return ids;
         }
       }
