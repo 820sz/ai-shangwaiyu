@@ -15,6 +15,7 @@ import '../../providers/bookmark_provider.dart';
 import '../../services/api_endpoint.dart';
 import '../../services/base_api.dart';
 import '../../services/doubao_api.dart';
+import '../../services/tts_service.dart';
 import '../../utils/follow_up_context.dart';
 import '../../utils/supplement_merge.dart';
 import 'widgets/word_list_tile.dart';
@@ -664,6 +665,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
             photoPath: photoPath,
             wordType: (r['word_type'] as String?) ?? 'word',
             partOfSpeech: r['part_of_speech'] as String?,
+            phonetic: r['phonetic'] as String?,
             grammarNote: r['grammar_note'] as String?,
           );
         }).toList();
@@ -3072,6 +3074,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
           onLongPress: () => _onWordLongPress(i),
           onBookmark: () => _toggleVocabBookmark(item),
           bookmarked: _isVocabBookmarked(item),
+          onSpeak: () => _speakWord(item),
         );
       }
     });
@@ -3168,6 +3171,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
               onLongPress: () => _onWordLongPress(i),
               onBookmark: () => _toggleVocabBookmark(item),
               bookmarked: _isVocabBookmarked(item),
+              onSpeak: () => _speakWord(item),
               index: i,
             ),
           );
@@ -3334,6 +3338,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     final wordCtrl = TextEditingController(text: item.word);
     final transCtrl = TextEditingController(text: item.translation ?? '');
     final posCtrl = TextEditingController(text: item.partOfSpeech ?? '');
+    final phoneticCtrl = TextEditingController(text: item.phonetic ?? '');
     final grammarCtrl = TextEditingController(text: item.grammarNote ?? '');
     final sentenceCtrl = TextEditingController(
       text: item.originalSentence ?? '',
@@ -3343,6 +3348,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
       wordCtrl.dispose();
       transCtrl.dispose();
       posCtrl.dispose();
+      phoneticCtrl.dispose();
       grammarCtrl.dispose();
       sentenceCtrl.dispose();
     }
@@ -3372,6 +3378,14 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                   decoration: const InputDecoration(
                     labelText: '词性',
                     hintText: '如：名词 n.',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: phoneticCtrl,
+                  decoration: const InputDecoration(
+                    labelText: '音标',
+                    hintText: '如：/ˈʌnfetəd/',
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -3436,6 +3450,9 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                   partOfSpeech: posCtrl.text.trim().isEmpty
                       ? null
                       : posCtrl.text.trim(),
+                  phonetic: phoneticCtrl.text.trim().isEmpty
+                      ? null
+                      : phoneticCtrl.text.trim(),
                   grammarNote: grammarCtrl.text.trim().isEmpty
                       ? null
                       : grammarCtrl.text.trim(),
@@ -3496,6 +3513,22 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
             AppConstants.bookmarkSourceVocab, _vocabBookmarkContent(v));
   }
 
+  /// 系统 TTS 朗读(v1.5.0):单词点一下朗读。失败(无语音引擎)提示一次。
+  Future<void> _speakWord(Vocabulary v) async {
+    final ok = await TtsService.instance.speak(v.displayWordText);
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text('设备未找到可用语音引擎，暂时无法朗读'),
+            behavior: SnackBarBehavior.floating,
+            duration: Duration(seconds: 2),
+          ),
+        );
+    }
+  }
+
   /// 词条长按(v1.4.4 用户最新指示):
   /// 未选中 → 选中(多选批量);已选中 → **取消该词选中**(单个取消,
   /// 误选可即时修正)。复制功能迁至词详情弹窗(v1.4.4),长按不再弹菜单。
@@ -3549,6 +3582,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     final wordCtrl = TextEditingController();
     final transCtrl = TextEditingController();
     final posCtrl = TextEditingController();
+    final phoneticCtrl = TextEditingController();
     final sentenceCtrl = TextEditingController();
     bool completing = false;
 
@@ -3556,6 +3590,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
       wordCtrl.dispose();
       transCtrl.dispose();
       posCtrl.dispose();
+      phoneticCtrl.dispose();
       sentenceCtrl.dispose();
     }
 
@@ -3563,6 +3598,9 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     void applyWordInfo(Map<String, String> info) {
       if (transCtrl.text.trim().isEmpty) transCtrl.text = info['translation'] ?? '';
       if (posCtrl.text.trim().isEmpty) posCtrl.text = info['part_of_speech'] ?? '';
+      if (phoneticCtrl.text.trim().isEmpty) {
+        phoneticCtrl.text = info['phonetic'] ?? '';
+      }
       if (sentenceCtrl.text.trim().isEmpty) {
         sentenceCtrl.text = info['original_sentence'] ?? '';
       }
@@ -3596,6 +3634,14 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                   decoration: const InputDecoration(
                     labelText: '词性',
                     hintText: '如：形容词 adj.',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: phoneticCtrl,
+                  decoration: const InputDecoration(
+                    labelText: '音标（可选）',
+                    hintText: '如：/ˈʌnfetəd/',
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -3695,6 +3741,9 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                       partOfSpeech: posCtrl.text.trim().isEmpty
                           ? null
                           : posCtrl.text.trim(),
+                      phonetic: phoneticCtrl.text.trim().isEmpty
+                          ? null
+                          : phoneticCtrl.text.trim(),
                       originalSentence: sentence.isEmpty ? null : sentence,
                       photoPath: null, // 手动补充的词无照片来源
                     ),

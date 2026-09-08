@@ -9,6 +9,7 @@ import '../../config/constants.dart';
 import '../../models/saved_session.dart';
 import '../../services/doubao_api.dart';
 import 'process_chat.dart';
+import '../writing/write_review_screen.dart';
 import 'widgets/analysis_mode_picker.dart';
 import 'widgets/my_materials_section.dart';
 import 'widgets/ai_discovery_section.dart';
@@ -67,6 +68,9 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
             // ── 板块1：拍照识文 ──
             _buildCaptureSectionCard(theme),
 
+            // ── 板块1.5：写译批改 ──
+            _buildWritingCard(theme),
+
             // ── 板块2：我的学习材料 ──
             const MyMaterialsSection(),
 
@@ -75,6 +79,24 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
 
             const SizedBox(height: 24),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWritingCard(ThemeData theme) {
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      elevation: 1,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: ListTile(
+        leading: Icon(Icons.edit_note, color: theme.colorScheme.primary),
+        title: const Text('写译批改'),
+        subtitle: const Text('手写英文拍照识别 → AI 批改（语法/拼写/用词/自然度）'),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const WriteReviewScreen()),
         ),
       ),
     );

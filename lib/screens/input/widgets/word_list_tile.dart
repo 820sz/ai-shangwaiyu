@@ -15,6 +15,8 @@ class WordListTile extends StatelessWidget {
   /// 收藏星标(v1.4.0 问题 8):非 null 时显示;分别控制显示与状态
   final VoidCallback? onBookmark;
   final bool bookmarked;
+  /// 朗读(v1.5.0):非 null 时显示小喇叭,点击系统 TTS 朗读词条
+  final VoidCallback? onSpeak;
 
   const WordListTile({
     super.key,
@@ -25,6 +27,7 @@ class WordListTile extends StatelessWidget {
     this.index,
     this.onBookmark,
     this.bookmarked = false,
+    this.onSpeak,
   });
 
   Color _barColor() {
@@ -113,6 +116,22 @@ class WordListTile extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 4),
+                // 朗读喇叭(v1.5.0):单词点一下朗读,无需进详情
+                if (onSpeak != null)
+                  InkWell(
+                    onTap: onSpeak,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 2,
+                        vertical: 4,
+                      ),
+                      child: Icon(
+                        Icons.volume_up_outlined,
+                        size: 15,
+                        color: Colors.grey[500],
+                      ),
+                    ),
+                  ),
                 // 收藏星标(可选)——好句子/词条单独收藏进收藏夹。
                 if (onBookmark != null)
                   InkWell(
@@ -133,7 +152,20 @@ class WordListTile extends StatelessWidget {
                   Icon(Icons.chevron_right, size: 18, color: Colors.grey[300]),
               ],
             ),
-            // 行2:释义(独占整行)
+            // 行2:音标(v1.5.0,AI 补全生成)+ 释义(独占整行)
+            if ((item.phonetic ?? '').isNotEmpty) ...[
+              const SizedBox(height: 2),
+              Text(
+                item.phonetic!,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontStyle: FontStyle.italic,
+                  color: Colors.grey[500],
+                ),
+                maxLines: null,
+                overflow: TextOverflow.visible,
+              ),
+            ],
             if ((item.translation ?? '').isNotEmpty) ...[
               const SizedBox(height: 2),
               Text(

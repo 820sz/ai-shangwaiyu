@@ -14,6 +14,7 @@ class Vocabulary {
   final int masteryLevel; // 0=新词, 1=学习中, 2=掌握
   final String? partOfSpeech; // 词性（单词专用）
   final String? grammarNote; // 语法分析（短语/句子专用）
+  final String? phonetic; // 音标(v1.5.0,AI 补全生成,如 /ˈʌnˈfetəd/)
   final String? category; // 分类：教材/书籍/外刊/碎片文章/其他
   final String? materialPath; // 分层素材路径，如 '教材/新概念英语/第1册'
   final DateTime createdAt;
@@ -31,6 +32,7 @@ class Vocabulary {
     this.masteryLevel = 0,
     this.partOfSpeech,
     this.grammarNote,
+    this.phonetic,
     this.category,
     this.materialPath,
     DateTime? createdAt,
@@ -51,6 +53,7 @@ class Vocabulary {
       'mastery_level': masteryLevel,
       'part_of_speech': partOfSpeech,
       'grammar_note': grammarNote,
+      'phonetic': phonetic,
       'category': category ?? AppConstants.dbCategoryDefault,
       'material_path': materialPath,
       'created_at': createdAt.toIso8601String(),
@@ -71,6 +74,7 @@ class Vocabulary {
       masteryLevel: map['mastery_level'] as int? ?? 0,
       partOfSpeech: map['part_of_speech'] as String?,
       grammarNote: map['grammar_note'] as String?,
+      phonetic: map['phonetic'] as String?,
       category: map['category'] as String?,
       materialPath: map['material_path'] as String?,
       createdAt: _tryParseDate(map['created_at']),
@@ -95,6 +99,7 @@ class Vocabulary {
     int? masteryLevel,
     Object? partOfSpeech = _sentinel,
     Object? grammarNote = _sentinel,
+    Object? phonetic = _sentinel,
     Object? category = _sentinel,
     Object? materialPath = _sentinel,
     DateTime? createdAt,
@@ -112,6 +117,7 @@ class Vocabulary {
       masteryLevel: masteryLevel ?? this.masteryLevel,
       partOfSpeech: _unwrap(partOfSpeech, this.partOfSpeech) as String?,
       grammarNote: _unwrap(grammarNote, this.grammarNote) as String?,
+      phonetic: _unwrap(phonetic, this.phonetic) as String?,
       category: _unwrap(category, this.category) as String?,
       materialPath: _unwrap(materialPath, this.materialPath) as String?,
       createdAt: createdAt ?? this.createdAt,

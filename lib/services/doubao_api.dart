@@ -187,7 +187,7 @@ class DoubaoApiService extends BaseApiService {
       ),
       _ => (
         '''你是英语学习助手。识别照片中"被标注"的英语内容。输出JSON，格式：
-{"items":[{"word":"完整原文","translation":"中文释义","word_type":"word|phrase|sentence","part_of_speech":"词性(可选)","original_sentence":"完整句子(短语/句子必填,单词可选)"}]}
+{"items":[{"word":"完整原文","translation":"中文释义","word_type":"word|phrase|sentence","part_of_speech":"词性(可选)","phonetic":"IPA音标(仅单词可选,如 /ˈleɪzi/)","original_sentence":"完整句子(短语/句子必填,单词可选)"}]}
 标记定义：手写笔迹圈画、下划线、波浪线、荧光笔、方框、星号、书签贴等读者标注痕迹。
 识别纪律(v1.4.4)：
 1. 只输出有明确标记痕迹的内容；正文中未作任何标记的文字一律不要输出。
@@ -383,7 +383,9 @@ class DoubaoApiService extends BaseApiService {
           'role': 'system',
           'content':
               '你是英语学习助手。用户给出一个英语单词或短语，请返回 JSON：'
-              '{"translation":"中文释义","part_of_speech":"词性(如 n./v./adj./phrase)","original_sentence":"包含该词的完整英文例句","grammar_note":"语法要点(可选,单词可省)"}。'
+              '{"translation":"中文释义","part_of_speech":"词性(如 n./v./adj./phrase)",'
+              '"phonetic":"IPA 国际音标(用两个斜杠包裹,如 /ˈʌnfetəd/;短语/句子可省)",'
+              '"original_sentence":"包含该词的完整英文例句","grammar_note":"语法要点(可选,单词可省)"}。'
               '只输出 JSON。',
         },
         {'role': 'user', 'content': word},
@@ -417,6 +419,7 @@ class DoubaoApiService extends BaseApiService {
       return {
         'translation': s('translation'),
         'part_of_speech': s('part_of_speech'),
+        'phonetic': s('phonetic'),
         'original_sentence': s('original_sentence'),
         'grammar_note': s('grammar_note'),
       };
@@ -429,6 +432,145 @@ class DoubaoApiService extends BaseApiService {
   /// 复用 [extractVocabularyStream] 同款压缩逻辑,大图缩至 2048 内。
   Future<List<String>> imageDataUrisFor(List<File> files) async {
     return Future.wait(files.map((f) => _imageToDataUri(f)), eagerError: true);
+  }
+
+  // ── 写译批改(v1.5.0) ──
+
+  /// 步骤1:手写英文识别 — 图片 → 转写文本(保留段落,不点评)。
+  /// 走主槽位(视觉)。思考强制 disabled:转写要快,不需要思考。
+  Future<String> transcribeWriting(
+    File imageFile, {
+    ApiEndpointConfig? endpoint,
+  }) async {
+    final cfg = endpoint ?? config;
+    if (!cfg.isConfigured) {
+      throw Exception('请先在设置中配置主 API Key');
+    }
+    final uri = await _imageToDataUri(imageFile);
+    final isDs = cfg.model.toLowerCase().contains('deepseek');
+    final body = {
+      'model': cfg.model,
+      'messages': [
+        {
+          'role': 'system',
+          'content':
+              '你是手写体识别助手。用户提供手写英文练习的照片,请准确转写其中的英文内容,'
+              '保留段落与换行。只输出转写文本本身,不解释、不翻译、不点评、不加引号。',
+        },
+        {
+          'role': 'user',
+          'content': [
+            {
+              'type': 'image_url',
+              'image_url': {
+                'url': uri,
+                if (shouldSendDetailFlag(cfg.model)) 'detail': 'low',
+              },
+            },
+            {'type': 'text', 'text': '请转写这张图片中的英文手写内容'},
+          ],
+        },
+      ],
+      'max_tokens': isDs ? 8192 : 2048,
+      if (!isDs) 'temperature': 0,
+      // 写译批改是单轮快速任务,思考关闭(识别要的是准确不是推理)
+      'thinking': {'type': 'disabled'},
+    };
+
+    final response = await postWithReasoningFallback(
+        '/chat/completions', body, cfg: cfg);
+    final content = BaseApiService.extractContent(response.data).trim();
+    if (content.isEmpty) {
+      throw Exception('AI 未返回转写文本，请重试或手动输入');
+    }
+    return content;
+  }
+
+  /// 步骤2:AI 批改 — 文本输入 → {score, correction, summary, issues}。
+  /// 优先副槽位(文本模型,便宜快),未配置则用主槽位。
+  Future<Map<String, dynamic>> reviewWriting(
+    String text, {
+    ApiEndpointConfig? endpoint,
+  }) async {
+    final cfg = endpoint ??
+        (ApiEndpointConfig.secondary.isConfigured
+            ? ApiEndpointConfig.secondary
+            : config);
+    if (!cfg.isConfigured) {
+      throw Exception('请先在设置中配置 API Key');
+    }
+    final isDs = cfg.model.toLowerCase().contains('deepseek');
+    final body = {
+      'model': cfg.model,
+      'messages': [
+        {
+          'role': 'system',
+          'content':
+              '你是一名严谨耐心的英语写作老师。请批改用户提交的英文写作,返回 JSON:'
+              '{"score":整数0-100,"correction":"修改后的完整英文(保留原意,标点拼写语法修正)",'
+              '"issues":[{"original":"原文片段","correction":"修改后","type":"语法|拼写|用词|搭配|标点|自然度",'
+              '"reason":"错误原因与中文解释"}],"summary":"总体评语(中文,60字内)"}。'
+              '不输出JSON以外的任何内容。',
+        },
+        {'role': 'user', 'content': text},
+      ],
+      'max_tokens': isDs ? 8192 : 4096,
+      if (!isDs) 'temperature': 0,
+      ...cfg.buildThinkingParamsFor('disabled'),
+    };
+
+    final response = await postWithReasoningFallback(
+        '/chat/completions', body, cfg: cfg);
+    final content = BaseApiService.extractContent(response.data);
+    final parsed = parseWritingReview(content);
+    if (parsed.isEmpty && content.trim().isNotEmpty) {
+      // 自诊断:解析失败时把 AI 原文带给用户(前400字)
+      final raw = content.trim();
+      throw Exception('AI 返回格式异常(原文前400字)：\n'
+          '${raw.length > 400 ? raw.substring(0, 400) : raw}');
+    }
+    return parsed;
+  }
+
+  /// 解析批改返回 JSON(纯静态,可单测)。兼容 ```json 包裹;
+  /// 缺字段回空串/空列表,绝不抛异常——界面仍可显示部分结果。
+  static Map<String, dynamic> parseWritingReview(String content) {
+    String jsonStr = content.trim();
+    if (jsonStr.startsWith('```')) {
+      final start = jsonStr.indexOf('\n');
+      final end = jsonStr.lastIndexOf('```');
+      if (start != -1 && end != -1) {
+        jsonStr = jsonStr.substring(start + 1, end).trim();
+      }
+    }
+    try {
+      final parsed = jsonDecode(jsonStr);
+      if (parsed is! Map) return {};
+      String s(String key, [String def = '']) =>
+          parsed[key]?.toString().trim() ?? def;
+      final issues = <Map<String, String>>[];
+      final rawIssues = parsed['issues'];
+      if (rawIssues is List) {
+        for (final e in rawIssues) {
+          if (e is Map) {
+            issues.add({
+              'original': e['original']?.toString().trim() ?? '',
+              'correction': e['correction']?.toString().trim() ?? '',
+              'type': e['type']?.toString().trim() ?? '',
+              'reason': e['reason']?.toString().trim() ?? '',
+            });
+          }
+        }
+      }
+      return {
+        'score': s('score'),
+        'correction': s('correction'),
+        'summary': s('summary'),
+        'issues': issues,
+      };
+    } catch (_) {
+      return {};
+    }
   }
 
   /// 基于已有识别结果发送追问,返回流式 SSE 块。
@@ -625,6 +767,7 @@ class DoubaoApiService extends BaseApiService {
             'word_type': type,
             'original_sentence': os,
             'part_of_speech': e['part_of_speech']?.toString(),
+            'phonetic': e['phonetic']?.toString(),
             'grammar_note': e['grammar_note']?.toString(),
             'image_index': imgIdx,
           });
@@ -647,6 +790,7 @@ class DoubaoApiService extends BaseApiService {
             'word_type': type,
             'original_sentence': os,
             'part_of_speech': e['part_of_speech']?.toString(),
+            'phonetic': e['phonetic']?.toString(),
             'grammar_note': e['grammar_note']?.toString(),
           };
         })

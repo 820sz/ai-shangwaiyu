@@ -172,6 +172,12 @@ class DatabaseService {
         ''');
       } catch (e) { debugPrint('ReadFlow DB migration v6 bookmarks: $e'); }
     }
+    if (oldV < 7) {
+      // 音标列(v1.5.0,AI 补全生成;旧词无音标显示时留空)
+      try {
+        await db.execute("ALTER TABLE vocabulary ADD COLUMN phonetic TEXT");
+      } catch (e) { debugPrint('ReadFlow DB migration v7 phonetic: $e'); }
+    }
   }
 
   // ═══════════════ 生词 CRUD ═══════════════

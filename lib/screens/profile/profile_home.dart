@@ -16,6 +16,7 @@ import 'vocab_list.dart';
 import 'stats_page.dart';
 import 'api_settings.dart';
 import 'bookmarks_screen.dart';
+import '../review/review_screen.dart';
 
 class ProfileHomeScreen extends StatefulWidget {
   const ProfileHomeScreen({super.key});
@@ -113,6 +114,15 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
               onTap: () => Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const VocabListScreen()),
+              ),
+            ),
+            _MenuTile(
+              icon: Icons.style,
+              title: '复习模式',
+              subtitle: '抽认卡：看词想义 → 翻面核对 → 标记掌握度',
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ReviewScreen()),
               ),
             ),
             _MenuTile(
