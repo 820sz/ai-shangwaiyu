@@ -330,8 +330,67 @@
 - **修复(显示层回退)**:word 以省略号结尾且存在更长的 originalSentence → 显示 originalSentence(详细模式 _displayWord + 总览 WordListTile 同逻辑)
 - 用户线索关键提示:"近几次词汇板块 UI 调整后就这样"+"原来正常"——但代码审查确认 UI 一直放开;数据层词条化是模型近端行为(v1.2.10 时代用户就反馈过截断,当时误判为 UI)
 
-## 断点快照(2026-08-26)
-- 正在做:**v1.4.0 发布完成,等用户真机验收**——8 项(6~13)+ 3 项回归(0/1/5)
-- 验收清单(重点):①追问聊 3 轮问"我上一楼问了什么"能答(#13)②词条长按两下出复制菜单(#7)③追问长按文字有「取消选择」④全文翻译点「AI 讲解」/追加图片(6/10)⑤追问答案☆收藏→我的-收藏夹(#8/9)⑥拍照识文/追问抽屉改名(11/12)⑦主槽位只填 sk- key 模型列表自动是 DS(API 自动端点)⑧出问题先看「我的-诊断信息」
-- 环境备忘:**本会话跑 flutter 命令必须 `FLUTTER_ALREADY_LOCKED=true` + 全盘权限(danger-full-access)**,否则 D:\flutter lockfile CreateFile failed 5 挂死;构建命令要开梯子
+## v1.6.0 — 写译批改重构 + 书籍分组修复 + 写译日志(2026-08-26)
+
+**用户反馈(三条)**:①写译批改该在输出页、太简陋(交互/分类混乱、不能多图)②书籍子分类仍按页分裂③批改要有追问抽屉(收藏/选模型)、AI 末尾按词汇/语法/表达优化/其他汇总、可保存练习日志按日期归档复盘
+
+**① 写译批改重做**(`lib/screens/writing/write_review_screen.dart`)
+- 入口从「输入」页搬到「输出」页(输出页顶部两个入口:写译批改 / 写译记录)
+- 进页先选材料类型:**手写档**(可一次多张,拍照/相册多选,≤9 张)或**电子档**(直接粘贴)
+- 手写档:上传 → 「识别为电子档」(`transcribeWriting(List<File>)` 多图一次转写合并)→ 文本可改 → 批改
+- 结果:分数 + 总评 + **错误分类汇总(词汇/语法/表达优化/其他)** + 逐条点评 + 修正后全文 + 我的原文
+- 追问抽屉:复用与识图页**同一套** `FollowUpController`(收藏星标、主/副槽位模型、思考档、上下楼记忆、编辑重发、历史对话);上下文自动带原文+批改结果
+
+**② 书籍分组修复**
+- 新增 `lib/utils/material_group.dart`(纯函数,可单测):书籍 = 一本书一个文件夹,页/章为二级子分类;页码按数字排序;未标页码单独归类
+- DB v8 迁移:旧数据 `书籍/《X》/p16 p17` → `material_path='书籍/《X》'` + `source_page='p16 p17'`(同一本书不再按页分裂)
+- `my_materials_section.dart` 分类弹窗改为两级展开
+
+**③ 写译练习日志**
+- DB v8 新表 `writing_logs` + `WritingLog` 模型(原文/修正/分数/评语/逐条点评/四类汇总/原稿图/模型/时间)
+- 批改完成弹「是否保存此次写译练习」;`writing_logs_screen.dart` 按日期文件夹归档,详情可看全部内容,可删除
+
+**内部重构**:追问逻辑从 process_chat 抽成 `lib/screens/input/widgets/follow_up_drawer.dart`(`FollowUpController` + `showFollowUpDrawer` + `CompactModelPicker`),识图页与写译页共用一份实现(process_chat 净减约 700 行)
+
+**验证**:analyze 0 error/0 warning;145 测试全绿(+1 skip,新增 11 条);arm64 release aapt versionCode=46/versionName=1.6.0;Release v1.6.0 = Latest
+
+**踩坑**:Gradle 本次构建耗时 26 分钟(网络导致依赖下载慢),不是卡死——等待即可;同步远端仍需 `tool/push_via_api.ps1`(github.com 被 fake-IP 劫持),用法:`$env:RF_DIFF_BASE='<tree 与远端一致的本地提交>'; powershell -File tool\push_via_api.ps1`
+
+## v1.5.0 — 音标+系统TTS发音(#4) / 复习模式(#5) / 写译批改(2026-08-26)
+
+**范围**(用户拍板节奏:先修复版再新功能;发音=系统TTS+音标;输出=先写译批改)
+
+**#4 音标 + 系统 TTS 发音**
+- DB v7:vocabulary 新增 `phonetic` 列(迁移 + Vocabulary 模型字段 + toMap/fromMap/copyWith)
+- 音标来源:识别 prompt 新增可选 `phonetic` 字段 + `completeWordInfo`/`parseWordInfo` 新增 phonetic + 手动添加/编辑表单新增「音标」输入
+- 朗读:新增 `lib/services/tts_service.dart`(flutter_tts 懒初始化,en-US,失败静默返回 false → 界面提示「设备未找到可用语音引擎」)
+- 入口:词列表小喇叭(WordListTile.onSpeak)、词详情页点单词本体/喇叭按钮、生词本卡片喇叭、生词详情页点词/喇叭
+
+**#5 复习模式**(我的 → 复习模式,`lib/screens/review/review_screen.dart`)
+- 抽认卡:看词想义 → 轻点翻面核对(释义/例句/语法) → 底部三档标记(不认识/模糊/认识 → mastery 0/1/2 实时写库)
+- 筛选(全部/新词/学习中/已掌握)+ 打乱重来 + 进度条 + 本轮统计小结 + 再来一轮
+- 只收「有释义」的条目(没释义的卡片无法"想义")
+
+**写译批改**(输入页 → 写译批改,`lib/screens/writing/write_review_screen.dart`)
+- 手写英文拍照/相册 → 「识别文本」(`transcribeWriting`,主槽位视觉,思考 disabled)→ 文本框可编辑确认 → 「AI 批改」
+- 批改(`reviewWriting`,优先副槽位,未配置用主槽位)→ 分数 + 修正后全文 + 逐条点评(语法/拼写/用词/搭配/标点/自然度)+ 总体评语 + 「我的原文」对照
+- 解析失败自诊断:把 AI 原文前 400 字带进错误页
+
+**其他**:软件图标换成用户新定稿 AI language 图标(5 密度);`tool/push_via_api.ps1`(网络阻断时用 GitHub API 同步提交的应急脚本)
+
+**验证**:analyze 0 error/0 warning(24 条历史 info);134 测试全绿(+1 skip);arm64 release 构建 aapt 验证 versionCode=45 versionName=1.5.0;GitHub Release v1.5.0 = Latest,资产 app-release.apk
+
+**踩坑(重要)**:
+- 本机 github.com 被网络层劫持到 fake-IP(198.18.0.84,TUN/代理节点失效)→ `git push` schannel/openssl 全部握手失败;api.github.com 正常
+- 应急方案:GitHub REST git API(blobs→trees→commits→refs)按本地对象逐层重建提交;**远端 master 原停在 v1.2.1(4a693160)**——此前多个版本的 git push 一直没成功(Release 走 API 所以正常)
+- PS 5.1 三坑:①UTF-8 无 BOM 的 .ps1 会因中文乱码解析失败(必须写 BOM)②`gh --jq` 多行输出在 PS 里是数组,`"$out"` 会按空格拼成一行(必须 `-join "`n"`)③`git/commits/<sha>` API 只认 40 位完整 SHA
+- 重建树时必须把「新增目录」作为条目插进父树(review/writing/tool 三个新目录曾整目录丢失);删除的文件要从树里丢弃;最后用 `git rev-parse HEAD^{tree}` 与 API 返回的根树 SHA 比对一致才提交
+
+**断点(2026-08-26 收尾)**:远端 master = 5c206a4,内容与本地 HEAD 树 SHA 完全一致(6a2c7ed0);本地保留完整历史,网络恢复后 `git push --force origin master` 即可把完整提交历史补回远端(并带上 PLAN.md 本次更新)
+
+## 断点快照(2026-08-26 收尾)
+- 正在做:**v1.5.0 已发布(Release = Latest),等用户真机验收**——#4 音标+朗读、#5 复习模式、写译批改、新图标
+- 验收清单(重点):①生词列表/详情出现音标(识别 prompt 已要求返回,老词可编辑补充)②点小喇叭/点单词本体能朗读(无引擎会提示)③我的→复习模式:抽认卡翻面 + 三档标记后进度推进,标记后回生词本掌握度同步④输入页→写译批改:拍手写英文→识别→可改文本→批改出分数/修正全文/逐条点评⑤新图标是否已生效(桌面图标可能需重装/重启桌面)
+- 环境备忘:**本会话跑 flutter 命令必须 `FLUTTER_ALREADY_LOCKED=true` + 全盘权限(danger-full-access)**,否则 D:\flutter lockfile CreateFile failed 5 挂死
+- 网络备忘:**github.com 被劫持到 fake-IP 198.18.0.84,git push 不通;api.github.com 通** → 用 `tool/push_via_api.ps1` 经 API 同步(脚本须存为 UTF-8 BOM)
 - 备注:auto 更新链路真机跑通 ✓;gh release create/upload 本会话直跑成功;PLAN.md 编辑注意版本标题完整性

@@ -4,6 +4,7 @@ import '../../../config/constants.dart';
 import '../../../providers/vocab_provider.dart';
 import '../../../services/database.dart';
 import '../../../models/vocabulary.dart';
+import '../../../utils/material_group.dart';
 import '../../profile/vocab_list.dart';
 
 /// 板块2：我的学习材料 — 按分类浏览用户已保存的材料
@@ -196,18 +197,9 @@ class _CategoryVocabSheetState extends State<_CategoryVocabSheet> {
     }
   }
 
-  /// 按 materialPath 分组 → 未指定路径的归入"未分类"
-  Map<String, List<Vocabulary>> _groupByMaterialPath() {
-    final groups = <String, List<Vocabulary>>{};
-    for (final v in _items!) {
-      final path = (v.materialPath != null && v.materialPath!.isNotEmpty)
-          ? v.materialPath!
-          : '未分类';
-      groups.putIfAbsent(path, () => []);
-      groups[path]!.add(v);
-    }
-    return groups;
-  }
+  /// 分组(v1.6.0):书籍 = 一本书一个文件夹,页/章为子分类;
+  /// 其他分类沿用整条 material_path 作一级分组。
+  List<MaterialGroup> _grouped() => groupMaterials(_items!, category: widget.category);
 
   @override
   Widget build(BuildContext context) {
@@ -262,31 +254,30 @@ class _CategoryVocabSheetState extends State<_CategoryVocabSheet> {
   }
 
   Widget _buildGroupedList() {
-    final groups = _groupByMaterialPath();
-    final keys = groups.keys.toList();
-
-    // 只有一个分组 → 扁平列表
-    if (keys.length == 1) {
-      return ListView(
-        controller: widget.scrollCtrl,
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        children: _buildVocabList(groups[keys.first]!),
-      );
+    final groups = _grouped();
+    // 只有一个分组且无有效二级 → 扁平列表
+    if (groups.length == 1) {
+      final subs = groups.first.subgroups;
+      if (subs.length <= 1) {
+        final only = subs.isEmpty ? <Vocabulary>[] : subs.values.first;
+        return ListView(
+          controller: widget.scrollCtrl,
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          children: _buildVocabList(only),
+        );
+      }
     }
 
-    // 多个子文件夹 → 分组展示
     return ListView.builder(
       controller: widget.scrollCtrl,
       padding: const EdgeInsets.symmetric(vertical: 8),
-      itemCount: keys.length,
+      itemCount: groups.length,
       itemBuilder: (_, i) {
-        final key = keys[i];
-        final items = groups[key]!;
-        final isUncategorized = key == '未分类';
-        // 从 materialPath 提取显示名（去掉主分类前缀）
-        final displayName = isUncategorized
-            ? '未归类'
-            : key.replaceFirst('${widget.category}/', '');
+        final g = groups[i];
+        final isUncategorized = g.path == '未归类';
+        final subs = g.subgroups;
+        // 无有效二级(单个空 key)→ 直接铺词;有二级 → 嵌套页/章
+        final hasSubgroups = !(subs.length == 1 && subs.keys.first.isEmpty);
         return Card(
           margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
           elevation: 0,
@@ -297,25 +288,61 @@ class _CategoryVocabSheetState extends State<_CategoryVocabSheet> {
           child: ExpansionTile(
             initiallyExpanded: !isUncategorized,
             tilePadding: const EdgeInsets.symmetric(horizontal: 12),
-            childrenPadding:
-                const EdgeInsets.fromLTRB(8, 0, 8, 8),
+            childrenPadding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
             leading: Icon(
               isUncategorized ? Icons.folder_outlined : Icons.folder,
               size: 20,
               color: isUncategorized ? Colors.grey : Colors.amber[700],
             ),
             title: Text(
-              displayName,
+              g.label,
               style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
             ),
             subtitle: Text(
-              '${items.length} 个生词',
+              '${g.totalCount} 个生词'
+              '${hasSubgroups ? ' · ${subs.length} 个${widget.category == '书籍' ? '页码/章节' : '子分类'}' : ''}',
               style: TextStyle(fontSize: 11, color: Colors.grey[500]),
             ),
-            children: _buildVocabList(items),
+            children: hasSubgroups
+                ? subs.entries
+                    .map((e) => _buildSubgroupTile(e.key, e.value))
+                    .toList()
+                : _buildVocabList(
+                    subs.isEmpty ? <Vocabulary>[] : subs.values.first),
           ),
         );
       },
+    );
+  }
+
+  /// 二级:页码/章节(书籍)或子分类
+  Widget _buildSubgroupTile(String label, List<Vocabulary> items) {
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
+      elevation: 0,
+      color: Colors.grey[50],
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8),
+        side: BorderSide(color: Colors.grey[200]!),
+      ),
+      child: ExpansionTile(
+        tilePadding: const EdgeInsets.symmetric(horizontal: 12),
+        childrenPadding: const EdgeInsets.fromLTRB(8, 0, 8, 6),
+        leading: Icon(
+          Icons.bookmark_border,
+          size: 16,
+          color: Colors.grey[500],
+        ),
+        title: Text(
+          label.isEmpty ? '未标页码' : label,
+          style: const TextStyle(fontSize: 13),
+        ),
+        subtitle: Text(
+          '${items.length} 个生词',
+          style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+        ),
+        children: _buildVocabList(items),
+      ),
     );
   }
 

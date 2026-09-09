@@ -26,7 +26,7 @@ import 'widgets/category_picker.dart';
 import 'widgets/sub_category_input.dart';
 import 'widgets/example_sentence.dart';
 import 'widgets/follow_up_models.dart';
-import 'widgets/follow_up_bubble.dart';
+import 'widgets/follow_up_drawer.dart';
 import 'widgets/scroll_buttons.dart';
 import 'widgets/model_avatars.dart';
 
@@ -110,66 +110,13 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
   /// 本轮请求实际使用的思考档位(_onStreamDone 检测 reasoning-only 用)
   String _lastRequestThinking = 'disabled';
 
-  /// 追问当前槽位:'primary' / 'secondary'(Hive 持久化,默认主)
-  String get _followUpSlot {
-    final v = Hive.box(
-      AppConstants.hiveBoxSettings,
-    ).get(AppConstants.keyFollowUpSlot);
-    return (v is String && v == 'secondary') ? 'secondary' : 'primary';
-  }
+  /// 追问当前使用的槽位配置(副未配置时回落到主)。
+  /// v1.6.0:整套追问逻辑抽到 FollowUpController(与写译批改共用),
+  /// 这里只保留「AI 补全词汇」等本页需要的槽位访问。
+  ApiEndpointConfig get _followUpEndpoint => _followUp.endpoint;
 
-  /// 追问当前使用的槽位配置(副未配置时回落到主)
-  ApiEndpointConfig get _followUpEndpoint {
-    if (_followUpSlot == 'secondary' &&
-        ApiEndpointConfig.secondary.isConfigured) {
-      return ApiEndpointConfig.secondary;
-    }
-    return ApiEndpointConfig.primary;
-  }
-
-  /// 追问当前显示的模型名(按槽位)
-  String get _followUpModel => _followUpEndpoint.model;
-
-  /// 追问思考档位 — 独立存储(keyFollowUpThinking,4 档):
-  /// v1.2.17 只该砍识图思考档位,追问不该连坐(v1.3.0 问题 1)。
-  /// 非法值一律回 disabled,保证请求与 UI 一致。
-  String get _followUpThinking {
-    final v = Hive.box(
-      AppConstants.hiveBoxSettings,
-    ).get(AppConstants.keyFollowUpThinking);
-    return (v is String &&
-            (v == 'disabled' || v == 'low' || v == 'medium' || v == 'high'))
-        ? v
-        : 'disabled';
-  }
-
-  // ── 追问抽屉（ValueNotifier 确保跨路由更新） ──
-  final ValueNotifier<List<FollowUpMessage>> _followUpMessages = ValueNotifier(
-    [],
-  );
-  final ValueNotifier<bool> _followUpLoading = ValueNotifier(false);
-
-  /// 追问槽位切换通知:抽屉是独立路由,主屏 setState 不会重建它,
-  /// 抽屉内的模型标签/AI 头像须监听此 notifier 才能跟随切换。
-  final ValueNotifier<String> _followUpSlotNotifier = ValueNotifier('primary');
-  final TextEditingController _followUpCtrl = TextEditingController();
-  final FocusNode _followUpFocus = FocusNode();
-  StreamSubscription<SseChunk>? _followUpSub;
-
-  /// 发送新消息后待滚到底部（用户手动上滑浏览时不打扰,发送时强制跟随）
-  bool _pendingFollowUpScroll = false;
-
-  /// 本次会话是否有追问内容（用于退出时提示保存）
-  bool _followUpDirty = false;
-
-  /// 外部预设的追问上下文（来自"询问AI详解"），优先级高于自动构建
-  String? _followUpContextOverride;
-
-  /// 已保存的历史对话
-  List<FollowUpSavedConversation> _savedConversations = [];
-
-  // ── 追问持久化 Key ──
-  static const _hiveKeySavedChats = 'saved_follow_up_chats';
+  /// 追问抽屉共享控制器(材料上下文 = 识别结果 / 全文翻译段落)
+  late final FollowUpController _followUp;
 
   /// 全部图片（初始 = 进入页面时的图；追加识别时动态扩展）。
   /// 追加的图片继续识别,结果按来源图分 p1/p2/pn 组,不退出当前对话。
@@ -195,8 +142,12 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     super.initState();
     _images = [...widget.imageFiles];
     WidgetsBinding.instance.addObserver(this);
-    _followUpSlotNotifier.value = _followUpSlot;
-    _loadSavedConversations();
+    // 追问控制器:上下文取识别结果 + 全文翻译段落,支持视觉的模型可附原图
+    _followUp = FollowUpController(
+      buildContext: () =>
+          buildFollowUpContext(results: _results, paragraphs: _fullTextParagraphs),
+      imageFilesProvider: () => _images,
+    );
     if (widget.restoreSession != null) {
       _restoreSession(widget.restoreSession!);
     } else {
@@ -237,7 +188,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
             .where((m) => m['original']!.isNotEmpty),
       );
 
-      _followUpMessages.value = s.followUpMessages
+      _followUp.messages.value = s.followUpMessages
           .where((m) => m['content']?.toString().isNotEmpty ?? false)
           .map(
             (m) => FollowUpMessage(
@@ -248,7 +199,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
             ),
           )
           .toList();
-      _followUpDirty = false;
+      _followUp.dirty = false;
 
       if (mounted) setState(() => _phase = _StreamPhase.results);
     } catch (e) {
@@ -311,7 +262,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         sourcePage: widget.sourcePage,
         results: results,
         fullTextParagraphs: _fullTextParagraphs,
-        followUpMessages: _followUpMessages.value
+        followUpMessages: _followUp.messages.value
             .where((m) => !m.streaming) // 跳过还在生成中的消息
             .map(
               (m) => {
@@ -364,11 +315,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     _subscription?.cancel();
     _firstByteTimer?.cancel();
     _thinkingTimer?.cancel();
-    _followUpSub?.cancel();
-    _followUpCtrl.dispose();
-    _followUpFocus.dispose();
-    _followUpMessages.dispose();
-    _followUpLoading.dispose();
+    _followUp.dispose();
     _scrollCtrl.dispose();
     super.dispose();
   }
@@ -814,164 +761,6 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     }
   }
 
-  // ═══════════════ 追问持久化 ═══════════════
-
-  /// 从 Hive 加载已保存的历史对话
-  void _loadSavedConversations() {
-    try {
-      final box = Hive.box(AppConstants.hiveBoxSettings);
-      final raw = box.get(_hiveKeySavedChats);
-      if (raw is List) {
-        _savedConversations = raw
-            .map(
-              (e) => FollowUpSavedConversation.fromJson(
-                Map<String, dynamic>.from(e as Map),
-              ),
-            )
-            .toList();
-      }
-    } catch (_) {
-      _savedConversations = [];
-    }
-  }
-
-  /// 保存当前追问到 Hive
-  Future<void> _saveFollowUpConversation() async {
-    final msgs = _followUpMessages.value;
-    if (msgs.isEmpty) return;
-    final now = DateTime.now();
-    final firstUserMsg =
-        msgs.where((m) => m.role == 'user').firstOrNull?.content ?? '';
-    final title = firstUserMsg.isNotEmpty
-        ? (firstUserMsg.length > 30
-              ? '${firstUserMsg.substring(0, 30)}…'
-              : firstUserMsg)
-        : '追问记录';
-    final conv = FollowUpSavedConversation(
-      id: now.millisecondsSinceEpoch.toString(),
-      title: title.length > 30 ? '${title.substring(0, 30)}…' : title,
-      dateLabel:
-          '${now.month}月${now.day}日 ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}',
-      messages: msgs
-          .where((m) => !m.streaming) // 跳过还在流式生成中的 AI 消息
-          .map(
-            (m) => {
-              'role': m.role,
-              'content': m.content,
-              if (m.reasoningText != null) 'reasoningText': m.reasoningText,
-              if (m.model != null) 'model': m.model,
-            },
-          )
-          .toList(),
-    );
-    _savedConversations.insert(0, conv);
-    try {
-      final box = Hive.box(AppConstants.hiveBoxSettings);
-      await box.put(
-        _hiveKeySavedChats,
-        _savedConversations.map((c) => c.toJson()).toList(),
-      );
-      _followUpDirty = false; // 保存成功才清 dirty flag
-    } catch (e) {
-      debugPrint('ReadFlow saveFollowUp error: $e');
-    }
-  }
-
-  /// 加载历史对话到当前追问抽屉
-  void _loadFollowUpConversation(FollowUpSavedConversation conv) {
-    _followUpMessages.value = conv.messages
-        .map(
-          (m) => FollowUpMessage(
-            role: m['role'] as String,
-            content: m['content'] as String,
-            reasoningText: m['reasoningText'] as String?,
-            model: m['model'] as String?,
-          ),
-        )
-        .toList();
-    _followUpDirty = false;
-  }
-
-  /// 历史对话选择器
-  void _showHistoryPicker() {
-    showModalBottomSheet(
-      context: context,
-      useSafeArea: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  const Text(
-                    '历史追问',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                  ),
-                  const Spacer(),
-                  TextButton(
-                    onPressed: () {
-                      _savedConversations.clear();
-                      Hive.box(
-                        AppConstants.hiveBoxSettings,
-                      ).delete(_hiveKeySavedChats);
-                      Navigator.pop(ctx);
-                    },
-                    child: const Text(
-                      '清空全部',
-                      style: TextStyle(fontSize: 12, color: Colors.red),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            if (_savedConversations.isEmpty)
-              const Padding(
-                padding: EdgeInsets.all(32),
-                child: Text('暂无保存的对话', style: TextStyle(color: Colors.grey)),
-              )
-            else
-              ...List.generate(_savedConversations.length, (i) {
-                final conv = _savedConversations[i];
-                return ListTile(
-                  title: Text(
-                    conv.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 14),
-                  ),
-                  subtitle: Text(
-                    conv.dateLabel,
-                    style: const TextStyle(fontSize: 12),
-                  ),
-                  trailing: IconButton(
-                    icon: const Icon(Icons.delete_outline, size: 18),
-                    onPressed: () {
-                      _savedConversations.removeAt(i);
-                      Hive.box(AppConstants.hiveBoxSettings).put(
-                        _hiveKeySavedChats,
-                        _savedConversations.map((c) => c.toJson()).toList(),
-                      );
-                      Navigator.pop(ctx);
-                    },
-                  ),
-                  onTap: () {
-                    Navigator.pop(ctx); // 关历史面板
-                    _loadFollowUpConversation(conv);
-                  },
-                );
-              }),
-            const SizedBox(height: 16),
-          ],
-        ),
-      ),
-    );
-  }
-
   /// 退出确认：有识别结果或未保存追问时弹窗询问。
   /// 「暂时离开」= 暂存整个会话(结果+追问+图片副本)后退出,
   /// 下次从「输入」页"继续上次会话"恢复。
@@ -1032,7 +821,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     }
 
     // 追问对话保存确认
-    if (_followUpDirty && _followUpMessages.value.isNotEmpty) {
+    if (_followUp.dirty && _followUp.messages.value.isNotEmpty) {
       final result = await showDialog<String>(
         context: context,
         barrierDismissible: false,
@@ -1061,7 +850,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         return true;
       }
       if (result == 'save') {
-        await _saveFollowUpConversation();
+        await _followUp.saveConversation();
       }
     }
     return true; // 允许退出
@@ -1116,517 +905,15 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     }
   }
 
-  // ═══════════════ 追问抽屉 ═══════════════
-
+  /// 打开追问抽屉(独立路由;与识图页共用同一套交互)
   void _openFollowUp({String? prefillQuestion, String? followUpContext}) {
-    _followUpCtrl.clear();
-    if (prefillQuestion != null) {
-      _followUpCtrl.text = prefillQuestion;
-    }
-    if (followUpContext != null) {
-      _followUpContextOverride = followUpContext;
-    } else {
-      _followUpContextOverride = null;
-    }
-    final bottomSafe = MediaQuery.of(this.context).padding.bottom;
-    showModalBottomSheet(
-      context: this.context,
-      isScrollControlled: true,
-      enableDrag: true,
-      useSafeArea: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (ctx) => Padding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.of(ctx).viewInsets.bottom + bottomSafe,
-        ),
-        child: _buildFollowUpSheet(ctx),
-      ),
-    );
-  }
-
-  Widget _buildFollowUpSheet(BuildContext sheetCtx) {
-    return DraggableScrollableSheet(
-      initialChildSize: 0.6,
-      minChildSize: 0.3,
-      maxChildSize: 0.85,
-      expand: false,
-      builder: (ctx, scrollCtrl) {
-        return Column(
-          children: [
-            // ── 拖拽条 ──
-            Padding(
-              padding: const EdgeInsets.only(top: 8, bottom: 4),
-              child: Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Colors.grey[300],
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-            // ── 标题栏 ──
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-              child: Row(
-                children: [
-                  const Icon(
-                    Icons.chat_bubble_outline,
-                    size: 18,
-                    color: Color(0xFF4A90D9),
-                  ),
-                  const SizedBox(width: 6),
-                  const Text(
-                    '追问抽屉',
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-                  ),
-                  const SizedBox(width: 8),
-                  // 模型/思考选择器（紧凑，与底部栏同步）
-                  _buildCompactModelPicker(),
-                  // 新对话按钮
-                  if (_followUpMessages.value.isNotEmpty)
-                    GestureDetector(
-                      onTap: () {
-                        _followUpMessages.value = [];
-                        _followUpDirty = false;
-                      },
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 6),
-                        child: Text(
-                          '新建',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: Colors.blue[400],
-                          ),
-                        ),
-                      ),
-                    ),
-                  const Spacer(),
-                  // 历史对话按钮
-                  if (_savedConversations.isNotEmpty)
-                    GestureDetector(
-                      onTap: () => _showHistoryPicker(),
-                      child: Icon(
-                        Icons.history,
-                        size: 18,
-                        color: Colors.grey[500],
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            const Divider(),
-            // ── 消息列表（ValueListenableBuilder 确保流式更新） ──
-            Expanded(
-              child: ValueListenableBuilder<List<FollowUpMessage>>(
-                valueListenable: _followUpMessages,
-                builder: (ctx, msgs, child) {
-                  if (msgs.isEmpty) {
-                    return Center(
-                      child: Text(
-                        '输入问题，AI 将基于图片内容回答',
-                        style: TextStyle(fontSize: 12, color: Colors.grey[400]),
-                      ),
-                    );
-                  }
-                  // 流式更新/新消息时自动跟随到底部:
-                  // 发送消息强制跳底(平滑);流式更新时若在底部附近则瞬时
-                  // 跟随(jumpTo——animateTo 动画在频繁更新时跟不上,
-                  // 表现为"楼层高了不跳");用户手动上滑浏览历史不被拉回
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    if (!scrollCtrl.hasClients) return;
-                    final pos = scrollCtrl.position;
-                    final nearBottom =
-                        pos.maxScrollExtent - pos.pixels < 150;
-                    if (_pendingFollowUpScroll || nearBottom) {
-                      _pendingFollowUpScroll = false;
-                      if (pos.maxScrollExtent > 0) {
-                        if (nearBottom) {
-                          scrollCtrl.jumpTo(pos.maxScrollExtent);
-                        } else {
-                          scrollCtrl.animateTo(
-                            pos.maxScrollExtent,
-                            duration: const Duration(milliseconds: 250),
-                            curve: Curves.easeOut,
-                          );
-                        }
-                      }
-                    }
-                  });
-                  return Stack(
-                    children: [
-                      ListView.builder(
-                        controller: scrollCtrl,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 8,
-                        ),
-                        itemCount: msgs.length,
-                        itemBuilder: (_, i) => _buildFollowUpBubble(msgs[i], i),
-                      ),
-                      // 回顶/回底小按钮（楼层高时方便跳转）
-                      Positioned(
-                        right: 4,
-                        bottom: 4,
-                        child: FollowUpScrollButtons(scrollCtrl: scrollCtrl),
-                      ),
-                    ],
-                  );
-                },
-              ),
-            ),
-            // ── 输入栏（StatefulBuilder 确保输入状态本地更新） ──
-            StatefulBuilder(
-              builder: (ctx, setLocalState) {
-                final hasText = _followUpCtrl.text.isNotEmpty;
-                return SafeArea(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _followUpCtrl,
-                            focusNode: _followUpFocus,
-                            minLines: 1,
-                            maxLines: 4,
-                            decoration: InputDecoration(
-                              hintText: '基于图片内容提问…',
-                              border: const OutlineInputBorder(),
-                              isDense: true,
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 10,
-                              ),
-                              suffixIcon: hasText
-                                  ? IconButton(
-                                      icon: const Icon(Icons.clear, size: 18),
-                                      onPressed: () {
-                                        _followUpCtrl.clear();
-                                        setLocalState(() {});
-                                      },
-                                    )
-                                  : null,
-                            ),
-                            onChanged: (_) => setLocalState(() {}),
-                            onSubmitted: (v) {
-                              if (v.trim().isEmpty || _followUpLoading.value)
-                                return;
-                              _sendFollowUp(v.trim());
-                            },
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        // 生成中显示红色停止按钮——AI 卡住时可主动打断,
-                        // 打断后保留已生成内容,可重新提问
-                        ValueListenableBuilder<bool>(
-                          valueListenable: _followUpLoading,
-                          builder: (ctx, loading, _) {
-                            if (loading) {
-                              return IconButton.filled(
-                                style: IconButton.styleFrom(
-                                  backgroundColor: Colors.red[400],
-                                ),
-                                onPressed: _stopFollowUp,
-                                tooltip: '停止生成',
-                                icon: const Icon(Icons.stop, size: 18),
-                              );
-                            }
-                            return IconButton.filled(
-                              onPressed: !hasText
-                                  ? null
-                                  : () => _sendFollowUp(
-                                      _followUpCtrl.text.trim(),
-                                    ),
-                              icon: const Icon(Icons.send, size: 18),
-                            );
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  void _sendFollowUp(String text) {
-    if (text.isEmpty) return;
-    final userMsg = FollowUpMessage(role: 'user', content: text);
-    // 捕获发送时实际生效的模型(副槽位未配置会回落到主)——该楼回复就记它
-    final aiMsg = FollowUpMessage(
-      role: 'ai',
-      content: '',
-      streaming: true,
-      model: _followUpModel,
-    );
-
-    _followUpMessages.value = [..._followUpMessages.value, userMsg, aiMsg];
-    _followUpCtrl.clear();
-    _followUpLoading.value = true;
-    _followUpDirty = true;
-    _pendingFollowUpScroll = true; // 发送后强制滚动到最新消息
-
-    _doFollowUpStream(text, _followUpMessages.value.length - 1);
-  }
-
-  /// 用户手动停止生成:取消流式订阅,当前 AI 消息保留已生成内容。
-  /// 停止后 _followUpLoading 置 false,输入框恢复可重新提问。
-  void _stopFollowUp() {
-    _followUpSub?.cancel();
-    _followUpSub = null;
-    final msgs = List<FollowUpMessage>.from(_followUpMessages.value);
-    for (int i = msgs.length - 1; i >= 0; i--) {
-      if (msgs[i].role == 'ai' && msgs[i].streaming) {
-        msgs[i] = FollowUpMessage(
-          role: 'ai',
-          content: msgs[i].content.isEmpty ? '（已停止生成）' : msgs[i].content,
-          reasoningText: msgs[i].reasoningText,
-          streaming: false,
-          model: msgs[i].model,
-        );
-        break;
-      }
-    }
-    _followUpMessages.value = msgs;
-    _followUpLoading.value = false;
-  }
-
-  Future<void> _doFollowUpStream(String question, int aiMsgIndex) async {
-    _followUpSub?.cancel();
-    String reasoning = '';
-    String content = '';
-
-    String finalContext;
-    List<String>? imageUris = <String>[];
-    if (_followUpContextOverride != null) {
-      // 外部预设上下文(如"询问 AI 详解")优先;已带完整文本,不再附图
-      finalContext = _followUpContextOverride!;
-      _followUpContextOverride = null; // 一次性消费
-      imageUris = null;
-    } else {
-      // 默认上下文 = 识别词汇 + 全文翻译段落(v1.3.0 问题 5:
-      // 原实现只有词汇列表,全文翻译模式下为空 → AI 说"没收到内容")
-      finalContext = buildFollowUpContext(
-        results: _results,
-        paragraphs: _fullTextParagraphs,
-      );
-      // 模型支持视觉且当前页有图 → 附识别图片,AI 能真正"看到"页面;
-      // 不支持时只发文本(避免每次追问 400),服务层另有图片被拒降级兜底
-      if (modelSupportsImages(_followUpEndpoint.model) && _images.isNotEmpty) {
-        try {
-          imageUris = await _api.imageDataUrisFor(_images);
-        } catch (e) {
-          debugPrint('ReadFlow followUp image prep fallback: $e');
-          imageUris = null;
-        }
-      } else {
-        imageUris = null;
-      }
-    }
-
-    void updateMsg({bool done = false}) {
-      final msgs = List<FollowUpMessage>.from(_followUpMessages.value);
-      if (aiMsgIndex < msgs.length) {
-        msgs[aiMsgIndex] = FollowUpMessage(
-          role: 'ai',
-          content: done
-              ? (content.isNotEmpty ? content : '（AI 未返回内容）')
-              : content,
-          reasoningText: reasoning.isNotEmpty ? reasoning : null,
-          streaming: !done,
-          model: msgs[aiMsgIndex].model, // 保留发送时捕获的模型
-        );
-        _followUpMessages.value = msgs;
-      }
-      if (done) _followUpLoading.value = false;
-    }
-
-    try {
-      // 上下楼记忆(v1.4.0 问题 13 根因修复):把当前轮之前的已完成对话
-      // (user/ai 交替)发给模型;role 映射在纯函数内完成
-      // (ai→assistant,否则第二问必 400,v1.4.2)
-      final history = buildFollowUpHistory(
-        _followUpMessages.value,
-        aiMsgIndex,
-      );
-      final stream = _api.followUpStream(
-        question,
-        context: finalContext,
-        endpoint: _followUpEndpoint,
-        imageDataUris: imageUris,
-        thinkingLevel: _followUpThinking,
-        history: history,
-      );
-
-      _followUpSub = stream.listen(
-        (chunk) {
-          if (!mounted) return;
-          if (chunk.isReasoning) {
-            reasoning += chunk.text;
-          } else {
-            content += chunk.text;
-          }
-          updateMsg();
-        },
-        onDone: () {
-          if (mounted) updateMsg(done: true);
-        },
-        onError: (e) {
-          if (mounted) {
-            // 保留已流式显示的内容,追加友好错误(v1.4.1:不再一屏 DioException 英文)
-            content = content.isNotEmpty
-                ? '$content\n\n[错误] ${BaseApiService.friendlyError(e)}'
-                : BaseApiService.friendlyError(e);
-            updateMsg(done: true);
-          }
-        },
-        cancelOnError: false,
-      );
-    } catch (e) {
-      if (mounted) {
-        content = BaseApiService.friendlyError(e);
-        updateMsg(done: true);
-      }
-    }
-  }
-
-  Widget _buildFollowUpBubble(FollowUpMessage msg, int index) {
-    final isUser = msg.role == 'user';
-
-    if (!isUser) {
-      return AiFollowUpBubble(
-        message: msg,
-        avatar: aiAvatar(radius: 14, modelName: msg.model ?? _followUpModel),
-      );
-    }
-
-    // 用户气泡（右侧）— v1.4.4:右上角铅笔图标独立编辑入口(不再依赖长按);
-    // 长按保留作为备份
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: [
-          Flexible(
-            child: GestureDetector(
-              onLongPress: () => _showEditFollowUpDialog(index, msg.content),
-              child: Container(
-                constraints: BoxConstraints(
-                  maxWidth: MediaQuery.of(context).size.width * 0.75,
-                ),
-                padding: const EdgeInsets.fromLTRB(12, 8, 6, 8),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF4A90D9).withAlpha(20),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        msg.content,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          color: Colors.black87,
-                          height: 1.4,
-                        ),
-                      ),
-                    ),
-                    // 编辑铅笔图标:每条用户消息角落常驻(v1.4.4)
-                    InkWell(
-                      onTap: () => _showEditFollowUpDialog(index, msg.content),
-                      borderRadius: BorderRadius.circular(8),
-                      child: const Padding(
-                        padding: EdgeInsets.all(4),
-                        child: Icon(
-                          Icons.edit_outlined,
-                          size: 14,
-                          color: Colors.grey,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          userAvatar(context: context, radius: 14),
-        ],
-      ),
-    );
-  }
-
-  /// 追问消息编辑对话框:长按用户气泡 → 改文本 → 确认后重发。
-  void _showEditFollowUpDialog(int index, String original) {
-    final ctrl = TextEditingController(text: original);
-    showDialog(
+    showFollowUpDrawer(
       context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        title: const Text('编辑提问'),
-        content: TextField(
-          controller: ctrl,
-          minLines: 1,
-          maxLines: 5,
-          autofocus: true,
-          decoration: const InputDecoration(
-            border: OutlineInputBorder(),
-            isDense: true,
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              ctrl.dispose();
-              Navigator.pop(ctx);
-            },
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () {
-              final newText = ctrl.text.trim();
-              ctrl.dispose();
-              Navigator.pop(ctx);
-              if (newText.isEmpty || newText == original) return;
-              _editFollowUpMessage(index, newText);
-            },
-            child: const Text('修改并重新发送'),
-          ),
-        ],
-      ),
+      controller: _followUp,
+      prefillQuestion: prefillQuestion,
+      contextOverride: followUpContext,
     );
   }
-
-  /// 编辑追问用户消息:替换内容 + 删除其后消息 + 重新生成 AI 回复。
-  void _editFollowUpMessage(int index, String newText) {
-    final msgs = List<FollowUpMessage>.from(_followUpMessages.value);
-    if (index < 0 || index >= msgs.length) return;
-    _followUpSub?.cancel(); // 若有正在生成的流,先停
-    msgs[index] = FollowUpMessage(role: 'user', content: newText);
-    final trimmed = msgs.take(index + 1).toList();
-    final aiMsg = FollowUpMessage(
-      role: 'ai',
-      content: '',
-      streaming: true,
-      model: _followUpModel,
-    );
-    trimmed.add(aiMsg);
-    _followUpMessages.value = trimmed;
-    _followUpLoading.value = true;
-    _followUpDirty = true;
-    _pendingFollowUpScroll = true;
-    _doFollowUpStream(newText, trimmed.length - 1);
-  }
-
 
   // ═══════════════ Build ═══════════════
 
@@ -1866,168 +1153,6 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     _openFollowUp(
       prefillQuestion: '请详细解释 "$aiWord" 的用法',
       followUpContext: ctx.toString(),
-    );
-  }
-
-  /// 追问抽屉专用的紧凑模型/思考选择器 — 主/副双槽位分组。
-  /// 选主槽位模型 → 识图同款(多模态);选副槽位模型 → 专项文本(若已配置)。
-  /// 包 ValueListenableBuilder:抽屉是独立路由,切换后标签文本须自行重建。
-  Widget _buildCompactModelPicker() {
-    return ValueListenableBuilder<String>(
-      valueListenable: _followUpSlotNotifier,
-      builder: (_, __, ___) => _buildCompactModelPickerInner(),
-    );
-  }
-
-  Widget _buildCompactModelPickerInner() {
-    final secConfigured = ApiEndpointConfig.secondary.isConfigured;
-    final isSecondary = _followUpSlot == 'secondary' && secConfigured;
-    // 主分组模型 = 按端点族/最近拉取结果(配了 DS 就显示 DS,v1.4.3)
-    final primaryModels = primaryModelChoices();
-    // 副分组模型 = 已保存的副模型 + 内置清单(去重,保证当前值可选)
-    final secModels = <String>{
-      if (ApiEndpointConfig.secondary.model.isNotEmpty)
-        ApiEndpointConfig.secondary.model,
-      ...AppConstants.deepseekFallbackModels,
-    }.toList();
-
-    PopupMenuItem<String> groupTitle(String text) => PopupMenuItem(
-      enabled: false,
-      height: 24,
-      child: Text(
-        text,
-        style: TextStyle(
-          fontSize: 10,
-          fontWeight: FontWeight.w600,
-          color: Colors.grey[500],
-        ),
-      ),
-    );
-
-    return PopupMenuButton<String>(
-      offset: const Offset(0, 200),
-      padding: EdgeInsets.zero,
-      constraints: const BoxConstraints(maxWidth: 280, maxHeight: 420),
-      itemBuilder: (_) => [
-        // ── 主 API(多模态) ──
-        groupTitle(isSecondary ? '主 API(多模态)' : '主 API'),
-        ...primaryModels.map((m) {
-          final isSel = _followUpSlot == 'primary' && m == _followUpModel;
-          return PopupMenuItem(
-            value: 'primary:$m',
-            height: 30,
-            child: Text(
-              m,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: isSel ? FontWeight.w600 : FontWeight.normal,
-                color: isSel ? const Color(0xFF3D7A5C) : null,
-              ),
-            ),
-          );
-        }),
-        // ── 副 API(专项文本,始终显示分组;未配置时禁用并引导去设置) ──
-        const PopupMenuDivider(),
-        groupTitle(secConfigured ? '副 API(专项文本)' : '副 API(专项文本 · 未配置)'),
-        if (!secConfigured)
-          const PopupMenuItem(
-            enabled: false,
-            height: 36,
-            child: Text(
-              '到「我的 → API 设置」填写副 API Key 后即可切换',
-              style: TextStyle(fontSize: 10, color: Colors.grey),
-            ),
-          )
-        else
-          ...secModels.map((m) {
-            final isSel = _followUpSlot == 'secondary' && m == _followUpModel;
-            return PopupMenuItem(
-              value: 'secondary:$m',
-              height: 30,
-              child: Text(
-                m,
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: isSel ? FontWeight.w600 : FontWeight.normal,
-                  color: isSel ? const Color(0xFF4A6CF7) : null,
-                ),
-              ),
-            );
-          }),
-        const PopupMenuDivider(),
-        // ── 思考模式(追问独立档位,4 档 — v1.3.0 问题 1:识图砍 2 档不该连坐) ──
-        ...AppConstants.followUpThinkingOptions.entries.map((e) {
-          final isSel = e.key == _followUpThinking;
-          return PopupMenuItem(
-            value: 'think:${e.key}',
-            height: 30,
-            child: Row(
-              children: [
-                Icon(
-                  isSel ? Icons.lightbulb : Icons.lightbulb_outline,
-                  size: 12,
-                  color: isSel ? Colors.orange : Colors.grey,
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  e.value,
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: isSel ? FontWeight.w600 : FontWeight.normal,
-                    color: isSel ? Colors.orange : null,
-                  ),
-                ),
-              ],
-            ),
-          );
-        }),
-      ],
-      onSelected: (v) {
-        // Hive put 同步写内存,Future 只是刷盘通知——UI 无需等磁盘,
-        // 不 await 可避免测试 FakeAsync 挂起与真机刷盘卡顿
-        final box = Hive.box(AppConstants.hiveBoxSettings);
-        if (v.startsWith('primary:')) {
-          box.put(AppConstants.keyDoubaoModel, v.substring(8));
-          box.put(AppConstants.keyFollowUpSlot, 'primary');
-        } else if (v.startsWith('secondary:')) {
-          // 'secondary:' 恰好 10 字符——之前 substring(11) 会吃掉模型名首字母
-          box.put(AppConstants.keyDeepseekModel, v.substring(10));
-          box.put(AppConstants.keyFollowUpSlot, 'secondary');
-        } else if (v.startsWith('think:')) {
-          // 追问思考档位独立存储——不再写入槽位识图档位(v1.3.0 问题 1)
-          box.put(AppConstants.keyFollowUpThinking, v.substring(6));
-        }
-        // 抽屉是独立路由,用 notifier 驱动头像/模型标签重建
-        _followUpSlotNotifier.value = _followUpSlot;
-        if (mounted) setState(() {});
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-        decoration: BoxDecoration(
-          border: Border.all(color: Colors.grey[300]!),
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              isSecondary ? '副·' : '主·',
-              style: TextStyle(
-                fontSize: 9,
-                color: Colors.grey[400],
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            Text(
-              _followUpModel.length > 16
-                  ? '${_followUpModel.substring(0, 16)}…'
-                  : _followUpModel,
-              style: TextStyle(fontSize: 10, color: Colors.grey[600]),
-            ),
-            Icon(Icons.arrow_drop_down, size: 14, color: Colors.grey[400]),
-          ],
-        ),
-      ),
     );
   }
 

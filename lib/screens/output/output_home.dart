@@ -3,6 +3,8 @@ import 'package:provider/provider.dart';
 import '../../providers/article_provider.dart';
 import '../../providers/vocab_provider.dart';
 import '../../models/article.dart';
+import '../writing/write_review_screen.dart';
+import '../writing/writing_logs_screen.dart';
 import 'article_reader.dart';
 
 class OutputHomeScreen extends StatefulWidget {
@@ -34,9 +36,12 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
           ? const Center(child: CircularProgressIndicator())
           : Column(
               children: [
+                // ── 写译批改 / 写译记录(v1.6.0:从输入页迁到输出页) ──
+                _buildWritingEntries(theme),
+
                 // 生成按钮
                 Padding(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
                   child: SizedBox(
                     width: double.infinity,
                     child: OutlinedButton.icon(
@@ -79,8 +84,122 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
     );
   }
 
-  Widget _buildEmptyState(ThemeData theme) {
-    return Center(
+  /// 写译批改 / 写译记录入口(v1.6.0:从输入页迁来,输出页才是"写"的地方)
+  Widget _buildWritingEntries(ThemeData theme) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: Card(
+              margin: EdgeInsets.zero,
+              color: theme.colorScheme.primary.withAlpha(12),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const WriteReviewScreen(),
+                  ),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 14,
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.edit_note,
+                        color: theme.colorScheme.primary,
+                        size: 22,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '写译批改',
+                              style: theme.textTheme.titleSmall?.copyWith(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              '手写/电子稿 → AI 批改',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.grey[600],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Card(
+              margin: EdgeInsets.zero,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const WritingLogsScreen(),
+                  ),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 14,
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.history_edu_outlined,
+                        color: Colors.amber[800],
+                        size: 22,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '写译记录',
+                              style: theme.textTheme.titleSmall?.copyWith(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              '按日期查阅复盘',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.grey[600],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyState(ThemeData theme) {    return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [

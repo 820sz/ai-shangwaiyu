@@ -6,8 +6,8 @@ void main() {
     expect(AppConstants.thinkingOptions.keys, ['disabled', 'low']);
   });
 
-  test('数据库版本为 7(含 v4 reference_answers / v5 translation / v6 bookmarks / v7 phonetic 迁移)', () {
-    expect(AppConstants.dbVersion, 7);
+  test('数据库版本为 8(含 v7 phonetic / v8 书籍路径归一 + writing_logs 迁移)', () {
+    expect(AppConstants.dbVersion, 8);
     expect(AppConstants.bookmarkSourceFollowUp, 'follow_up');
     expect(AppConstants.bookmarkSourceVocab, 'vocab');
   });
