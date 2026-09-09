@@ -434,40 +434,50 @@ class DoubaoApiService extends BaseApiService {
     return Future.wait(files.map((f) => _imageToDataUri(f)), eagerError: true);
   }
 
-  // ── 写译批改(v1.5.0) ──
+  // ── 写译批改(v1.5.0,多图/错误汇总 v1.6.0) ──
 
-  /// 步骤1:手写英文识别 — 图片 → 转写文本(保留段落,不点评)。
+  /// 步骤1:手写英文识别 — 图片(可多张) → 转写文本(保留段落,不点评)。
   /// 走主槽位(视觉)。思考强制 disabled:转写要快,不需要思考。
+  /// 多图按上传顺序拼接为一份电子档。
   Future<String> transcribeWriting(
-    File imageFile, {
+    List<File> imageFiles, {
     ApiEndpointConfig? endpoint,
   }) async {
+    if (imageFiles.isEmpty) throw Exception('没有可识别的图片');
     final cfg = endpoint ?? config;
     if (!cfg.isConfigured) {
       throw Exception('请先在设置中配置主 API Key');
     }
-    final uri = await _imageToDataUri(imageFile);
+    final uris = await imageDataUrisFor(imageFiles);
     final isDs = cfg.model.toLowerCase().contains('deepseek');
+    final multi = uris.length > 1;
     final body = {
       'model': cfg.model,
       'messages': [
         {
           'role': 'system',
           'content':
-              '你是手写体识别助手。用户提供手写英文练习的照片,请准确转写其中的英文内容,'
-              '保留段落与换行。只输出转写文本本身,不解释、不翻译、不点评、不加引号。',
+              '你是手写体识别助手。用户提供手写英文练习的照片(可能多张),请准确转写其中的英文内容,'
+              '保留段落与换行。${multi ? '多张图片按顺序拼接为一份完整文稿,不要加"第N张"等标注。' : ''}'
+              '只输出转写文本本身,不解释、不翻译、不点评、不加引号。',
         },
         {
           'role': 'user',
           'content': [
-            {
-              'type': 'image_url',
-              'image_url': {
-                'url': uri,
-                if (shouldSendDetailFlag(cfg.model)) 'detail': 'low',
+            for (final uri in uris)
+              {
+                'type': 'image_url',
+                'image_url': {
+                  'url': uri,
+                  if (shouldSendDetailFlag(cfg.model)) 'detail': 'low',
+                },
               },
+            {
+              'type': 'text',
+              'text': multi
+                  ? '请按顺序转写这些图片中的英文手写内容，合并成一份连续文稿'
+                  : '请转写这张图片中的英文手写内容',
             },
-            {'type': 'text', 'text': '请转写这张图片中的英文手写内容'},
           ],
         },
       ],
@@ -486,8 +496,9 @@ class DoubaoApiService extends BaseApiService {
     return content;
   }
 
-  /// 步骤2:AI 批改 — 文本输入 → {score, correction, summary, issues}。
+  /// 步骤2:AI 批改 — 文本输入 → {score, correction, summary, issues, error_summary}。
   /// 优先副槽位(文本模型,便宜快),未配置则用主槽位。
+  /// [errorSummary] 要求模型在最后按「词汇/语法/表达优化/其他」四类汇总。
   Future<Map<String, dynamic>> reviewWriting(
     String text, {
     ApiEndpointConfig? endpoint,
@@ -508,9 +519,13 @@ class DoubaoApiService extends BaseApiService {
           'content':
               '你是一名严谨耐心的英语写作老师。请批改用户提交的英文写作,返回 JSON:'
               '{"score":整数0-100,"correction":"修改后的完整英文(保留原意,标点拼写语法修正)",'
-              '"issues":[{"original":"原文片段","correction":"修改后","type":"语法|拼写|用词|搭配|标点|自然度",'
-              '"reason":"错误原因与中文解释"}],"summary":"总体评语(中文,60字内)"}。'
-              '不输出JSON以外的任何内容。',
+              '"issues":[{"original":"原文片段","correction":"修改后",'
+              '"type":"词汇|语法|表达优化|其他","reason":"错误原因与中文解释"}],'
+              '"error_summary":{"词汇":"这一类问题的汇总(没有则空串)","语法":"...",'
+              '"表达优化":"...","其他":"..."},'
+              '"summary":"总体评语(中文,60字内)"}。'
+              'error_summary 必须四个键齐全,用中文总结每一类错误的共性问题与改进方向(每条 40 字内),'
+              '没有该类错误就留空字符串。不输出JSON以外的任何内容。',
         },
         {'role': 'user', 'content': text},
       ],
@@ -531,6 +546,9 @@ class DoubaoApiService extends BaseApiService {
     }
     return parsed;
   }
+
+  /// 错误汇总的固定四类(顺序即展示顺序)
+  static const writingErrorCategories = ['词汇', '语法', '表达优化', '其他'];
 
   /// 解析批改返回 JSON(纯静态,可单测)。兼容 ```json 包裹;
   /// 缺字段回空串/空列表,绝不抛异常——界面仍可显示部分结果。
@@ -562,11 +580,18 @@ class DoubaoApiService extends BaseApiService {
           }
         }
       }
+      // 错误分类汇总(v1.6.0):四个键固定,缺的补空串
+      final rawSummary = parsed['error_summary'];
+      final errorSummary = <String, String>{
+        for (final c in writingErrorCategories)
+          c: (rawSummary is Map ? rawSummary[c]?.toString().trim() : '') ?? '',
+      };
       return {
         'score': s('score'),
         'correction': s('correction'),
         'summary': s('summary'),
         'issues': issues,
+        'error_summary': errorSummary,
       };
     } catch (_) {
       return {};

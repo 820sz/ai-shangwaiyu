@@ -7,6 +7,7 @@ import '../models/article.dart';
 import '../models/exercise.dart';
 import '../models/learning_record.dart';
 import '../models/bookmark.dart';
+import '../models/writing_log.dart';
 
 /// 本地 SQLite 数据库服务 — 生词、文章、练习、学习记录全部落本地
 class DatabaseService {
@@ -112,6 +113,23 @@ class DatabaseService {
         created_at TEXT NOT NULL
       )
     ''');
+
+    // 写译练习日志(v1.6.0):每次批改可保存,按日期文件夹查阅复盘
+    await db.execute('''
+      CREATE TABLE writing_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        source_type TEXT NOT NULL DEFAULT 'electronic',
+        original_text TEXT NOT NULL,
+        corrected_text TEXT,
+        score TEXT,
+        summary TEXT,
+        issues_json TEXT,
+        error_summary_json TEXT,
+        model TEXT,
+        image_paths TEXT,
+        created_at TEXT NOT NULL
+      )
+    ''');
   }
 
   static Future<void> _onUpgrade(Database db, int oldV, int newV) async {
@@ -177,6 +195,59 @@ class DatabaseService {
       try {
         await db.execute("ALTER TABLE vocabulary ADD COLUMN phonetic TEXT");
       } catch (e) { debugPrint('ReadFlow DB migration v7 phonetic: $e'); }
+    }
+    if (oldV < 8) {
+      // 书籍路径归一(v1.6.0):旧数据把页码拼进 material_path
+      // ('书籍/《X》/p16 p17'),同一本书被按页拆成多个文件夹。
+      // 归一为 '书籍/《X》' + source_page='p16 p17' → 一本书一个文件夹,
+      // 页/章成为其下的子分类。
+      try {
+        final rows = await db.query(
+          'vocabulary',
+          columns: ['id', 'material_path', 'source_page'],
+          where: "category = ? AND material_path LIKE ?",
+          whereArgs: ['书籍', '书籍/%/%'],
+        );
+        for (final r in rows) {
+          final path = (r['material_path'] as String?) ?? '';
+          final parts = path
+              .split('/')
+              .map((s) => s.trim())
+              .where((s) => s.isNotEmpty)
+              .toList();
+          if (parts.length < 3 || parts[0] != '书籍') continue;
+          final bookPath = '${parts[0]}/${parts[1]}';
+          final page = parts.sublist(2).join('/').trim();
+          final existingPage = (r['source_page'] as String?)?.trim() ?? '';
+          await db.update(
+            'vocabulary',
+            {
+              'material_path': bookPath,
+              if (existingPage.isEmpty && page.isNotEmpty) 'source_page': page,
+            },
+            where: 'id = ?',
+            whereArgs: [r['id']],
+          );
+        }
+      } catch (e) { debugPrint('ReadFlow DB migration v8 book path: $e'); }
+      // 写译练习日志表(v1.6.0)
+      try {
+        await db.execute('''
+          CREATE TABLE IF NOT EXISTS writing_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_type TEXT NOT NULL DEFAULT 'electronic',
+            original_text TEXT NOT NULL,
+            corrected_text TEXT,
+            score TEXT,
+            summary TEXT,
+            issues_json TEXT,
+            error_summary_json TEXT,
+            model TEXT,
+            image_paths TEXT,
+            created_at TEXT NOT NULL
+          )
+        ''');
+      } catch (e) { debugPrint('ReadFlow DB migration v8 writing_logs: $e'); }
     }
   }
 
@@ -539,5 +610,27 @@ class DatabaseService {
     final rows =
         await db.query('bookmarks', orderBy: 'created_at DESC, id DESC');
     return rows.map((r) => Bookmark.fromMap(r)).toList();
+  }
+
+  // ═══════════════ 写译练习日志 CRUD(v1.6.0) ═══════════════
+
+  static Future<int> insertWritingLog(WritingLog log) async {
+    final db = await database;
+    return db.insert('writing_logs', log.toMap());
+  }
+
+  static Future<List<WritingLog>> getWritingLogs({int limit = 200}) async {
+    final db = await database;
+    final rows = await db.query(
+      'writing_logs',
+      orderBy: 'created_at DESC, id DESC',
+      limit: limit,
+    );
+    return rows.map((r) => WritingLog.fromMap(r)).toList();
+  }
+
+  static Future<int> deleteWritingLog(int id) async {
+    final db = await database;
+    return db.delete('writing_logs', where: 'id = ?', whereArgs: [id]);
   }
 }
