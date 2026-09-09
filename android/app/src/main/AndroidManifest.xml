@@ -1,6 +1,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+    <!-- 自动更新:允许请求安装应用。缺此权限时系统安装器对 App 发起的
+         安装静默拒绝——不弹界面不报错(手动装 APK 走文件管理器,不受影响,
+         这就是 App 内更新一直"没反应"的终极根因) -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
     <application
         android:label="AI上外语"
         android:usesCleartextTraffic="true"
@@ -38,10 +42,13 @@
             android:name="com.yalantis.ucrop.UCropActivity"
             android:screenOrientation="portrait"
             android:theme="@style/Ucrop.CropTheme"/>
-        <!-- 自动更新:FileProvider 提供给系统安装器读取下载的 APK -->
+        <!-- 自动更新:FileProvider 提供给系统安装器读取下载的 APK。
+             authority 必须与 open_filex 4.7.0 硬编码的
+             packageName + ".fileProvider.com.crazecoder.openfile" 完全一致——
+             不一致时 getUriForFile 抛异常被插件吞掉,安装器静默不拉起 -->
         <provider
             android:name="androidx.core.content.FileProvider"
-            android:authorities="${applicationId}.fileprovider"
+            android:authorities="${applicationId}.fileProvider.com.crazecoder.openfile"
             android:exported="false"
             android:grantUriPermissions="true">
             <meta-data

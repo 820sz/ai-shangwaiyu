@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
-import 'package:open_filex/open_filex.dart';
+import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -49,44 +49,97 @@ class UpdateService {
       );
 
   /// 检查 GitHub 最新 Release。
-  /// 返回 [UpdateInfo]；未配置仓库/无 APK 资源/网络失败均返回 null(静默)。
+  /// 返回 [UpdateInfo]；未配置仓库返回 null(静默);网络全失败抛异常(调用方提示),
+  /// 绝不谎报"已是最新"。
+  /// 2026-08-09 修复:检查接口裸连 api.github.com(国内经常连不上,
+  /// 用户实测"收不到自动更新")——改为直连 + 镜像前缀竞速。
+  /// 2026-08-10 修复:竞速"先到先得"会拿镜像缓存的旧 latest 响应(用户实测
+  /// "自动更新还是 20 版本")——改为收集所有成功响应,取 tag 版本号最大者。
+  /// 2026-08-11 修复(F3):直连(权威)被 15s 截断收割——直连 >15s 时 stale
+  /// 镜像响应胜出,又回到"自动更新还是 20 版本"。改直连独立等 20s 优先,
+  /// 直连失败才用镜像;全失败抛异常,不再静默 null。
   static Future<UpdateInfo?> checkLatestRelease() async {
     if (AppConstants.githubOwner.isEmpty) return null;
-    try {
-      final resp = await _dio.get(
+    final base =
         'https://api.github.com/repos/'
-        '${AppConstants.githubOwner}/${AppConstants.githubRepo}/releases/latest',
-        options: _apiOpts(),
-      );
-      final data = resp.data as Map<String, dynamic>?;
-      if (data == null) return null;
+        '${AppConstants.githubOwner}/${AppConstants.githubRepo}/releases/latest';
 
-      final tag = (data['tag_name'] as String? ?? '').replaceFirst(
-        RegExp(r'^v'), '',
-      );
-      final body = data['body'] as String? ?? '';
-      final assets = data['assets'] as List? ?? [];
+    // 权威直连独立等待(Dio 自带 10s receiveTimeout,外框 20s 兜底),
+    // 不被镜像的竞速截断打断——直连成功就完全信任它
+    final direct = await _fetchRelease(base).timeout(
+      const Duration(seconds: 20),
+      onTimeout: () => null,
+    );
+    if (direct != null) return _buildInfo(direct);
 
-      // 找第一个 APK 资源
-      String? apkUrl;
-      for (final asset in assets) {
-        if (asset is Map && (asset['name'] as String? ?? '').endsWith('.apk')) {
-          apkUrl = asset['browser_download_url'] as String?;
-          break;
-        }
-      }
-      if (tag.isEmpty || apkUrl == null) return null;
-
-      final current = await _currentVersion();
-      return UpdateInfo(
-        version: tag,
-        downloadUrl: apkUrl,
-        releaseNotes: body,
-        currentVersion: current,
-      );
-    } catch (_) {
-      return null; // 检查失败不打扰用户
+    // 直连失败:并发收镜像(15s 截断),取版本最高者(可能 stale,但优于无响应)
+    final mirrorResponses = <Map<String, dynamic>>[];
+    final pending = <Future<void>>[];
+    for (final p in _mirrorPrefixes) {
+      pending.add(_fetchRelease('$p$base').then((d) {
+        if (d != null) mirrorResponses.add(d);
+      }));
     }
+    await Future.wait(pending).timeout(
+      const Duration(seconds: 15),
+      onTimeout: () => <void>[],
+    );
+    if (mirrorResponses.isEmpty) {
+      throw Exception('无法连接 GitHub,请检查网络后重试');
+    }
+    return _buildInfo(pickLatest(mirrorResponses));
+  }
+
+  static Future<Map<String, dynamic>?> _fetchRelease(String url) async {
+    try {
+      final resp = await _dio.get(url, options: _apiOpts());
+      final d = resp.data as Map<String, dynamic>?;
+      return (d != null && d.isNotEmpty) ? d : null;
+    } catch (_) {
+      return null; // 单候选失败:忽略,等别的候选
+    }
+  }
+
+  static Future<UpdateInfo?> _buildInfo(Map<String, dynamic> d) async {
+    final tag = (d['tag_name'] as String? ?? '').replaceFirst(
+      RegExp(r'^v'), '',
+    );
+    final body = d['body'] as String? ?? '';
+    final assets = d['assets'] as List? ?? [];
+
+    // 找第一个 APK 资源
+    String? apkUrl;
+    for (final asset in assets) {
+      if (asset is Map && (asset['name'] as String? ?? '').endsWith('.apk')) {
+        apkUrl = asset['browser_download_url'] as String?;
+        break;
+      }
+    }
+    if (tag.isEmpty || apkUrl == null) return null;
+
+    final current = await _currentVersion();
+    return UpdateInfo(
+      version: tag,
+      downloadUrl: apkUrl,
+      releaseNotes: body,
+      currentVersion: current,
+    );
+  }
+
+  /// 从多个 latest 响应中取 tag 版本号最高者。
+  /// 镜像节点可能缓存旧响应,不能"先到先得",必须取最新。
+  static Map<String, dynamic> pickLatest(List<Map<String, dynamic>> responses) {
+    return responses.reduce((a, b) {
+      final va = (a['tag_name'] as String? ?? '').replaceFirst(
+        RegExp(r'^v'),
+        '',
+      );
+      final vb = (b['tag_name'] as String? ?? '').replaceFirst(
+        RegExp(r'^v'),
+        '',
+      );
+      return compareVersions(va, vb) >= 0 ? a : b;
+    });
   }
 
   /// 当前安装版本号,如 "1.0.0"
@@ -179,7 +232,20 @@ class UpdateService {
         );
         if (!settled) {
           settled = true;
-          complete.complete(file.path);
+          // 竞速临时名是 .part——PackageInstaller 按 URI 文件名扩展名
+          // 判断是否 APK,非 .apk 会静默拒绝打开(进度满但不跳安装界面)。
+          // 必须改回 .apk 再交给系统安装器。
+          final apkPath = file.path.replaceFirst(RegExp(r'\.part$'), '.apk');
+          if (file.existsSync()) {
+            try {
+              await file.rename(apkPath);
+            } catch (_) {
+              try {
+                await file.copy(apkPath);
+              } catch (_) {}
+            }
+          }
+          complete.complete(apkPath);
           // 胜出后取消其余候选,停止占用带宽
           for (final c in cancelTokens) {
             if (!identical(c, cancel)) c.cancel();
@@ -204,8 +270,28 @@ class UpdateService {
     });
   }
 
-  /// 调起系统安装器安装 APK(Android 会引导"未知来源"授权)
+  /// 调起系统安装器安装 APK(Android 会引导"未知来源"授权)。
+  /// 自写 MethodChannel(app/install_apk,见 MainActivity.kt)替代 open_filex——
+  /// open_filex 在部分路径下不回调 result 导致 await 永久挂起
+  /// (用户看到"正在打开安装器"卡死,无超时无错误)。
+  /// 自写通道同步返回成功/失败,并加 15s 超时兜底,任何情况都快速可见。
+  static const MethodChannel _installChannel = MethodChannel(
+    'app/install_apk',
+  );
+
   static Future<void> installApk(String path) async {
-    await OpenFilex.open(path, type: 'application/vnd.android.package-archive');
+    try {
+      await _installChannel
+          .invokeMethod('installApk', {'path': path})
+          .timeout(
+            const Duration(seconds: 15),
+            onTimeout: () => throw Exception(
+              '打开安装器 15 秒无响应,可能被系统拦截。'
+              '请在设置中允许「安装未知应用」后重试',
+            ),
+          );
+    } on PlatformException catch (e) {
+      throw Exception('打开安装器失败: ${e.message ?? e.code}');
+    }
   }
 }

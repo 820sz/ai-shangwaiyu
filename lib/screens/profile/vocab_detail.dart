@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../models/vocabulary.dart';
 import '../../providers/vocab_provider.dart';
+import '../../services/tts_service.dart';
+import '../input/widgets/example_sentence.dart';
 
 class VocabDetailScreen extends StatefulWidget {
   final Vocabulary vocab;
@@ -32,13 +34,47 @@ class _VocabDetailScreenState extends State<VocabDetailScreen> {
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          // 单词大字
-          Text(
-            _vocab.word,
-            style: theme.textTheme.headlineMedium
-                ?.copyWith(fontWeight: FontWeight.bold),
+          // 单词大字:截断词条回退显示完整句子(F8,与列表/横幅一致)
+          // v1.5.0:点单词本体即朗读(系统 TTS);右侧另有喇叭按钮
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: GestureDetector(
+                  onTap: _speak,
+                  child: Text(
+                    _vocab.displayWordText,
+                    style: theme.textTheme.headlineMedium
+                        ?.copyWith(fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+              IconButton(
+                onPressed: _speak,
+                tooltip: '朗读',
+                icon: Icon(
+                  Icons.volume_up_outlined,
+                  color: theme.colorScheme.primary,
+                  size: 24,
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 4),
+          // 音标(v1.5.0,AI 补全生成)
+          if (_vocab.phonetic != null && _vocab.phonetic!.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Text(
+                _vocab.phonetic!,
+                style: TextStyle(
+                  fontSize: 16,
+                  fontStyle: FontStyle.italic,
+                  color: Colors.grey[600],
+                ),
+              ),
+            ),
+          const SizedBox(height: 4),
           if (_vocab.translation != null && _vocab.translation!.isNotEmpty)
             Text(
               _vocab.translation!,
@@ -78,8 +114,9 @@ class _VocabDetailScreenState extends State<VocabDetailScreen> {
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(color: Colors.grey[200]!),
                 ),
-                child: Text(
-                  _vocab.originalSentence!,
+                child: ExampleSentence(
+                  sentence: _vocab.originalSentence!,
+                  highlightWord: _vocab.word,
                   style: theme.textTheme.bodyLarge
                       ?.copyWith(height: 1.6, fontStyle: FontStyle.italic),
                 ),
@@ -121,6 +158,19 @@ class _VocabDetailScreenState extends State<VocabDetailScreen> {
         ],
       ),
     );
+  }
+
+  Future<void> _speak() async {
+    final ok = await TtsService.instance.speak(_vocab.displayWordText);
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('设备未找到可用语音引擎，暂时无法朗读'),
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
   }
 
   Future<void> _updateMastery(int level) async {

@@ -9,6 +9,7 @@ import '../../config/constants.dart';
 import '../../models/saved_session.dart';
 import '../../services/doubao_api.dart';
 import 'process_chat.dart';
+import '../writing/write_review_screen.dart';
 import 'widgets/analysis_mode_picker.dart';
 import 'widgets/my_materials_section.dart';
 import 'widgets/ai_discovery_section.dart';
@@ -32,14 +33,16 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
 
   // ── 当前模型 & 思考模式（从 Hive 实时读） ──
   String get _currentModel {
-    final v = Hive.box(AppConstants.hiveBoxSettings)
-        .get(AppConstants.keyDoubaoModel);
+    final v = Hive.box(
+      AppConstants.hiveBoxSettings,
+    ).get(AppConstants.keyDoubaoModel);
     return (v is String && v.isNotEmpty) ? v : AppConstants.doubaoVisionModel;
   }
 
   String get _currentThinking {
-    final v = Hive.box(AppConstants.hiveBoxSettings)
-        .get(AppConstants.keyDoubaoThinking);
+    final v = Hive.box(
+      AppConstants.hiveBoxSettings,
+    ).get(AppConstants.keyDoubaoThinking);
     return (v is String && v.isNotEmpty) ? v : 'disabled';
   }
 
@@ -58,14 +61,15 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
     final theme = Theme.of(context);
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('输入'),
-      ),
+      appBar: AppBar(title: const Text('输入')),
       body: SingleChildScrollView(
         child: Column(
           children: [
             // ── 板块1：拍照识文 ──
             _buildCaptureSectionCard(theme),
+
+            // ── 板块1.5：写译批改 ──
+            _buildWritingCard(theme),
 
             // ── 板块2：我的学习材料 ──
             const MyMaterialsSection(),
@@ -75,6 +79,24 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
 
             const SizedBox(height: 24),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWritingCard(ThemeData theme) {
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      elevation: 1,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: ListTile(
+        leading: Icon(Icons.edit_note, color: theme.colorScheme.primary),
+        title: const Text('写译批改'),
+        subtitle: const Text('手写英文拍照识别 → AI 批改（语法/拼写/用词/自然度）'),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const WriteReviewScreen()),
         ),
       ),
     );
@@ -93,8 +115,11 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
             // 标题行
             Row(
               children: [
-                Icon(Icons.camera_alt,
-                    size: 20, color: theme.colorScheme.primary),
+                Icon(
+                  Icons.camera_alt,
+                  size: 20,
+                  color: theme.colorScheme.primary,
+                ),
                 const SizedBox(width: 6),
                 Text(
                   '拍照识文',
@@ -106,166 +131,170 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
             ),
             const SizedBox(height: 12),
             // 大拍照按钮
-          GestureDetector(
-            onTap: () => _takePhoto(),
-            child: Container(
-              width: 80,
-              height: 80,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: theme.colorScheme.primary,
-                boxShadow: [
-                  BoxShadow(
-                    color: theme.colorScheme.primary.withAlpha(60),
-                    blurRadius: 16,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: const Icon(
-                Icons.camera_alt,
-                color: Colors.white,
-                size: 36,
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            '拍照取词',
-            style: theme.textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            '拍摄阅读材料，AI 自动识别标记的生词',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: Colors.grey,
-            ),
-          ),
-          const SizedBox(height: 12),
-          // 从相册选择
-          TextButton.icon(
-            onPressed: () => _pickFromGallery(),
-            icon: const Icon(Icons.photo_library_outlined, size: 18),
-            label: const Text('从相册选择（可多选）'),
-          ),
-
-          const SizedBox(height: 4),
-          // ── AI 模型 & 思考模式选择（识图前即可切换） ──
-          _buildModelThinkingRow(theme),
-
-          // ── 待提交图片缩略图 ──
-          if (_pendingImages.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            SizedBox(
-              height: 72,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                itemCount: _pendingImages.length,
-                separatorBuilder: (_, _) => const SizedBox(width: 6),
-                itemBuilder: (_, i) => GestureDetector(
-                  onTap: () => _showImagePreview(i),
-                  child: Stack(
-                    children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: Image.file(
-                          _pendingImages[i],
-                          width: 64,
-                          height: 72,
-                          fit: BoxFit.cover,
-                        ),
-                      ),
-                      // 删除按钮（右上角）
-                      Positioned(
-                        top: 2,
-                        right: 2,
-                        child: GestureDetector(
-                          onTap: () => _removePendingImage(i),
-                          child: Container(
-                            width: 18,
-                            height: 18,
-                            decoration: const BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: Colors.black54,
-                            ),
-                            child: const Icon(
-                              Icons.close,
-                              size: 12,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
-                      ),
-                      // 裁剪按钮（右下角）
-                      Positioned(
-                        bottom: 2,
-                        right: 2,
-                        child: GestureDetector(
-                          onTap: () async {
-                            final cropped = await _cropImage(_pendingImages[i]);
-                            if (cropped != null && mounted) {
-                              setState(() => _pendingImages[i] = cropped);
-                            }
-                          },
-                          child: Container(
-                            width: 18,
-                            height: 18,
-                            decoration: const BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: Colors.black54,
-                            ),
-                            child: const Icon(
-                              Icons.crop,
-                              size: 11,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+            GestureDetector(
+              onTap: () => _takePhoto(),
+              child: Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: theme.colorScheme.primary,
+                  boxShadow: [
+                    BoxShadow(
+                      color: theme.colorScheme.primary.withAlpha(60),
+                      blurRadius: 16,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: const Icon(
+                  Icons.camera_alt,
+                  color: Colors.white,
+                  size: 36,
                 ),
               ),
             ),
-            const SizedBox(height: 8),
-            FilledButton.icon(
-              onPressed: _submitImages,
-              icon: const Icon(Icons.auto_awesome, size: 18),
-              label: Text('开始识别 (${_pendingImages.length}张)'),
-            ),
-          ],
-
-          // ── 继续上次暂存的会话 ──
-          if (_savedSessions.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed: _showSavedSessions,
-              icon: const Icon(Icons.history, size: 16),
-              label: Text(
-                '继续上次会话（${_savedSessions.length} 条）',
-                style: const TextStyle(fontSize: 12),
+            const SizedBox(height: 12),
+            Text(
+              '拍照识文',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w600,
               ),
             ),
-          ],
-
-          const SizedBox(height: 8),
-          // 标注来源
-          TextButton.icon(
-            onPressed: () => setState(() => _showBookInput = !_showBookInput),
-            icon: Icon(
-              _showBookInput ? Icons.expand_less : Icons.expand_more,
-              size: 18,
+            const SizedBox(height: 4),
+            Text(
+              '拍摄阅读材料，AI 自动识别标记的生词',
+              style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey),
             ),
-            label: Text(_sourceBook.isEmpty ? '标注出处（可选）' : '《$_sourceBook》p$_sourcePage'),
-          ),
+            const SizedBox(height: 12),
+            // 从相册选择
+            TextButton.icon(
+              onPressed: () => _pickFromGallery(),
+              icon: const Icon(Icons.photo_library_outlined, size: 18),
+              label: const Text('从相册选择（可多选）'),
+            ),
 
-          // 来源信息
-          if (_showBookInput) _buildBookInput(theme),
-        ],
-      ),
+            const SizedBox(height: 4),
+            // ── AI 模型 & 思考模式选择（识图前即可切换） ──
+            _buildModelThinkingRow(theme),
+
+            // ── 待提交图片缩略图 ──
+            if (_pendingImages.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              SizedBox(
+                height: 72,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  itemCount: _pendingImages.length,
+                  separatorBuilder: (_, _) => const SizedBox(width: 6),
+                  itemBuilder: (_, i) => GestureDetector(
+                    onTap: () => _showImagePreview(i),
+                    child: Stack(
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.file(
+                            _pendingImages[i],
+                            width: 64,
+                            height: 72,
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                        // 删除按钮（右上角）
+                        Positioned(
+                          top: 2,
+                          right: 2,
+                          child: GestureDetector(
+                            onTap: () => _removePendingImage(i),
+                            child: Container(
+                              width: 18,
+                              height: 18,
+                              decoration: const BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: Colors.black54,
+                              ),
+                              child: const Icon(
+                                Icons.close,
+                                size: 12,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ),
+                        // 裁剪按钮（右下角）
+                        Positioned(
+                          bottom: 2,
+                          right: 2,
+                          child: GestureDetector(
+                            onTap: () async {
+                              final cropped = await _cropImage(
+                                _pendingImages[i],
+                              );
+                              if (cropped != null && mounted) {
+                                setState(() => _pendingImages[i] = cropped);
+                              }
+                            },
+                            child: Container(
+                              width: 18,
+                              height: 18,
+                              decoration: const BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: Colors.black54,
+                              ),
+                              child: const Icon(
+                                Icons.crop,
+                                size: 11,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              FilledButton.icon(
+                onPressed: _submitImages,
+                icon: const Icon(Icons.auto_awesome, size: 18),
+                label: Text('开始识别 (${_pendingImages.length}张)'),
+              ),
+            ],
+
+            // ── 继续上次暂存的会话 ──
+            if (_savedSessions.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: _showSavedSessions,
+                icon: const Icon(Icons.history, size: 16),
+                label: Text(
+                  '继续上次会话（${_savedSessions.length} 条）',
+                  style: const TextStyle(fontSize: 12),
+                ),
+              ),
+            ],
+
+            const SizedBox(height: 8),
+            // 标注来源
+            TextButton.icon(
+              onPressed: () => setState(() => _showBookInput = !_showBookInput),
+              icon: Icon(
+                _showBookInput ? Icons.expand_less : Icons.expand_more,
+                size: 18,
+              ),
+              label: Text(
+                _sourceBook.isEmpty
+                    ? '标注出处（可选）'
+                    : '《$_sourceBook》p$_sourcePage',
+              ),
+            ),
+
+            // 来源信息
+            if (_showBookInput) _buildBookInput(theme),
+          ],
+        ),
       ), // Padding
     ); // Card
   }
@@ -318,23 +347,25 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
               offset: const Offset(0, 200),
               constraints: const BoxConstraints(maxWidth: 280),
               itemBuilder: (_) => [
-                ...DoubaoApiService.fallbackDoubaoModels.map((m) {
+                // 按端点族/最近拉取结果展示(配了 DS 就显示 DS 模型,v1.4.3)
+                ...primaryModelChoices().map((m) {
                   final isSel = m == _currentModel;
                   return PopupMenuItem(
                     value: 'model:$m',
                     height: 30,
-                    child: Text(m,
-                        style: TextStyle(
-                            fontSize: 11,
-                            fontWeight:
-                                isSel ? FontWeight.w600 : FontWeight.normal,
-                            color: isSel
-                                ? const Color(0xFF3D7A5C)
-                                : null)),
+                    child: Text(
+                      m,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: isSel ? FontWeight.w600 : FontWeight.normal,
+                        color: isSel ? const Color(0xFF3D7A5C) : null,
+                      ),
+                    ),
                   );
                 }),
                 const PopupMenuDivider(),
-                ...AppConstants.thinkingOptions.entries.map((e) {
+                ...AppConstants.thinkingOptionsFor(_currentModel).entries
+                    .map((e) {
                   final isSel = e.key == _currentThinking;
                   return PopupMenuItem(
                     value: 'think:${e.key}',
@@ -342,19 +373,21 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
                     child: Row(
                       children: [
                         Icon(
-                          isSel
-                              ? Icons.lightbulb
-                              : Icons.lightbulb_outline,
+                          isSel ? Icons.lightbulb : Icons.lightbulb_outline,
                           size: 12,
                           color: isSel ? Colors.orange : Colors.grey,
                         ),
                         const SizedBox(width: 6),
-                        Text(e.value,
-                            style: TextStyle(
-                                fontSize: 11,
-                                fontWeight:
-                                    isSel ? FontWeight.w600 : FontWeight.normal,
-                                color: isSel ? Colors.orange : null)),
+                        Text(
+                          e.value,
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: isSel
+                                ? FontWeight.w600
+                                : FontWeight.normal,
+                            color: isSel ? Colors.orange : null,
+                          ),
+                        ),
                       ],
                     ),
                   );
@@ -362,17 +395,18 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
               ],
               onSelected: (v) async {
                 if (v.startsWith('model:')) {
-                  await Hive.box(AppConstants.hiveBoxSettings)
-                      .put(AppConstants.keyDoubaoModel, v.substring(6));
+                  await Hive.box(
+                    AppConstants.hiveBoxSettings,
+                  ).put(AppConstants.keyDoubaoModel, v.substring(6));
                 } else if (v.startsWith('think:')) {
-                  await Hive.box(AppConstants.hiveBoxSettings)
-                      .put(AppConstants.keyDoubaoThinking, v.substring(6));
+                  await Hive.box(
+                    AppConstants.hiveBoxSettings,
+                  ).put(AppConstants.keyDoubaoThinking, v.substring(6));
                 }
                 if (mounted) setState(() {});
               },
               child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                 decoration: BoxDecoration(
                   border: Border.all(color: Colors.grey[300]!),
                   borderRadius: BorderRadius.circular(8),
@@ -396,7 +430,8 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
               borderRadius: BorderRadius.circular(8),
             ),
             child: Text(
-              AppConstants.thinkingOptions[_currentThinking] ?? '不思考',
+              AppConstants.thinkingOptionsFor(_currentModel)[_currentThinking] ??
+                  '不思考',
               style: TextStyle(fontSize: 11, color: Colors.orange[700]),
             ),
           ),
@@ -407,9 +442,9 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
 
   Future<void> _takePhoto() async {
     if (_pendingImages.length >= _maxImages) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('最多$_maxImages张图片')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('最多$_maxImages张图片')));
       return;
     }
     try {
@@ -423,18 +458,18 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('相机错误：$e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('相机错误：$e')));
       }
     }
   }
 
   Future<void> _pickFromGallery() async {
     if (_pendingImages.length >= _maxImages) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('最多$_maxImages张图片')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('最多$_maxImages张图片')));
       return;
     }
     try {
@@ -452,9 +487,9 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('选择图片错误：$e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('选择图片错误：$e')));
       }
     }
   }
@@ -498,8 +533,10 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
       final box = Hive.box(AppConstants.hiveBoxSettings);
       final raw = box.get(AppConstants.keySavedSessions);
       if (raw is List) {
+        // Hive 读回的嵌套 Map 是 _Map<dynamic, dynamic>,不能直接
+        // as Map<String, dynamic> 强转(会抛)——必须 .from 重建
         return raw
-            .map((e) => SavedSession.fromJson(e as Map<String, dynamic>))
+            .map((e) => SavedSession.fromJson(Map<String, dynamic>.from(e as Map)))
             .toList();
       }
     } catch (_) {}
@@ -522,19 +559,23 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
               padding: const EdgeInsets.all(16),
               child: Row(
                 children: [
-                  const Text('暂存的会话',
-                      style:
-                          TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                  const Text(
+                    '暂存的会话',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                  ),
                   const Spacer(),
                   TextButton(
                     onPressed: () {
-                      Hive.box(AppConstants.hiveBoxSettings)
-                          .delete(AppConstants.keySavedSessions);
+                      Hive.box(
+                        AppConstants.hiveBoxSettings,
+                      ).delete(AppConstants.keySavedSessions);
                       Navigator.pop(ctx);
                       if (mounted) setState(() {});
                     },
-                    child: const Text('清空全部',
-                        style: TextStyle(fontSize: 12, color: Colors.red)),
+                    child: const Text(
+                      '清空全部',
+                      style: TextStyle(fontSize: 12, color: Colors.red),
+                    ),
                   ),
                 ],
               ),
@@ -542,20 +583,23 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
             if (_savedSessions.isEmpty)
               const Padding(
                 padding: EdgeInsets.all(32),
-                child: Text('暂无暂存的会话',
-                    style: TextStyle(color: Colors.grey)),
+                child: Text('暂无暂存的会话', style: TextStyle(color: Colors.grey)),
               )
             else
               ...List.generate(_savedSessions.length, (i) {
                 final s = _savedSessions[i];
                 return ListTile(
                   leading: const Icon(Icons.chat_bubble_outline, size: 20),
-                  title: Text(s.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 14)),
-                  subtitle: Text(s.dateLabel,
-                      style: const TextStyle(fontSize: 12)),
+                  title: Text(
+                    s.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 14),
+                  ),
+                  subtitle: Text(
+                    s.dateLabel,
+                    style: const TextStyle(fontSize: 12),
+                  ),
                   trailing: IconButton(
                     icon: const Icon(Icons.delete_outline, size: 18),
                     onPressed: () {
@@ -563,8 +607,10 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
                       final rest = _savedSessions
                           .where((x) => x.id != s.id)
                           .toList();
-                      box.put(AppConstants.keySavedSessions,
-                          rest.map((x) => x.toJson()).toList());
+                      box.put(
+                        AppConstants.keySavedSessions,
+                        rest.map((x) => x.toJson()).toList(),
+                      );
                       Navigator.pop(ctx);
                       if (mounted) setState(() {});
                     },
@@ -587,7 +633,9 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
   void _resumeSession(SavedSession s) {
     final files = <File>[];
     for (final m in s.results) {
-      final p = m['photoPath'] as String?;
+      // Vocabulary.toMap() 序列化为 snake_case('photo_path');
+      // 兼容老数据的 camelCase('photoPath')
+      final p = (m['photo_path'] ?? m['photoPath']) as String?;
       if (p == null || p.isEmpty) continue;
       final f = File(p);
       if (f.existsSync() && !files.any((x) => x.path == p)) {
@@ -620,8 +668,11 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
         barrierColor: Colors.black87,
         transitionDuration: const Duration(milliseconds: 250),
         reverseTransitionDuration: const Duration(milliseconds: 200),
-        pageBuilder: (ctx, anim, secAnim) =>
-            _ImagePreviewPage(file: file, index: index, onCrop: _onCropFromPreview),
+        pageBuilder: (ctx, anim, secAnim) => _ImagePreviewPage(
+          file: file,
+          index: index,
+          onCrop: _onCropFromPreview,
+        ),
         transitionsBuilder: (ctx, anim, secAnim, child) =>
             FadeTransition(opacity: anim, child: child),
       ),
@@ -647,7 +698,10 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
     _processImages(files, analysisMode: mode);
   }
 
-  Future<void> _processImages(List<File> imageFiles, {String analysisMode = AppConstants.analysisModeMarked}) async {
+  Future<void> _processImages(
+    List<File> imageFiles, {
+    String analysisMode = AppConstants.analysisModeMarked,
+  }) async {
     final saved = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
@@ -675,7 +729,6 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
       }
     }
   }
-
 }
 
 /// 图片大图预览页 — 点击缩略图弹出，支持放大查看和裁剪入口
@@ -702,11 +755,7 @@ class _ImagePreviewPage extends StatelessWidget {
           Center(
             child: InteractiveViewer(
               maxScale: 5.0,
-              child: Image.file(
-                file,
-                width: size.width,
-                fit: BoxFit.contain,
-              ),
+              child: Image.file(file, width: size.width, fit: BoxFit.contain),
             ),
           ),
           // 顶部关闭按钮
@@ -742,8 +791,10 @@ class _ImagePreviewPage extends StatelessWidget {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.white,
                   foregroundColor: Colors.black87,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 12,
+                  ),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(24),
                   ),

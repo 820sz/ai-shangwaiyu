@@ -1,14 +1,22 @@
 import 'package:flutter/material.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 import 'package:provider/provider.dart';
 import '../../providers/stats_provider.dart';
 import '../../providers/vocab_provider.dart';
 import '../../providers/article_provider.dart';
+import '../../providers/bookmark_provider.dart';
+import '../../config/constants.dart';
+import '../../services/api_endpoint.dart';
+import '../../services/doubao_api.dart';
+import '../../utils/crash_logger.dart';
 import '../../widgets/stats_chart.dart';
 import '../../widgets/update_dialog.dart';
 import '../../services/update_service.dart';
 import 'vocab_list.dart';
 import 'stats_page.dart';
 import 'api_settings.dart';
+import 'bookmarks_screen.dart';
+import '../review/review_screen.dart';
 
 class ProfileHomeScreen extends StatefulWidget {
   const ProfileHomeScreen({super.key});
@@ -33,6 +41,7 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
     await Future.wait([
       context.read<StatsProvider>().loadStats(),
       context.read<VocabProvider>().loadVocabularies(),
+      context.read<BookmarkProvider>().load(),
     ]);
     _loadAdvice();
   }
@@ -108,6 +117,15 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
               ),
             ),
             _MenuTile(
+              icon: Icons.style,
+              title: '复习模式',
+              subtitle: '抽认卡：看词想义 → 翻面核对 → 标记掌握度',
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ReviewScreen()),
+              ),
+            ),
+            _MenuTile(
               icon: Icons.bar_chart,
               title: '学习统计',
               subtitle: '曲线图、日历热力图',
@@ -117,24 +135,48 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
               ),
             ),
             _MenuTile(
+              icon: Icons.star_outline,
+              title: '收藏夹',
+              subtitle: '追问洞见与好句子(独立于生词本)',
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const BookmarksScreen()),
+              ),
+            ),
+            _MenuTile(
               icon: Icons.settings,
               title: 'API 设置',
               subtitle: '配置豆包和 DeepSeek API Key',
               onTap: () => _showSettings(),
             ),
             _MenuTile(
+              icon: Icons.medical_information,
+              title: '诊断信息',
+              subtitle: '崩溃日志 + 当前 API 配置(排查问题用)',
+              onTap: () => _showDiagnostics(),
+            ),
+            _MenuTile(
               icon: Icons.system_update_alt,
               title: '检查更新',
               subtitle: '检查 GitHub 最新版本',
               onTap: () async {
-                final info = await UpdateService.checkLatestRelease();
-                if (!context.mounted) return;
-                if (info == null || !info.hasUpdate) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('当前已是最新版本')),
-                  );
-                } else {
-                  showUpdateDialog(context, info);
+                try {
+                  final info = await UpdateService.checkLatestRelease();
+                  if (!context.mounted) return;
+                  if (info == null || !info.hasUpdate) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('当前已是最新版本')),
+                    );
+                  } else {
+                    showUpdateDialog(context, info);
+                  }
+                } catch (e) {
+                  // F3:检查失败(网络全断)必须明说,不能伪装成"已是最新"
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('检查更新失败:$e')),
+                    );
+                  }
                 }
               },
             ),
@@ -196,6 +238,69 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => const ApiSettingsScreen()),
+    );
+  }
+
+  /// 诊断信息:崩溃日志 + 当前 API 配置摘要(key 打码)。
+  /// 真机闪退/识别失败时,打开这里截图即可定位,无需 adb(v1.3.2)。
+  Future<void> _showDiagnostics() async {
+    final log = await CrashLogger.readCrashLog();
+    final box = Hive.box(AppConstants.hiveBoxSettings);
+    String maskKey(String? k) {
+      if (k == null || k.isEmpty) return '(未配置)';
+      if (k.length <= 8) return '${k.substring(0, 2)}***';
+      return '${k.substring(0, 6)}...${k.substring(k.length - 2)}(${k.length}字符)';
+    }
+
+    String briefUrl(String? u) {
+      if (u == null || u.isEmpty) return '(默认)';
+      return u;
+    }
+
+    final summary = [
+      '── 主 API(多模态) ──',
+      'Key: ${maskKey(ApiEndpointConfig.primary.apiKey)}',
+      'Base URL: ${briefUrl(box.get(AppConstants.keyDoubaoBaseUrl) as String?)}',
+      '模型: ${ApiEndpointConfig.primary.model}',
+      '思考: ${ApiEndpointConfig.primary.thinking}',
+      '',
+      '── 副 API(文本) ──',
+      'Key: ${maskKey(ApiEndpointConfig.secondary.apiKey)}',
+      'Base URL: ${briefUrl(box.get(AppConstants.keyDeepseekBaseUrl) as String?)}',
+      '模型: ${ApiEndpointConfig.secondary.model}',
+      '',
+      '── 模型列表加载 ──',
+      DoubaoApiService.lastFetchNote,
+      '',
+      '── 崩溃日志 ──',
+      log.isEmpty ? '(无崩溃记录)' : log,
+    ].join('\n');
+
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('诊断信息'),
+        content: SingleChildScrollView(
+          child: SelectableText(
+            summary,
+            style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              await CrashLogger.clearCrashLog();
+              if (ctx.mounted) Navigator.pop(ctx);
+            },
+            child: const Text('清空日志'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
     );
   }
 }

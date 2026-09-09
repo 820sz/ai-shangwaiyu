@@ -1,0 +1,141 @@
+import 'package:flutter/material.dart';
+
+/// 追问抽屉 回顶/回底 小按钮:监听滚动位置,↑ 未在顶部时显示,↓ 未到底时显示
+///
+/// 原为 process_chat.dart 私有类(2026-08-10 拆分重构),跨文件使用故公开。
+class FollowUpScrollButtons extends StatefulWidget {
+  final ScrollController scrollCtrl;
+  const FollowUpScrollButtons({super.key, required this.scrollCtrl});
+
+  @override
+  State<FollowUpScrollButtons> createState() => _FollowUpScrollButtonsState();
+}
+
+class _FollowUpScrollButtonsState extends State<FollowUpScrollButtons> {
+  double _offset = 0;
+  double _maxExtent = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.scrollCtrl.addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    widget.scrollCtrl.removeListener(_onScroll);
+    super.dispose();
+  }
+
+  void _onScroll() {
+    final pos = widget.scrollCtrl.position;
+    setState(() {
+      _offset = pos.pixels;
+      _maxExtent = pos.maxScrollExtent;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final atTop = _offset < 40;
+    final atBottom = _maxExtent - _offset < 40;
+    // 内容不满一屏时隐藏
+    if (atTop && atBottom) return const SizedBox.shrink();
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (!atTop)
+          _smallButton(Icons.keyboard_arrow_up, () {
+            widget.scrollCtrl.animateTo(
+              0,
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOut,
+            );
+          }),
+        if (!atBottom) ...[
+          const SizedBox(height: 4),
+          _smallButton(Icons.keyboard_arrow_down, () {
+            widget.scrollCtrl.animateTo(
+              widget.scrollCtrl.position.maxScrollExtent,
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOut,
+            );
+          }),
+        ],
+      ],
+    );
+  }
+
+  Widget _smallButton(IconData icon, VoidCallback onTap) {
+    return Material(
+      color: Colors.white,
+      elevation: 2,
+      shape: const CircleBorder(),
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(6),
+          child: Icon(icon, size: 16, color: Colors.grey[600]),
+        ),
+      ),
+    );
+  }
+}
+
+/// 回到顶部浮动小按钮 — 仅在结果态显示，点击后平滑滚动到顶部
+class ScrollToTopButton extends StatefulWidget {
+  final ScrollController scrollCtrl;
+  const ScrollToTopButton({super.key, required this.scrollCtrl});
+
+  @override
+  State<ScrollToTopButton> createState() => _ScrollToTopButtonState();
+}
+
+class _ScrollToTopButtonState extends State<ScrollToTopButton> {
+  bool _visible = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.scrollCtrl.addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    widget.scrollCtrl.removeListener(_onScroll);
+    super.dispose();
+  }
+
+  void _onScroll() {
+    final show = widget.scrollCtrl.hasClients && widget.scrollCtrl.offset > 200;
+    if (show != _visible && mounted) {
+      setState(() => _visible = show);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_visible) return const SizedBox.shrink();
+    final cs = Theme.of(context).colorScheme;
+    return Material(
+      elevation: 3,
+      shape: const CircleBorder(),
+      color: cs.primary,
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: () {
+          widget.scrollCtrl.animateTo(
+            0,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOut,
+          );
+        },
+        child: const Padding(
+          padding: EdgeInsets.all(8),
+          child: Icon(Icons.arrow_upward, size: 18, color: Colors.white),
+        ),
+      ),
+    );
+  }
+}

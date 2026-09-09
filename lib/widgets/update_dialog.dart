@@ -64,16 +64,42 @@ class _DownloadDialog extends StatefulWidget {
   State<_DownloadDialog> createState() => _DownloadDialogState();
 }
 
-class _DownloadDialogState extends State<_DownloadDialog> {
+class _DownloadDialogState extends State<_DownloadDialog>
+    with WidgetsBindingObserver {
   double _progress = 0;
   bool _downloading = true;
   String? _error;
   bool _installing = false;
+  /// 安装阶段是否检测到 App 进入过后台。
+  /// 正常情况系统安装器弹出会把 App 压到后台(paused);
+  /// 若安装意图发出后始终 resumed,说明安装器根本没弹(静默拒绝),
+  /// 需引导用户开"安装未知应用"权限。
+  /// 只在 _installing == true 时记录——下载期间的任意后台化不算(F2:
+  /// 用户下载时切去别的 App,回来安装被拒,不能误判"见过安装界面")。
+  bool _sawBackground = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _startDownload();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (!_installing) return; // 只有安装阶段才观察后台化
+    // PackageInstaller 前台时 App 进入 inactive/paused
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      _sawBackground = true;
+    }
   }
 
   Future<void> _startDownload() async {
@@ -81,6 +107,7 @@ class _DownloadDialogState extends State<_DownloadDialog> {
       _downloading = true;
       _error = null;
       _progress = 0;
+      _sawBackground = false;
     });
     try {
       final path = await UpdateService.downloadApk(
@@ -95,10 +122,28 @@ class _DownloadDialogState extends State<_DownloadDialog> {
       setState(() {
         _downloading = false;
         _installing = true;
+        _sawBackground = false; // 安装阶段重新计时
       });
       // 调起系统安装器,对话框随即关闭
       await UpdateService.installApk(path);
-      if (mounted) Navigator.pop(context);
+      if (!mounted) return;
+      // 原生端(MainActivity)在 startActivity 后同步回 'ok',
+      // App 被安装器压到后台的 lifecycle 事件稍后才到——留窗口再判定,
+      // 否则正常安装也会误报"未检测到安装界面弹出"
+      await Future.delayed(const Duration(milliseconds: 800));
+      if (!mounted) return;
+      if (!_sawBackground) {
+        // 安装意图发出但 App 从未进入后台 → 安装界面没弹出,
+        // 大概率是系统"安装未知应用"权限被禁,给出明确引导
+        setState(() {
+          _installing = false;
+          _error = '未检测到安装界面弹出。\n'
+              '请前往 系统设置 → 应用 → AI上外语 → '
+              '「安装未知应用」→ 允许,然后点重试。';
+        });
+        return;
+      }
+      Navigator.pop(context);
     } catch (e) {
       if (mounted) {
         setState(() {

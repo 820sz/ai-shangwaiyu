@@ -30,8 +30,10 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
   late final TextEditingController _secondaryModelCtrl;
   String _secondaryThinking = 'disabled';
 
-  /// 模型列表(异步填充)
-  List<String> _primaryModels = DoubaoApiService.fallbackDoubaoModels;
+  /// 模型列表(异步填充)。
+  /// 主槽位 = 主槽位兜底清单(豆包系 + DeepSeek 视觉模型,2026-08-21);
+  /// 副槽位 = DeepSeek 文本清单。
+  List<String> _primaryModels = AppConstants.primaryFallbackModels;
   List<String> _secondaryModels = AppConstants.deepseekFallbackModels;
 
   /// 加载中
@@ -51,7 +53,8 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
     _primaryModelCtrl = TextEditingController(
       text: _box.get(AppConstants.keyDoubaoModel, defaultValue: '') as String? ?? '',
     );
-    _primaryThinking = _migrateThinking(AppConstants.keyDoubaoThinking);
+    _primaryThinking =
+        _migrateThinking(AppConstants.keyDoubaoThinking, _primaryModelCtrl.text);
 
     _secondaryKeyCtrl = TextEditingController(
       text: _box.get(AppConstants.keyDeepseekApiKey, defaultValue: '') as String? ?? '',
@@ -62,17 +65,23 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
     _secondaryModelCtrl = TextEditingController(
       text: _box.get(AppConstants.keyDeepseekModel, defaultValue: '') as String? ?? '',
     );
-    _secondaryThinking = _migrateThinking(AppConstants.keyDeepseekThinking);
+    _secondaryThinking =
+        _migrateThinking(AppConstants.keyDeepseekThinking, _secondaryModelCtrl.text);
   }
 
-  /// 读思考模式并迁移旧值(minimal → disabled),非法值一律 disabled
-  String _migrateThinking(String hiveKey) {
+  /// 读思考模式并迁移旧值(v1.4.3 按模型族):
+  /// - minimal → disabled(并入不思考)
+  /// - medium/high:DeepSeek 系保留(官方支持 4 档);豆包/其他迁移 low
+  ///   (2026-08-08 决策:豆包中/高思考慢,只留两档)
+  /// - 非法值一律 disabled
+  String _migrateThinking(String hiveKey, String model) {
     final saved = _box.get(hiveKey) as String?;
+    final isDs = model.toLowerCase().contains('deepseek');
     if (saved == 'minimal') return 'disabled';
-    if (saved == 'disabled' ||
-        saved == 'low' ||
-        saved == 'medium' ||
-        saved == 'high') {
+    if (saved == 'medium' || saved == 'high') {
+      return isDs ? saved! : 'low';
+    }
+    if (saved == 'disabled' || saved == 'low') {
       return saved!;
     }
     return 'disabled';
@@ -90,21 +99,51 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
   }
 
   Future<void> _save() async {
+    // URL 清洗+校验(v1.3.2):粘贴带全角冒号/空格/换行 → 清洗;
+    // 清洗后非空但不以 http(s):// 开头 → 警告并重置为默认,绝不存坏值
+    final primaryKey = _primaryKeyCtrl.text.replaceAll(RegExp(r'\s+'), '');
+    final secondaryKey = _secondaryKeyCtrl.text.replaceAll(RegExp(r'\s+'), '');
+    // 未填 URL 按 Key 前缀补默认端点(v1.4.0):sk- → DeepSeek 官方,零配置错配
+    final primaryUrlRaw = ApiEndpointConfig.cleanBaseUrl(_primaryUrlCtrl.text);
+    final primaryUrlValid = ApiEndpointConfig.normalizedBaseUrl(primaryUrlRaw);
+    final primaryUrlSaved = primaryUrlValid ??
+        (primaryKey.toLowerCase().startsWith('sk-')
+            ? AppConstants.deepseekBaseUrl
+            : '');
+    final secondaryUrlRaw = ApiEndpointConfig.cleanBaseUrl(_secondaryUrlCtrl.text);
+    final secondaryUrlValid = ApiEndpointConfig.normalizedBaseUrl(secondaryUrlRaw);
+    final secondaryUrlSaved = secondaryUrlValid ??
+        (secondaryKey.toLowerCase().startsWith('sk-')
+            ? AppConstants.deepseekBaseUrl
+            : '');
+    final badUrl =
+        (primaryUrlRaw.isNotEmpty && primaryUrlValid == null) ||
+        (secondaryUrlRaw.isNotEmpty && secondaryUrlValid == null);
+    final autoUrl =
+        (primaryUrlRaw.isEmpty && (primaryKey.toLowerCase().startsWith('sk-'))) ||
+        (secondaryUrlRaw.isEmpty && (secondaryKey.toLowerCase().startsWith('sk-')));
+
     // 主槽位(复用原豆包 key,老配置无需迁移)
-    await _box.put(AppConstants.keyDoubaoApiKey, _primaryKeyCtrl.text.trim());
-    await _box.put(AppConstants.keyDoubaoBaseUrl, _primaryUrlCtrl.text.trim());
+    await _box.put(AppConstants.keyDoubaoApiKey, primaryKey);
+    await _box.put(AppConstants.keyDoubaoBaseUrl, primaryUrlSaved);
     await _box.put(AppConstants.keyDoubaoModel, _primaryModelCtrl.text.trim());
     await _box.put(AppConstants.keyDoubaoThinking, _primaryThinking);
     // 副槽位(复用原 DeepSeek key)
-    await _box.put(AppConstants.keyDeepseekApiKey, _secondaryKeyCtrl.text.trim());
-    await _box.put(AppConstants.keyDeepseekBaseUrl, _secondaryUrlCtrl.text.trim());
+    await _box.put(AppConstants.keyDeepseekApiKey, secondaryKey);
+    await _box.put(AppConstants.keyDeepseekBaseUrl, secondaryUrlSaved);
     await _box.put(AppConstants.keyDeepseekModel, _secondaryModelCtrl.text.trim());
     await _box.put(AppConstants.keyDeepseekThinking, _secondaryThinking);
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('API 设置已保存 · 模型变更后重新拍照生效'),
+        SnackBar(
+          content: Text(
+            badUrl
+                ? 'Base URL 格式不正确(需 http/https 开头),已重置为默认端点;请检查后重新填写'
+                : autoUrl
+                    ? 'API 设置已保存 · 检测到 DeepSeek Key,已自动使用 https://api.deepseek.com'
+                    : 'API 设置已保存 · 模型变更后重新拍照生效',
+          ),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -122,8 +161,14 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
         : ApiEndpointConfig.secondary.defaultBaseUrl;
 
     final apiKey = keyCtrl.text.trim();
-    final baseUrl =
-        urlCtrl.text.trim().isNotEmpty ? urlCtrl.text.trim() : defaultUrl;
+    final urlRaw = ApiEndpointConfig.cleanBaseUrl(urlCtrl.text);
+    // 未填 URL 时按 Key 前缀自动配端点:sk- → DeepSeek 官方(否则拉方舟 /models
+    // 会失败回退豆包清单,用户看不到自己的 DS 模型——v1.3.1 实测痛点)
+    final baseUrl = urlRaw.isNotEmpty
+        ? (ApiEndpointConfig.normalizedBaseUrl(urlRaw) ?? defaultUrl)
+        : (apiKey.toLowerCase().startsWith('sk-')
+            ? AppConstants.deepseekBaseUrl
+            : defaultUrl);
 
     setState(() {
       if (isPrimary) {
@@ -133,15 +178,18 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
       }
     });
 
-    // 两槽位拉取 /models 后按模型族过滤:
-    // 主=豆包系列,副=DeepSeek 系列 —— 方舟聚合端点会混入他族模型,过滤避免误导
+    // 两槽位拉取 /models 后按能力/模型族过滤:
+    // 主=只留视觉候选(isVisionCandidate:vision/doubao-seed 系),砍掉未开通的
+    //   老文本/角色/纯文本 DS 模型(v1.3.0-2 用户实测"一堆乱模型"问题);
+    // 副=DeepSeek 系列 —— 方舟聚合端点会混入他族模型,过滤避免误导
     if (apiKey.isNotEmpty) {
       final models = await DoubaoApiService.fetchModels(
         baseUrl,
         apiKey,
-        allowPrefixes: isPrimary ? const ['doubao'] : const ['deepseek'],
+        allowPrefixes: isPrimary ? const [] : const ['deepseek'],
+        keepFilter: isPrimary ? isVisionCandidate : null,
         fallback: isPrimary
-            ? DoubaoApiService.fallbackDoubaoModels
+            ? AppConstants.primaryFallbackModels
             : AppConstants.deepseekFallbackModels,
       );
       if (mounted) {
@@ -169,6 +217,7 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
 
   void _showModelPicker({required bool isPrimary}) {
     final modelCtrl = isPrimary ? _primaryModelCtrl : _secondaryModelCtrl;
+    final urlCtrl = isPrimary ? _primaryUrlCtrl : _secondaryUrlCtrl;
     final models = isPrimary ? _primaryModels : _secondaryModels;
     final currentModel = modelCtrl.text.trim();
     final bottomSafe = MediaQuery.of(context).padding.bottom;
@@ -186,6 +235,23 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
         bottomSafe: bottomSafe,
         onSelected: (id) {
           modelCtrl.text = id;
+          // 防呆:选中 DeepSeek 模型但端点还是方舟(默认/volces)时提示配对
+          // (v1.3.0-2 用户实测:ark key + DS 模型名 → 识别失败"API Key 无效")
+          final url = urlCtrl.text.trim();
+          final isArkUrl =
+              url.isEmpty || url.contains('volces.com') || url.contains('ark.cn-');
+          if (id.toLowerCase().contains('deepseek') && isArkUrl) {
+            ScaffoldMessenger.of(ctx).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'DeepSeek 模型需搭配：Base URL https://api.deepseek.com '
+                  '+ DeepSeek 官方 Key（sk- 开头）。否则会提示 API 无效。',
+                ),
+                behavior: SnackBarBehavior.floating,
+                duration: Duration(seconds: 6),
+              ),
+            );
+          }
           Navigator.pop(ctx);
         },
       ),
@@ -211,19 +277,22 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
           _SectionHeader(title: '主 API(多模态)'),
           const SizedBox(height: 4),
           Text(
-            '拍照识词 / 全文翻译 / 素材推荐 / 追问默认。需支持图片识别的模型。',
+            '拍照识文 / 全文翻译 / 素材推荐 / 追问默认。需支持图片识别的模型。\n'
+            '模型列表按视觉能力过滤。Key 填 sk- 开头(DeepSeek 官方)时,'
+            'Base URL 留空自动使用 https://api.deepseek.com;ark- 开头(火山方舟)'
+            '自动使用方舟端点。DeepSeek 视觉模型为 deepseek-v4-flash-vision-exp。',
             style: TextStyle(fontSize: 11, color: Colors.grey[500]),
           ),
           const SizedBox(height: 8),
           _ApiField(
             controller: _primaryKeyCtrl,
             label: 'API Key',
-            hint: '默认端点：${ApiEndpointConfig.primary.defaultBaseUrl}',
+            hint: 'sk- 开头 = DeepSeek 官方 · ark- 开头 = 火山方舟',
           ),
           _ApiField(
             controller: _primaryUrlCtrl,
             label: 'Base URL',
-            hint: '留空用默认',
+            hint: '留空按 Key 类型自动使用',
           ),
           _ModelRow(
             controller: _primaryModelCtrl,
@@ -234,6 +303,7 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
           ),
           _ThinkingDropdown(
             value: _primaryThinking,
+            options: AppConstants.thinkingOptionsFor(_primaryModelCtrl.text),
             onChanged: (v) => setState(() => _primaryThinking = v),
           ),
           const SizedBox(height: 24),
@@ -249,7 +319,7 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
           _ApiField(
             controller: _secondaryKeyCtrl,
             label: 'API Key',
-            hint: '默认端点：${ApiEndpointConfig.secondary.defaultBaseUrl}',
+            hint: 'sk- 开头 = DeepSeek 官方',
           ),
           _ApiField(
             controller: _secondaryUrlCtrl,
@@ -265,6 +335,7 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
           ),
           _ThinkingDropdown(
             value: _secondaryThinking,
+            options: AppConstants.thinkingOptionsFor(_secondaryModelCtrl.text),
             onChanged: (v) => setState(() => _secondaryThinking = v),
           ),
           const SizedBox(height: 16),
@@ -388,15 +459,23 @@ class _ModelRow extends StatelessWidget {
   }
 }
 
-/// 思考模式下拉(两槽位共用)
+/// 思考模式下拉(两槽位共用,v1.4.3 按模型族展示档位:
+/// DS 系 4 档(不思考/低/中/高),豆包系 2 档)
 class _ThinkingDropdown extends StatelessWidget {
   final String value;
+  final Map<String, String> options;
   final ValueChanged<String> onChanged;
 
-  const _ThinkingDropdown({required this.value, required this.onChanged});
+  const _ThinkingDropdown({
+    required this.value,
+    required this.options,
+    required this.onChanged,
+  });
 
   @override
   Widget build(BuildContext context) {
+    // 当前值必须存在于档位表(模型族切换后旧值可能非法,如 DS→豆包时的高档)
+    final validValue = options.containsKey(value) ? value : options.keys.first;
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: InputDecorator(
@@ -407,11 +486,11 @@ class _ThinkingDropdown extends StatelessWidget {
         ),
         child: DropdownButtonHideUnderline(
           child: DropdownButton<String>(
-            value: value,
+            value: validValue,
             isExpanded: true,
             isDense: true,
             style: const TextStyle(fontSize: 14, color: Colors.black87),
-            items: AppConstants.thinkingOptions.entries
+            items: options.entries
                 .map((e) => DropdownMenuItem(
                       value: e.key,
                       child: Text(e.value),

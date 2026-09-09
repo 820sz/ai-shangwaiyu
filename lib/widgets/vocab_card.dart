@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/vocabulary.dart';
+import '../services/tts_service.dart';
 
 class VocabCard extends StatelessWidget {
   final Vocabulary vocab;
@@ -72,9 +73,44 @@ class VocabCard extends StatelessWidget {
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
+                        // 朗读(v1.5.0):单词点一下朗读(系统 TTS)
+                        IconButton(
+                          onPressed: () async {
+                            final ok =
+                                await TtsService.instance.speak(vocab.displayLabel);
+                            if (!ok && context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('设备未找到可用语音引擎，暂时无法朗读'),
+                                  behavior: SnackBarBehavior.floating,
+                                  duration: Duration(seconds: 2),
+                                ),
+                              );
+                            }
+                          },
+                          icon: Icon(
+                            Icons.volume_up_outlined,
+                            size: 16,
+                            color: Colors.grey[500],
+                          ),
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          visualDensity: VisualDensity.compact,
+                        ),
                         _typeChip(vocab.wordType, theme),
                       ],
                     ),
+                    // 音标(v1.5.0,AI 补全生成)
+                    if (vocab.phonetic != null && vocab.phonetic!.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        vocab.phonetic!,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          fontStyle: FontStyle.italic,
+                          color: theme.colorScheme.onSurface.withAlpha(150),
+                        ),
+                      ),
+                    ],
                     if (vocab.translation != null &&
                         vocab.translation!.isNotEmpty) ...[
                       const SizedBox(height: 4),

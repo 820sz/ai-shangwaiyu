@@ -102,7 +102,8 @@ class _VocabListScreenState extends State<VocabListScreen> {
         provider.updateVocabulary(id,
             category: category,
             materialPath: subInfo?.materialPath,
-            sourceBook: subInfo?.materialName)));
+            sourceBook: subInfo?.materialName,
+            sourcePage: subInfo?.sourcePage)));
     if (mounted) {
       final count = _selectedIds.length; // 先存计数，再清选择
       final hasSourceBookOverwrite = subInfo?.materialName != null;

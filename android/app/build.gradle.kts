@@ -43,3 +43,8 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // FileProvider(安装 APK 用,自写 MethodChannel 替代 open_filex)
+    implementation("androidx.core:core-ktx:1.13.1")
+}

@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../../models/vocabulary.dart';
+import '../../../services/tts_service.dart';
+import 'example_sentence.dart';
 
 /// 单词详情 BottomSheet
 /// [onSave] 单独保存此词（async，等保存完成才关 sheet）
@@ -44,11 +47,44 @@ void showWordDetailSheet({
                 ),
               ),
             ),
-            // 单词大标题
-            Text(
-              item.word,
-              style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+            // 单词大标题:截断词条回退显示完整句子(F8,与列表/横幅一致)
+            // v1.5.0:点单词本体即朗读(系统 TTS);右侧另有喇叭按钮
+            Row(
+              children: [
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () => _speak(ctx, item),
+                    child: Text(
+                      item.displayWordText,
+                      style: theme.textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => _speak(ctx, item),
+                  tooltip: '朗读',
+                  icon: Icon(
+                    Icons.volume_up_outlined,
+                    size: 22,
+                    color: theme.colorScheme.primary,
+                  ),
+                ),
+              ],
             ),
+            // 音标(v1.5.0:AI 补全生成,如 /ˈʌnfetəd/)
+            if (item.phonetic != null && item.phonetic!.isNotEmpty) ...[
+              Text(
+                item.phonetic!,
+                style: TextStyle(
+                  fontSize: 15,
+                  fontStyle: FontStyle.italic,
+                  color: Colors.grey[600],
+                ),
+              ),
+              const SizedBox(height: 6),
+            ],
             const SizedBox(height: 6),
             // 类型 + 词性
             Row(
@@ -81,8 +117,11 @@ void showWordDetailSheet({
                   color: Colors.grey[100],
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: Text(
-                  item.originalSentence!,
+                child: ExampleSentence(
+                  sentence: item.originalSentence!,
+                  // 传原始 word:非截断词正常标粗;截断词匹配不到自动原样
+                  // (数据层没有"截断前的真实词",保守不标,绝不误标)
+                  highlightWord: item.word,
                   style: TextStyle(fontStyle: FontStyle.italic, color: Colors.grey[700]),
                 ),
               ),
@@ -101,6 +140,27 @@ void showWordDetailSheet({
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
                 _actionButton(ctx, Icons.edit_outlined, '编辑', onEdit),
+                // 复制(v1.4.4:词条复制入口从长按菜单迁入详情页)
+                _actionButton(ctx, Icons.copy_outlined, '复制', () {
+                  final buf = [
+                    item.displayWordText,
+                    if (item.translation != null && item.translation!.isNotEmpty)
+                      '释义：${item.translation}',
+                    if (item.originalSentence != null &&
+                        item.originalSentence!.isNotEmpty)
+                      '例句：${item.originalSentence}',
+                  ].join('\n');
+                  Clipboard.setData(ClipboardData(text: buf));
+                  if (ctx.mounted) {
+                    ScaffoldMessenger.of(ctx).showSnackBar(
+                      const SnackBar(
+                        content: Text('已复制'),
+                        behavior: SnackBarBehavior.floating,
+                        duration: Duration(seconds: 2),
+                      ),
+                    );
+                  }
+                }),
                 // 保存按钮：等 async 保存完成再关 sheet
                 TextButton.icon(
                   onPressed: () async {
@@ -122,6 +182,22 @@ void showWordDetailSheet({
 
 TextStyle _sectionTitle(ThemeData theme) {
   return TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.grey[600]);
+}
+
+/// 系统 TTS 朗读;失败(无语音引擎)提示一次,不打断查看。
+Future<void> _speak(BuildContext ctx, Vocabulary item) async {
+  final ok = await TtsService.instance.speak(item.displayWordText);
+  if (!ok && ctx.mounted) {
+    ScaffoldMessenger.of(ctx)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(
+          content: Text('设备未找到可用语音引擎，暂时无法朗读'),
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(seconds: 2),
+        ),
+      );
+  }
 }
 
 Color _typeColor(String type) {

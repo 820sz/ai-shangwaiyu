@@ -128,4 +128,60 @@ abstract class BaseApiService {
     return body.contains('1830102') ||
         (body.contains('invalid') && body.contains('parameter'));
   }
+
+  /// 把 Dio/API 异常转成人类可读错误(v1.4.1):
+  /// 优先显示服务端 error message;常见状态码给中文指引——
+  /// 用户实拍一屏 DioException 英文,完全看不懂原因。
+  static String friendlyError(Object e) {
+    if (e is DioException) {
+      final data = e.response?.data;
+      if (data is Map) {
+        final err = data['error'];
+        if (err is Map) {
+          final em = err['message']?.toString() ?? '';
+          if (em.isNotEmpty) return 'API 返回错误：$em';
+        }
+        final m = data['message']?.toString() ?? '';
+        if (m.isNotEmpty) return 'API 返回错误：$m';
+        // 有些网关把错误直接放 body(Map 键不含 message/error)
+        final str = data.toString();
+        if (str.contains('error') || str.contains('Error')) {
+          return 'API 返回错误：${_truncate(str)}';
+        }
+      }
+      if (data is String && data.trim().isNotEmpty) {
+        return 'API 返回错误：${_truncate(data.trim())}';
+      }
+      final code = e.response?.statusCode;
+      switch (code) {
+        case 301:
+        case 302:
+          return '端点重定向：Base URL 请使用 https:// 开头(已自动修复,重新保存即可)';
+        case 400:
+          return '请求被拒绝(400)：模型或参数与该端点不匹配，请检查模型名称与端点是否同一家';
+        case 401:
+        case 403:
+          return '鉴权失败(401/403)：API Key 与端点不匹配或无效，请检查 Key 前缀(sk-=DeepSeek / ark-=方舟)';
+        case 404:
+          return '请求路径/模型不存在(404)：请检查 Base URL 与模型名称';
+        case 429:
+          return '请求太频繁(429)：稍等几秒再试';
+      }
+      if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.receiveTimeout ||
+          e.type == DioExceptionType.sendTimeout) {
+        return '网络超时：请检查网络后重试';
+      }
+      if (e.type == DioExceptionType.connectionError) {
+        return '网络连接失败：请检查网络/代理后重试';
+      }
+    }
+    final s = e.toString()
+        .replaceFirst('DioException [bad response]: ', '')
+        .replaceFirst('DioException [unknown]: ', '');
+    return _truncate(s);
+  }
+
+  static String _truncate(String s) =>
+      s.length > 200 ? '${s.substring(0, 200)}…' : s;
 }
