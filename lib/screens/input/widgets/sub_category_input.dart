@@ -200,17 +200,13 @@ class _SubCategoryInputSheetState extends State<_SubCategoryInputSheet> {
               ],
             ),
             const SizedBox(height: 4),
-            Text(
-              '添加后可在材料管理中按层级浏览（可选，留空则只归入大类）',
-              style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey),
-            ),
             const SizedBox(height: 16),
             // 历史子分类 — 点选即填,不必重新输入
             if (_historyLoaded && _historyPaths.isNotEmpty) ...[
               Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
-                  '历史子分类(点选快速填入)',
+                  '历史分类',
                   style: theme.textTheme.bodySmall
                       ?.copyWith(color: Colors.grey),
                 ),

@@ -134,4 +134,65 @@ void main() {
     await box.put(AppConstants.keyDoubaoThinking, 'medium');
     expect(ApiEndpointConfig.primary.thinking, 'low');
   });
+
+  // ── v1.7.0 回归:用户实测「选极致变成不思考」 ──
+
+  group('思考档位不再被兜底打回 disabled(v1.7.0)', () {
+    Future<void> useDs() async {
+      await Hive.box(AppConstants.hiveBoxSettings)
+          .put(AppConstants.keyDoubaoModel, 'deepseek-v4-flash-vision-exp');
+    }
+
+    test('DS + max(极致) → thinking getter 原样返回 max(核心 bug 回归)', () async {
+      await useDs();
+      final box = Hive.box(AppConstants.hiveBoxSettings);
+      await box.put(AppConstants.keyDoubaoThinking, 'max');
+      expect(ApiEndpointConfig.primary.thinking, 'max');
+      expect(box.get(AppConstants.keyDoubaoThinking), 'max'); // 不被改写
+      expect(
+        ApiEndpointConfig.primary.buildThinkingParams()['reasoning_effort'],
+        'max',
+      );
+    });
+
+    test('DS + high → 原样返回 high(不再被当成非法值)', () async {
+      await useDs();
+      final box = Hive.box(AppConstants.hiveBoxSettings);
+      await box.put(AppConstants.keyDoubaoThinking, 'high');
+      expect(ApiEndpointConfig.primary.thinking, 'high');
+      expect(box.get(AppConstants.keyDoubaoThinking), 'high');
+    });
+
+    test('豆包 + max(自身没有该档) → 回不思考,与设置页显示一致', () async {
+      final box = Hive.box(AppConstants.hiveBoxSettings);
+      await box.put(AppConstants.keyDoubaoModel, '');
+      await box.put(AppConstants.keyDoubaoThinking, 'max');
+      // 豆包档位表只有 disabled/low;max 属表外值 → 安全回落 disabled。
+      // 关键:设置页 _migrateThinking 对同一输入也给 disabled——UI 与请求
+      // 行为必须一致(否则又是"显示不思考、实际带思考"的老问题)。
+      expect(ApiEndpointConfig.primary.thinking, 'disabled');
+    });
+
+    test('豆包 + 存量 medium/high → 迁移 low 并写回(2026-08-08 两档决策)', () async {
+      final box = Hive.box(AppConstants.hiveBoxSettings);
+      await box.put(AppConstants.keyDoubaoModel, '');
+      for (final legacy in ['medium', 'high']) {
+        await box.put(AppConstants.keyDoubaoThinking, legacy);
+        expect(ApiEndpointConfig.primary.thinking, 'low');
+        expect(box.get(AppConstants.keyDoubaoThinking), 'low');
+      }
+    });
+
+    test('追问档位表按模型族区分:DS 无 medium,含 max', () {
+      expect(
+        AppConstants.followUpThinkingOptionsFor('deepseek-v4-flash').keys,
+        ['disabled', 'low', 'high', 'max'],
+      );
+      expect(
+        AppConstants.followUpThinkingOptionsFor('doubao-seed-1-6').keys,
+        ['disabled', 'low', 'medium', 'high'],
+      );
+      expect(AppConstants.deepseekThinkingOptions['max'], '极致');
+    });
+  });
 }

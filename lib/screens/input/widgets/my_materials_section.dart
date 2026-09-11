@@ -91,7 +91,7 @@ class MyMaterialsSection extends StatelessWidget {
           Icon(Icons.inbox_outlined, size: 40, color: Colors.grey[300]),
           const SizedBox(height: 8),
           Text(
-            '拍照识文后保存的生词会出现在这里',
+            '暂无材料',
             style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey),
           ),
         ],

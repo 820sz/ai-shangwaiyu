@@ -99,8 +99,10 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
   String get _currentModel => _api.modelName;
   String get _currentThinking {
     // 自动降级重试时强制不思考(一次性,_startStreaming 消费复位),
-    // v1.4.3 DS V4 系列思考模式 "reasoning-only" 已知问题
-    return _forceDisabledThinking ? 'disabled' : _api.config.thinking;
+    // v1.4.3 DS V4 系列思考模式 "reasoning-only" 已知问题。
+    // v1.7.0:直接取配置的已校验档位(单一事实来源),不再读裸 Hive 值——
+    // 裸值在档位表外时页面显示"不思考"、请求却带思考,UI 与行为会打架。
+    return _forceDisabledThinking ? 'disabled' : ApiEndpointConfig.primary.thinking;
   }
 
   /// 思考失败自动降级标记(DS V4 生态已知问题:
@@ -128,6 +130,11 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
   /// 补充识别模式(v1.3.0 问题 3):对全部图片重新识别,只并入遗漏项。
   /// 为 true 时 [_onStreamDone] 走去重合并分支,结束后复位。
   bool _supplementMode = false;
+
+  /// 校准重识别模式(v1.7.0):用户对首次识别不满意时的"认真重做一遍"。
+  /// 与补充识别的区别:校准会**整组替换**结果(不合并),并用逐行扫描 +
+  /// 高清图 + 自检的强化提示词。为 true 时 [_onStreamDone] 走替换分支。
+  bool _recalibrateMode = false;
 
   /// 全文翻译:每轮识别的段落起点(imageIndex → 段落下标)。
   /// 追加图片后点击 p1/p2 定位到该图第一段(v1.4.1 用户实测:
@@ -394,6 +401,8 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         // 补充识别:告知已有词,只找遗漏(v1.3.0 问题 3)
         excludeWords:
             _supplementMode ? _results.map((v) => v.word).toList() : const [],
+        // 校准重识别:强化提示词 + 高清图(v1.7.0)
+        calibrate: _recalibrateMode,
       );
 
       _subscription = stream.listen(
@@ -549,6 +558,22 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
           }
           return;
         }
+        if (_recalibrateMode) {
+          // 校准重识别没识别到标注 → 保留原结果,明确告知(不丢用户数据)
+          setState(() {
+            _recalibrateMode = false;
+            _phase = _StreamPhase.results;
+          });
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('校准后仍未识别到标注内容，已保留原结果'),
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+          }
+          return;
+        }
         final msg = widget.analysisMode == AppConstants.analysisModeFullText
             ? 'AI 未识别到可翻译的文字内容。'
             : 'AI 未识别到标记的单词，请确认图片中有标记痕迹。';
@@ -619,7 +644,11 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
 
         setState(() {
           _phase = _StreamPhase.results;
-          if (_streamStartIndex == 0 && !_supplementMode) {
+          if (_recalibrateMode) {
+            // 校准重识别:整组替换(旧的漏识/误识结果作废),默认不选中
+            _results = results;
+            _selected.clear();
+          } else if (_streamStartIndex == 0 && !_supplementMode) {
             // 首次识别:整组替换,默认不选中(长按才选中)
             _results = results;
             _selected.clear();
@@ -630,14 +659,31 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
             // 追加识别:新结果接在旧结果后;新词默认不选中,旧选中保留
             _results = [..._results, ...results];
           }
+          final wasCalibrate = _recalibrateMode;
+          _recalibrateMode = false; // 校准结束复位
           _streamStartIndex = 0; // 本轮结束复位,下次从头开始
           _supplementMode = false; // 补充识别结束复位
+          if (wasCalibrate) {
+            ScaffoldMessenger.of(context)
+              ..hideCurrentSnackBar()
+              ..showSnackBar(
+                SnackBar(
+                  content: Text('校准完成：识别到 ${results.length} 条标注内容'),
+                  behavior: SnackBarBehavior.floating,
+                  duration: const Duration(seconds: 3),
+                ),
+              );
+          }
         });
       }
       // 滚动到 AI 结果区域顶部
       _scrollToAiSection();
     } catch (e) {
       if (!mounted) return;
+      // 校准/补充标记复位:失败后重试按普通重试处理(否则会带着旧模式重跑)
+      final wasCalibrate = _recalibrateMode;
+      _recalibrateMode = false;
+      _supplementMode = false;
       // v1.4.4:解析失败 + 思考档且内容疑似截断(JSON 未闭合)→ 自动降级重试一次
       final raw = _contentText.trim();
       if (_lastRequestThinking != 'disabled' &&
@@ -645,6 +691,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
           !raw.endsWith('}') &&
           !raw.endsWith(']')) {
         _forceDisabledThinking = true;
+        _recalibrateMode = wasCalibrate; // 截断降级重试:保留校准语义
         ScaffoldMessenger.of(context)
           ..hideCurrentSnackBar()
           ..showSnackBar(
@@ -940,12 +987,47 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
             // 暂存入口已移入返回确认弹窗的「暂时离开」——不再占用 AppBar
             if (_phase == _StreamPhase.results &&
                 widget.analysisMode != AppConstants.analysisModeFullText) ...[
-              // AI 再识别补漏(v1.3.0 问题 3)— 入口在 AppBar,不占底部 UI:
-              // 发现大量疏漏时对同图重新识别,只并入遗漏项
-              IconButton(
+              // 识别质量菜单(v1.7.0 用户要求区分两种"再来一次"):
+              // - 重新识别(校准):强化提示词 + 高清图,整组替换结果
+              // - 补充识别:告知已有词,只并入遗漏项
+              PopupMenuButton<String>(
                 icon: const Icon(Icons.auto_awesome),
-                tooltip: 'AI 再识别（补漏）',
-                onPressed: _reRecognize,
+                tooltip: '识别质量',
+                onSelected: (v) {
+                  if (v == 'calibrate') {
+                    _recalibrate();
+                  } else if (v == 'supplement') {
+                    _reRecognize();
+                  }
+                },
+                itemBuilder: (_) => const [
+                  PopupMenuItem(
+                    value: 'calibrate',
+                    child: ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.center_focus_strong, size: 20),
+                      title: Text('重新识别（校准）', style: TextStyle(fontSize: 14)),
+                      subtitle: Text(
+                        '逐行扫描+高清图，替换当前结果',
+                        style: TextStyle(fontSize: 11),
+                      ),
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'supplement',
+                    child: ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.add_circle_outline, size: 20),
+                      title: Text('补充识别（只补漏）', style: TextStyle(fontSize: 14)),
+                      subtitle: Text(
+                        '保留现有结果，只并入漏掉的',
+                        style: TextStyle(fontSize: 11),
+                      ),
+                    ),
+                  ),
+                ],
               ),
               IconButton(
                 icon: const Icon(Icons.checklist),
@@ -1368,6 +1450,51 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     setState(() {
       _supplementMode = true;
       _streamStartIndex = 0; // 全量重识别
+      _phase = _StreamPhase.connecting;
+      _reasoningText = '';
+      _contentText = '';
+      _thinkingStartAt = null;
+      _thinkingSeconds = 0;
+      _thinkingExpanded = false;
+    });
+    _startStreaming();
+  }
+
+  /// 校准重识别(v1.7.0 用户要求):对识别结果不满意时**重新认真识别一遍**,
+  /// 用逐行扫描 + 高清图(detail=high)+ 输出前自检的强化提示词,
+  /// 结果整组替换。会先弹确认——当前结果与手动修改会被丢弃。
+  Future<void> _recalibrate() async {
+    if (_phase != _StreamPhase.results ||
+        widget.analysisMode == AppConstants.analysisModeFullText ||
+        _images.isEmpty) {
+      return;
+    }
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('重新识别（校准）'),
+        content: Text(
+          '会用更严格的流程重做一遍识别（逐行扫描 + 高清图 + 输出前自检），'
+          '提高批注/圈画的识别准确度。\n\n'
+          '当前 ${_results.length} 条结果（含手动修改）将被替换，确定继续？',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('开始校准'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    setState(() {
+      _recalibrateMode = true;
+      _supplementMode = false;
+      _streamStartIndex = 0; // 全部图片重跑
       _phase = _StreamPhase.connecting;
       _reasoningText = '';
       _contentText = '';
@@ -2155,7 +2282,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
           child: TextButton.icon(
             onPressed: _showAddWordDialog,
             icon: const Icon(Icons.add_circle_outline, size: 16),
-            label: const Text('添加词汇（AI 漏识别时手动补充）'),
+            label: const Text('添加词汇'),
             style: TextButton.styleFrom(
               foregroundColor: theme.colorScheme.primary,
               textStyle: const TextStyle(fontSize: 12),
@@ -2166,8 +2293,8 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         Center(
           child: Text(
             _displayMode == _DisplayMode.detailed
-                ? '单击词汇 → AI 详解 | 长按选中'
-                : '单击词汇 → 查看详情 | 长按选中',
+                ? '单击 = AI 详解 · 长按 = 选中'
+                : '单击 = 查看详情 · 长按 = 选中',
             style: TextStyle(fontSize: 12, color: Colors.grey[400]),
           ),
         ),

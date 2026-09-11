@@ -161,6 +161,7 @@ class DoubaoApiService extends BaseApiService {
     bool stream = false,
     String analysisMode = AppConstants.analysisModeMarked,
     List<String> excludeWords = const [],
+    bool calibrate = false,
   }) {
     final bookHint = sourceBook != null && sourceBook.isNotEmpty
         ? '，出处书籍："$sourceBook"' : '';
@@ -185,16 +186,40 @@ class DoubaoApiService extends BaseApiService {
 要求：保持原文段落结构，翻译准确流畅。只返回JSON。''',
         '请翻译这些阅读材料照片中的全文内容$bookHint$pageHint$countHint'
       ),
+      // 校准重识别(v1.7.0):用户对首次识别不满意时的"认真重做一遍"。
+      // 与首次识别的差别:①逐行扫描的作业流程 ②标记类型清单+排除干扰物
+      // ③输出前自检 ④高清图(detail=high,提升小字/浅色笔迹可辨识度)
+      _ when calibrate => (
+        '''你是严谨的英语学习助手，正在做一次"校准重识别"：用户认为上一次识别有漏识或误识，请重新完整检查图片。
+输出JSON，格式：
+{"items":[{"word":"完整原文","translation":"中文释义","word_type":"word|phrase|sentence","part_of_speech":"词性(可选)","phonetic":"IPA音标(仅单词可选)","original_sentence":"完整句子(短语/句子必填)"}]}
+
+作业流程(必须按此顺序)：
+1. 先整体扫一遍图片，找出所有人工标记的位置，再逐个读取被标记的文字。
+2. 标记类型包括：圈画、下划线、双下划线、波浪线、荧光笔(黄/绿/粉等彩色底纹)、方框、星号、箭头、书签贴/便签、页边中文批注旁对应的英文。
+3. 把标点符号、连字符、缩写、专有名词原样保留；看不清的字母按上下文补全，但不要编造不存在的词。
+4. 同一处内容重复标记只输出一次。
+
+识别纪律：
+1. 只输出有明确标记痕迹的内容；未标记的正文一律不输出。
+2. word 必须与图上文字完全一致，禁止截断、禁止省略号。
+3. 短语/句子必须在 original_sentence 给出其所在完整句子。
+4. 输出前自检：逐条确认"这个词在图上确实有标记痕迹"，无法确认的删掉——宁可少，不可错。
+${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,"items":[...]},...]}' : ''}
+无任何标记返回{"items":[]}。只输出JSON。''',
+        '请校准重识别这些照片中被标记(批注/圈画/划线/荧光笔等)的英语内容$bookHint$pageHint$countHint'
+      ),
       _ => (
         '''你是英语学习助手。识别照片中"被标注"的英语内容。输出JSON，格式：
 {"items":[{"word":"完整原文","translation":"中文释义","word_type":"word|phrase|sentence","part_of_speech":"词性(可选)","phonetic":"IPA音标(仅单词可选,如 /ˈleɪzi/)","original_sentence":"完整句子(短语/句子必填,单词可选)"}]}
-标记定义：手写笔迹圈画、下划线、波浪线、荧光笔、方框、星号、书签贴等读者标注痕迹。
+标记定义：手写笔迹圈画、下划线、波浪线、荧光笔、方框、星号、书签贴、页边批注对应的英文等读者标注痕迹。
 识别纪律(v1.4.4)：
 1. 只输出有明确标记痕迹的内容；正文中未作任何标记的文字一律不要输出。
 2. 如果不能确定某个内容是否被标记，宁可漏掉，也不要输出。
 3. word 必须与照片中的文本完全一致——单词、短语、句子一律完整输出,禁止截断,禁止用省略号(…)代替后半部分。
 4. 短语/句子必须在 original_sentence 中给出其所在的完整句子(必填,不可省略)。
-5. 单词给词性。${imageUris.length > 1 ? '多图格式：{"items_by_image":[{"image_index":0,"items":[...]},...]}' : ''}
+5. 单词给词性。
+6. 先扫一遍找出所有标记位置，再逐个读取，同一处重复标记只输出一次。${imageUris.length > 1 ? '多图格式：{"items_by_image":[{"image_index":0,"items":[...]},...]}' : ''}
 无任何标记返回{"items":[]}。只输出JSON。简洁思考。''',
         '识别标记的英语内容$bookHint$pageHint$countHint$excludeHint'
       ),
@@ -212,10 +237,12 @@ class DoubaoApiService extends BaseApiService {
             for (final uri in imageUris)
               {
                 'type': 'image_url',
-                // detail 仅豆包系发:DeepSeek 视觉模型不认未知字段(400)
+                // detail 仅豆包系发:DeepSeek 视觉模型不认未知字段(400)。
+                // 校准重识别用 high(小字/浅色笔迹更可辨),日常识别用 low 省流量
                 'image_url': {
                   'url': uri,
-                  if (shouldSendDetailFlag(modelName)) 'detail': 'low',
+                  if (shouldSendDetailFlag(modelName))
+                    'detail': calibrate ? 'high' : 'low',
                 },
               },
             {'type': 'text', 'text': userPrompt},
@@ -271,12 +298,15 @@ class DoubaoApiService extends BaseApiService {
   // ── 流式版（新增） ──
 
   /// 拍照取词 — 流式返回（async* 生成器，逐个产出 SseChunk）
+  /// [calibrate] true = 校准重识别(v1.7.0):逐行扫描 + 高清图 + 自检提示词,
+  /// 结果由调用方整组替换(区别于 [excludeWords] 的"只补漏")。
   Stream<SseChunk> extractVocabularyStream(
     List<File> imageFiles, {
     String? sourceBook,
     String? sourcePage,
     String analysisMode = AppConstants.analysisModeMarked,
     List<String> excludeWords = const [],
+    bool calibrate = false,
   }) async* {
     if (imageFiles.isEmpty) throw Exception('没有可识别的图片');
     if (!config.isConfigured) {
@@ -295,6 +325,7 @@ class DoubaoApiService extends BaseApiService {
       stream: true,
       analysisMode: analysisMode,
       excludeWords: excludeWords,
+      calibrate: calibrate,
     );
 
     final response = await postWithReasoningFallback(

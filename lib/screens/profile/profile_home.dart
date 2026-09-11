@@ -110,7 +110,7 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
             _MenuTile(
               icon: Icons.book,
               title: '我的生词本',
-              subtitle: '按书籍分类，可跳转原文',
+              subtitle: '按书籍分组',
               onTap: () => Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const VocabListScreen()),
@@ -119,7 +119,7 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
             _MenuTile(
               icon: Icons.style,
               title: '复习模式',
-              subtitle: '抽认卡：看词想义 → 翻面核对 → 标记掌握度',
+              subtitle: '抽认卡记忆',
               onTap: () => Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const ReviewScreen()),
@@ -128,7 +128,7 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
             _MenuTile(
               icon: Icons.bar_chart,
               title: '学习统计',
-              subtitle: '曲线图、日历热力图',
+              subtitle: '趋势与热力图',
               onTap: () => Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const StatsPageScreen()),
@@ -137,7 +137,7 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
             _MenuTile(
               icon: Icons.star_outline,
               title: '收藏夹',
-              subtitle: '追问洞见与好句子(独立于生词本)',
+              subtitle: '收藏的洞见与好句',
               onTap: () => Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const BookmarksScreen()),
@@ -146,19 +146,19 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
             _MenuTile(
               icon: Icons.settings,
               title: 'API 设置',
-              subtitle: '配置豆包和 DeepSeek API Key',
+              subtitle: '配置 API Key',
               onTap: () => _showSettings(),
             ),
             _MenuTile(
               icon: Icons.medical_information,
               title: '诊断信息',
-              subtitle: '崩溃日志 + 当前 API 配置(排查问题用)',
+              subtitle: '崩溃日志与配置',
               onTap: () => _showDiagnostics(),
             ),
             _MenuTile(
               icon: Icons.system_update_alt,
               title: '检查更新',
-              subtitle: '检查 GitHub 最新版本',
+              subtitle: 'GitHub 最新版',
               onTap: () async {
                 try {
                   final info = await UpdateService.checkLatestRelease();

@@ -109,31 +109,26 @@ class ApiEndpointConfig {
     return (v is String && v.isNotEmpty) ? v : defaultModel;
   }
 
+  /// 思考档位(单一事实来源:合法档位由当前模型族的档位表决定)。
+  /// v1.7.0 根因修复:原实现只放行 low/disabled,DS 官方的 high/max
+  /// (含"极致")会被末尾兜底打回 disabled——用户实测"点极致变成不思考"。
+  /// 现在:档位表里有的值一律原样返回;表外**确实存过的旧值**
+  /// (豆包 medium/high → low、minimal → disabled)迁移并写回 Hive。
+  /// 注意:读取路径绝不因"值不存在"而写 Hive——Hive 写入会触发监听重建,
+  /// 在 build 中读取时会变成无限重建(单元测试直接挂死,实测)。
   String get thinking {
     final v = _box.get(hiveThinking);
-    final isDs = model.toLowerCase().contains('deepseek');
-    if (v == 'medium' || v == 'high') {
-      // v1.4.3:DeepSeek 系官方支持高思考,不再迁移;
-      // v1.4.4:官方 reasoning_effort 只有 low/high/max——存量 medium 迁移为
-      // low(官方合法档),避免发非法档位导致 API 异常。
-      if (isDs) {
-        if (v == 'medium') {
-          _box.put(hiveThinking, 'low');
-          return 'low';
-        }
-        return v;
-      }
-      // 豆包维持 2026-08-08 决策——中/高慢,迁移到 low。
-      // 必须写回 Hive:否则设置页/状态条读原始值显示"不思考",
-      // 实际请求却带着 thinking:enabled(F4)——UI 与行为打架。
-      _box.put(hiveThinking, 'low');
-      return 'low';
+    final allowed = AppConstants.thinkingOptionsFor(model).keys.toSet();
+    if (v is String && allowed.contains(v)) return v;
+    final isLegacyStrong = v == 'medium' || v == 'high';
+    final isLegacyMinimal = v == 'minimal';
+    final fallback = isLegacyStrong
+        ? 'low'
+        : 'disabled';
+    if ((isLegacyStrong || isLegacyMinimal) && v != fallback) {
+      _box.put(hiveThinking, fallback);
     }
-    if (v == 'minimal') {
-      _box.put(hiveThinking, 'disabled'); // 更早版本的 minimal 档已并入不思考
-      return 'disabled';
-    }
-    return (v == 'low' || v == 'disabled') ? v : 'disabled';
+    return fallback;
   }
 
   bool get isConfigured => apiKey != null;

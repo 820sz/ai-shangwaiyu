@@ -122,12 +122,29 @@ class VocabCard extends StatelessWidget {
                       ),
                     ],
                     const SizedBox(height: 6),
-                    Text(
-                      vocab.sourceSummary,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurface.withAlpha(120),
-                        fontSize: 11,
-                      ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            vocab.sourceSummary,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurface.withAlpha(120),
+                              fontSize: 11,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        // 保存时间(v1.7.0):保存时自动记录,便于按日期复习
+                        Text(
+                          vocab.createdLabel,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurface.withAlpha(120),
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),

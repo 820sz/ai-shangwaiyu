@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 $repo = '820sz/ai-shangwaiyu'
 $branch = 'master'
 # diff 基准:一个本地提交,其 tree 与远端当前 tree 一致(增量同步)
