@@ -51,7 +51,7 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
       buildContext: _buildFollowUpContext,
       imageFilesProvider: () => _materialType == 'handwritten' ? _images : null,
       historyKey: 'saved_writing_follow_up_chats',
-      emptyHint: '就这次批改继续提问，例如「为什么这里用完成时？」',
+      emptyHint: '就这次批改提问',
     );
   }
 
@@ -203,7 +203,7 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('是否保存此次写译练习？'),
-        content: const Text('保存后可在「写译记录」里按日期查阅，方便复盘错误。'),
+        content: const Text('保存后可在「写译记录」按日期查阅。'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -303,8 +303,12 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
   // ── 编辑态 ──
 
   Widget _buildCompose(BuildContext context) {
-    final theme = Theme.of(context);
     final isHandwritten = _materialType == 'handwritten';
+    final wordCount = _textCtrl.text
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((w) => w.isNotEmpty)
+        .length;
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
       children: [
@@ -325,156 +329,141 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
           selected: {_materialType},
           onSelectionChanged: (s) => setState(() => _materialType = s.first),
         ),
-        const SizedBox(height: 8),
-        Text(
-          isHandwritten
-              ? '① 拍照/相册上传手写稿（可多张）→ ② 识别为电子档 → ③ 修改确认后批改'
-              : '直接粘贴或输入英文，点「AI 批改」即可',
-          style: TextStyle(fontSize: 12, color: Colors.grey[500]),
-        ),
         const SizedBox(height: 12),
 
-        // 手写档:图片区
+        // 手写稿:固定高度横向条,永不撑破页面
         if (isHandwritten) ...[
-          Card(
-            margin: EdgeInsets.zero,
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.gesture,
-                        size: 18,
-                        color: theme.colorScheme.primary,
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        '手写稿（${_images.length}/$_maxImages）',
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const Spacer(),
-                      TextButton.icon(
-                        onPressed: () => _pickImages(fromCamera: false),
-                        icon: const Icon(
-                          Icons.photo_library_outlined,
-                          size: 16,
-                        ),
-                        label: const Text('相册'),
-                      ),
-                      TextButton.icon(
-                        onPressed: () => _pickImages(fromCamera: true),
-                        icon: const Icon(Icons.camera_alt_outlined, size: 16),
-                        label: const Text('拍照'),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  if (_images.isEmpty)
-                    Container(
-                      width: double.infinity,
-                      height: 96,
+          Row(
+            children: [
+              Text(
+                '手写稿 ${_images.length}/$_maxImages',
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.black87,
+                ),
+              ),
+              const Spacer(),
+              IconButton(
+                tooltip: '从相册选择（可多选）',
+                onPressed: () => _pickImages(fromCamera: false),
+                icon: const Icon(Icons.photo_library_outlined),
+              ),
+              IconButton(
+                tooltip: '拍照',
+                onPressed: () => _pickImages(fromCamera: true),
+                icon: const Icon(Icons.camera_alt_outlined),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          SizedBox(
+            height: 92,
+            child: _images.isEmpty
+                ? GestureDetector(
+                    onTap: () => _pickImages(fromCamera: false),
+                    child: Container(
                       decoration: BoxDecoration(
                         color: Colors.grey[100],
                         borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: Colors.grey[200]!),
+                        border: Border.all(color: Colors.grey[300]!),
                       ),
-                      child: Center(
-                        child: Text(
-                          '可一次选多张手写稿，按顺序合并成一份文稿',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[500],
+                      child: const Center(
+                        child: Icon(
+                          Icons.add_photo_alternate_outlined,
+                          size: 28,
+                          color: Colors.grey,
+                        ),
+                      ),
+                    ),
+                  )
+                : ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: _images.length,
+                    separatorBuilder: (_, _) => const SizedBox(width: 8),
+                    itemBuilder: (_, i) => Stack(
+                      children: [
+                        GestureDetector(
+                          onTap: () => _openImageViewer(i),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: Image.file(
+                              _images[i],
+                              width: 92,
+                              height: 92,
+                              fit: BoxFit.cover,
+                            ),
                           ),
                         ),
-                      ),
-                    )
-                  else
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: _images.asMap().entries.map((e) {
-                        final i = e.key;
-                        return Stack(
-                          children: [
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(8),
-                              child: Image.file(
-                                e.value,
-                                width: 84,
-                                height: 84,
-                                fit: BoxFit.cover,
+                        Positioned(
+                          top: 2,
+                          right: 2,
+                          child: GestureDetector(
+                            onTap: () => setState(() => _images.removeAt(i)),
+                            child: Container(
+                              width: 22,
+                              height: 22,
+                              decoration: const BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: Colors.black54,
+                              ),
+                              child: const Icon(
+                                Icons.close,
+                                size: 14,
+                                color: Colors.white,
                               ),
                             ),
-                            Positioned(
-                              top: 2,
-                              right: 2,
-                              child: GestureDetector(
-                                onTap: () =>
-                                    setState(() => _images.removeAt(i)),
-                                child: Container(
-                                  width: 20,
-                                  height: 20,
-                                  decoration: const BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: Colors.black54,
-                                  ),
-                                  child: const Icon(
-                                    Icons.close,
-                                    size: 13,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        );
-                      }).toList(),
-                    ),
-                  if (_images.isNotEmpty) ...[
-                    const SizedBox(height: 10),
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: _transcribe,
-                        icon: const Icon(
-                          Icons.document_scanner_outlined,
-                          size: 16,
+                          ),
                         ),
-                        label: Text('识别为电子档（${_images.length} 张）'),
-                      ),
+                      ],
                     ),
-                  ],
-                ],
-              ),
+                  ),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.tonalIcon(
+              onPressed: _images.isEmpty ? null : _transcribe,
+              icon: const Icon(Icons.document_scanner_outlined, size: 16),
+              label: const Text('识别为电子档'),
             ),
           ),
           const SizedBox(height: 12),
         ],
 
-        // 电子档文本
-        TextField(
-          controller: _textCtrl,
-          maxLines: 10,
-          minLines: 6,
-          onChanged: (_) => setState(() {}),
-          decoration: InputDecoration(
-            labelText: isHandwritten ? '电子档（识别结果，可修改）' : '英文内容',
-            hintText: isHandwritten
-                ? '识别结果会填入这里，可手动修改'
-                : '粘贴或输入要批改的英文',
-            border: const OutlineInputBorder(),
-            alignLabelWithHint: true,
-          ),
+        // 文本区:固定高度,内部滚动(长文不会把页面顶爆)
+        Row(
+          children: [
+            Text(
+              isHandwritten ? '电子档' : '英文内容',
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Colors.black87,
+              ),
+            ),
+            const Spacer(),
+            Text(
+              '$wordCount 词',
+              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+            ),
+          ],
         ),
         const SizedBox(height: 6),
-        Text(
-          '${_textCtrl.text.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length} 词',
-          style: TextStyle(fontSize: 11, color: Colors.grey[400]),
+        SizedBox(
+          height: 240,
+          child: TextField(
+            controller: _textCtrl,
+            maxLines: null,
+            expands: true,
+            textAlignVertical: TextAlignVertical.top,
+            onChanged: (_) => setState(() {}),
+            decoration: InputDecoration(
+              hintText: isHandwritten ? null : '粘贴或输入要批改的英文',
+              border: const OutlineInputBorder(),
+              contentPadding: const EdgeInsets.all(12),
+            ),
+          ),
         ),
         const SizedBox(height: 14),
         SizedBox(
@@ -488,15 +477,37 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
             ),
           ),
         ),
-        const SizedBox(height: 10),
-        Center(
-          child: Text(
-            '批改返回:分数 + 修正后全文 + 逐条点评 + 按词汇/语法/表达优化/其他分类的错误汇总',
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 11, color: Colors.grey[400]),
+      ],
+    );
+  }
+
+  /// 全屏看图(v1.7.0):可缩放拖动,点空白处关闭
+  void _openImageViewer(int index) {
+    Navigator.of(context).push(
+      PageRouteBuilder(
+        opaque: false,
+        barrierDismissible: true,
+        barrierColor: Colors.black87,
+        transitionDuration: const Duration(milliseconds: 200),
+        pageBuilder: (ctx, _, _) => Scaffold(
+          backgroundColor: Colors.transparent,
+          appBar: AppBar(
+            backgroundColor: Colors.transparent,
+            foregroundColor: Colors.white,
+            elevation: 0,
+            title: Text('${index + 1} / ${_images.length}'),
+          ),
+          body: GestureDetector(
+            onTap: () => Navigator.pop(ctx),
+            child: InteractiveViewer(
+              maxScale: 6,
+              child: Center(
+                child: Image.file(_images[index], fit: BoxFit.contain),
+              ),
+            ),
           ),
         ),
-      ],
+      ),
     );
   }
 

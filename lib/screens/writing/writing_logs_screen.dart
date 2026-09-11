@@ -88,11 +88,6 @@ class _WritingLogsScreenState extends State<WritingLogsScreen> {
             '还没有保存的写译练习',
             style: TextStyle(color: Colors.grey[500]),
           ),
-          const SizedBox(height: 6),
-          Text(
-            '批改后点「保存此次练习」即可按日期归档',
-            style: TextStyle(fontSize: 12, color: Colors.grey[400]),
-          ),
         ],
       ),
     );

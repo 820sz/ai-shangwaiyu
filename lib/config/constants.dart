@@ -96,6 +96,17 @@ class AppConstants {
         : thinkingOptions;
   }
 
+  /// 追问思考档位(按模型族):
+  /// DS 与识图同源(disabled/low/high/max,官方无 medium);
+  /// 豆包系保留 disabled/low/medium/high 4 档。
+  /// v1.7.0 修复:此前追问与设置页共用一张含 medium 的表,
+  /// DS 下选「极致」/「高」会被校验打回 disabled(用户实测"点了变不思考")。
+  static Map<String, String> followUpThinkingOptionsFor(String model) {
+    return model.toLowerCase().contains('deepseek')
+        ? deepseekThinkingOptions
+        : followUpThinkingOptions;
+  }
+
   // ── 数据库 ──
   static const String dbName = 'readflow.db';
   static const int dbVersion = 8;

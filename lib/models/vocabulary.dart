@@ -176,6 +176,19 @@ class Vocabulary {
     return sb.toString();
   }
 
+  /// 保存时间简短标签(v1.7.0):今天 / 昨天 / N天前 / YYYY/M/D。
+  /// 保存时自动记录(created_at),列表与复习卡片据此显示"何时存的"。
+  String get createdLabel {
+    final now = DateTime.now();
+    final days = DateTime(now.year, now.month, now.day)
+        .difference(DateTime(createdAt.year, createdAt.month, createdAt.day))
+        .inDays;
+    if (days <= 0) return '今天';
+    if (days == 1) return '昨天';
+    if (days < 30) return '$days 天前';
+    return '${createdAt.year}/${createdAt.month}/${createdAt.day}';
+  }
+
   /// 掌握度标签
   String get masteryLabel {
     switch (masteryLevel) {

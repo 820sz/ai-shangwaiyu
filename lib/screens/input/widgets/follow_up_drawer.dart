@@ -81,15 +81,16 @@ class FollowUpController {
 
   String get model => endpoint.model;
 
-  /// 追问思考档位 — 独立存储(keyFollowUpThinking,4 档)
+  /// 追问思考档位 — 独立存储(keyFollowUpThinking)。
+  /// v1.7.0:合法档位按**当前模型族**判定(DS 官方只有 low/high/max),
+  /// 此前用固定 4 档校验,DS 下选「极致」会被打回 disabled。
   String get thinking {
     final v = Hive.box(
       AppConstants.hiveBoxSettings,
     ).get(AppConstants.keyFollowUpThinking);
-    return (v is String &&
-            (v == 'disabled' || v == 'low' || v == 'medium' || v == 'high'))
-        ? v
-        : 'disabled';
+    final allowed =
+        AppConstants.followUpThinkingOptionsFor(endpoint.model).keys;
+    return (v is String && allowed.contains(v)) ? v : 'disabled';
   }
 
   // ── 发送 / 停止 / 编辑 ──
@@ -838,7 +839,9 @@ class CompactModelPicker extends StatelessWidget {
             );
           }),
         const PopupMenuDivider(),
-        ...AppConstants.followUpThinkingOptions.entries.map((e) {
+        ...AppConstants.followUpThinkingOptionsFor(controller.endpoint.model)
+            .entries
+            .map((e) {
           final isSel = e.key == controller.thinking;
           return PopupMenuItem(
             value: 'think:${e.key}',

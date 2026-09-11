@@ -330,6 +330,38 @@
 - **修复(显示层回退)**:word 以省略号结尾且存在更长的 originalSentence → 显示 originalSentence(详细模式 _displayWord + 总览 WordListTile 同逻辑)
 - 用户线索关键提示:"近几次词汇板块 UI 调整后就这样"+"原来正常"——但代码审查确认 UI 一直放开;数据层词条化是模型近端行为(v1.2.10 时代用户就反馈过截断,当时误判为 UI)
 
+## v1.7.0 — 极致思考修复 / 识别校准 / 复习模式重做 / UI 瘦身(2026-08-26)
+
+**用户实测 4 组问题**
+
+**① 思考强度「极致」点了变成不思考(根因修复)**
+- 根因:`ApiEndpointConfig.thinking` 只放行 `low/disabled`,DS 官方 `high/max` 被末尾兜底打回 disabled
+- 修复:档位合法性统一由 `AppConstants.thinkingOptionsFor(model)` 判定;表内原样生效,表外旧值(豆包 medium/high→low、minimal→disabled)迁移写回
+- 追问档位新增 `followUpThinkingOptionsFor(model)`(DS = disabled/low/high/max,无 medium)
+- 页头/设置页档位显示改取配置层已校验值(`_currentThinking`),UI 与请求行为一致
+- **踩坑**:getter 曾在读路径上无条件写 Hive(null 也写)→ 触发 Hive 监听重建 → build 中无限重建 → `restore_session_test` 挂死 10 分钟。修复:只对"确实存过的旧档位"写回
+
+**② 识图「重新识别」不真实(只有补充)**
+- AppBar 拆成「识别质量」菜单两个入口:
+  - **重新识别(校准)**:逐行扫描 + 标记类型清单 + 输出前自检 + 高清图(`detail:'high'`),结果**整组替换**(先弹确认)
+  - **补充识别(只补漏)**:保留现有结果,只并入遗漏项
+- `extractVocabularyStream(calibrate: true)` → `_buildRequestBody` 走校准提示词;首次识别提示词同步加强(标记类型枚举 + 先扫标记再读字 + 同处不重复)
+
+**③ 复习模式 5 项**
+1. 标记后自动翻面显示释义(不再直接跳过),看完点「下一张」
+2. 左右滑动 + ⬅➡ 按钮前后翻卡,回看显示当时标记结果
+3. 顶部筛选 chip/进度文字改深色加粗、进度条主题色
+4. 新增日期筛选(今天/近3天/近一周/近一月)+ 卡片显示「保存于 …」(`Vocabulary.createdLabel`,生词本卡片同显)
+5. 进度持久化(Hive `review_progress`):退出再进提示「上次复习到第 X 张」→ 继续/重新开始;卡组顺序与标记统计一起存
+- 新增 `lib/utils/review_deck.dart`(纯函数:`filterReviewItems` / `ReviewProgress` / `restoreDeck`)
+
+**④ 写译批改 UI**
+- 手写稿改固定高度横向缩略图条(可滑、点击全屏查看 + 双指缩放);文本框固定高度内部滚动 → 长文不再撑破页面/卡住滚动
+- 删除多余灰色说明文案(流程 ①②③、"批改返回:…"、"可一次选多张…" 等),并全局精简输入页/我的/分类弹窗/写译记录等处啰嗦副标题
+
+**验证**:analyze 0/0;160 测试全绿(+1 skip,新增 15 条);arm64 aapt versionCode=47/versionName=1.7.0;Release v1.7.0 = Latest
+**同步**:`$env:RF_DIFF_BASE='aa43675'`(v1.6.0 本地提交,其 tree 与远端一致)后跑 `tool/push_via_api.ps1`
+
 ## v1.6.0 — 写译批改重构 + 书籍分组修复 + 写译日志(2026-08-26)
 
 **用户反馈(三条)**:①写译批改该在输出页、太简陋(交互/分类混乱、不能多图)②书籍子分类仍按页分裂③批改要有追问抽屉(收藏/选模型)、AI 末尾按词汇/语法/表达优化/其他汇总、可保存练习日志按日期归档复盘

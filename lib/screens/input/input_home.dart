@@ -8,6 +8,7 @@ import '../../providers/vocab_provider.dart';
 import '../../config/constants.dart';
 import '../../models/saved_session.dart';
 import '../../services/doubao_api.dart';
+import '../../services/api_endpoint.dart';
 import 'process_chat.dart';
 import 'widgets/analysis_mode_picker.dart';
 import 'widgets/my_materials_section.dart';
@@ -38,13 +39,9 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
     return (v is String && v.isNotEmpty) ? v : AppConstants.doubaoVisionModel;
   }
 
-  String get _currentThinking {
-    final v = Hive.box(
-      AppConstants.hiveBoxSettings,
-    ).get(AppConstants.keyDoubaoThinking);
-    return (v is String && v.isNotEmpty) ? v : 'disabled';
-  }
-
+  /// v1.7.0:取配置层已校验的档位(档位表外的值会被迁移),
+  /// 不再读裸 Hive 值——否则「极致」这类合法档位在页头显示成"不思考"。
+  String get _currentThinking => ApiEndpointConfig.primary.thinking;
   @override
   void initState() {
     super.initState();
@@ -141,7 +138,7 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
             ),
             const SizedBox(height: 4),
             Text(
-              '拍摄阅读材料，AI 自动识别标记的生词',
+              '拍摄阅读材料，识别标记内容',
               style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey),
             ),
             const SizedBox(height: 12),

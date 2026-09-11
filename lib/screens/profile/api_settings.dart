@@ -69,21 +69,15 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
         _migrateThinking(AppConstants.keyDeepseekThinking, _secondaryModelCtrl.text);
   }
 
-  /// 读思考模式并迁移旧值(v1.4.3 按模型族):
-  /// - minimal → disabled(并入不思考)
-  /// - medium/high:DeepSeek 系保留(官方支持 4 档);豆包/其他迁移 low
-  ///   (2026-08-08 决策:豆包中/高思考慢,只留两档)
-  /// - 非法值一律 disabled
+  /// 读思考模式并迁移旧值(v1.7.0 改为按模型族档位表判定):
+  /// - 档位表里有的值一律保留(DS 现在正确保留 high/max)
+  /// - minimal → disabled(并入不思考);豆包的 medium 等表外值 → low
   String _migrateThinking(String hiveKey, String model) {
     final saved = _box.get(hiveKey) as String?;
-    final isDs = model.toLowerCase().contains('deepseek');
+    final allowed = AppConstants.thinkingOptionsFor(model).keys.toSet();
+    if (saved != null && allowed.contains(saved)) return saved;
     if (saved == 'minimal') return 'disabled';
-    if (saved == 'medium' || saved == 'high') {
-      return isDs ? saved! : 'low';
-    }
-    if (saved == 'disabled' || saved == 'low') {
-      return saved!;
-    }
+    if (saved == 'medium' || saved == 'high') return 'low';
     return 'disabled';
   }
 
