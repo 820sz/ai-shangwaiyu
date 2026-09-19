@@ -97,20 +97,20 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
   final Map<int, GlobalKey> _imageGroupKeys = {};
 
   String get _currentModel => _api.modelName;
-  String get _currentThinking {
-    // 自动降级重试时强制不思考(一次性,_startStreaming 消费复位),
-    // v1.4.3 DS V4 系列思考模式 "reasoning-only" 已知问题。
-    // v1.7.0:直接取配置的已校验档位(单一事实来源),不再读裸 Hive 值——
-    // 裸值在档位表外时页面显示"不思考"、请求却带思考,UI 与行为会打架。
-    return _forceDisabledThinking ? 'disabled' : ApiEndpointConfig.primary.thinking;
-  }
 
-  /// 思考失败自动降级标记(DS V4 生态已知问题:
-  /// thinking 开启时只返回 reasoning_content,content 为空 → 解析失败)
-  bool _forceDisabledThinking = false;
+  /// 当前思考档位 = 配置层已校验的档位(单一事实来源)。
+  /// v1.8.0 起**不再有"自动降级成不思考"**:用户选了什么档位就用什么档位,
+  /// 思考模型只吐思考过程时改为"从思考内容里取结果 / 同档位重试"。
+  String get _currentThinking => ApiEndpointConfig.primary.thinking;
 
-  /// 本轮请求实际使用的思考档位(_onStreamDone 检测 reasoning-only 用)
+  /// 本轮请求实际使用的思考档位(_onStreamDone 判断是否思考模式用)
   String _lastRequestThinking = 'disabled';
+
+  /// reasoning-only 同档位重试守卫(避免无限重试;成功或用户手动重试时复位)
+  bool _reasoningOnlyRetried = false;
+
+  /// 内容被截断的同档位重试守卫
+  bool _truncationRetried = false;
 
   /// 追问当前使用的槽位配置(副未配置时回落到主)。
   /// v1.6.0:整套追问逻辑抽到 FollowUpController(与写译批改共用),
@@ -366,10 +366,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
   void _startStreaming() {
     _firstByteTimer?.cancel();
     _lastChunkAt = null; // 新流开始,重置心跳
-    // 一次性消费降级标记:本轮强制不思考,后续恢复用户档位
-    final forceDisabled = _forceDisabledThinking;
-    _forceDisabledThinking = false;
-    final thinking = forceDisabled ? 'disabled' : _currentThinking;
+    final thinking = _currentThinking;
     _lastRequestThinking = thinking;
     // 首字节超时(只报错,不降级重跑):不思考25s;思考模式60s——
     // reasoning_effort 生效后(2026-08-07 实测低≈3s/中≈14s/高≈25s)
@@ -515,24 +512,58 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     // cancelOnError=false → onDone 在 onError 后也触发，避免覆盖错误信息
     if (_phase == _StreamPhase.error) return;
 
-    // v1.4.3 DS V4 思考模式已知问题(生态多个代理实测):
-    // thinking 开启时模型只输出 reasoning_content,content 为空 →
-    // "思考一会就报错"。检测到 reasoning-only → 自动切不思考重试一次,
-    // 并明确告知用户(不静默)。
+    // v1.8.0 根因修复(用户实测"思考一长就被强行砍成不思考"):
+    // 思考模型有时把最终 JSON 直接写在 reasoning_content 里(content 空)。
+    // 正确做法不是砍档位,而是**先把思考内容里的 JSON 取出来用**。
+    if (_contentText.trim().isEmpty && _reasoningText.isNotEmpty) {
+      final fromReasoning = DoubaoApiService.extractJsonBlock(_reasoningText);
+      if (fromReasoning.isNotEmpty) {
+        try {
+          final maps = DoubaoApiService.parseResponse(
+            fromReasoning,
+            analysisMode: widget.analysisMode,
+          );
+          if (maps.isNotEmpty) {
+            _contentText = fromReasoning; // 结果来自思考通道,档位保持不变
+          }
+        } catch (e) {
+          debugPrint('ReadFlow reasoning JSON parse failed: $e');
+        }
+      }
+    }
+
+    // 思考模式下确实没有可用结果 → 用**同一档位**重试一次(绝不改成不思考),
+    // 第二次仍失败则如实报错,把选择权留给用户。
     if (_contentText.trim().isEmpty &&
         _reasoningText.isNotEmpty &&
         _lastRequestThinking != 'disabled') {
-      _forceDisabledThinking = true;
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          const SnackBar(
-            content: Text('思考模式下该模型只返回了思考过程(DeepSeek V4 已知问题),已自动切换不思考重试'),
-            behavior: SnackBarBehavior.floating,
-            duration: Duration(seconds: 4),
-          ),
-        );
-      _retry();
+      if (!_reasoningOnlyRetried) {
+        _reasoningOnlyRetried = true;
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            SnackBar(
+              content: Text(
+                '思考模型本次只输出了思考过程，正在用相同档位（'
+                '${AppConstants.thinkingOptionsFor(_currentModel)[_lastRequestThinking] ?? _lastRequestThinking}'
+                '）重试一次…',
+              ),
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        _retry();
+        return;
+      }
+      setState(() {
+        _phase = _StreamPhase.error;
+        _errorMessage =
+            '模型两次都只返回了思考过程、没有结果。\n'
+            '思考档位保持为你选择的值（未被改成"不思考"），可：\n'
+            '① 直接重试  ② 换模型  ③ 到设置里换一个更快的思考档位\n\n'
+            '思考内容（前 300 字）：\n'
+            '${_reasoningText.length > 300 ? '${_reasoningText.substring(0, 300)}…' : _reasoningText}';
+      });
       return;
     }
 
@@ -567,7 +598,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                content: Text('校准后仍未识别到标注内容，已保留原结果'),
+                content: Text('重新识别未发现标注内容，已保留原结果'),
                 behavior: SnackBarBehavior.floating,
               ),
             );
@@ -645,8 +676,10 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         setState(() {
           _phase = _StreamPhase.results;
           if (_recalibrateMode) {
-            // 校准重识别:整组替换(旧的漏识/误识结果作废),默认不选中
-            _results = results;
+            // 重新识别:整组替换(旧结果作废),但**保留手动补充的词**
+            // (photoPath == null 是用户自己敲进去的,不能被 AI 覆盖掉)
+            final manual = _results.where((v) => v.photoPath == null).toList();
+            _results = [...results, ...manual];
             _selected.clear();
           } else if (_streamStartIndex == 0 && !_supplementMode) {
             // 首次识别:整组替换,默认不选中(长按才选中)
@@ -660,6 +693,8 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
             _results = [..._results, ...results];
           }
           final wasCalibrate = _recalibrateMode;
+          _reasoningOnlyRetried = false; // 成功即复位守卫
+          _truncationRetried = false;
           _recalibrateMode = false; // 校准结束复位
           _streamStartIndex = 0; // 本轮结束复位,下次从头开始
           _supplementMode = false; // 补充识别结束复位
@@ -668,7 +703,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
               ..hideCurrentSnackBar()
               ..showSnackBar(
                 SnackBar(
-                  content: Text('校准完成：识别到 ${results.length} 条标注内容'),
+                  content: Text('重新识别完成：共 ${results.length} 条标注内容'),
                   behavior: SnackBarBehavior.floating,
                   duration: const Duration(seconds: 3),
                 ),
@@ -684,19 +719,21 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
       final wasCalibrate = _recalibrateMode;
       _recalibrateMode = false;
       _supplementMode = false;
-      // v1.4.4:解析失败 + 思考档且内容疑似截断(JSON 未闭合)→ 自动降级重试一次
+      // v1.8.0:内容疑似截断(JSON 未闭合)时,用**同一思考档位**重试一次,
+      // 不再把用户选的档位砍成"不思考";第二次仍截断则如实报错。
       final raw = _contentText.trim();
       if (_lastRequestThinking != 'disabled' &&
           raw.isNotEmpty &&
           !raw.endsWith('}') &&
-          !raw.endsWith(']')) {
-        _forceDisabledThinking = true;
-        _recalibrateMode = wasCalibrate; // 截断降级重试:保留校准语义
+          !raw.endsWith(']') &&
+          !_truncationRetried) {
+        _truncationRetried = true;
+        _recalibrateMode = wasCalibrate; // 截断重试:保留校准语义
         ScaffoldMessenger.of(context)
           ..hideCurrentSnackBar()
           ..showSnackBar(
             const SnackBar(
-              content: Text('识别内容疑似被截断,已自动切换不思考重试'),
+              content: Text('识别内容疑似被截断，正在用相同思考档位重试一次…'),
               behavior: SnackBarBehavior.floating,
               duration: Duration(seconds: 4),
             ),
@@ -719,8 +756,13 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     }
   }
 
-  void _retry() {
+  /// [resetGuards] true = 用户手动点重试:清掉 reasoning-only/截断重试守卫
+  void _retry({bool resetGuards = false}) {
     _subscription?.cancel();
+    if (resetGuards) {
+      _reasoningOnlyRetried = false;
+      _truncationRetried = false;
+    }
     _thinkingTimer?.cancel();
     // 追加模式失败重试:保留 _streamStartIndex,只重识别"本轮追加的图"。
     // 旧实现无条件置 0 → 追加失败重试时全量重识别,onDone 走首轮分支
@@ -987,47 +1029,13 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
             // 暂存入口已移入返回确认弹窗的「暂时离开」——不再占用 AppBar
             if (_phase == _StreamPhase.results &&
                 widget.analysisMode != AppConstants.analysisModeFullText) ...[
-              // 识别质量菜单(v1.7.0 用户要求区分两种"再来一次"):
-              // - 重新识别(校准):强化提示词 + 高清图,整组替换结果
-              // - 补充识别:告知已有词,只并入遗漏项
-              PopupMenuButton<String>(
+              // 重新识别(v1.8.0 用户要求):校准与补漏合成一个动作——
+              // 对全部图片重新完整识别(逐行扫描+高清+自检),结果整组替换。
+              // 不再让用户面对"校准 vs 补漏"的选择题。
+              IconButton(
                 icon: const Icon(Icons.auto_awesome),
-                tooltip: '识别质量',
-                onSelected: (v) {
-                  if (v == 'calibrate') {
-                    _recalibrate();
-                  } else if (v == 'supplement') {
-                    _reRecognize();
-                  }
-                },
-                itemBuilder: (_) => const [
-                  PopupMenuItem(
-                    value: 'calibrate',
-                    child: ListTile(
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                      leading: Icon(Icons.center_focus_strong, size: 20),
-                      title: Text('重新识别（校准）', style: TextStyle(fontSize: 14)),
-                      subtitle: Text(
-                        '逐行扫描+高清图，替换当前结果',
-                        style: TextStyle(fontSize: 11),
-                      ),
-                    ),
-                  ),
-                  PopupMenuItem(
-                    value: 'supplement',
-                    child: ListTile(
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                      leading: Icon(Icons.add_circle_outline, size: 20),
-                      title: Text('补充识别（只补漏）', style: TextStyle(fontSize: 14)),
-                      subtitle: Text(
-                        '保留现有结果，只并入漏掉的',
-                        style: TextStyle(fontSize: 11),
-                      ),
-                    ),
-                  ),
-                ],
+                tooltip: '重新识别',
+                onPressed: _recalibrate,
               ),
               IconButton(
                 icon: const Icon(Icons.checklist),
@@ -1438,45 +1446,26 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     _startStreaming();
   }
 
-  /// AI 再识别补漏(v1.3.0 问题 3):对当前全部图片重新识别,
-  /// 提示词告知已有词只找遗漏,结果按 word 去重合并进列表。
-  /// 入口在 AppBar(识别结果页,不在底部 UI)。
-  void _reRecognize() {
-    if (_phase != _StreamPhase.results ||
-        widget.analysisMode == AppConstants.analysisModeFullText ||
-        _images.isEmpty) {
-      return;
-    }
-    setState(() {
-      _supplementMode = true;
-      _streamStartIndex = 0; // 全量重识别
-      _phase = _StreamPhase.connecting;
-      _reasoningText = '';
-      _contentText = '';
-      _thinkingStartAt = null;
-      _thinkingSeconds = 0;
-      _thinkingExpanded = false;
-    });
-    _startStreaming();
-  }
-
-  /// 校准重识别(v1.7.0 用户要求):对识别结果不满意时**重新认真识别一遍**,
-  /// 用逐行扫描 + 高清图(detail=high)+ 输出前自检的强化提示词,
-  /// 结果整组替换。会先弹确认——当前结果与手动修改会被丢弃。
+  /// 重新识别(v1.8.0 合并版):对识别结果不满意时**重新认真识别一遍**——
+  /// 逐行扫描 + 高清图(detail=high) + 输出前自检,结果整组替换。
+  /// 校准与补漏本就是一件事(重跑一遍自然既纠正又补全),不再让用户选。
+  /// 会先弹确认:当前结果与手动修改会被替换(手动补充的词会保留)。
   Future<void> _recalibrate() async {
     if (_phase != _StreamPhase.results ||
         widget.analysisMode == AppConstants.analysisModeFullText ||
         _images.isEmpty) {
       return;
     }
+    final manualCount = _results.where((v) => v.photoPath == null).length;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('重新识别（校准）'),
+        title: const Text('重新识别'),
         content: Text(
-          '会用更严格的流程重做一遍识别（逐行扫描 + 高清图 + 输出前自检），'
-          '提高批注/圈画的识别准确度。\n\n'
-          '当前 ${_results.length} 条结果（含手动修改）将被替换，确定继续？',
+          '重新完整识别这些图片（逐行扫描 + 高清图 + 输出前自检），'
+          '既纠正错识也补齐漏识。\n\n'
+          '当前 ${_results.length} 条结果将被替换'
+          '${manualCount > 0 ? '（其中 $manualCount 条手动补充的词会保留）' : ''}，确定继续？',
         ),
         actions: [
           TextButton(
@@ -1485,7 +1474,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('开始校准'),
+            child: const Text('重新识别'),
           ),
         ],
       ),
@@ -2062,7 +2051,14 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         : const Color(0xFF4A90D9);
 
     return GestureDetector(
-      onTap: () => setState(() => _queryTargetIndex = index),
+      // v1.8.0:选中模式下单击 = 选中/取消;否则单击 = 询问 AI 详解
+      onTap: () {
+        if (_selected.isNotEmpty) {
+          _onWordLongPress(index);
+          return;
+        }
+        setState(() => _queryTargetIndex = index);
+      },
       onLongPress: () => _onWordLongPress(index),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
@@ -2292,10 +2288,18 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         ),
         Center(
           child: Text(
-            _displayMode == _DisplayMode.detailed
-                ? '单击 = AI 详解 · 长按 = 选中'
-                : '单击 = 查看详情 · 长按 = 选中',
-            style: TextStyle(fontSize: 12, color: Colors.grey[400]),
+            _selected.isEmpty
+                ? (_displayMode == _DisplayMode.detailed
+                      ? '单击 = AI 详解 · 长按进入选中'
+                      : '单击 = 查看详情 · 长按进入选中')
+                : '选中模式：单击 = 选中/取消 · 右上角可删除/保存',
+            style: TextStyle(
+              fontSize: 12,
+              color: _selected.isEmpty
+                  ? Colors.grey[400]
+                  : theme.colorScheme.primary,
+              fontWeight: _selected.isEmpty ? FontWeight.normal : FontWeight.w600,
+            ),
           ),
         ),
       ],
@@ -2315,6 +2319,12 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
           isSelected: isSel,
           index: i,
           onTap: () {
+            // v1.8.0:选中模式下单击 = 选中/取消选中(用户要求单点快选,
+            // 不再为了选一个词长按半天);非选中模式仍然是看详情
+            if (_selected.isNotEmpty) {
+              _onWordLongPress(i);
+              return;
+            }
             showWordDetailSheet(
               context: context,
               item: item,
@@ -2412,6 +2422,10 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
               item: item,
               isSelected: isSel,
               onTap: () {
+                if (_selected.isNotEmpty) {
+                  _onWordLongPress(i);
+                  return;
+                }
                 showWordDetailSheet(
                   context: context,
                   item: item,
@@ -2552,7 +2566,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
             mainAxisSize: MainAxisSize.min,
             children: [
               OutlinedButton.icon(
-                onPressed: _retry,
+                onPressed: () => _retry(resetGuards: true),
                 icon: const Icon(Icons.refresh, size: 16),
                 label: const Text('重试'),
                 style: OutlinedButton.styleFrom(

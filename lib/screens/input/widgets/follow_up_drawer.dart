@@ -185,7 +185,11 @@ class FollowUpController {
         msgs[aiMsgIndex] = FollowUpMessage(
           role: 'ai',
           content: done
-              ? (content.isNotEmpty ? content : '（AI 未返回内容）')
+              // v1.8.0:思考模型有时把答案整段写在思考通道(content 为空)
+              // → 直接把思考内容当回答展示,而不是显示"未返回内容"
+              ? (content.isNotEmpty
+                    ? content
+                    : (reasoning.trim().isNotEmpty ? reasoning : '（AI 未返回内容）'))
               : content,
           reasoningText: reasoning.isNotEmpty ? reasoning : null,
           streaming: !done,

@@ -330,6 +330,42 @@
 - **修复(显示层回退)**:word 以省略号结尾且存在更长的 originalSentence → 显示 originalSentence(详细模式 _displayWord + 总览 WordListTile 同逻辑)
 - 用户线索关键提示:"近几次词汇板块 UI 调整后就这样"+"原来正常"——但代码审查确认 UI 一直放开;数据层词条化是模型近端行为(v1.2.10 时代用户就反馈过截断,当时误判为 UI)
 
+## v1.8.0 — 思考不再被砍 / 重新识别合并 / 复习修复 / 页码智能 / AI 推荐可用(2026-09-15)
+
+**用户实测 8 条**
+
+**① 思考模式被强行砍成"不思考"(根因两条)**
+- 根因 A:请求写死 `max_tokens: 8192`(思考+正文总预算)→ 思考吃光预算,content 为空
+  → **DS 请求不再发 max_tokens**(与官方/dsh 一致,交服务端默认);豆包仍显式限制
+- 根因 B:检测 reasoning-only 就自动切不思考 → 改为:
+  1) 先 `extractJsonBlock(reasoning)` 从思考通道取 JSON 直接用
+  2) 仍无结果 → **同档位**重试一次(`_reasoningOnlyRetried` 守卫)
+  3) 再失败 → 报错并附思考原文,档位保持用户所选(绝不偷偷降级)
+- 追问抽屉:思考通道有答案就直接当回答展示
+- 截断重试也从"降级不思考"改成"同档位重试一次"(`_truncationRetried`)
+
+**② 识图「重新识别」合并**:删掉 校准/补漏 二选一,单一动作(逐行扫描+高清+自检),整组替换但保留手动补充的词(弹窗写明条数)
+
+**③ 复习模式**:认识 → 直接下一张;仅不认识/模糊翻面看释义;修「同一词反复点认识刷进度」(重复同档忽略 + 改标记先撤销旧计数)
+
+**④ 页码智能 + 可改**:`lib/utils/page_label.dart`(`p9页/第9页/9/PP9页→p9`,`9~12→p9-12`,`p16 p17→p16-17`,非数字原样);DB v9 迁移归一历史数据;材料页书/材料文件夹可重命名(`renameBookPath`),页码分组可改(`updateSourcePageByIds`)
+
+**⑤ 数量对不上**:分类详情默认 `limit=100` → 改 5000,标题与实际一致
+
+**⑥ 「其他输入材料」做成可用功能**
+- `LearnerProfile`(水平/目的/偏好/补充,Hive 持久化,可编辑)+ `suggestFromVocab` 按真实词汇量/来源推断
+- `MaterialRecommendService`(纯函数:推荐 system/user 提示词、`parseRecommendations`、`vocabFingerprint`)
+- DB v9 新表 `recommendations`;推荐清单与学习内容都落库缓存,不再每次重算
+- 新页面:`learner_profile_screen.dart`(画像编辑)、重写 `ai_material_search.dart`(流式推荐+缓存列表)、`material_recommendation_detail_screen.dart`(流式精读内容:选段/导读/重点词/用法;可存为文章、收藏、追问)
+- API 新增通用流式 `streamPrompt(system,user)`
+
+**⑦ 「AI 生成文章」迁到输入页** → `widgets/ai_article_section.dart`「特色功能 · AI 生词定制文章」;输出页精简为 写译批改/写译记录(`output_home.dart` 重写)
+
+**⑧ 识图选中模式单击即选中**:平铺/分组/详细三种卡片 onTap 都先判 `_selected.isNotEmpty` → 切换选中;底部提示随模式变化
+
+**验证**:analyze 0/0;176 测试全绿(+1 skip,新增 16 条);aapt versionCode=48/versionName=1.8.0;Release v1.8.0 = Latest
+**同步**:`$env:RF_DIFF_BASE='451b1db'`(v1.7.0 本地提交,其 tree 与远端一致)后跑 `tool/push_via_api.ps1`
+
 ## v1.7.0 — 极致思考修复 / 识别校准 / 复习模式重做 / UI 瘦身(2026-08-26)
 
 **用户实测 4 组问题**

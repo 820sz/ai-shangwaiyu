@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../services/database.dart';
+import '../../../utils/page_label.dart';
 
 /// 分类子信息（由 showSubCategoryInput 返回）
 class CategorySubInfo {
@@ -150,14 +151,17 @@ class _SubCategoryInputSheetState extends State<_SubCategoryInputSheet> {
     // 不拼进 material_path——同一本书无论存哪页都归入同一个路径,
     // 杜绝"同一本书按页码每页一类"的混乱;教材/外刊的层级信息(单元/
     // 期号)仍拼进路径,层级浏览有意义。
+    // v1.8.0:页码做智能归一——「p9页」「第9页」「9」统一成「p9」,
+    // 「p16 p17」压缩成「p16-17」,不再出现「pp9页」这种脏数据。
     final isBook = widget.category == '书籍';
     final segments = <String>[widget.category];
     if (name.isNotEmpty) segments.add(name);
     if (!isBook && extra.isNotEmpty) segments.add(extra);
+    final page = isBook ? normalizePageLabel(extra) : '';
     return CategorySubInfo(
       materialName: materialName,
       materialPath: segments.join('/'),
-      sourcePage: isBook && extra.isNotEmpty ? extra : null,
+      sourcePage: page.isEmpty ? null : page,
     );
   }
 

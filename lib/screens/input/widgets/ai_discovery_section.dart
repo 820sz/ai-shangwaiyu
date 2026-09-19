@@ -50,21 +50,12 @@ class AiDiscoverySection extends StatelessWidget {
           ],
         ),
         subtitle: const Text(
-          'AI 帮您搜索学习资源，点击分类开始探索',
-          style: TextStyle(fontSize: 11),
+          '按你的水平推荐材料，点开即可学',
+          style: TextStyle(fontSize: 12),
         ),
         children: [
           // 分类网格（2列）
           ..._buildGrid(context, theme),
-          const SizedBox(height: 8),
-          Text(
-            '提示：该功能由 AI 实时搜索推荐，效果取决于模型能力，仅供参考。',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: Colors.grey[400],
-              fontSize: 10,
-            ),
-            textAlign: TextAlign.center,
-          ),
         ],
       ),
     );

@@ -8,6 +8,8 @@ import '../models/exercise.dart';
 import '../models/learning_record.dart';
 import '../models/bookmark.dart';
 import '../models/writing_log.dart';
+import '../models/material_recommendation.dart';
+import '../utils/page_label.dart';
 
 /// 本地 SQLite 数据库服务 — 生词、文章、练习、学习记录全部落本地
 class DatabaseService {
@@ -130,6 +132,22 @@ class DatabaseService {
         created_at TEXT NOT NULL
       )
     ''');
+
+    // AI 学习资源推荐(v1.8.0):推荐清单 + 生成的学习内容都落库,可复用
+    await db.execute('''
+      CREATE TABLE recommendations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        category TEXT NOT NULL,
+        title TEXT NOT NULL,
+        summary TEXT,
+        level TEXT,
+        reason TEXT,
+        keywords TEXT,
+        content TEXT,
+        profile_snapshot TEXT,
+        created_at TEXT NOT NULL
+      )
+    ''');
   }
 
   static Future<void> _onUpgrade(Database db, int oldV, int newV) async {
@@ -248,6 +266,46 @@ class DatabaseService {
           )
         ''');
       } catch (e) { debugPrint('ReadFlow DB migration v8 writing_logs: $e'); }
+    }
+    if (oldV < 9) {
+      // 页码归一(v1.8.0):历史数据存在「pp9页」「第9页」「9」「p16 p17」等写法,
+      // 统一成 p9 / p16-17(与 normalizePageLabel 同规则),修显示杂乱。
+      try {
+        final rows = await db.query(
+          'vocabulary',
+          columns: ['id', 'source_page'],
+          where: "source_page IS NOT NULL AND source_page != ''",
+        );
+        for (final r in rows) {
+          final raw = (r['source_page'] as String?) ?? '';
+          final normalized = normalizePageLabel(raw);
+          if (normalized.isNotEmpty && normalized != raw) {
+            await db.update(
+              'vocabulary',
+              {'source_page': normalized},
+              where: 'id = ?',
+              whereArgs: [r['id']],
+            );
+          }
+        }
+      } catch (e) { debugPrint('ReadFlow DB migration v9 page label: $e'); }
+      // AI 学习资源推荐表(v1.8.0)
+      try {
+        await db.execute('''
+          CREATE TABLE IF NOT EXISTS recommendations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            category TEXT NOT NULL,
+            title TEXT NOT NULL,
+            summary TEXT,
+            level TEXT,
+            reason TEXT,
+            keywords TEXT,
+            content TEXT,
+            profile_snapshot TEXT,
+            created_at TEXT NOT NULL
+          )
+        ''');
+      } catch (e) { debugPrint('ReadFlow DB migration v9 recommendations: $e'); }
     }
   }
 
@@ -434,6 +492,39 @@ class DatabaseService {
       offset: offset,
     );
     return rows.map((r) => Vocabulary.fromMap(r)).toList();
+  }
+
+  /// 重命名书籍文件夹(v1.8.0):更新该书下所有词条的 material_path 与
+  /// source_book。返回受影响行数。
+  static Future<int> renameBookPath({
+    required String oldPath,
+    required String newPath,
+    required String newBookName,
+  }) async {
+    final db = await database;
+    return db.update(
+      'vocabulary',
+      {'material_path': newPath, 'source_book': newBookName},
+      where: 'material_path = ?',
+      whereArgs: [oldPath],
+    );
+  }
+
+  /// 批量改页码/章节标签(v1.8.0):页码写入前先归一。
+  static Future<int> updateSourcePageByIds(
+    List<int> ids,
+    String page,
+  ) async {
+    if (ids.isEmpty) return 0;
+    final db = await database;
+    final normalized = normalizePageLabel(page);
+    final placeholders = List.filled(ids.length, '?').join(',');
+    return db.update(
+      'vocabulary',
+      {'source_page': normalized.isEmpty ? null : normalized},
+      where: 'id IN ($placeholders)',
+      whereArgs: ids,
+    );
   }
 
   // ═══════════════ 文章 CRUD ═══════════════
@@ -632,5 +723,58 @@ class DatabaseService {
   static Future<int> deleteWritingLog(int id) async {
     final db = await database;
     return db.delete('writing_logs', where: 'id = ?', whereArgs: [id]);
+  }
+
+  // ═══════════════ AI 学习资源推荐 CRUD(v1.8.0) ═══════════════
+
+  static Future<int> insertRecommendation(
+    MaterialRecommendation rec,
+  ) async {
+    final db = await database;
+    return db.insert('recommendations', rec.toMap());
+  }
+
+  static Future<List<MaterialRecommendation>> getRecommendations({
+    String? category,
+    int limit = 100,
+  }) async {
+    final db = await database;
+    final rows = await db.query(
+      'recommendations',
+      where: category == null ? null : 'category = ?',
+      whereArgs: category == null ? null : [category],
+      orderBy: 'created_at DESC, id DESC',
+      limit: limit,
+    );
+    return rows.map((r) => MaterialRecommendation.fromMap(r)).toList();
+  }
+
+  /// 更新学习内容(首次流式生成后缓存)
+  static Future<int> updateRecommendationContent(
+    int id,
+    String content,
+  ) async {
+    final db = await database;
+    return db.update(
+      'recommendations',
+      {'content': content},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  static Future<int> deleteRecommendation(int id) async {
+    final db = await database;
+    return db.delete('recommendations', where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// 清掉某分类的旧推荐(重新推荐前调用)
+  static Future<int> clearRecommendations(String category) async {
+    final db = await database;
+    return db.delete(
+      'recommendations',
+      where: 'category = ?',
+      whereArgs: [category],
+    );
   }
 }

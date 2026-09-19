@@ -169,29 +169,44 @@ class _ReviewScreenState extends State<ReviewScreen> {
     if (save) _saveProgress();
   }
 
-  /// 标记掌握度:写库 + **自动翻面显示释义**(不再直接跳过),看完点「下一张」
+  /// 标记掌握度(v1.8.0 按用户反馈重做):
+  /// - 「认识」:记完**直接进下一张**(不需要再翻面看释义)
+  /// - 「不认识 / 模糊」:翻面显示释义,看完点「下一张」
+  /// - 同一张卡重复点同一档位不再计次(修复"一个词反复点认识刷进度"的 bug);
+  ///   回看时改标记会先撤销旧档位计数再计新档位 —— 统计始终等于已标记卡片数
   Future<void> _mark(int level) async {
     if (_deck.isEmpty || _index >= _deck.length) return;
     final v = _deck[_index];
-    if (v.id != null) _marks[v.id!] = level;
+    final id = v.id;
+    if (id == null) return;
+    final previous = _marks[id];
+    if (previous == level) return; // 重复点同一档位:忽略
     try {
-      await context.read<VocabProvider>().updateMastery(v.id!, level);
+      await context.read<VocabProvider>().updateMastery(id, level);
     } catch (_) {
       // 记录失败不阻断复习
     }
     if (!mounted) return;
+    _marks[id] = level;
     setState(() {
-      switch (level) {
-        case 2:
-          _countMastered++;
-        case 1:
-          _countLearning++;
-        default:
-          _countNew++;
-      }
-      _flipped = true; // 自动翻面:先看释义再走
+      if (previous != null) _applyCount(previous, -1);
+      _applyCount(level, 1);
+      _flipped = level != 2; // 认识不翻面;不认识/模糊先看释义
     });
     _saveProgress();
+    if (level == 2) _next();
+  }
+
+  /// 统计加减(带回夹:计数不会变成负数)
+  void _applyCount(int level, int delta) {
+    switch (level) {
+      case 2:
+        _countMastered = (_countMastered + delta).clamp(0, 1 << 30);
+      case 1:
+        _countLearning = (_countLearning + delta).clamp(0, 1 << 30);
+      default:
+        _countNew = (_countNew + delta).clamp(0, 1 << 30);
+    }
   }
 
   void _next() {

@@ -10,6 +10,7 @@ import '../../models/saved_session.dart';
 import '../../services/doubao_api.dart';
 import '../../services/api_endpoint.dart';
 import 'process_chat.dart';
+import 'widgets/ai_article_section.dart';
 import 'widgets/analysis_mode_picker.dart';
 import 'widgets/my_materials_section.dart';
 import 'widgets/ai_discovery_section.dart';
@@ -64,10 +65,13 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
             // ── 板块1：拍照识文 ──
             _buildCaptureSectionCard(theme),
 
-            // ── 板块2：我的学习材料 ──
+            // ── 板块2：特色功能 · AI 生词定制文章(v1.8.0 从输出页迁来) ──
+            const AiArticleSection(),
+
+            // ── 板块3：我的学习材料 ──
             const MyMaterialsSection(),
 
-            // ── 板块3：其他输入材料（实验性） ──
+            // ── 板块4：AI 推荐学习资源 ──
             const AiDiscoverySection(),
 
             const SizedBox(height: 24),

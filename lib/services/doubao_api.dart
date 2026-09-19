@@ -249,9 +249,12 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
           ],
         },
       ],
-      // v1.4.4 对齐 DS 官方:max_tokens 是 reasoning+content 总预算,
-      // 思考档位开到 8192 防"思考吃满预算导致 content 为空/截断"
-      'max_tokens': isDs ? 8192 : 4096,
+      // v1.8.0 根因修复(用户实测"思考一长就被砍成不思考"):
+      // DeepSeek 官方/dsh 的请求**默认不带 max_tokens**——它是
+      // reasoning+content 的总预算,写死 8192 会被思考吃光,导致
+      // content 为空(reasoning-only)。DS 一律省略,交服务端默认预算;
+      // 豆包仍显式限制输出长度。
+      if (!isDs) 'max_tokens': 4096,
       // DS 官方/样例请求不带 temperature(dsh llm-deepseek 只在显式配置时才发),
       // 思考模式与其组合可能引发不稳定——DS 请求省略,豆包保留 0(确定性)
       if (!isDs) 'temperature': 0,
@@ -422,7 +425,7 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
         {'role': 'user', 'content': word},
       ],
       'temperature': 0,
-      'max_tokens': 1024,
+      if (!cfg.model.toLowerCase().contains('deepseek')) 'max_tokens': 1024,
       'thinking': {'type': 'disabled'},
     };
 
@@ -512,7 +515,7 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
           ],
         },
       ],
-      'max_tokens': isDs ? 8192 : 2048,
+      if (!isDs) 'max_tokens': 2048,
       if (!isDs) 'temperature': 0,
       // 写译批改是单轮快速任务,思考关闭(识别要的是准确不是推理)
       'thinking': {'type': 'disabled'},
@@ -560,7 +563,7 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
         },
         {'role': 'user', 'content': text},
       ],
-      'max_tokens': isDs ? 8192 : 4096,
+      if (!isDs) 'max_tokens': 4096,
       if (!isDs) 'temperature': 0,
       ...cfg.buildThinkingParamsFor('disabled'),
     };
@@ -629,6 +632,39 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
     }
   }
 
+  /// 通用流式文本生成(v1.8.0):给「AI 推荐学习材料 / 生成学习内容」这类
+  /// 纯文本任务使用——system 提示词原样发送(不像 [followUpStream] 那样
+  /// 套"英语学习助手问答"模板)。同样走用户选择的槽位与思考档位。
+  Stream<SseChunk> streamPrompt({
+    required String system,
+    required String user,
+    ApiEndpointConfig? endpoint,
+    String? thinkingLevel,
+  }) async* {
+    final cfg = endpoint ?? config;
+    if (!cfg.isConfigured) {
+      throw Exception('请先在设置中配置 API Key');
+    }
+    final isDs = cfg.model.toLowerCase().contains('deepseek');
+    final body = {
+      'model': cfg.model,
+      'messages': [
+        {'role': 'system', 'content': system},
+        {'role': 'user', 'content': user},
+      ],
+      if (!isDs) 'temperature': 0.4,
+      ...cfg.buildThinkingParamsFor(thinkingLevel ?? cfg.thinking),
+      'stream': true,
+    };
+    final response = await postWithReasoningFallback(
+      '/chat/completions',
+      body,
+      cfg: cfg,
+      responseType: ResponseType.stream,
+    );
+    yield* _parseSseStream(_responseStream(response));
+  }
+
   /// 基于已有识别结果发送追问,返回流式 SSE 块。
   /// [endpoint] 指定槽位(主/副),null 用本服务默认槽位(主)。
   /// [imageDataUris] 非空时以多模态消息发送(模型能"看到"识别图片);
@@ -674,9 +710,9 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
           },
         {'role': 'user', 'content': lastUserContent},
       ],
-      // v1.4.4 对齐 DS 官方:max_tokens 含 reasoning 总预算,思考档 8192;
-      // DS 官方样例请求不带 temperature(dsh 源码同款),省略防思考模式异常
-      'max_tokens': cfg.model.toLowerCase().contains('deepseek') ? 8192 : 4096,
+      // v1.8.0:DS 省略 max_tokens(思考会吃光总预算 → content 为空),
+      // 与官方/dsh 一致;豆包仍显式设上限
+      if (!cfg.model.toLowerCase().contains('deepseek')) 'max_tokens': 4096,
       if (!cfg.model.toLowerCase().contains('deepseek')) 'temperature': 0.3,
       ...cfg.buildThinkingParamsFor(thinkingLevel ?? cfg.thinking),
       'stream': true,
@@ -854,8 +890,41 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
         .toList();
   }
 
-  /// 词条化截断清洗(数据层治本):模型可能把长句 word 截断成
-  /// "开头~20字符+省略号"(省略号形态不固定:…/.../⋯/……/.. 等),
+  /// 去掉整篇被 ``` 包裹的外壳(v1.8.0):学习内容按 Markdown 展示,
+  /// 模型有时会把整篇塞进一个代码块里,这里剥掉。
+  static String extractMarkdown(String text) {
+    final t = text.trim();
+    final m = RegExp(
+      r'^```(?:markdown|md)?\s*\n([\s\S]*?)\n?```$',
+    ).firstMatch(t);
+    if (m != null) return (m.group(1) ?? '').trim();
+    return t;
+  }
+
+  /// 从一段可能夹带说明文字的文本里取出 JSON 主体(纯函数,可单测)。
+  /// 用途(v1.8.0):思考模型有时把最终 JSON 写在 reasoning_content 里
+  /// (content 为空),此时应**从思考内容里取结果**,而不是把思考档位砍掉。
+  /// 兼容 ```json 代码块;取第一个 '{' 到最后一个 '}'。
+  static String extractJsonBlock(String text) {
+    final t = text.trim();
+    if (t.isEmpty) return '';
+    final fence = RegExp(r'```(?:json)?\s*([\s\S]*?)```').firstMatch(t);
+    if (fence != null) {
+      final inner = (fence.group(1) ?? '').trim();
+      if (inner.startsWith('{') || inner.startsWith('[')) return inner;
+    }
+    final start = t.indexOf('{');
+    final end = t.lastIndexOf('}');
+    if (start >= 0 && end > start) return t.substring(start, end + 1);
+    final arrStart = t.indexOf('[');
+    final arrEnd = t.lastIndexOf(']');
+    if (arrStart >= 0 && arrEnd > arrStart) {
+      return t.substring(arrStart, arrEnd + 1);
+    }
+    return '';
+  }
+
+  /// 词条化截断清洗(数据层治本):模型可能把长句 word 截断成  /// "开头~20字符+省略号"(省略号形态不固定:…/.../⋯/……/.. 等),
   /// original_sentence 字段才是完整句子。word 带截断特征且存在更长的
   /// 完整句时,用完整句替换 word 数据本身——显示/保存/编辑全走完整句子。
   /// 正常单词/短语不带省略号特征,不受影响(如 "compound with" 不匹配)。

@@ -187,14 +187,103 @@ class _CategoryVocabSheetState extends State<_CategoryVocabSheet> {
   }
 
   Future<void> _load() async {
+    // v1.8.0 修「数量对不上」:原实现用默认 limit=100,分类 251 个词只读到
+    // 100 个 → 标题写 100 与实际不符。这里一次读全(上限给足)。
     final items = await DatabaseService.getVocabulariesByCategory(
-        widget.category);
+      widget.category,
+      limit: 5000,
+    );
     if (mounted) {
       setState(() {
         _items = items;
         _loading = false;
       });
     }
+  }
+
+  /// 重命名书/材料文件夹(v1.8.0:用户要求书名可改)
+  Future<void> _renameGroup(MaterialGroup group) async {
+    final ctrl = TextEditingController(text: group.label);
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('重命名'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: '名称',
+            border: OutlineInputBorder(),
+            isDense: true,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (newName == null || newName.isEmpty || !mounted) return;
+    if (group.path == '未归类') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('未归类分组的词请先在生词本里指定分类')),
+      );
+      return;
+    }
+    final newPath = '${widget.category}/$newName';
+    await DatabaseService.renameBookPath(
+      oldPath: group.path,
+      newPath: newPath,
+      newBookName: newName,
+    );
+    if (!mounted) return;
+    await context.read<VocabProvider>().loadVocabularies();
+    await _load();
+  }
+
+  /// 改页码/章节标签(v1.8.0):整组一起改,输入会被智能归一
+  Future<void> _editPageLabel(String label, List<Vocabulary> items) async {
+    final ctrl = TextEditingController(
+      text: label == '未标页码' ? '' : label,
+    );
+    final newLabel = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('修改页码/章节'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: '如 p9 或 p9-12',
+            border: OutlineInputBorder(),
+            isDense: true,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (newLabel == null || !mounted) return;
+    final ids = items.map((v) => v.id).whereType<int>().toList();
+    await DatabaseService.updateSourcePageByIds(ids, newLabel);
+    if (!mounted) return;
+    await _load();
   }
 
   /// 分组(v1.6.0):书籍 = 一本书一个文件夹,页/章为子分类;
@@ -303,6 +392,14 @@ class _CategoryVocabSheetState extends State<_CategoryVocabSheet> {
               '${hasSubgroups ? ' · ${subs.length} 个${widget.category == '书籍' ? '页码/章节' : '子分类'}' : ''}',
               style: TextStyle(fontSize: 11, color: Colors.grey[500]),
             ),
+            // 重命名(v1.8.0):书名/材料名可手动改
+            trailing: isUncategorized
+                ? null
+                : IconButton(
+                    tooltip: '重命名',
+                    icon: const Icon(Icons.edit_outlined, size: 16),
+                    onPressed: () => _renameGroup(g),
+                  ),
             children: hasSubgroups
                 ? subs.entries
                     .map((e) => _buildSubgroupTile(e.key, e.value))
@@ -340,6 +437,12 @@ class _CategoryVocabSheetState extends State<_CategoryVocabSheet> {
         subtitle: Text(
           '${items.length} 个生词',
           style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+        ),
+        // 改页码/章节(v1.8.0):整组一起改,输入自动归一
+        trailing: IconButton(
+          tooltip: '修改页码/章节',
+          icon: const Icon(Icons.edit_outlined, size: 15),
+          onPressed: () => _editPageLabel(label, items),
         ),
         children: _buildVocabList(items),
       ),
