@@ -1,7 +1,10 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
+
 import 'api_endpoint.dart';
 import 'base_api.dart';
 import 'database.dart';
+import 'doubao_api.dart';
 
 /// 专项文本 API 服务(副槽位):文章生成、回译练习、个性化建议。
 ///
@@ -59,20 +62,24 @@ $vocabText
 
     final response = await postWithReasoningFallback(
       '/v1/chat/completions',
-      {
-        'model': config.model,
-        'messages': [
+      // v1.9.0(P0-3/P1-1):统一走 buildChatBody —— DS 官方省略 max_tokens
+      // (它是 reasoning+content 总预算,写死会被思考吃光 → content 为空)
+      // 与 temperature,方舟等端点显式给。此前这里硬编码 max_tokens,
+      // 导致"思考一长就失败"的根因修复只落在识图侧、文章生成仍复发。
+      BaseApiService.buildChatBody(
+        cfg: config,
+        temperature: 0.8,
+        maxTokens: 4096,
+        messages: [
           {'role': 'system', 'content': systemPrompt},
           {'role': 'user', 'content': userPrompt},
         ],
-        'temperature': 0.8,
-        'max_tokens': 4096,
-        ...config.buildThinkingParams(),
-      },
+      ),
       cfg: config,
     );
 
-    final content = BaseApiService.extractContent(response.data);
+    // v1.9.0:正文为空时回退思考通道(思考模型常把结果写在 reasoning_content)
+    final content = BaseApiService.extractContentWithReasoning(response.data);
     return _parseJsonResponse(content);
   }
 
@@ -95,23 +102,22 @@ $vocabText
 
     final response = await postWithReasoningFallback(
       '/v1/chat/completions',
-      {
-        'model': config.model,
-        'messages': [
+      BaseApiService.buildChatBody(
+        cfg: config,
+        temperature: 0.5,
+        maxTokens: 4096,
+        messages: [
           {'role': 'system', 'content': systemPrompt},
           {
             'role': 'user',
             'content': '请为以下文章生成回译练习句子：\n\n$articleContent'
           },
         ],
-        'temperature': 0.5,
-        'max_tokens': 4096,
-        ...config.buildThinkingParams(),
-      },
+      ),
       cfg: config,
     );
 
-    final content = BaseApiService.extractContent(response.data);
+    final content = BaseApiService.extractContentWithReasoning(response.data);
     final parsed = _parseJsonResponse(content);
     final sentences = parsed['sentences'] as List<dynamic>?;
     if (sentences == null) return [];
@@ -158,9 +164,11 @@ $vocabText
 
     final response = await postWithReasoningFallback(
       '/v1/chat/completions',
-      {
-        'model': config.model,
-        'messages': [
+      BaseApiService.buildChatBody(
+        cfg: config,
+        temperature: 0.7,
+        maxTokens: 2048,
+        messages: [
           {'role': 'system', 'content': systemPrompt},
           {
             'role': 'user',
@@ -178,27 +186,32 @@ $memoryContext
 请给出个性化学习建议。'''
           },
         ],
-        'temperature': 0.7,
-        'max_tokens': 1024,
-        ...config.buildThinkingParams(),
-      },
+      ),
       cfg: config,
     );
 
-    return BaseApiService.extractContent(response.data);
+    return BaseApiService.extractContentWithReasoning(response.data);
   }
 
   // ═══════════════ 通用 JSON 解析 ═══════════════
 
+  /// 解析模型返回的 JSON(v1.9.0 加固):
+  /// - 统一用 `extractJsonBlock` 抠 JSON(兼容 ```围栏/前置说明文字)
+  /// - **绝不抛异常**:失败返回 `{}`,原文只进调试日志(旧实现抛
+  ///   FormatException 且把整段原文拼进 message,一路显示到 UI)
   Map<String, dynamic> _parseJsonResponse(String content) {
-    String jsonStr = content.trim();
-    if (jsonStr.startsWith('```')) {
-      final start = jsonStr.indexOf('\n');
-      final end = jsonStr.lastIndexOf('```');
-      if (start != -1 && end != -1) {
-        jsonStr = jsonStr.substring(start, end).trim();
-      }
+    final jsonStr = DoubaoApiService.extractJsonBlock(content);
+    if (jsonStr.isEmpty) {
+      debugPrint('ReadFlow deepseek parse: 未找到 JSON(共 ${content.length} 字)');
+      return const {};
     }
-    return jsonDecode(jsonStr) as Map<String, dynamic>;
+    try {
+      final parsed = jsonDecode(jsonStr);
+      if (parsed is! Map) return const {};
+      return Map<String, dynamic>.from(parsed);
+    } catch (e) {
+      debugPrint('ReadFlow deepseek parse failed: $e');
+      return const {};
+    }
   }
 }

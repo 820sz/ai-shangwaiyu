@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 自动更新:FileProvider 可共享的路径(APK 下载到应用缓存目录) -->
+<!-- 自动更新:FileProvider 可共享的路径。
+     P2-24:收窄到"缓存目录/updates"这一层(APK 就下在这里,见
+     update_service.dart),原来还声明了 cache/files/外部存储的整根目录,
+     等于把应用私有目录全部授权给系统安装器,授权面过大。 -->
 <paths>
-    <cache-path name="cache" path="."/>
-    <files-path name="files" path="."/>
-    <external-files-path name="external_files" path="."/>
-    <external-path name="external" path="."/>
+    <cache-path name="updates" path="updates/"/>
 </paths>

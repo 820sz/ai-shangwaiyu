@@ -1,9 +1,10 @@
 # PLAN.md — AI上外语 (readflow)
 
 ## 状态
-- 当前版本:**v1.4.4**(Release 已建 = Latest,v1.4.4 tag 已存在,资产待确认;上版 v1.4.3)
-- 当前阶段:✅ v1.4.4 已发(DS 思考官方格式/识别纪律/编辑铅笔/选中取消/分类合并),**等用户真机复测**
-- 状态协议:DONE_WITH_CONCERNS(真机复测未做)
+- 当前版本:**v1.9.0+49**(Release v1.9.0 = Latest;aapt versionCode=49/versionName=1.9.0;上版 v1.8.0)
+- 当前阶段:✅ **2026-09-19 代码审查修复已交付**(`docs/CODE-REVIEW-2026-09-19.md`,P0 3/3、P1 9/9、P2 34/34;落地记录见该文档 §10)
+- 状态协议:DONE(analyze 0 error/0 warning、193 测试全绿 +1 skip、APK 已发 Release、远端已同步)
+- 维护约定:本状态区是版本/阶段的唯一事实源,**每次发版必须同步更新这三行**(历史小节只追加,不回改)
 
 ## 需求摘要
 **项目**:AI上外语(Flutter 英语学习 App,D:\readflow)
@@ -26,6 +27,19 @@
 **被否掉的方案**:只改设置页标签不角色化;单一 API 槽位。
 
 ## 版本记录(最新在前)
+
+### v1.9.0 — 全面代码审查修复（P0 3/3 · P1 9/9 · P2 34/34）(2026-09-21,已发布)
+**背景**:用户要求"把软件做一个好好的 review,再依次修复所有问题"。审查产出 `docs/CODE-REVIEW-2026-09-19.md`(45 个文件逐行过 + 5 维度审计 + 主审逐条复核,剔除 3 条不成立结论、改写 2 条机制错误、降级 2 条严重度),本版按该报告 §8 的 B1–B6 批次全部实施;落地记录见该文档 §10。
+**最要紧的修复**:
+- **P0-2 迁移不可自愈**:步骤级 `catch` 吞异常 + `user_version` 照推 → 失败的迁移永不重跑(生词本 `no such column`)。改幂等 + 单事务 + 真实错误上抛 + 启动自检补列。**并修掉审查自己漏掉的一处**:`_onCreate` 建表语缺 `phonetic` 列,全新安装必崩。
+- **P0-3 第二个 API 服务没跟上修复**:DS 请求带 `max_tokens`/`temperature` → 正文被思考吃光。三个方法统一走 `buildChatBody` + 思考通道兜底。
+- **P1-2 SSE 中文跨包损坏**:逐块 `utf8.decode(allowMalformed)` 把被 TCP 切开的中文字节解成 U+FFFD(不可恢复)或整帧静默丢弃 → 改流式解码 + `LineSplitter` 分帧,失败计数并抛出可诊断错误。
+- **P1-3 流内卡死**:`receiveTimeout` 只管到响应头,首字节计时器收到第一个 chunk 就 cancel → 半开连接时前台永久转圈。三条流式链路各加 60s 空闲看门狗 + 「取消生成」。
+- **P1-5 复习进度丢标记**:`marks` 只在内存 → 续看后标记消失且重复计数(与 9 月"能一直点认识刷进度"同源)。改随进度持久化 + 按 `lastId` 定位断点。
+- **P1-7/P1-8/P1-9 数据一致性**:批量路径单事务分片、`fromMap` 全容错、dbVersion 10 补 9 索引 + 外键 + 清孤儿练习。
+- **P0-1 更新链路**:下载后校验 sha256 + 字节数(料取自 Release asset 的 `digest`/`size`),校验不过拒绝安装;签名仍为 debug keystore(A/B/C 三条路需产品决策,本版按 C 走)。
+**验证**:analyze 0 error / 0 warning(24 infos,与修复前同量级);193 测试全绿 +1 skip(修复前 176+1);APK arm64 versionName=1.9.0/versionCode=49,sha256 与 Release asset `digest` 逐字一致。
+**未做(留 v1.9.1+)**:`process_chat.dart` 三分拆、`follow_up_drawer` 控制器分文件、交互组件抽取、`flutter_markdown`(已 discontinued)/`hive`/`fl_chart` 依赖升级、§5 的三条增量动效、`process_chat` 结果区 Sliver 惰性化。
 
 ### v1.4.2 — 追问第二问400根因+收藏提示/总览布局+全文翻译分组(2026-08-27,已发布)
 **背景**:用户真机实测 v1.4.1:DS 不思考能识图但思考低度失败;追问第一问成功、第二问必 400;收藏提示相反;总览单词被挤拆行;首页模型菜单不跟随配置;全文翻译段落挤在一起。
@@ -302,6 +316,10 @@
 - Hive 读回嵌套 Map 是 `_Map<dynamic,dynamic>`,`as Map<String,dynamic>` 必炸 → 用 Map.from 重建
 - 临时文件命名别用系统组件靠扩展名识别的场景(PackageInstaller 按 .apk 判断)
 - 插件硬编码配置(open_filex authority)须与 Manifest 逐字核对
+- **🚨 2026-09-21 血的教训:别用脚本做批量字符串替换。** 为把 60 处灰阶正文色收敛到 AA,用 pwsh 写了个 `[System.IO.File]::ReadAllText / Replace / WriteAllText` 的批量替换,数组构造写错导致替换对变成了单字符 `'s'→'t'`,**一次把 4 个源文件的每个 s 都改成了 t**(process_chat.dart 122KB、my_materials_section.dart、vocab_list.dart、writing_logs_screen.dart 全毁)。救援路径记下来备用:
+  1. **`app.dill` 里有完整源码文本**。Flutter 构建产物 `.dart_tool/flutter_build/<hash>/app.dill`(kernel)内嵌了每个源文件的**原文**(注释都在),因为损坏是"每个 s→t"这种长度不变的双射,可以先用正则 `escape(损坏内容前 200 字) + t→[st]` 定位,再按**原始字符数**切出候选、用 `候选.Replace('s','t') == 损坏内容` 逐字节验证,1:1 还原(本次 4 个文件全部 VERIFIED 后还原成功,analyze 回到 24 infos 基线)。
+  2. 前提是**损坏前刚跑过 build/test**;所以改代码后跑一次 `flutter analyze`/`build` 同时也是给自己留了份"可反解的编译快照"。
+  3. 真要做批量替换,必须用 `edit` 工具(带确切 old/new 字面量),或者替换前 `git add` 一次留个 index 快照。
 
 ## v1.2.15 — 思考参数根治(budget_tokens→reasoning_effort)+ 新 logo(2026-08-07)
 

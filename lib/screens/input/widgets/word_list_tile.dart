@@ -80,7 +80,8 @@ class WordListTile extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w600,
-                        color: Colors.grey[400],
+                        // P2-31:正文灰阶对比度 <4.5:1,提到 grey[600] 达 WCAG AA
+                        color: Colors.grey[600],
                       ),
                     ),
                   ),
@@ -98,20 +99,25 @@ class WordListTile extends StatelessWidget {
                 ),
                 const SizedBox(width: 8),
                 // 词性/类型标签
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                  decoration: BoxDecoration(
-                    color: _barColor().withAlpha(20),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(
-                    item.partOfSpeech ?? _typeLabel(),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 10,
-                      color: _barColor(),
-                      fontWeight: FontWeight.w500,
+                // P2-32 附带修:2× 系统字号下标签+右侧图标会把整行撑爆
+                // (实测 Row overflowed by 25 pixels)。标签改为可压缩
+                // (Flexible + 已有 ellipsis),长词条与图标优先保留完整。
+                Flexible(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: _barColor().withAlpha(20),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      item.partOfSpeech ?? _typeLabel(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: _barColor(),
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                   ),
                 ),
@@ -160,7 +166,7 @@ class WordListTile extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 11,
                   fontStyle: FontStyle.italic,
-                  color: Colors.grey[500],
+                  color: Colors.grey[600],
                 ),
                 maxLines: null,
                 overflow: TextOverflow.visible,

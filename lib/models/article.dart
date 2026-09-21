@@ -28,12 +28,16 @@ class Article {
     };
   }
 
+  /// v1.9.0(审查 P1-8):全字段兜底 —— 旧实现 `as String` / `DateTime.parse`
+  /// 硬转,任意一行坏数据(老版本写入格式变化、手工改库)都会让
+  /// `getArticles()` 整个 map 抛异常,而 `ArticleProvider.loadArticles` 当时
+  /// 没有 try/catch → 文章页永久转圈、所有文章都进不去。
   factory Article.fromMap(Map<String, dynamic> map) {
     final vocabStr = map['vocab_ids'] as String? ?? '';
     return Article(
-      id: map['id'] as int?,
-      title: map['title'] as String,
-      content: map['content'] as String,
+      id: map['id'] is int ? map['id'] as int : null,
+      title: (map['title'] as String?) ?? '',
+      content: (map['content'] as String?) ?? '',
       translation: map['translation'] as String?,
       vocabIds: vocabStr.isEmpty
           ? []
@@ -42,7 +46,7 @@ class Article {
               .map((s) => int.tryParse(s.trim()) ?? 0)
               .where((n) => n > 0)
               .toList(),
-      createdAt: DateTime.parse(map['created_at'] as String),
+      createdAt: DateTime.tryParse('${map['created_at']}') ?? DateTime.now(),
     );
   }
 

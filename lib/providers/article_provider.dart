@@ -20,23 +20,34 @@ class ArticleProvider extends ChangeNotifier {
   bool get generating => _generating;
   String? get error => _error;
 
-  /// 加载文章列表
+  /// 加载文章列表(v1.9.0 加固,审查 P1-9/P1-8/P2-30):
+  /// - 练习改为**一次 IN 查询**再分组:旧实现 50 篇文章 = 51 次查询,
+  ///   而每提交一次练习答案就会调一次 loadArticles
+  /// - 全程 try/finally:`_loading` 必然复位,失败也给出 `_error`,
+  ///   不再"文章页永久转圈"
   Future<void> loadArticles() async {
     _loading = true;
+    _error = null;
     notifyListeners();
 
-    _articles = await DatabaseService.getArticles();
-    // 也加载每篇文章的练习
-    _exercisesByArticle = {};
-    for (final a in _articles) {
-      if (a.id != null) {
-        _exercisesByArticle[a.id!] =
-            await DatabaseService.getExercisesByArticle(a.id!);
+    try {
+      final articles = await DatabaseService.getArticles();
+      final map = <int, List<Exercise>>{};
+      final ids = articles.map((a) => a.id).whereType<int>().toList();
+      if (ids.isNotEmpty) {
+        for (final e in await DatabaseService.getExercisesByArticleIds(ids)) {
+          map.putIfAbsent(e.articleId, () => []).add(e);
+        }
       }
+      _articles = articles;
+      _exercisesByArticle = map;
+    } catch (e, stack) {
+      debugPrint('ReadFlow loadArticles error: $e\n$stack');
+      _error = '加载文章失败：$e';
+    } finally {
+      _loading = false;
+      notifyListeners();
     }
-
-    _loading = false;
-    notifyListeners();
   }
 
   /// 根据生词列表生成文章

@@ -5,11 +5,22 @@
          安装静默拒绝——不弹界面不报错(手动装 APK 走文件管理器,不受影响,
          这就是 App 内更新一直"没反应"的终极根因) -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+    <!-- 关备份(v1.9.0 审查 P2-8):默认 allowBackup=true 会把 Hive 里的
+         明文 API Key 与学习数据随系统云备份/换机迁移传出本机。
+         fullBackupContent="false" 是同一意图的显式化(老系统只认它,
+         新系统的 dataExtractionRules 也由此归零)——别只删这一行。
+         代价:换机不能靠系统备份恢复(数据都在本机,重装即全新)。 -->
+    <!-- 已删除 android:usesCleartextTraffic="true"(v1.9.0 审查 P2-7):
+         api_endpoint.normalizedBaseUrl 把用户存的 http:// 强制归一为 https://,
+         全库无 http:// 端点、无 localhost/内网地址,这个全局开关收益为零,
+         只扩大明文可被中间人篡改的面。内网自建端点请改用 networkSecurityConfig
+         按域名白名单放行(不要恢复全局开关)。 -->
     <application
         android:label="AI上外语"
-        android:usesCleartextTraffic="true"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false"
+        android:fullBackupContent="false">
         <activity
             android:name=".MainActivity"
             android:exported="true"

@@ -137,8 +137,10 @@ class Vocabulary {
         return DateTime.parse(raw);
       } catch (_) {}
     }
-    debugPrint('ReadFlow: bad date in DB, using DateTime.now()');
-    return DateTime.now();
+    // v1.9.0(审查 P1-8):回退到 epoch 而不是 now() —— 坏行被当成"今天"
+    // 会排到列表最前、显示"今天存的",让用户以为数据错乱
+    debugPrint('ReadFlow: bad date in DB, using epoch');
+    return DateTime.fromMillisecondsSinceEpoch(0);
   }
 
   /// 词条显示文本：模型会把长句 word 词条化截断（输出开头 ~20 字符+省略号，

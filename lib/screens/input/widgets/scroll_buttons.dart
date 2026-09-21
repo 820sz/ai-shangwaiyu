@@ -41,6 +41,11 @@ class _FollowUpScrollButtonsState extends State<FollowUpScrollButtons> {
     final atBottom = _maxExtent - _offset < 40;
     // 内容不满一屏时隐藏
     if (atTop && atBottom) return const SizedBox.shrink();
+    // A5:回顶/回底统一 260ms(原来 200ms 与结果页回顶的 300ms 手感不一致);
+    // A3:系统开启"移除动画"时瞬时跳转
+    final jump = MediaQuery.of(context).disableAnimations
+        ? Duration.zero
+        : const Duration(milliseconds: 260);
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -48,7 +53,7 @@ class _FollowUpScrollButtonsState extends State<FollowUpScrollButtons> {
           _smallButton(Icons.keyboard_arrow_up, () {
             widget.scrollCtrl.animateTo(
               0,
-              duration: const Duration(milliseconds: 200),
+              duration: jump,
               curve: Curves.easeOut,
             );
           }),
@@ -57,7 +62,7 @@ class _FollowUpScrollButtonsState extends State<FollowUpScrollButtons> {
           _smallButton(Icons.keyboard_arrow_down, () {
             widget.scrollCtrl.animateTo(
               widget.scrollCtrl.position.maxScrollExtent,
-              duration: const Duration(milliseconds: 200),
+              duration: jump,
               curve: Curves.easeOut,
             );
           }),
@@ -127,7 +132,10 @@ class _ScrollToTopButtonState extends State<ScrollToTopButton> {
         onTap: () {
           widget.scrollCtrl.animateTo(
             0,
-            duration: const Duration(milliseconds: 300),
+            // A5:与回底按钮统一 260ms;A3:移除动画时瞬时
+            duration: MediaQuery.of(context).disableAnimations
+                ? Duration.zero
+                : const Duration(milliseconds: 260),
             curve: Curves.easeOut,
           );
         },

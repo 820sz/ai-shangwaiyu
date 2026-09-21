@@ -49,3 +49,7 @@ app.*.map.json
 
 # API 同步脚本的本地缓存(每次同步会变,不入库)
 /tool/_blob_cache.json
+
+# 审查工具(open-code-review)的中间产物与脚本临时文件(审查 §3 仓库卫生)
+/_ocr_*.json
+/_tmp_*

@@ -53,15 +53,97 @@ abstract class BaseApiService {
     throw Exception('API 返回内容为空');
   }
 
-  /// POST — 自适应递归降级(最多 3 次),应对端点不认思考参数的情况:
-  /// 1. 有 reasoning_effort → 移除它(保留 thinking: enabled)
-  /// 2. thinking: enabled → disabled → 整体移除
+  /// 构建 chat/completions 请求体(v1.9.0 抽出的公共纯函数,可单测)。
+  ///
+  /// 抽取动机(审查 P1-1):仓库里曾有两套并行的请求构造 —— 思考档位/
+  /// max_tokens 的根因修复只落在 `doubao_api`,`deepseek_api`(文章生成、
+  /// 回译练习、学习建议)仍发旧参数,导致"同一类 bug 修两遍、另一处必复发"。
+  ///
+  /// 规则:
+  /// - **DeepSeek 官方**:省略 `max_tokens`(它是 reasoning+content 总预算,
+  ///   写死会被思考吃光 → content 为空)、省略 `temperature`(官方样例与
+  ///   dsh 都不发)、补 `stream_options.include_usage`
+  /// - **其他端点**(方舟/第三方网关):显式 `max_tokens` + `temperature`,
+  ///   且**不发** `stream_options`(未知字段可能 400)
+  static Map<String, dynamic> buildChatBody({
+    required ApiEndpointConfig cfg,
+    required List<Map<String, dynamic>> messages,
+    bool stream = false,
+    double temperature = 0.3,
+    int maxTokens = 4096,
+    String? thinkingLevel,
+    bool includeThinking = true,
+  }) {
+    final official = cfg.isDeepSeekOfficial;
+    return {
+      'model': cfg.model,
+      'messages': messages,
+      if (!official) 'max_tokens': maxTokens,
+      if (!official) 'temperature': temperature,
+      if (includeThinking)
+        ...cfg.buildThinkingParamsFor(thinkingLevel ?? cfg.thinking),
+      if (official && stream) 'stream_options': {'include_usage': true},
+      if (stream) 'stream': true,
+    };
+  }
+
+  /// 降级一次(纯函数,可单测):同时移除 `reasoning_effort` 并把
+  /// `thinking` 置为 `disabled` —— 第一步就真正换掉两类不兼容参数,
+  /// 因此只重试一次就够(审查 P1-4:旧实现第一步只删 reasoning_effort
+  /// 却保留 `thinking: enabled`,对不认该字段的端点等于原样重发)。
+  /// 没有任何可降级字段时返回 null —— 调用方应立即失败,不做无意义重发。
+  static Map<String, dynamic>? degradeOnce(Map<String, dynamic> body) {
+    final next = Map<String, dynamic>.from(body);
+    var changed = false;
+    if (next.remove('reasoning_effort') != null) changed = true;
+    final thinking = next['thinking'];
+    if (thinking is Map) {
+      if ((thinking['type'] as String?) == 'enabled') {
+        next['thinking'] = {'type': 'disabled'};
+      } else {
+        next.remove('thinking');
+      }
+      changed = true;
+    }
+    return changed ? next : null;
+  }
+
+  /// 提取正文;**正文为空但思考通道有内容时返回思考内容**(v1.9.0)。
+  /// 用途:思考模型常把最终结果整段写在 `reasoning_content`(content 为空),
+  /// 调用方拿到后可用 `extractJsonBlock` 抠出 JSON —— 而不是把用户选的
+  /// 思考档位砍成"不思考"。
+  static String extractContentWithReasoning(Map<String, dynamic> data) {
+    final error = data['error'];
+    if (error != null) {
+      final msg = error is Map ? (error['message'] ?? '未知错误') : '$error';
+      throw Exception('API 返回错误：$msg');
+    }
+    final choices = data['choices'] as List<dynamic>?;
+    if (choices == null || choices.isEmpty) {
+      throw Exception('API 返回空响应，请检查模型是否可用');
+    }
+    final message = choices[0]['message'];
+    if (message == null) {
+      throw Exception('API 响应格式异常：缺少 message 字段');
+    }
+    final content = message['content'];
+    if (content is String && content.trim().isNotEmpty) return content;
+    final reasoning = message['reasoning_content'];
+    if (reasoning is String && reasoning.trim().isNotEmpty) return reasoning;
+    throw Exception('API 返回内容为空');
+  }
+
+  /// POST — 自适应降级重试(**最多 1 次**,v1.9.0 收敛):
+  /// 只在"参数不兼容"类 4xx(见 [isReasoningError])且请求体确实含有
+  /// 可降级字段时重试一次,并同时去掉 reasoning_effort、关闭 thinking。
+  /// [cancelToken] 供调用方中途取消(流式看门狗/用户点取消)。
   Future<Response> postWithReasoningFallback(
     String path,
     Map<String, dynamic> body, {
     required ApiEndpointConfig cfg,
     ResponseType? responseType,
     int retryDepth = 0,
+    CancelToken? cancelToken,
   }) async {
     final apiKey = cfg.apiKey;
     if (apiKey == null || apiKey.isEmpty) {
@@ -73,32 +155,17 @@ abstract class BaseApiService {
             headers: {'Authorization': 'Bearer $apiKey'},
             responseType: responseType,
           ),
-          data: body);
+          data: body,
+          cancelToken: cancelToken);
     } on DioException catch (e) {
-      if (!isReasoningError(e) || retryDepth >= 3) rethrow;
-
-      final degraded = Map<String, dynamic>.from(body);
-
-      // Step 1: 移除 reasoning_effort(最常见的不兼容参数)
-      if (degraded.containsKey('reasoning_effort')) {
-        degraded.remove('reasoning_effort');
-      } else if (degraded['thinking'] is Map) {
-        // Step 2: enabled → disabled → 移除 thinking
-        final t = degraded['thinking'] as Map;
-        final type = t['type'] as String?;
-        if (type == 'enabled') {
-          degraded['thinking'] = {'type': 'disabled'};
-        } else {
-          degraded.remove('thinking');
-        }
-      } else {
-        rethrow;
-      }
-
+      if (!isReasoningError(e) || retryDepth >= 1) rethrow;
+      final degraded = degradeOnce(body);
+      if (degraded == null) rethrow;
       return postWithReasoningFallback(path, degraded,
           cfg: cfg,
           responseType: responseType,
-          retryDepth: retryDepth + 1);
+          retryDepth: retryDepth + 1,
+          cancelToken: cancelToken);
     }
   }
 

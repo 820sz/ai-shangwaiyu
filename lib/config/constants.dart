@@ -109,7 +109,7 @@ class AppConstants {
 
   // ── 数据库 ──
   static const String dbName = 'readflow.db';
-  static const int dbVersion = 9;
+  static const int dbVersion = 10;
 
   // ── 收藏夹 ──
   /// 收藏来源:追问答案 / 词汇卡片

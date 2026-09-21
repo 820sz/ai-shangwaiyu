@@ -225,11 +225,15 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
       ),
     };
 
-    final isDs = modelName.toLowerCase().contains('deepseek');
-
-    return {
-      'model': modelName,
-      'messages': [
+    // 请求体统一走 BaseApiService.buildChatBody(v1.9.0):
+    // DS 官方省略 max_tokens(思考与正文共享总预算)/temperature、补 stream_options;
+    // 方舟等端点显式给 max_tokens 与 temperature,且不发 stream_options。
+    return BaseApiService.buildChatBody(
+      cfg: config,
+      stream: stream,
+      temperature: 0, // 识别要确定性
+      maxTokens: 4096,
+      messages: [
         {'role': 'system', 'content': systemPrompt},
         {
           'role': 'user',
@@ -249,54 +253,10 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
           ],
         },
       ],
-      // v1.8.0 根因修复(用户实测"思考一长就被砍成不思考"):
-      // DeepSeek 官方/dsh 的请求**默认不带 max_tokens**——它是
-      // reasoning+content 的总预算,写死 8192 会被思考吃光,导致
-      // content 为空(reasoning-only)。DS 一律省略,交服务端默认预算;
-      // 豆包仍显式限制输出长度。
-      if (!isDs) 'max_tokens': 4096,
-      // DS 官方/样例请求不带 temperature(dsh llm-deepseek 只在显式配置时才发),
-      // 思考模式与其组合可能引发不稳定——DS 请求省略,豆包保留 0(确定性)
-      if (!isDs) 'temperature': 0,
-      ...config.buildThinkingParams(),
-      // DS 官方流式要求/样例带 usage 上报(dsh 也带)
-      if (isDs) 'stream_options': {'include_usage': true},
-      if (stream) 'stream': true,
-    };
+    );
   }
 
   // ── 同步版（保留向下兼容） ──
-
-  /// 拍照取词 — 发送图片到豆包 Vision API（非流式）
-  Future<List<Map<String, dynamic>>> extractVocabulary(
-    List<File> imageFiles, {
-    String? sourceBook,
-    String? sourcePage,
-    String analysisMode = AppConstants.analysisModeMarked,
-  }) async {
-    if (imageFiles.isEmpty) throw Exception('没有可识别的图片');
-    if (!config.isConfigured) {
-      throw Exception('请先在设置中配置主 API Key');
-    }
-
-    final imageUris = await Future.wait(
-      imageFiles.map((f) => _imageToDataUri(f)),
-      eagerError: true,
-    );
-
-    final body = _buildRequestBody(
-      imageUris,
-      sourceBook: sourceBook,
-      sourcePage: sourcePage,
-      analysisMode: analysisMode,
-    );
-
-    final response = await postWithReasoningFallback(
-      '/chat/completions', body, cfg: config);
-
-    final content = BaseApiService.extractContent(response.data);
-    return parseResponse(content, analysisMode: analysisMode);
-  }
 
   // ── 流式版（新增） ──
 
@@ -342,11 +302,13 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
     yield* _parseSseStream(data.stream);
   }
 
-  /// SSE data 行解析 → 产出 SseChunk（null = [DONE] 或空行）
-  SseChunk? _parseDataLine(String jsonStr) {
-    if (jsonStr.isEmpty || jsonStr == '[DONE]') return null;
+  /// 单个 SSE 事件 → SseChunk(null = 无内容 / [DONE] / 解析失败)
+  static SseChunk? _chunkFromEventPayload(String payload) {
+    final trimmed = payload.trim();
+    if (trimmed.isEmpty || trimmed == '[DONE]') return null;
     try {
-      final data = jsonDecode(jsonStr);
+      final data = jsonDecode(trimmed);
+      if (data is! Map) return null;
       final choices = data['choices'] as List<dynamic>?;
       if (choices == null || choices.isEmpty) return null;
       final delta = choices[0]['delta'];
@@ -358,42 +320,82 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
         return SseChunk(text: reasoning, isReasoning: true);
       }
     } catch (e) {
-      debugPrint('ReadFlow SSE: $e');
+      debugPrint('ReadFlow SSE frame parse failed: $e');
+      rethrow; // 交由调用方计数,不再静默丢弃
     }
     return null;
   }
 
-  /// SSE 流解析器：区分 reasoning_content 和 content
-  /// 按 \n\n 分隔 SSE 事件，跨 TCP 包的残片保留在 buffer 等下次补齐
-  Stream<SseChunk> _parseSseStream(Stream<List<int>> rawStream) async* {
-    String buffer = '';
-    await for (final bytes in rawStream) {
-      buffer += utf8.decode(bytes, allowMalformed: true);
-      // 按双换行切分完整的 SSE 事件
-      while (buffer.contains('\n\n')) {
-        final eventEnd = buffer.indexOf('\n\n');
-        final event = buffer.substring(0, eventEnd);
-        buffer = buffer.substring(eventEnd + 2);
+  /// SSE 流解析器(v1.9.0 重写,公开以便单测)。
+  ///
+  /// 相比旧实现(逐块 `utf8.decode(allowMalformed: true)` + 只认 `\n\n`)修掉:
+  /// 1. **中文跨包损坏**:改用 `utf8.decoder` 流式解码,被 TCP 包切开的
+  ///    多字节字符会保留半个序列等下一块 —— 旧实现会把它们烧成 U+FFFD
+  ///    且不可恢复(坏数据静默入库)。
+  /// 2. **分帧**:按 SSE 规范以"空行"结束事件,兼容 `\n` / `\r\n` / 孤立 `\r`
+  ///    (用 LineSplitter),不再依赖硬编码 `\n\n`。
+  /// 3. **同一事件多条 `data:`**:按规范用 `\n` 拼接后解析(旧实现只取第一行,
+  ///    会丢掉含 finish_reason/真实 content 的那一段)。
+  /// 4. **内存上限**:单事件累计超过 1MB 直接抛错,避免 buffer 无界增长。
+  /// 5. **失败可见**:帧解析失败计数;若整条流一个 chunk 都没产出却失败过,
+  ///    抛出可诊断错误(旧实现只 debugPrint,表现为"AI 没识别到内容")。
+  static Stream<SseChunk> parseSseStream(Stream<List<int>> rawStream) async* {
+    final dataLines = <String>[];
+    var eventChars = 0;
+    var parsedFrames = 0;
+    var failedFrames = 0;
 
-        for (final line in event.split('\n')) {
-          if (line.startsWith('data: ')) {
-            final chunk = _parseDataLine(line.substring(6).trim());
-            if (chunk != null) yield chunk;
-          }
-        }
+    SseChunk? takeEvent() {
+      if (dataLines.isEmpty) return null;
+      final payload = dataLines.join('\n');
+      dataLines.clear();
+      eventChars = 0;
+      try {
+        final chunk = _chunkFromEventPayload(payload);
+        parsedFrames++;
+        return chunk;
+      } catch (_) {
+        failedFrames++;
+        return null;
       }
     }
-    // 尾部残留 flush（流结束但 buffer 里还有未关闭的事件）
-    if (buffer.trim().isNotEmpty) {
-      for (final line in buffer.split('\n')) {
-        final trimmed = line.trim();
-        if (trimmed.startsWith('data: ')) {
-          final chunk = _parseDataLine(trimmed.substring(6).trim());
-          if (chunk != null) yield chunk;
+
+    final lines = rawStream
+        .transform(utf8.decoder) // allowMalformed:false —— 坏字节必须暴露
+        .transform(const LineSplitter());
+
+    await for (final line in lines) {
+      if (line.isEmpty) {
+        final chunk = takeEvent();
+        if (chunk != null) yield chunk;
+        continue;
+      }
+      // SSE 字段格式:`field: value`(冒号后可有可无空格);只有 data 参与内容
+      if (line.startsWith('data:')) {
+        final raw = line.substring(5);
+        dataLines.add(raw.startsWith(' ') ? raw.substring(1) : raw);
+        eventChars += raw.length;
+        if (eventChars > 1 << 20) {
+          throw StateError('SSE 事件超过 1MB,已中止(可能是端点返回了非流式内容)');
         }
       }
+      // id/event/retry/注释(以 : 开头)等字段对本应用无用,忽略
+    }
+
+    // 流结束但最后一个事件没有以空行收尾 → 收尾处理
+    final tail = takeEvent();
+    if (tail != null) yield tail;
+
+    if (parsedFrames == 0 && failedFrames > 0) {
+      throw Exception(
+        '流式响应解析失败($failedFrames 帧无法解析),端点可能未按 SSE 返回',
+      );
     }
   }
+
+  /// 历史实例入口(保留调用点不变)
+  Stream<SseChunk> _parseSseStream(Stream<List<int>> rawStream) =>
+      DoubaoApiService.parseSseStream(rawStream);
 
   // ── 追问对话（text-only 流式） ──
 
@@ -410,9 +412,12 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
       throw Exception('请先在设置中配置 API Key');
     }
 
-    final body = {
-      'model': cfg.model,
-      'messages': [
+    final body = BaseApiService.buildChatBody(
+      cfg: cfg,
+      temperature: 0,
+      maxTokens: 1024,
+      thinkingLevel: 'disabled',
+      messages: [
         {
           'role': 'system',
           'content':
@@ -424,15 +429,17 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
         },
         {'role': 'user', 'content': word},
       ],
-      'temperature': 0,
-      if (!cfg.model.toLowerCase().contains('deepseek')) 'max_tokens': 1024,
-      'thinking': {'type': 'disabled'},
-    };
+    );
 
     final response = await postWithReasoningFallback(
         '/chat/completions', body, cfg: cfg);
     final content = BaseApiService.extractContent(response.data);
-    return parseWordInfo(content);
+    // v1.9.0:思考模型可能把 JSON 写在思考通道 → 统一兜底
+    return parseWordInfo(
+      content.trim().isNotEmpty
+          ? content
+          : BaseApiService.extractContentWithReasoning(response.data),
+    );
   }
 
   /// 解析 AI 补全返回的 JSON(纯静态,可单测)。
@@ -483,11 +490,15 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
       throw Exception('请先在设置中配置主 API Key');
     }
     final uris = await imageDataUrisFor(imageFiles);
-    final isDs = cfg.model.toLowerCase().contains('deepseek');
     final multi = uris.length > 1;
-    final body = {
-      'model': cfg.model,
-      'messages': [
+    final body = BaseApiService.buildChatBody(
+      cfg: cfg,
+      temperature: 0,
+      // v1.9.0(P2-18):多页手写稿 + 思考档位会吃预算,2048 太小 → 8192;
+      // DS 官方走 buildChatBody 自动省略 max_tokens(交服务端默认)
+      maxTokens: 8192,
+      thinkingLevel: 'disabled',
+      messages: [
         {
           'role': 'system',
           'content':
@@ -515,15 +526,12 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
           ],
         },
       ],
-      if (!isDs) 'max_tokens': 2048,
-      if (!isDs) 'temperature': 0,
-      // 写译批改是单轮快速任务,思考关闭(识别要的是准确不是推理)
-      'thinking': {'type': 'disabled'},
-    };
+    );
 
     final response = await postWithReasoningFallback(
         '/chat/completions', body, cfg: cfg);
-    final content = BaseApiService.extractContent(response.data).trim();
+    final content =
+        BaseApiService.extractContentWithReasoning(response.data).trim();
     if (content.isEmpty) {
       throw Exception('AI 未返回转写文本，请重试或手动输入');
     }
@@ -544,10 +552,12 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
     if (!cfg.isConfigured) {
       throw Exception('请先在设置中配置 API Key');
     }
-    final isDs = cfg.model.toLowerCase().contains('deepseek');
-    final body = {
-      'model': cfg.model,
-      'messages': [
+    final body = BaseApiService.buildChatBody(
+      cfg: cfg,
+      temperature: 0,
+      maxTokens: 8192, // 长作文 + 逐条点评需要空间(P2-18)
+      thinkingLevel: 'disabled',
+      messages: [
         {
           'role': 'system',
           'content':
@@ -563,14 +573,12 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
         },
         {'role': 'user', 'content': text},
       ],
-      if (!isDs) 'max_tokens': 4096,
-      if (!isDs) 'temperature': 0,
-      ...cfg.buildThinkingParamsFor('disabled'),
-    };
+    );
 
     final response = await postWithReasoningFallback(
         '/chat/completions', body, cfg: cfg);
-    final content = BaseApiService.extractContent(response.data);
+    // v1.9.0:统一从"正文或思考通道"取文本(思考模型可能把 JSON 写在思考里)
+    final content = BaseApiService.extractContentWithReasoning(response.data);
     final parsed = parseWritingReview(content);
     if (parsed.isEmpty && content.trim().isNotEmpty) {
       // 自诊断:解析失败时把 AI 原文带给用户(前400字)
@@ -587,19 +595,19 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
   /// 解析批改返回 JSON(纯静态,可单测)。兼容 ```json 包裹;
   /// 缺字段回空串/空列表,绝不抛异常——界面仍可显示部分结果。
   static Map<String, dynamic> parseWritingReview(String content) {
-    String jsonStr = content.trim();
-    if (jsonStr.startsWith('```')) {
-      final start = jsonStr.indexOf('\n');
-      final end = jsonStr.lastIndexOf('```');
-      if (start != -1 && end != -1) {
-        jsonStr = jsonStr.substring(start + 1, end).trim();
-      }
-    }
+    // v1.9.0(P2-17):统一 extractJsonBlock —— 思考模型常输出
+    // "好的,我来批改这份作文:\n```json\n{…}" 这类前置说明,
+    // 旧实现只在开头就是 ``` 时剥壳,否则整份解析失败(整轮批改白花钱)。
+    var jsonStr = extractJsonBlock(content);
+    if (jsonStr.isEmpty) jsonStr = content.trim();
     try {
       final parsed = jsonDecode(jsonStr);
       if (parsed is! Map) return {};
       String s(String key, [String def = '']) =>
           parsed[key]?.toString().trim() ?? def;
+      // v1.9.0:score 归一 —— 模型可能回 "85分"/"85/100"/null,
+      // 直接 toString 会把这些原样送进 UI(分数圆环显示"85分")。
+      final score = _normalizeScore(parsed['score']);
       final issues = <Map<String, String>>[];
       final rawIssues = parsed['issues'];
       if (rawIssues is List) {
@@ -621,7 +629,7 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
           c: (rawSummary is Map ? rawSummary[c]?.toString().trim() : '') ?? '',
       };
       return {
-        'score': s('score'),
+        'score': score,
         'correction': s('correction'),
         'summary': s('summary'),
         'issues': issues,
@@ -632,6 +640,18 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
     }
   }
 
+  /// 分数归一(纯函数,可单测):从 `85` / `"85分"` / `"85/100"` / `"85.5"`
+  /// 里取出 0-100 的整数;取不到返回空串(界面显示 `--`)。
+  static String _normalizeScore(Object? raw) {
+    if (raw == null) return '';
+    final m = RegExp(r'\d+(?:\.\d+)?').firstMatch(raw.toString());
+    if (m == null) return '';
+    final v = double.tryParse(m.group(0)!);
+    if (v == null) return '';
+    final clamped = v.clamp(0, 100).round();
+    return '$clamped';
+  }
+
   /// 通用流式文本生成(v1.8.0):给「AI 推荐学习材料 / 生成学习内容」这类
   /// 纯文本任务使用——system 提示词原样发送(不像 [followUpStream] 那样
   /// 套"英语学习助手问答"模板)。同样走用户选择的槽位与思考档位。
@@ -640,27 +660,29 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
     required String user,
     ApiEndpointConfig? endpoint,
     String? thinkingLevel,
+    CancelToken? cancelToken,
   }) async* {
     final cfg = endpoint ?? config;
     if (!cfg.isConfigured) {
       throw Exception('请先在设置中配置 API Key');
     }
-    final isDs = cfg.model.toLowerCase().contains('deepseek');
-    final body = {
-      'model': cfg.model,
-      'messages': [
+    final body = BaseApiService.buildChatBody(
+      cfg: cfg,
+      stream: true,
+      temperature: 0.4,
+      maxTokens: 8192, // 推荐清单/精读正文都可能较长(P2-18)
+      thinkingLevel: thinkingLevel,
+      messages: [
         {'role': 'system', 'content': system},
         {'role': 'user', 'content': user},
       ],
-      if (!isDs) 'temperature': 0.4,
-      ...cfg.buildThinkingParamsFor(thinkingLevel ?? cfg.thinking),
-      'stream': true,
-    };
+    );
     final response = await postWithReasoningFallback(
       '/chat/completions',
       body,
       cfg: cfg,
       responseType: ResponseType.stream,
+      cancelToken: cancelToken, // v1.9.0(P2-34):支持用户取消长生成
     );
     yield* _parseSseStream(_responseStream(response));
   }
@@ -698,9 +720,13 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
         : '你是英语学习助手。基于图片识别结果回答用户追问。简洁准确，根据材料量自行决定回答长度。\n\n'
             '识别材料上下文：\n$context';
 
-    final body = {
-      'model': cfg.model,
-      'messages': [
+    final body = BaseApiService.buildChatBody(
+      cfg: cfg,
+      stream: true,
+      temperature: 0.3,
+      maxTokens: 4096,
+      thinkingLevel: thinkingLevel,
+      messages: [
         {'role': 'system', 'content': systemContent},
         // 历史对话(上下楼记忆)— 仅已完成消息,最近 20 条由调用方截断
         for (final h in history)
@@ -710,13 +736,7 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
           },
         {'role': 'user', 'content': lastUserContent},
       ],
-      // v1.8.0:DS 省略 max_tokens(思考会吃光总预算 → content 为空),
-      // 与官方/dsh 一致;豆包仍显式设上限
-      if (!cfg.model.toLowerCase().contains('deepseek')) 'max_tokens': 4096,
-      if (!cfg.model.toLowerCase().contains('deepseek')) 'temperature': 0.3,
-      ...cfg.buildThinkingParamsFor(thinkingLevel ?? cfg.thinking),
-      'stream': true,
-    };
+    );
 
     try {
       final response = await postWithReasoningFallback(
@@ -724,7 +744,9 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
         responseType: ResponseType.stream);
       yield* _parseSseStream(_responseStream(response));
     } catch (e) {
-      // 带图但模型不支持图片 → 降级纯文本重试一次(每次追问最多 1 次降级)
+      // 带图但模型确实不支持图片 → 降级纯文本重试**一次**
+      // (v1.9.0 P1-4:收紧判据,见 _imageRejected —— 旧实现把任何
+      //  含 image 字样的 400 都当成"不支持图片",连"请求体过大"也重发)
       if (imageDataUris != null && imageDataUris.isNotEmpty && _imageRejected(e)) {
         debugPrint('ReadFlow followUp image rejected, retry text-only: $e');
         final retryBody = {
@@ -771,21 +793,58 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
     ];
   }
 
-  /// 判断错误是否"模型不支持图片"——带图追问失败时据此降级纯文本。
-  /// 覆盖 DioException(400/422/参数错误)与描述含图相关关键词的错误。
+  /// 判断错误是否"模型不支持图片"(纯函数,可单测)。
+  ///
+  /// v1.9.0 收紧(审查 P1-4):旧实现(1)把错误串里**任何** `image` 字样都算
+  /// 命中——而"request body too large"这类 400 也常带 image 字样,于是会把
+  /// 整份 base64 图片重发一次;(2)把**任何** 400/415/422 都算命中——参数错、
+  /// 限频边缘也重发。现在只在"明确不支持图片"时降级:
+  /// - 415/422(媒体类型/语义错误),或
+  /// - 400 且错误体命中 image/vision/multimodal 相关措辞,**且不含**
+  ///   too large / rate / length / context 这类与"不支持图片"无关的原因。
   static bool _imageRejected(Object e) {
-    final msg = e.toString().toLowerCase();
-    if (msg.contains('image') ||
-        msg.contains('vision') ||
-        msg.contains('multimodal') ||
-        msg.contains('picture')) {
-      return true;
-    }
+    final body = _errorBodyText(e).toLowerCase();
+    if (_looksLikeOversizeOrRate(body)) return false;
+
     if (e is DioException) {
       final code = e.response?.statusCode;
-      if (code == 400 || code == 422 || code == 415) return true;
+      if (code == 415 || code == 422) return true;
+      if (code == 400) return _looksLikeVisionRejection(body);
     }
-    return false;
+    return _looksLikeVisionRejection(body);
+  }
+
+  /// 从错误对象里取出"服务端返回体"文本(不含 Dio 的堆栈/URL,避免误命中)
+  static String _errorBodyText(Object e) {
+    if (e is DioException) {
+      final d = e.response?.data;
+      if (d is Map) {
+        final err = d['error'];
+        if (err is Map) {
+          return '${err['code'] ?? ''} ${err['message'] ?? ''} ${err['type'] ?? ''}';
+        }
+        return d['message']?.toString() ?? d.toString();
+      }
+      if (d is String) return d;
+      return e.message ?? '';
+    }
+    return e.toString();
+  }
+
+  static bool _looksLikeVisionRejection(String body) {
+    return body.contains('image') ||
+        body.contains('vision') ||
+        body.contains('multimodal') ||
+        body.contains('picture');
+  }
+
+  static bool _looksLikeOversizeOrRate(String body) {
+    return body.contains('too large') ||
+        body.contains('too long') ||
+        body.contains('exceed') ||
+        body.contains('rate limit') ||
+        body.contains('context length') ||
+        body.contains('maximum context');
   }
 
   /// 从响应中取流式 body(统一 postWithReasoningFallback 的两种返回形态)
@@ -803,21 +862,22 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
   /// 解析 AI 返回的 JSON 文本。
   /// [analysisMode]: 'marked' → items 列表, 'fullText' → paragraphs 列表
   static List<Map<String, dynamic>> parseResponse(String content, {String analysisMode = AppConstants.analysisModeMarked}) {
-    String jsonStr = content.trim();
-    // 去掉可能的 ```json 包裹
-    if (jsonStr.startsWith('```')) {
-      final start = jsonStr.indexOf('\n');
-      final end = jsonStr.lastIndexOf('```');
-      if (start != -1 && end != -1) {
-        jsonStr = jsonStr.substring(start, end).trim();
-      }
-    }
+    // v1.9.0(P2-15/A14):统一用 extractJsonBlock —— 兼容 ```围栏(含同行围栏)、
+    // 围栏外带解释文字("好的,识别结果如下:{…}")、前后空白。
+    // 旧实现只在以 ``` 开头时剥壳且用 substring(start,end) 会带上开围栏,
+    // 围栏后还有文字时直接解析失败。
+    var jsonStr = extractJsonBlock(content);
+    if (jsonStr.isEmpty) jsonStr = content.trim();
 
     final Map<String, dynamic> parsed;
     try {
       parsed = jsonDecode(jsonStr) as Map<String, dynamic>;
     } catch (_) {
-      throw FormatException('无法解析 AI 返回的 JSON: $content');
+      // v1.9.0(P2-15):不把整段原文塞进异常 —— 它会一路显示到 UI 并写进
+      // 会话快照(用户材料原文/提示词泄漏面);原文只进调试日志。
+      debugPrint('ReadFlow parseResponse failed (${content.length} chars): '
+          '${content.length > 400 ? '${content.substring(0, 400)}…' : content}');
+      throw FormatException('无法解析 AI 返回的 JSON(共 ${content.length} 字)');
     }
 
     // 全文翻译模式
@@ -924,10 +984,15 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
     return '';
   }
 
-  /// 词条化截断清洗(数据层治本):模型可能把长句 word 截断成  /// "开头~20字符+省略号"(省略号形态不固定:…/.../⋯/……/.. 等),
+  /// 词条化截断清洗(数据层治本):模型可能把长句 word 截断成
+  /// "开头~20字符+省略号"(省略号形态不固定:…/.../⋯/……/.. 等),
   /// original_sentence 字段才是完整句子。word 带截断特征且存在更长的
   /// 完整句时,用完整句替换 word 数据本身——显示/保存/编辑全走完整句子。
   /// 正常单词/短语不带省略号特征,不受影响(如 "compound with" 不匹配)。
+  ///
+  /// v1.9.0(P2-16):单词型(word)增加长度门槛 —— `etc...` 这类**合法带点
+  /// 缩写**不该被替换成整句(否则词与释义错配:"etc..." 配"等等",词条却成了
+  /// 一整句话)。短语/句子型保持原样:它们的省略号只可能来自截断。
   static String cleanTruncatedWord(
     String word,
     String wordType,
@@ -937,8 +1002,13 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
     if (originalSentence.length <= word.length) return word;
     // 截断特征:尾部 2+ 个点(…/⋯/../.../…… 等任意形态)
     final truncRe = RegExp(r'([…⋯]{1,}|\.{2,})$');
-    if (truncRe.hasMatch(word)) return originalSentence;
-    return word;
+    if (!truncRe.hasMatch(word)) return word;
+    if (wordType == 'word') {
+      final stripped = word.replaceAll(truncRe, '').trim();
+      // 短碎片(≤4 字符,如 etc/eg/i.e)更可能是"本身就带点的词"而不是截断
+      if (stripped.length < 5) return word;
+    }
+    return originalSentence;
   }
 
   // ── 模型列表（混合：先调API，失败则用内置清单兜底） ──

@@ -66,7 +66,8 @@ class _AiFollowUpBubbleState extends State<AiFollowUpBubble> {
                               msg.model!,
                               style: TextStyle(
                                 fontSize: 10,
-                                color: Colors.grey[500],
+                                // P2-31:正文灰阶对比度 <4.5:1,提到 grey[600] 达 WCAG AA
+                                color: Colors.grey[600],
                               ),
                             ),
                           )

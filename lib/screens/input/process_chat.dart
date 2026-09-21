@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -17,7 +18,6 @@ import '../../services/base_api.dart';
 import '../../services/doubao_api.dart';
 import '../../services/tts_service.dart';
 import '../../utils/follow_up_context.dart';
-import '../../utils/supplement_merge.dart';
 import 'widgets/word_list_tile.dart';
 import 'widgets/ai_result_header.dart';
 import 'widgets/word_detail_sheet.dart';
@@ -32,6 +32,9 @@ import 'widgets/model_avatars.dart';
 
 /// 流式处理阶段
 enum _StreamPhase { connecting, streaming, results, error }
+
+/// 失败类型(v1.9.0):只用于"是否值得自动重试"的判定
+enum _ErrorKind { none, timeout, network, api, parse }
 
 /// 展示模式
 enum _DisplayMode { detailed, quick }
@@ -73,6 +76,8 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
   // ── 结果 ──
   List<Vocabulary> _results = [];
   final Set<int> _selected = {};
+  /// 单词条保存流程是否在进行中(P2-14:防止连点叠出多个分类对话框)
+  bool _savingSingle = false;
   // 全文翻译结果
   List<Map<String, String>> _fullTextParagraphs = [];
   _DisplayMode _displayMode = _DisplayMode.detailed;
@@ -112,6 +117,18 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
   /// 内容被截断的同档位重试守卫
   bool _truncationRetried = false;
 
+  /// 流内空闲看门狗(v1.9.0,审查 P1-3)。
+  /// dio 的 receiveTimeout 只覆盖"等响应头"阶段,拿不到流式 body 的看护;
+  /// 首字节计时器又在收到第一个 chunk 后就取消 —— 于是"第二字之后卡死"
+  /// (网关半开 / 服务端思考完不吐字)在旧实现里表现为**永久转圈**,
+  /// 用户只能杀进程。这里每收到一个 chunk 就重置 60s 计时,到点主动断开。
+  Timer? _idleTimer;
+
+  /// 本次失败的类型(v1.9.0,审查 P1-4):不再用"错误文案里有没有'超时/
+  /// 网络/连接'"决定要不要自动重试 —— 服务端错误正文里出现这些词就会
+  /// 静默再发一次付费请求。分类只由 DioException.type 决定。
+  _ErrorKind _lastErrorKind = _ErrorKind.none;
+
   /// 追问当前使用的槽位配置(副未配置时回落到主)。
   /// v1.6.0:整套追问逻辑抽到 FollowUpController(与写译批改共用),
   /// 这里只保留「AI 补全词汇」等本页需要的槽位访问。
@@ -127,13 +144,9 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
   /// 本轮识别从第几张图开始（追加模式 = 上次的图片数；首次 = 0）
   int _streamStartIndex = 0;
 
-  /// 补充识别模式(v1.3.0 问题 3):对全部图片重新识别,只并入遗漏项。
-  /// 为 true 时 [_onStreamDone] 走去重合并分支,结束后复位。
-  bool _supplementMode = false;
-
-  /// 校准重识别模式(v1.7.0):用户对首次识别不满意时的"认真重做一遍"。
-  /// 与补充识别的区别:校准会**整组替换**结果(不合并),并用逐行扫描 +
-  /// 高清图 + 自检的强化提示词。为 true 时 [_onStreamDone] 走替换分支。
+  /// 校准重识别模式(v1.7.0, v1.8.0 合并"补充识别"后成为唯一的重跑入口):
+  /// 用户对首次识别不满意时的"认真重做一遍" —— 逐行扫描 + 高清图 + 输出前
+  /// 自检,结果**整组替换**(手动补充的词保留)。
   bool _recalibrateMode = false;
 
   /// 全文翻译:每轮识别的段落起点(imageIndex → 段落下标)。
@@ -321,6 +334,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     WidgetsBinding.instance.removeObserver(this);
     _subscription?.cancel();
     _firstByteTimer?.cancel();
+    _idleTimer?.cancel();
     _thinkingTimer?.cancel();
     _followUp.dispose();
     _scrollCtrl.dispose();
@@ -335,13 +349,10 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     if (state == AppLifecycleState.resumed) {
       // 回前台时若流已因网络断连而报错，自动静默重试
       if (_phase == _StreamPhase.error && mounted) {
-        final msg = _errorMessage ?? '';
-        if (msg.contains('超时') ||
-            msg.contains('Receive timeout') || // Dio 接收超时原文
-            msg.contains('连接') ||
-            msg.contains('网络') ||
-            msg.contains('Socket') ||
-            msg.contains('Connection')) {
+        // v1.9.0(P1-4):只按错误类型判断,不再对用户可见文案做子串匹配
+        // (服务端正文里出现"网络策略拦截"这类词就会误触发一次付费重发)
+        if (_lastErrorKind == _ErrorKind.timeout ||
+            _lastErrorKind == _ErrorKind.network) {
           _retry();
         }
         return;
@@ -363,6 +374,48 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
 
   // ═══════════════ 主屏流式 ═══════════════
 
+  /// 空闲看门狗(v1.9.0,审查 P1-3):60s 没收到任何字节 → 主动断开并报错。
+  /// 覆盖"第一个字之后卡死"这段旧实现没有任何保护的区域。
+  void _armIdleWatchdog() {
+    _idleTimer?.cancel();
+    _idleTimer = Timer(const Duration(seconds: 60), () {
+      if (!mounted) return;
+      if (_phase != _StreamPhase.streaming &&
+          _phase != _StreamPhase.connecting) {
+        return;
+      }
+      _subscription?.cancel();
+      _subscription = null;
+      _lastErrorKind = _ErrorKind.timeout;
+      setState(() {
+        _phase = _StreamPhase.error;
+        _errorMessage = '生成中断：60 秒没有收到新数据。\n'
+            '可能是网络中断或服务端卡住，可点「重试」继续（思考档位保持不变）。';
+      });
+    });
+  }
+
+  /// 错误分类(纯函数,可单测):只依据 DioException.type 与服务端状态码,
+  /// 不看用户可见文案
+  static _ErrorKind _classifyError(Object e) {
+    if (e is DioException) {
+      switch (e.type) {
+        case DioExceptionType.connectionTimeout:
+        case DioExceptionType.receiveTimeout:
+        case DioExceptionType.sendTimeout:
+          return _ErrorKind.timeout;
+        case DioExceptionType.connectionError:
+          return _ErrorKind.network;
+        default:
+          final code = e.response?.statusCode;
+          if (code != null && code >= 400) return _ErrorKind.api;
+          return _ErrorKind.network;
+      }
+    }
+    if (e is FormatException) return _ErrorKind.parse;
+    return _ErrorKind.api;
+  }
+
   void _startStreaming() {
     _firstByteTimer?.cancel();
     _lastChunkAt = null; // 新流开始,重置心跳
@@ -373,9 +426,11 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     // 思考模式直接等真实结果,Dio receiveTimeout 180s 是最终兜底。
     // 到点仍未收到任何字节(连 reasoning 都不吐)判定模型空回复,报错让用户重试
     final timeoutSeconds = thinking == 'disabled' ? 25 : 60;
+    _armIdleWatchdog();
     _firstByteTimer = Timer(Duration(seconds: timeoutSeconds), () {
       if (mounted && _phase == _StreamPhase.connecting) {
         _subscription?.cancel();
+        _lastErrorKind = _ErrorKind.timeout;
         setState(() {
           _phase = _StreamPhase.error;
           _errorMessage =
@@ -395,10 +450,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         sourceBook: widget.sourceBook,
         sourcePage: widget.sourcePage,
         analysisMode: widget.analysisMode,
-        // 补充识别:告知已有词,只找遗漏(v1.3.0 问题 3)
-        excludeWords:
-            _supplementMode ? _results.map((v) => v.word).toList() : const [],
-        // 校准重识别:强化提示词 + 高清图(v1.7.0)
+        // 重新识别(校准):强化提示词 + 高清图(v1.7.0/v1.8.0)
         calibrate: _recalibrateMode,
       );
 
@@ -406,6 +458,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         (chunk) {
           _firstByteTimer?.cancel();
           _lastChunkAt = DateTime.now(); // 心跳更新
+          _armIdleWatchdog(); // P1-3:每个 chunk 重置空闲看门狗
           if (!mounted) return;
 
           if (chunk.isReasoning) {
@@ -452,8 +505,11 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         onDone: _onStreamDone,
         onError: (e) {
           _firstByteTimer?.cancel();
+          _idleTimer?.cancel();
           _thinkingTimer?.cancel();
           _subscription = null; // 流已断,供回前台检测
+          // v1.9.0(P1-4):错误分类落地,供回前台"是否值得自动重试"判定
+          _lastErrorKind = _classifyError(e);
           final msg = e.toString();
           String hint;
           if (msg.contains('Connection timed out') || msg.contains('超时')) {
@@ -483,8 +539,10 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
       );
     } catch (e) {
       _firstByteTimer?.cancel();
+      _idleTimer?.cancel();
       _thinkingTimer?.cancel();
       _thinkingStartAt = null;
+      _lastErrorKind = _classifyError(e);
       if (mounted) {
         setState(() {
           _phase = _StreamPhase.error;
@@ -505,6 +563,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
 
   void _onStreamDone() {
     _firstByteTimer?.cancel();
+    _idleTimer?.cancel();
     _thinkingTimer?.cancel(); // 思考计时在流结束/出错/重试都必须停,否则 setState 永转
     _thinkingStartAt = null;
     _subscription = null; // 流已结束,供回前台检测"静默中断"
@@ -573,22 +632,6 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         analysisMode: widget.analysisMode,
       );
       if (rawMaps.isEmpty) {
-        if (_supplementMode) {
-          // 补充识别没找到遗漏 → 回结果页 + 提示,不算错误(v1.3.0 问题 3)
-          setState(() {
-            _supplementMode = false;
-            _phase = _StreamPhase.results;
-          });
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('AI 未发现新的遗漏内容'),
-                behavior: SnackBarBehavior.floating,
-              ),
-            );
-          }
-          return;
-        }
         if (_recalibrateMode) {
           // 校准重识别没识别到标注 → 保留原结果,明确告知(不丢用户数据)
           setState(() {
@@ -681,13 +724,10 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
             final manual = _results.where((v) => v.photoPath == null).toList();
             _results = [...results, ...manual];
             _selected.clear();
-          } else if (_streamStartIndex == 0 && !_supplementMode) {
+          } else if (_streamStartIndex == 0) {
             // 首次识别:整组替换,默认不选中(长按才选中)
             _results = results;
             _selected.clear();
-          } else if (_supplementMode) {
-            // 补充识别:只并入遗漏项,按 (word, wordType) 去重(v1.3.0 问题 3)
-            _results = mergeSupplementResults(_results, results);
           } else {
             // 追加识别:新结果接在旧结果后;新词默认不选中,旧选中保留
             _results = [..._results, ...results];
@@ -697,7 +737,6 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
           _truncationRetried = false;
           _recalibrateMode = false; // 校准结束复位
           _streamStartIndex = 0; // 本轮结束复位,下次从头开始
-          _supplementMode = false; // 补充识别结束复位
           if (wasCalibrate) {
             ScaffoldMessenger.of(context)
               ..hideCurrentSnackBar()
@@ -718,7 +757,6 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
       // 校准/补充标记复位:失败后重试按普通重试处理(否则会带着旧模式重跑)
       final wasCalibrate = _recalibrateMode;
       _recalibrateMode = false;
-      _supplementMode = false;
       // v1.8.0:内容疑似截断(JSON 未闭合)时,用**同一思考档位**重试一次,
       // 不再把用户选的档位砍成"不思考";第二次仍截断则如实报错。
       final raw = _contentText.trim();
@@ -781,6 +819,18 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     _startStreaming();
   }
 
+  /// A3:系统开启"移除动画"(无障碍)时把时长降为 0 —— 之前全库只有
+  /// 复习页读了这个开关,其余动画照旧全量播放。
+  Duration _motionDuration(Duration d) =>
+      MediaQuery.of(context).disableAnimations ? Duration.zero : d;
+
+  /// P3:缩略图解码宽度 = 逻辑宽度 × 设备像素比(上限 2048,再大无意义)。
+  /// 不设的话 Image.file 会按原图解满内存 —— 12MP 照片约 48MB RGBA/张。
+  int _thumbDecodeWidth(double logicalWidth) {
+    final px = (logicalWidth * MediaQuery.devicePixelRatioOf(context)).round();
+    return px.clamp(64, 2048);
+  }
+
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollCtrl.hasClients) {
@@ -810,7 +860,9 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
 
   /// 点击聊天栏图片/页码条 → 滚动到对应分组的识别结果
   /// (v1.4.1:全文翻译模式滚到该图第一段,不再永远停在追加结果)
+  /// A5:三处"跳到某张图/回顶部"统一 260ms(A3:移除动画时瞬时)。
   void _scrollToImageGroup(int imageIndex) {
+    final jump = _motionDuration(const Duration(milliseconds: 260));
     if (widget.analysisMode == AppConstants.analysisModeFullText) {
       if (imageIndex >= 0 && imageIndex < _fullTextGroupStarts.length) {
         final start = _fullTextGroupStarts[imageIndex];
@@ -820,7 +872,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
             Scrollable.ensureVisible(
               ctx,
               alignment: 0.05,
-              duration: const Duration(milliseconds: 300),
+              duration: jump,
               curve: Curves.easeOut,
             );
             return;
@@ -829,11 +881,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
       }
       // 找不到对应段(单次多图无分组信息)→ 滚回顶部(图片区)
       if (_scrollCtrl.hasClients) {
-        _scrollCtrl.animateTo(
-          0,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
+        _scrollCtrl.animateTo(0, duration: jump, curve: Curves.easeOut);
       }
       return;
     }
@@ -844,7 +892,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
       Scrollable.ensureVisible(
         ctx,
         alignment: 0.0,
-        duration: const Duration(milliseconds: 300),
+        duration: jump,
         curve: Curves.easeOut,
       );
     }
@@ -1482,7 +1530,6 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     if (ok != true || !mounted) return;
     setState(() {
       _recalibrateMode = true;
-      _supplementMode = false;
       _streamStartIndex = 0; // 全部图片重跑
       _phase = _StreamPhase.connecting;
       _reasoningText = '';
@@ -1522,7 +1569,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                   ),
                   child: Text(
                     '图片副本已丢失，仅恢复识别结果',
-                    style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                    style: TextStyle(fontSize: 11, color: Colors.grey[600]),
                   ),
                 ),
               ] else ...[
@@ -1543,6 +1590,9 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                             child: Image.file(
                               _images.first,
                               width: imgWidth,
+                              // P3:按显示宽度解码 —— 否则 12MP 原图整张进内存
+                              // (RGBA 约 48MB/张,10 张极易 OOM)
+                              cacheWidth: _thumbDecodeWidth(imgWidth),
                               fit: BoxFit.contain,
                             ),
                           ),
@@ -1567,6 +1617,8 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                                   Image.file(
                                     _images[i],
                                     width: imgWidth,
+                                    // P3:同上,缩略条按显示宽度解码
+                                    cacheWidth: _thumbDecodeWidth(imgWidth),
                                     fit: BoxFit.cover,
                                   ),
                                   Positioned(
@@ -1603,7 +1655,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                 children: [
                   Text(
                     '共 $count 张图片',
-                    style: TextStyle(fontSize: 11, color: Colors.grey[400]),
+                    style: TextStyle(fontSize: 11, color: Colors.grey[600]),
                   ),
                   const Spacer(),
                   // 追加图片:圈画/全文翻译模式都支持(v1.4.0 问题 10)
@@ -1685,7 +1737,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
           children: [
             userAvatar(context: context),
             const SizedBox(height: 2),
-            Text('我', style: TextStyle(fontSize: 9, color: Colors.grey[400])),
+            Text('我', style: TextStyle(fontSize: 9, color: Colors.grey[600])),
           ],
         ),
       ],
@@ -1704,7 +1756,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
             const SizedBox(height: 2),
             Text(
               _providerName,
-              style: TextStyle(fontSize: 9, color: Colors.grey[400]),
+              style: TextStyle(fontSize: 9, color: Colors.grey[600]),
             ),
           ],
         ),
@@ -1774,7 +1826,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
               const SizedBox(height: 4),
               Text(
                 '$_currentModel · ${AppConstants.thinkingOptionsFor(_currentModel)[_currentThinking] ?? "不思考"}',
-                style: TextStyle(fontSize: 10, color: Colors.grey[500]),
+                style: TextStyle(fontSize: 10, color: Colors.grey[600]),
               ),
             ],
           ),
@@ -1898,13 +1950,15 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
           ),
           const SizedBox(height: 12),
           Text(
-            'AI 正在识别图片中的标记内容…',
+            widget.analysisMode == AppConstants.analysisModeFullText
+            ? 'AI 正在翻译图片中的文字…'
+            : 'AI 正在识别图片中的标记内容…',
             style: TextStyle(fontSize: 13, color: Colors.grey[600]),
           ),
           const SizedBox(height: 4),
           Text(
             '模型: $_currentModel',
-            style: TextStyle(fontSize: 11, color: Colors.grey[400]),
+            style: TextStyle(fontSize: 11, color: Colors.grey[600]),
           ),
         ],
       ),
@@ -1966,7 +2020,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                       : (_thinkingSeconds > 0
                             ? '正在生成… (思考耗时$_thinkingSeconds秒)'
                             : '正在生成…'),
-                  style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                  style: TextStyle(fontSize: 11, color: Colors.grey[600]),
                 ),
               ],
             ),
@@ -2060,19 +2114,26 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         setState(() => _queryTargetIndex = index);
       },
       onLongPress: () => _onWordLongPress(index),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: isSel ? cs.primary.withAlpha(8) : theme.colorScheme.surface,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: isSel ? barColor.withAlpha(80) : Colors.grey[200]!,
-            width: isSel ? 1.5 : 1,
+      // A2:选中是高频操作,只改底色在 180ms 里会显得"迟钝";
+      // 叠一次极轻的缩放(1.0→1.012)让"选中"有物理回应。
+      // A3:系统开启"移除动画"时全部瞬时完成。
+      child: AnimatedScale(
+        scale: isSel ? 1.012 : 1.0,
+        duration: _motionDuration(const Duration(milliseconds: 120)),
+        curve: Curves.easeOut,
+        child: AnimatedContainer(
+          duration: _motionDuration(const Duration(milliseconds: 140)),
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: isSel ? cs.primary.withAlpha(8) : theme.colorScheme.surface,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: isSel ? barColor.withAlpha(80) : Colors.grey[200]!,
+              width: isSel ? 1.5 : 1,
+            ),
           ),
-        ),
-        child: Column(
+          child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // 第一行：序号 + 单词（横幅单行）+ ✏ 紧凑按钮
@@ -2201,16 +2262,17 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
               const SizedBox(height: 4),
               Text(
                 item.grammarNote!,
-                style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
               ),
             ],
             // 底部提示
             const SizedBox(height: 4),
             Text(
               '点击询问 AI 详解 · 长按选中',
-              style: TextStyle(fontSize: 10, color: Colors.grey[350]),
+              style: TextStyle(fontSize: 11, color: Colors.grey[700]),
             ),
           ],
+          ),
         ),
       ),
     );
@@ -2264,10 +2326,11 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         // 选中计数
         Text(
           '已选 ${_selected.length}/${_results.length}',
-          style: TextStyle(fontSize: 11, color: Colors.grey[400]),
+          style: TextStyle(fontSize: 11, color: Colors.grey[600]),
         ),
         const SizedBox(height: 4),
         // 词汇列表 — 多图时按来源图片分组
+        _resetBookmarkFrameCache(),
         if (_images.length > 1)
           ..._buildGroupedResults(theme)
         else
@@ -2296,7 +2359,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
             style: TextStyle(
               fontSize: 12,
               color: _selected.isEmpty
-                  ? Colors.grey[400]
+                  ? Colors.grey[600] // P2-31:正文灰阶对比度 <4.5:1,提到 AA
                   : theme.colorScheme.primary,
               fontWeight: _selected.isEmpty ? FontWeight.normal : FontWeight.w600,
             ),
@@ -2448,32 +2511,41 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
   }
 
   /// 单独保存一个词
+  ///
+  /// P2-14:entry 用**词条快照**而不是 index —— 弹出分类/子分类对话框期间
+  /// 用户仍可能删词或重新识别,列表一变 `_results[index]` 就指向别的词
+  /// (轻则保存错词、重则 RangeError);再加一个 in-flight 守卫,
+  /// 防止连点叠出多个对话框。
   Future<void> _saveSingleItem(int index) async {
-    // 1. 弹出分类选择
-    final category = await showCategoryPicker(context);
-    if (category == null || !mounted) return;
-
-    // 2. 弹出子分类输入（可跳过）
-    final subInfo = await showSubCategoryInput(
-      context,
-      category: category,
-      prefill: widget.sourceBook ?? '',
-    );
-    if (!mounted) return;
-
+    if (_savingSingle) return;
+    if (index < 0 || index >= _results.length) return;
+    final snapshot = _results[index];
+    _savingSingle = true;
     try {
-      final item = _results[index].copyWith(
+      // 1. 弹出分类选择
+      final category = await showCategoryPicker(context);
+      if (category == null || !mounted) return;
+
+      // 2. 弹出子分类输入（可跳过）
+      final subInfo = await showSubCategoryInput(
+        context,
+        category: category,
+        prefill: widget.sourceBook ?? '',
+      );
+      if (!mounted) return;
+
+      final item = snapshot.copyWith(
         category: category,
         materialPath: subInfo?.materialPath,
-        sourceBook: subInfo?.materialName ?? _results[index].sourceBook,
+        sourceBook: subInfo?.materialName ?? snapshot.sourceBook,
         // 书籍类页码独立字段(v1.4.4),不参与材料路径分组
-        sourcePage: subInfo?.sourcePage ?? _results[index].sourcePage,
+        sourcePage: subInfo?.sourcePage ?? snapshot.sourcePage,
       );
       await context.read<VocabProvider>().saveVocabularies([item]);
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('已保存：${_results[index].word}')));
+        ).showSnackBar(SnackBar(content: Text('已保存：${snapshot.word}')));
       }
     } catch (e) {
       if (mounted) {
@@ -2481,6 +2553,8 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
           context,
         ).showSnackBar(SnackBar(content: Text('保存失败：$e')));
       }
+    } finally {
+      _savingSingle = false; // 无论成功失败都要放行下一次保存
     }
   }
 
@@ -2559,7 +2633,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
           const SizedBox(height: 4),
           Text(
             '模型: $_currentModel',
-            style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+            style: TextStyle(fontSize: 11, color: Colors.grey[600]),
           ),
           const SizedBox(height: 12),
           Row(
@@ -2595,7 +2669,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
   Widget _attributionLine() {
     return Text(
       '翻译释义由 $_providerName 大模型 ($_currentModel) 生成 · 仅供参考',
-      style: TextStyle(fontSize: 10, color: Colors.grey[350]),
+      style: TextStyle(fontSize: 11, color: Colors.grey[700]),
     );
   }
 
@@ -2676,7 +2750,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
               // 修改原文后例句自动替换提示
               Text(
                 '修改「原文」后，例句中的「${item.displayWordText.length > 12 ? '${item.displayWordText.substring(0, 12)}…' : item.displayWordText}」会自动替换为新词',
-                style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                style: TextStyle(fontSize: 11, color: Colors.grey[600]),
               ),
             ],
           ),
@@ -2771,12 +2845,28 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     ].join('\n');
   }
 
+  /// 收藏状态(v1.9.0,审查 P2-5):**同一次 build 只 watch 一次**。
+  /// 旧实现每行都 `context.watch<BookmarkProvider>()`,N 个词 = N 次依赖注册
+  /// + N 次 `_items.any(...)` 线性扫描;收藏夹越大越慢,且任意一次收藏
+  /// 都会重建整页。仍然用 watch(不用 read)——收藏/取消后星标实时变化。
+  BookmarkProvider? _bookmarkFrameCache;
+
   bool _isVocabBookmarked(Vocabulary v) {
-    // 用 watch:收藏/取消后星标实时变化(用 read 不会重建,v1.4.0 实测"点星没反应"根因)
-    return context
-        .watch<BookmarkProvider>()
-        .isBookmarked(
-            AppConstants.bookmarkSourceVocab, _vocabBookmarkContent(v));
+    final provider = _bookmarkFrameCache ??= context.watch<BookmarkProvider>();
+    return provider.isBookmarked(
+        AppConstants.bookmarkSourceVocab, _vocabBookmarkContent(v));
+  }
+
+  /// 每帧结束后失效缓存,下一帧重新 watch(保持响应式)。
+  /// 返回零尺寸占位 Widget —— 它被放在 children 列表里调用,
+  /// 返回 void 会把 null 塞进 List<Widget>(运行期类型错误)。
+  Widget _resetBookmarkFrameCache() {
+    if (_bookmarkFrameCache != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _bookmarkFrameCache = null;
+      });
+    }
+    return const SizedBox.shrink();
   }
 
   /// 系统 TTS 朗读(v1.5.0):单词点一下朗读。失败(无语音引擎)提示一次。
@@ -3052,7 +3142,5 @@ String replaceWordInSentence(
     return newWord;
   });
 }
-
-/// 回到顶部浮动小按钮 — 仅在结果态显示，点击后平滑滚动到顶部
 
 

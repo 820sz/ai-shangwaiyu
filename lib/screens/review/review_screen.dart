@@ -107,6 +107,12 @@ class _ReviewScreenState extends State<ReviewScreen> {
         filterDays: _filterDays,
         flipped: _flipped,
         updatedAt: DateTime.now(),
+        // v1.9.0(P1-5):已标记表与断点词 id 一起存 —— 续看后
+        // 卡片标记不丢、也不会重复计数
+        marks: Map<int, int>.from(_marks),
+        lastId: _deck.isEmpty
+            ? null
+            : (_index < _deck.length ? _deck[_index].id : _deck.last.id),
       );
       Hive.box(
         AppConstants.hiveBoxSettings,
@@ -140,6 +146,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
     int index = 0;
     int mastered = 0, learning = 0, fresh = 0;
     bool flipped = false;
+    Map<int, int> restoredMarks = {};
 
     final saved = resume ? _readProgress() : null;
     if (saved != null && !saved.isEmpty && saved.matchesDeck(items)) {
@@ -150,6 +157,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
       learning = saved.countLearning;
       fresh = saved.countNew;
       flipped = saved.flipped;
+      restoredMarks = Map<int, int>.from(saved.marks); // v1.9.0(P1-5)
     } else {
       items.shuffle(Random());
       deck = items;
@@ -164,6 +172,9 @@ class _ReviewScreenState extends State<ReviewScreen> {
       _countNew = fresh;
       _flipped = flipped;
       _finished = false;
+      _marks
+        ..clear()
+        ..addAll(restoredMarks);
       if (!keepResumable) _resumable = null;
     });
     if (save) _saveProgress();
@@ -436,7 +447,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
               ),
               const Spacer(),
               Text(
-                '已掌握 $_countMastered · 学习中 $_countLearning · 新词 $_countNew',
+                '认识/已掌握 $_countMastered · 模糊/学习中 $_countLearning · 不认识/新词 $_countNew',
                 style: TextStyle(
                   fontSize: 12,
                   color: Colors.grey[850],
@@ -531,9 +542,29 @@ class _ReviewScreenState extends State<ReviewScreen> {
             },
             onTap: () => setState(() => _flipped = !_flipped),
             child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 200),
-              transitionBuilder: (child, anim) =>
-                  FadeTransition(opacity: anim, child: child),
+              // A1(v1.9.0):翻面与换卡给不同方向语意 —— 纯淡入淡出时用户
+              // 分不清"我翻面了"还是"换词了";系统开"移除动画"时直接瞬时切换
+              duration: Duration(
+                milliseconds: MediaQuery.of(context).disableAnimations
+                    ? 0
+                    : (_flipped ? 180 : 240),
+              ),
+              transitionBuilder: (child, anim) {
+                final incoming = child.key == ValueKey('${_index}_$_flipped');
+                final slide = _flipped
+                    ? const Offset(0, 0.04)
+                    : Offset(incoming ? 0.12 : -0.12, 0);
+                return FadeTransition(
+                  opacity: anim,
+                  child: SlideTransition(
+                    position: Tween<Offset>(
+                      begin: slide,
+                      end: Offset.zero,
+                    ).animate(anim),
+                    child: child,
+                  ),
+                );
+              },
               child: Card(
                 key: ValueKey('${_index}_$_flipped'),
                 elevation: 3,
@@ -591,6 +622,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
               Expanded(
                 child: _markButton(
                   label: '不认识',
+                  statusLabel: '新词',
                   icon: Icons.sentiment_very_dissatisfied,
                   color: Colors.red,
                   level: 0,
@@ -600,6 +632,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
               Expanded(
                 child: _markButton(
                   label: '模糊',
+                  statusLabel: '学习中',
                   icon: Icons.sentiment_neutral,
                   color: Colors.blue,
                   level: 1,
@@ -609,6 +642,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
               Expanded(
                 child: _markButton(
                   label: '认识',
+                  statusLabel: '已掌握',
                   icon: Icons.sentiment_very_satisfied,
                   color: Colors.green,
                   level: 2,
@@ -759,9 +793,9 @@ class _ReviewScreenState extends State<ReviewScreen> {
 
   Widget _markBadge(int level) {
     final (String label, Color color) = switch (level) {
-      2 => ('已标记：认识', Colors.green),
-      1 => ('已标记：模糊', Colors.blue),
-      _ => ('已标记：不认识', Colors.red),
+      2 => ('已标记：认识 · 已掌握', Colors.green),
+      1 => ('已标记：模糊 · 学习中', Colors.blue),
+      _ => ('已标记：不认识 · 新词', Colors.red),
     };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -826,6 +860,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
     required IconData icon,
     required Color color,
     required int level,
+    required String statusLabel,
   }) {
     return GestureDetector(
       onTap: () => _mark(level),
@@ -847,6 +882,12 @@ class _ReviewScreenState extends State<ReviewScreen> {
                 fontWeight: FontWeight.w700,
                 color: color,
               ),
+            ),
+            // P2-29:动作词 + 结果状态词一起显示 —— 用户标完「不认识」回词库
+            // 看到的是「新词」,这里先把对应关系讲清楚
+            Text(
+              statusLabel,
+              style: TextStyle(fontSize: 10, color: color.withAlpha(200)),
             ),
           ],
         ),

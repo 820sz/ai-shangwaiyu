@@ -5,6 +5,8 @@ import '../../models/writing_log.dart';
 import '../../services/base_api.dart';
 import '../../services/database.dart';
 import '../../services/doubao_api.dart';
+import '../../widgets/error_state.dart';
+import '../../widgets/writing_labels.dart';
 import '../input/widgets/follow_up_drawer.dart';
 import 'writing_logs_screen.dart';
 
@@ -28,8 +30,9 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
   final _textCtrl = TextEditingController();
   final List<File> _images = [];
 
-  /// 手写档 / 电子档
-  String _materialType = 'handwritten';
+  /// 手写档 / 电子档(取值与标签统一在 lib/widgets/writing_labels.dart,
+  /// 与「写译记录」页共用同一份,避免两页文案漂移 —— P2-29)
+  String _materialType = kMaterialTypeHandwritten;
 
   _Phase _phase = _Phase.compose;
   String? _error;
@@ -40,6 +43,9 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
   bool _promptedSave = false;
   bool _saved = false;
 
+  /// 退出确认弹窗是否已经打开(P2-27):连按两次返回键只弹一个窗
+  bool _exitDialogOpen = false;
+
   late final FollowUpController _followUp;
 
   static const _maxImages = 9;
@@ -49,7 +55,8 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
     super.initState();
     _followUp = FollowUpController(
       buildContext: _buildFollowUpContext,
-      imageFilesProvider: () => _materialType == 'handwritten' ? _images : null,
+      imageFilesProvider: () =>
+          _materialType == kMaterialTypeHandwritten ? _images : null,
       historyKey: 'saved_writing_follow_up_chats',
       emptyHint: '就这次批改提问',
     );
@@ -219,7 +226,9 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
     if (ok == true) await _saveLog();
   }
 
-  Future<void> _saveLog() async {
+  /// 保存为写译记录。返回是否真的写库成功 ——
+  /// 退出确认要用它决定"保存后能不能 pop":失败还退出去等于数据照样丢。
+  Future<bool> _saveLog() async {
     try {
       await DatabaseService.insertWritingLog(
         WritingLog(
@@ -239,9 +248,89 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
         setState(() => _saved = true);
         _toast('已保存到写译记录');
       }
+      return true;
     } catch (e) {
       if (mounted) _toast('保存失败：$e');
+      return false;
     }
+  }
+
+  // ── 退出保护(P2-27) ──
+
+  /// 页面上是否有"值得挽留"的产物:敲过的原文 / 拍过的手写稿 / 已出的批改结果。
+  bool _hasUnsavedWork() {
+    if (_textCtrl.text.trim().isNotEmpty) return true;
+    if (_images.isNotEmpty) return true;
+    if (_phase == _Phase.result || _result.isNotEmpty) return true;
+    return false;
+  }
+
+  /// 原文词数(编辑态与退出提示共用一份算法,避免两处数出不同结果)
+  int get _wordCount => _textCtrl.text
+      .trim()
+      .split(RegExp(r'\s+'))
+      .where((w) => w.isNotEmpty)
+      .length;
+
+  /// 返回键/左上角箭头被按下时的三选一问(与识图页 process_chat.dart 的
+  /// `_onWillPop` 同一套交互风格:取消 / 直接离开 / 保存并退出)。
+  ///
+  /// 为什么必须问:手写档最多要拍 9 张、原文可能敲几百字、批改还花过一次
+  /// AI 调用 —— 按一下返回就全丢,而且不进 writing_logs(练习统计少记)。
+  /// 返回 true = 允许离开;false = 留在本页。
+  Future<bool> _onWillPop() async {
+    if (!_hasUnsavedWork()) return true; // 空白页:不打扰用户
+    if (_exitDialogOpen) return false; // 连点两次返回不叠弹窗
+    _exitDialogOpen = true;
+    var choice = 'cancel';
+    try {
+      final parts = <String>[];
+      if (_textCtrl.text.trim().isNotEmpty) parts.add('$_wordCount 词原文');
+      if (_images.isNotEmpty) parts.add('${_images.length} 张手写稿');
+      if (_phase == _Phase.result) parts.add('本次批改结果');
+      final what = parts.isEmpty ? '当前内容' : parts.join('、');
+      final hint = _phase == _Phase.result
+          ? '保存为写译记录后可在「写译记录」按日期查阅。'
+          : '保存为写译记录后可在「写译记录」按日期查阅。\n'
+                '（本次还没批改，记录里暂时没有分数与点评）';
+      choice =
+          await showDialog<String>(
+            context: context,
+            barrierDismissible: false,
+            builder: (ctx) => AlertDialog(
+              title: const Text('离开写译批改？'),
+              content: Text('你还有 $what 没有保存。\n$hint'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, 'cancel'),
+                  child: const Text('取消'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, 'discard'),
+                  child: const Text('直接离开'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(ctx, 'save'),
+                  child: const Text('保存为写译记录'),
+                ),
+              ],
+            ),
+          ) ??
+          'cancel';
+    } finally {
+      _exitDialogOpen = false;
+    }
+    if (choice == 'save') {
+      final saved = await _saveLog();
+      // 保存失败就留在页面上(草稿还在),不要"报个错然后照退不误"
+      if (!saved) return false;
+      // 顺手把本轮追问对话存进历史,避免"存了批改却丢了追问"
+      if (_followUp.dirty && _followUp.messages.value.isNotEmpty) {
+        await _followUp.saveConversation();
+      }
+      return true;
+    }
+    return choice == 'discard';
   }
 
   void _toast(String msg) {
@@ -266,64 +355,97 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('写译批改'),
-        actions: [
-          IconButton(
-            tooltip: '写译记录',
-            icon: const Icon(Icons.history_edu_outlined),
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const WritingLogsScreen()),
-            ),
-          ),
-        ],
-      ),
-      floatingActionButton: _phase == _Phase.result
-          ? FloatingActionButton.extended(
-              onPressed: () => showFollowUpDrawer(
-                context: context,
-                controller: _followUp,
-                title: '追问批改',
-              ),
-              icon: const Icon(Icons.chat_bubble_outline, size: 18),
-              label: const Text('追问'),
-            )
-          : null,
-      body: switch (_phase) {
-        _Phase.error => _buildError(context),
-        _Phase.transcribing || _Phase.reviewing => _buildLoading(context),
-        _Phase.result => _buildResult(context),
-        _Phase.compose => _buildCompose(context),
+    return PopScope(
+      canPop: false, // 我们手动控制:先问保存/离开,再决定退不退(P2-27)
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+        try {
+          final ok = await _onWillPop();
+          if (ok && mounted) Navigator.of(context).pop(result);
+        } catch (e) {
+          // 兜底:确认流程本身出错也不能把用户困在这一页
+          debugPrint('ReadFlow writeReview onPopInvokedWithResult: $e');
+          if (mounted) Navigator.of(context).pop(result);
+        }
       },
-    );
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('写译批改'),
+          actions: [
+            // 常驻保存入口(P2-27):结果页很长,底部的保存按钮得滚到底才看得见;
+            // 而原来只有"批改完成弹一次"的对话框,点过"暂不保存"就再也回不来。
+            // 这里刻意用紧凑的图标按钮:AppBar 是 centerTitle,放带文字的长按钮
+            // 会挤压居中的标题(窄屏上标题会被截断)。
+            if (_phase == _Phase.result)
+              IconButton(
+                tooltip: _saved ? '已保存到写译记录' : '保存记录',
+                icon: Icon(
+                  _saved ? Icons.check_circle_outline : Icons.save_outlined,
+                ),
+                onPressed: _saved ? null : () => _saveLog(),
+              ),
+            IconButton(
+              tooltip: '写译记录',
+              icon: const Icon(Icons.history_edu_outlined),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const WritingLogsScreen()),
+              ),
+            ),
+          ],
+        ),
+        floatingActionButton: _phase == _Phase.result
+            ? FloatingActionButton.extended(
+                onPressed: () => showFollowUpDrawer(
+                  context: context,
+                  controller: _followUp,
+                  title: '追问批改',
+                ),
+                icon: const Icon(Icons.chat_bubble_outline, size: 18),
+                label: const Text('追问'),
+              )
+            : null,
+        body: AnimatedSwitcher(
+          // A1:阶段切换(编辑 → 生成中 → 结果/错误)给 200ms easeOut 淡入,
+          // 不再硬切;分数圆环另有 520ms 的数值入场(见 _scoreBadge)。
+          // 输入、滚动这类高频操作不加动画。
+          duration: const Duration(milliseconds: 200),
+          switchInCurve: Curves.easeOut,
+          child: KeyedSubtree(
+            key: ValueKey(_phase),
+            child: switch (_phase) {
+              _Phase.error => _buildError(context),
+              _Phase.transcribing || _Phase.reviewing => _buildLoading(context),
+              _Phase.result => _buildResult(context),
+              _Phase.compose => _buildCompose(context),
+            },
+          ),
+        ),
+      ),
+    ); // PopScope
   }
 
   // ── 编辑态 ──
 
   Widget _buildCompose(BuildContext context) {
-    final isHandwritten = _materialType == 'handwritten';
-    final wordCount = _textCtrl.text
-        .trim()
-        .split(RegExp(r'\s+'))
-        .where((w) => w.isNotEmpty)
-        .length;
+    final isHandwritten = _materialType == kMaterialTypeHandwritten;
+    final wordCount = _wordCount;
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
       children: [
-        // 材料类型
+        // 材料类型(取值与文案见 lib/widgets/writing_labels.dart,
+        // 与「写译记录」页共用一份 —— P2-29 的局部收口)
         SegmentedButton<String>(
           segments: const [
             ButtonSegment(
-              value: 'handwritten',
+              value: kMaterialTypeHandwritten,
               icon: Icon(Icons.gesture, size: 16),
-              label: Text('手写档'),
+              label: Text(kMaterialTypeHandwrittenLabel),
             ),
             ButtonSegment(
-              value: 'electronic',
+              value: kMaterialTypeElectronic,
               icon: Icon(Icons.keyboard_alt_outlined, size: 16),
-              label: Text('电子档'),
+              label: Text(kMaterialTypeElectronicLabel),
             ),
           ],
           selected: {_materialType},
@@ -528,28 +650,12 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
   }
 
   Widget _buildError(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.error_outline, size: 48, color: Colors.red),
-            const SizedBox(height: 12),
-            SelectableText(
-              _error ?? '',
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 13),
-            ),
-            const SizedBox(height: 16),
-            OutlinedButton.icon(
-              onPressed: _backToCompose,
-              icon: const Icon(Icons.refresh, size: 16),
-              label: const Text('返回重试'),
-            ),
-          ],
-        ),
-      ),
+    // 用公共 ErrorState(P2-30 / B4):错误 + 一个明确出口,
+    // 与统计页/写译记录页的错误态长得一样,用户不必重新学
+    return ErrorState(
+      message: _error ?? '批改失败',
+      onRetry: _backToCompose,
+      retryLabel: '返回重试',
     );
   }
 
@@ -579,24 +685,10 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
             padding: const EdgeInsets.all(16),
             child: Row(
               children: [
-                Container(
-                  width: 64,
-                  height: 64,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: scoreColor.withAlpha(30),
-                    border: Border.all(color: scoreColor, width: 3),
-                  ),
-                  child: Center(
-                    child: Text(
-                      scoreTxt.isEmpty ? '--' : scoreTxt,
-                      style: TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
-                        color: scoreColor,
-                      ),
-                    ),
-                  ),
+                _scoreBadge(
+                  score: score,
+                  scoreTxt: scoreTxt,
+                  color: scoreColor,
                 ),
                 const SizedBox(width: 16),
                 Expanded(
@@ -705,15 +797,88 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
         SizedBox(
           width: double.infinity,
           child: FilledButton.tonalIcon(
-            onPressed: _saved ? null : _saveLog,
+            onPressed: _saved ? null : () => _saveLog(),
             icon: Icon(
               _saved ? Icons.check : Icons.save_outlined,
               size: 18,
             ),
-            label: Text(_saved ? '已保存到写译记录' : '保存此次练习'),
+            // 文案与 AppBar 的「保存记录」/退出弹窗的「保存为写译记录」对齐(P2-29)
+            label: Text(_saved ? '已保存到写译记录' : '保存为写译记录'),
           ),
         ),
       ],
+    );
+  }
+
+  /// 分数圆环 + 分数文本。
+  ///
+  /// A1(动效):从生成中到出结果是全 App 唯一的"成就时刻",值得一次
+  /// 520ms 的 TweenAnimationBuilder 入场 —— 数字从 0 涨到目标分,
+  /// 圆环按同一进度填充(两者读同一个动画值,数字和环不会脱节)。
+  /// 用 TweenAnimationBuilder 而不是 AnimationController:一次性的值入场,
+  /// 不需要显式管理生命周期,也不怕页面重建后重播(目标值不变就不重播)。
+  ///
+  /// B3(字号放大):不再是 64×64 硬盒 + fontSize 22 —— 系统字号 1.5×~2× 时
+  /// 会被裁掉。下限保持 64,上限 84 兜底,里面套 FittedBox:正常字号仍是 64,
+  /// 字号放大时圆环跟着长一点,极端字号则缩小填进去。
+  Widget _scoreBadge({
+    required int? score,
+    required String scoreTxt,
+    required Color color,
+  }) {
+    final target = (score ?? 0).clamp(0, 100).toDouble();
+    return TweenAnimationBuilder<double>(
+      tween: Tween<double>(begin: 0, end: target),
+      duration: const Duration(milliseconds: 520),
+      curve: Curves.easeOutCubic,
+      builder: (context, value, _) {
+        final shown = score == null
+            ? (scoreTxt.isEmpty ? '--' : scoreTxt)
+            : '${value.round()}';
+        return Stack(
+          alignment: Alignment.center,
+          children: [
+            ConstrainedBox(
+              constraints: const BoxConstraints(
+                minWidth: 64,
+                minHeight: 64,
+                maxWidth: 84,
+                maxHeight: 84,
+              ),
+              child: Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: color.withAlpha(25),
+                ),
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    shown,
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: color,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            // 圆环:与数字共用动画值(0 → score/100)
+            if (score != null)
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: CircularProgressIndicator(
+                    value: value / 100,
+                    strokeWidth: 3.5,
+                    backgroundColor: color.withAlpha(30),
+                    valueColor: AlwaysStoppedAnimation<Color>(color),
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
     );
   }
 

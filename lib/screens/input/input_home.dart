@@ -177,6 +177,9 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
                             _pendingImages[i],
                             width: 64,
                             height: 72,
+                            // P3:64×72 的缩略图按 128px 解码即可,
+                            // 原图直解是低端机 OOM 的主因
+                            cacheWidth: 128,
                             fit: BoxFit.cover,
                           ),
                         ),
@@ -734,7 +737,16 @@ class _ImagePreviewPage extends StatelessWidget {
           Center(
             child: InteractiveViewer(
               maxScale: 5.0,
-              child: Image.file(file, width: size.width, fit: BoxFit.contain),
+              child: Image.file(
+                file,
+                width: size.width,
+                // P3:按屏幕宽度解码,别把 12MP 原图整张解进内存(约 48MB/张)
+                cacheWidth:
+                    (size.width * MediaQuery.devicePixelRatioOf(context))
+                        .round()
+                        .clamp(320, 2048),
+                fit: BoxFit.contain,
+              ),
             ),
           ),
           // 顶部关闭按钮

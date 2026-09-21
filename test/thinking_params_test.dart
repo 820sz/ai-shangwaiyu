@@ -96,9 +96,14 @@ void main() {
     );
   });
 
-  test('主槽位配 DeepSeek 模型 → 官方档位 low/high/max,medium 归一 high', () async {
+  test('主槽位配 DeepSeek 模型(端点也是官方)→ 官方档位 low/high/max,medium 归一 high', () async {
     final box = Hive.box(AppConstants.hiveBoxSettings);
+    // v1.9.0(P2-19):是否"DS 官方端点"改为 baseUrl + 模型名**双条件**判定,
+    // 所以这里必须把端点一起配成 DeepSeek 官方 —— 这也正是用户只填 sk- Key
+    // 时 baseUrl getter 的自动配对结果(真机路径)。
+    await box.put(AppConstants.keyDoubaoBaseUrl, AppConstants.deepseekBaseUrl);
     await box.put(AppConstants.keyDoubaoModel, 'deepseek-v4-flash-vision-exp');
+    expect(ApiEndpointConfig.primary.isDeepSeekOfficial, isTrue);
     expect(
       ApiEndpointConfig.primary.buildThinkingParamsFor('low')['reasoning_effort'],
       'low',
@@ -117,6 +122,25 @@ void main() {
     );
     // 恢复默认豆包模型,避免影响其他测试
     await box.put(AppConstants.keyDoubaoModel, '');
+    await box.put(AppConstants.keyDoubaoBaseUrl, '');
+  });
+
+  test('方舟端点 + deepseek 模型名 → 仍按方舟参数族,且 max 归一 high(不发非法枚举)', () async {
+    final box = Hive.box(AppConstants.hiveBoxSettings);
+    await box.put(AppConstants.keyDoubaoBaseUrl, AppConstants.doubaoBaseUrl);
+    await box.put(AppConstants.keyDoubaoModel, 'deepseek-v3-1-250821'); // 方舟转售
+    final ep = ApiEndpointConfig.primary;
+    expect(ep.isDeepSeekOfficial, isFalse); // 端点不是 deepseek.com
+    // 方舟族:low → minimal(不是 DS 官方的 low)
+    expect(ep.buildThinkingParamsFor('low')['reasoning_effort'], 'minimal');
+    // 档位表按模型名给的是 DS 表(含「极致」),但方舟不认 max →
+    // 必须归一 high,否则 400 → 降级把思考整个关掉(v1.7.0 老 bug 复现)
+    expect(ep.buildThinkingParamsFor('max')['reasoning_effort'], 'high');
+    expect(ep.buildThinkingParamsFor('high')['reasoning_effort'], 'high');
+    // 表外值仍安全回落不思考
+    expect(ep.buildThinkingParamsFor('ultra'), {'thinking': {'type': 'disabled'}});
+    await box.put(AppConstants.keyDoubaoModel, '');
+    await box.put(AppConstants.keyDoubaoBaseUrl, '');
   });
 
   test('DS 档位表:官方只有 low/high/max(无 medium)+ 存量 medium 迁移 low', () async {
@@ -139,8 +163,13 @@ void main() {
 
   group('思考档位不再被兜底打回 disabled(v1.7.0)', () {
     Future<void> useDs() async {
-      await Hive.box(AppConstants.hiveBoxSettings)
-          .put(AppConstants.keyDoubaoModel, 'deepseek-v4-flash-vision-exp');
+      final box = Hive.box(AppConstants.hiveBoxSettings);
+      // 真机 DS 配置 = sk- Key(端点自动配对 deepseek.com)+ DS 视觉模型
+      await box.put(AppConstants.keyDoubaoBaseUrl, AppConstants.deepseekBaseUrl);
+      await box.put(
+        AppConstants.keyDoubaoModel,
+        'deepseek-v4-flash-vision-exp',
+      );
     }
 
     test('DS + max(极致) → thinking getter 原样返回 max(核心 bug 回归)', () async {

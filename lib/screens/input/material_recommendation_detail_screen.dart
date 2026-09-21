@@ -58,7 +58,12 @@ class _MaterialRecommendationDetailScreenState
       emptyHint: '就这份材料提问',
     );
     if (_content.trim().isEmpty) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _generate());
+      // P2-10:_generate 里要用 context(取 Provider),进页立刻返回时
+      // element 已 deactivate → 抛错并被 CrashLogger 记成"崩溃"
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _generate();
+      });
     }
   }
 
@@ -99,10 +104,16 @@ class _MaterialRecommendationDetailScreenState
         ),
       );
       final buffer = StringBuffer();
+      final reasoningBuffer = StringBuffer();
       final done = Completer<void>();
       _sub = stream.listen(
         (chunk) {
-          if (chunk.isReasoning) return;
+          // v1.9.0(P1-6):思考通道不展示但要留作兜底 —— 思考模型常把整段
+          // 内容写在 reasoning_content 里,旧实现直接丢弃 → 报"AI 未返回内容"
+          if (chunk.isReasoning) {
+            reasoningBuffer.write(chunk.text);
+            return;
+          }
           buffer.write(chunk.text);
           if (mounted) setState(() => _content = buffer.toString());
         },
@@ -115,6 +126,10 @@ class _MaterialRecommendationDetailScreenState
       await done.future;
 
       var text = buffer.toString().trim();
+      if (text.isEmpty) {
+        // 正文为空 → 用思考通道的内容兜底(仍是同一档位,不降级)
+        text = reasoningBuffer.toString().trim();
+      }
       if (text.isEmpty) {
         throw Exception('AI 未返回内容，请重试');
       }

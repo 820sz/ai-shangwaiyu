@@ -15,8 +15,32 @@ import 'package:path_provider/path_provider.dart';
 class CrashLogger {
   CrashLogger._();
 
+  /// 单条日志上限(字符)。栈回溯动辄上千行,不截断会让文件迅速膨胀。
+  static const int maxEntryChars = 4000;
+
+  /// 文件上限 256KB(审查 P2-6)。超过时只保留尾部——最近的崩溃才有诊断价值,
+  /// 旧的直接丢弃,避免"循环报错 → 文件无界增长 → 每次写入都在搬大文件"。
+  static const int maxFileBytes = 256 * 1024;
+
   static bool _installed = false;
   static File? _logFile;
+
+  /// 写盘前脱敏(审查 P2-6):诊断页内容常被截图/贴到 Issue,
+  /// 而崩溃栈与异常消息里可能夹带请求体中的 Key 或 Authorization 头。
+  /// 只保留"是什么类型的凭证",不留任何可用片段。
+  static String redact(String text) {
+    var out = text;
+    for (final re in _secretPatterns) {
+      out = out.replaceAll(re, '***');
+    }
+    return out;
+  }
+
+  static final List<RegExp> _secretPatterns = [
+    RegExp(r'sk-[A-Za-z0-9_-]{6,}'),
+    RegExp(r'ark-[A-Za-z0-9_-]{6,}'),
+    RegExp(r'Bearer\s+\S+'),
+  ];
 
   /// 在 main() 中 runApp 前调用一次。
   static Future<void> install() async {
@@ -46,14 +70,35 @@ class CrashLogger {
     final f = _logFile;
     if (f == null) return;
     try {
+      // 脱敏 + 截断都在写盘前做:读日志的人不需要原文,留长度足够定位问题
+      var safe = redact(text);
+      if (safe.length > maxEntryChars) {
+        safe = '${safe.substring(0, maxEntryChars)}…(已截断,原长 ${safe.length})';
+      }
+      _trimIfTooLarge(f);
       f.writeAsStringSync(
-        '[${DateTime.now().toIso8601String()}] $text\n',
+        '[${DateTime.now().toIso8601String()}] $safe\n',
         mode: FileMode.append,
         flush: true,
       );
     } catch (_) {
       // 日志写入失败绝不影响主流程
     }
+  }
+
+  /// 超过上限就把文件重写成"尾部片段 + 截断标记"。
+  /// 放在 append 之前做,而不是写完再检查:否则崩溃循环里每次都要写一次大文件。
+  static void _trimIfTooLarge(File f) {
+    if (!f.existsSync() || f.lengthSync() <= maxFileBytes) return;
+    final content = f.readAsStringSync();
+    // 按"字符数"取尾简单可靠(中文 3 字节,按字节切会切碎字符)
+    final keep = content.length > maxEntryChars * 2
+        ? content.substring(content.length - maxEntryChars * 2)
+        : content;
+    f.writeAsStringSync(
+      '…(日志超过 ${maxFileBytes ~/ 1024}KB,已丢弃较早内容)\n$keep',
+      mode: FileMode.write,
+    );
   }
 
   /// 读取崩溃日志(为空 = 无崩溃记录);每次读取后不清理,

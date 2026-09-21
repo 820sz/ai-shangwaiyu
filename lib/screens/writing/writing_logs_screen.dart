@@ -2,6 +2,10 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import '../../models/writing_log.dart';
 import '../../services/database.dart';
+import '../../widgets/confirm_destructive.dart';
+import '../../widgets/empty_state.dart';
+import '../../widgets/error_state.dart';
+import '../../widgets/writing_labels.dart';
 
 /// 写译记录(v1.6.0):按日期文件夹归档的写译练习轨迹,可查阅复盘。
 class WritingLogsScreen extends StatefulWidget {
@@ -35,6 +39,16 @@ class _WritingLogsScreenState extends State<WritingLogsScreen> {
     }
   }
 
+  /// 重试(P2-30):先回到加载态再拉数据——
+  /// 否则重试期间页面还挂着上一次的错误,看不出"点了有没有反应"
+  Future<void> _retry() async {
+    setState(() {
+      _error = null;
+      _logs = null;
+    });
+    await _load();
+  }
+
   /// 按日期分组(日期文件夹)
   Map<String, List<WritingLog>> _groupByDate() {
     final groups = <String, List<WritingLog>>{};
@@ -58,38 +72,52 @@ class _WritingLogsScreenState extends State<WritingLogsScreen> {
               child: Center(
                 child: Text(
                   '共 ${logs!.length} 篇',
-                  style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                  // P2-31:正文灰阶对比度 <4.5:1,提到 grey[600] 达 WCAG AA
+                  style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                 ),
               ),
             ),
         ],
       ),
-      body: _error != null
-          ? Center(child: Text(_error!))
-          : logs == null
-          ? const Center(child: CircularProgressIndicator())
-          : logs.isEmpty
-          ? _buildEmpty(theme)
-          : RefreshIndicator(
-              onRefresh: _load,
-              child: _buildList(theme),
-            ),
+      body: AnimatedSwitcher(
+        // A1:加载/失败/空/列表之间 180ms easeOut 切换,不再硬切
+        // (只有低频的状态切换才给动效,列表滚动等高频操作不加)
+        duration: const Duration(milliseconds: 180),
+        switchInCurve: Curves.easeOut,
+        child: _buildBody(theme),
+      ),
     );
   }
 
-  Widget _buildEmpty(ThemeData theme) {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.history_edu_outlined, size: 56, color: Colors.grey[300]),
-          const SizedBox(height: 12),
-          Text(
-            '还没有保存的写译练习',
-            style: TextStyle(color: Colors.grey[500]),
-          ),
-        ],
-      ),
+  /// 三态(P2-30 / B4):加载中 / 加载失败可重试 / 空态与列表。
+  /// 失败态此前只是一个裸 Text(连重试按钮都没有),用户只能退出去重进。
+  Widget _buildBody(ThemeData theme) {
+    if (_error != null) {
+      return ErrorState(
+        key: const ValueKey('logs-error'),
+        message: _error!,
+        onRetry: _retry,
+      );
+    }
+    final logs = _logs;
+    if (logs == null) {
+      return const Center(
+        key: ValueKey('logs-loading'),
+        child: CircularProgressIndicator(),
+      );
+    }
+    if (logs.isEmpty) {
+      return const EmptyState(
+        key: ValueKey('logs-empty'),
+        icon: Icons.history_edu_outlined,
+        title: '还没有保存的写译练习',
+        hint: '在「写译批改」批改后点「保存记录」即可归档到这里',
+      );
+    }
+    return RefreshIndicator(
+      key: const ValueKey('logs-list'),
+      onRefresh: _load,
+      child: _buildList(theme),
     );
   }
 
@@ -111,16 +139,19 @@ class _WritingLogsScreenState extends State<WritingLogsScreen> {
                   color: Colors.amber[700],
                 ),
                 const SizedBox(width: 6),
-                Text(
-                  groups[date]!.first.dateLabel,
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w600,
+                // B3:日期是变长文本,给 Flexible 让它换行而不是把这一行挤爆
+                Flexible(
+                  child: Text(
+                    groups[date]!.first.dateLabel,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
                 const SizedBox(width: 8),
                 Text(
                   '${groups[date]!.length} 篇',
-                  style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                  style: TextStyle(fontSize: 11, color: Colors.grey[600]),
                 ),
               ],
             ),
@@ -145,21 +176,36 @@ class _WritingLogsScreenState extends State<WritingLogsScreen> {
       margin: const EdgeInsets.only(bottom: 8),
       child: ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-        leading: Container(
-          width: 44,
-          height: 44,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: scoreColor.withAlpha(25),
-            border: Border.all(color: scoreColor.withAlpha(120), width: 1.5),
+        leading: ConstrainedBox(
+          // B3:原来是 44×44 的硬盒子装 fontSize 14 的分数,系统字号放大到
+          // 1.5×~2× 时文字会被裁掉。改成"下限 44(保持原视觉)+ 上限 60",
+          // 配 FittedBox:正常字号仍占 44,字号放大时盒子长一点,
+          // 极端字号下缩小填进去,永不裁切。
+          constraints: const BoxConstraints(
+            minWidth: 44,
+            minHeight: 44,
+            maxWidth: 60,
+            maxHeight: 60,
           ),
-          child: Center(
-            child: Text(
-              (log.score ?? '').isEmpty ? '--' : log.score!,
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.bold,
-                color: scoreColor,
+          child: Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: scoreColor.withAlpha(25),
+              border: Border.all(
+                color: scoreColor.withAlpha(120),
+                width: 1.5,
+              ),
+            ),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                (log.score ?? '').isEmpty ? '--' : log.score!,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  color: scoreColor,
+                ),
               ),
             ),
           ),
@@ -172,23 +218,26 @@ class _WritingLogsScreenState extends State<WritingLogsScreen> {
         ),
         subtitle: Padding(
           padding: const EdgeInsets.only(top: 4),
-          child: Row(
+          // B3:原来是一个 Row,系统字号放大到 2× 时"时间 + 两个标签"必然
+          // 横向溢出(黄黑条纹)。改 Wrap:正常字号仍是一行,字号大时自动换行。
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               Text(
                 log.timeLabel,
-                style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                // P2-31:正文灰阶对比度 <4.5:1,提到 AA
+                style: TextStyle(fontSize: 11, color: Colors.grey[600]),
               ),
-              const SizedBox(width: 8),
               _chip(
-                log.sourceType == 'handwritten' ? '手写档' : '电子档',
-                log.sourceType == 'handwritten'
+                materialTypeLabel(log.sourceType),
+                log.sourceType == kMaterialTypeHandwritten
                     ? Colors.deepPurple
                     : Colors.blueGrey,
               ),
-              if (log.issueCount > 0) ...[
-                const SizedBox(width: 6),
+              if (log.issueCount > 0)
                 _chip('${log.issueCount} 处问题', Colors.orange),
-              ],
             ],
           ),
         ),
@@ -219,30 +268,42 @@ class _WritingLogsScreenState extends State<WritingLogsScreen> {
     );
   }
 
-  void _confirmDelete(WritingLog log) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('删除练习记录'),
-        content: Text('确定删除「${log.title}」吗？删除后不可恢复。'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () async {
-              Navigator.pop(ctx);
-              if (log.id != null) {
-                await DatabaseService.deleteWritingLog(log.id!);
-              }
-              await _load();
-            },
-            child: const Text('删除'),
-          ),
-        ],
-      ),
+  /// 删除记录(P2-28):确认弹窗改用公共 [confirmDestructive](红底 + 不可恢复提示),
+  /// 并且删除成功后给 SnackBar——此前删完页面只是少一张卡,没有任何反馈。
+  Future<void> _confirmDelete(WritingLog log) async {
+    final ok = await confirmDestructive(
+      context,
+      title: '删除练习记录',
+      message: '确定删除「${log.title}」吗？删除后不可恢复。',
+    );
+    if (!ok || !mounted) return;
+    try {
+      if (log.id != null) {
+        await DatabaseService.deleteWritingLog(log.id!);
+      }
+    } catch (e) {
+      if (mounted) showFeedbackSnack(context, '删除失败：$e');
+      return;
+    }
+    if (!mounted) return;
+    await _load();
+    if (!mounted) return;
+    showFeedbackSnack(
+      context,
+      '已删除练习记录',
+      actionLabel: '撤销',
+      // 撤销要留够反应时间(默认 3 秒给普通提示用)
+      duration: const Duration(seconds: 6),
+      // 撤销 = 用同一条记录(含原 id、原 createdAt)重新插回,
+      // 日期分组与"共 N 篇"都会跟着恢复
+      onAction: () async {
+        try {
+          await DatabaseService.insertWritingLog(log);
+        } catch (e) {
+          debugPrint('ReadFlow writingLog undo: $e');
+        }
+        if (mounted) await _load();
+      },
     );
   }
 
@@ -277,16 +338,20 @@ class _WritingLogsScreenState extends State<WritingLogsScreen> {
             ),
             Row(
               children: [
-                Text(
-                  '${log.dateLabel} ${log.timeLabel}',
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w600,
+                // B3:日期是变长文本,给 Flexible 让它换行——
+                // 否则字号放大到 2× 时这一行必然横向溢出
+                Flexible(
+                  child: Text(
+                    '${log.dateLabel} ${log.timeLabel}',
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
                 const SizedBox(width: 8),
                 _chip(
-                  log.sourceType == 'handwritten' ? '手写档' : '电子档',
-                  log.sourceType == 'handwritten'
+                  materialTypeLabel(log.sourceType),
+                  log.sourceType == kMaterialTypeHandwritten
                       ? Colors.deepPurple
                       : Colors.blueGrey,
                 ),
@@ -433,7 +498,7 @@ class _WritingLogsScreenState extends State<WritingLogsScreen> {
               const SizedBox(height: 12),
               Text(
                 '批改模型:${log.model}',
-                style: TextStyle(fontSize: 10, color: Colors.grey[400]),
+                style: TextStyle(fontSize: 10, color: Colors.grey[600]),
               ),
             ],
           ],

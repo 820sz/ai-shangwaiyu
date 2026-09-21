@@ -21,6 +21,9 @@ class _AiArticleSectionState extends State<AiArticleSection> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      // P2-10:进页立刻返回时 element 已 deactivate,这里直接用 context 会抛错,
+      // 被 CrashLogger 记成"崩溃"污染诊断日志
+      if (!mounted) return;
       context.read<ArticleProvider>().loadArticles();
     });
   }

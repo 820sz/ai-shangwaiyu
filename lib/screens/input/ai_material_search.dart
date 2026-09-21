@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:dio/dio.dart';
 import 'package:provider/provider.dart';
 
 import '../../models/material_recommendation.dart';
@@ -39,17 +40,25 @@ class _AiMaterialSearchScreenState extends State<AiMaterialSearchScreen> {
   String _streamText = '';
   String? _error;
   StreamSubscription<SseChunk>? _sub;
+  CancelToken? _cancelToken;
 
   @override
   void initState() {
     super.initState();
     _profile = LearnerProfileStore.load();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _bootstrap());
+    // P2-10:_bootstrap 第一行就 context.read,进页立刻返回时 element 已
+    // deactivate → 抛错并被 CrashLogger 记成"崩溃",污染诊断日志
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _bootstrap();
+    });
   }
 
   @override
   void dispose() {
     _sub?.cancel();
+    // P2-34:总超时/「取消生成」用的令牌也要随页面销毁释放,否则请求仍挂着
+    _cancelToken?.cancel();
     super.dispose();
   }
 
@@ -88,6 +97,15 @@ class _AiMaterialSearchScreenState extends State<AiMaterialSearchScreen> {
   }
 
   /// 流式生成推荐清单(结果落库,可反复查看)
+  ///
+  /// v1.9.0 修复:
+  /// - **思考通道兜底**(P1-6):DeepSeek 思考模型常把 JSON 整段写在
+  ///   reasoning_content 里;旧实现 `if (chunk.isReasoning) return;` 直接丢弃,
+  ///   于是开着高思考档时这里必然报"未返回可解析的推荐清单"。
+  /// - **可取消 + 总超时**(P2-34):旧实现只 `await done.future`,
+  ///   模型一直吐字但永不结束时页面永久卡在"AI 正在推荐…"且无法取消。
+  /// - **原子替换**(P2-2):走 `replaceRecommendations` 单事务,
+  ///   不再"先清空再逐条插入"(中途失败会连已生成的学习内容一起丢)。
   Future<void> _generate({bool replace = false}) async {
     if (_generating) return;
     setState(() {
@@ -95,6 +113,8 @@ class _AiMaterialSearchScreenState extends State<AiMaterialSearchScreen> {
       _streamText = '';
       _error = null;
     });
+    final cancelToken = CancelToken();
+    _cancelToken = cancelToken;
     try {
       final vocab = context.read<VocabProvider>().vocabularies;
       final stream = _api.streamPrompt(
@@ -104,31 +124,49 @@ class _AiMaterialSearchScreenState extends State<AiMaterialSearchScreen> {
           vocab: vocab,
           category: widget.category,
         ),
+        cancelToken: cancelToken,
       );
       final buffer = StringBuffer();
+      final reasoningBuffer = StringBuffer();
       final done = Completer<void>();
       _sub = stream.listen(
         (chunk) {
-          if (chunk.isReasoning) return; // 思考过程不展示在结果里
+          if (chunk.isReasoning) {
+            // 思考过程不展示,但要留作兜底(P1-6)
+            reasoningBuffer.write(chunk.text);
+            return;
+          }
           buffer.write(chunk.text);
           if (mounted) setState(() => _streamText = buffer.toString());
         },
-        onDone: () => done.complete(),
+        onDone: () {
+          if (!done.isCompleted) done.complete();
+        },
         onError: (e) {
           if (!done.isCompleted) done.completeError(e);
         },
         cancelOnError: false,
       );
-      await done.future;
+      // 总预算 180s:模型持续吐字但永不结束时不至于永久卡住(P2-34)
+      await done.future.timeout(
+        const Duration(seconds: 180),
+        onTimeout: () {
+          _sub?.cancel();
+          throw Exception('生成超时(180s),已中止。可重试或降低思考档位');
+        },
+      );
 
+      // 结果来源:正文优先,正文解析不出再从思考通道抠(P1-6)
       var items = MaterialRecommendService.parseRecommendations(
         buffer.toString(),
         category: widget.category,
         profileSnapshot: _profile.summaryText,
       );
       if (items.isEmpty) {
-        // 思考模型可能把 JSON 写在思考通道 → 从累积文本里再抠一次
-        final extracted = DoubaoApiService.extractJsonBlock(buffer.toString());
+        final raw = buffer.toString().trim().isNotEmpty
+            ? buffer.toString()
+            : reasoningBuffer.toString();
+        final extracted = DoubaoApiService.extractJsonBlock(raw);
         if (extracted.isNotEmpty) {
           items = MaterialRecommendService.parseRecommendations(
             extracted,
@@ -141,10 +179,12 @@ class _AiMaterialSearchScreenState extends State<AiMaterialSearchScreen> {
         throw Exception('AI 未返回可解析的推荐清单');
       }
       if (replace) {
-        await DatabaseService.clearRecommendations(widget.category);
-      }
-      for (final item in items) {
-        await DatabaseService.insertRecommendation(item);
+        // 原子替换(P2-2):清空 + 插入在同一事务里,失败整体回滚
+        await DatabaseService.replaceRecommendations(widget.category, items);
+      } else {
+        for (final item in items) {
+          await DatabaseService.insertRecommendation(item);
+        }
       }
       await _loadSaved();
       if (mounted) {
@@ -205,6 +245,24 @@ class _AiMaterialSearchScreenState extends State<AiMaterialSearchScreen> {
               ),
             ],
           ),
+          if (_generating)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: OutlinedButton.icon(
+                onPressed: () {
+                  // P2-34:长生成可中止(取消后保留已生成片段)
+                  _cancelToken?.cancel('用户取消');
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('已取消生成，已生成的部分保留在下方'),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.stop, size: 16),
+                label: const Text('取消生成'),
+              ),
+            ),
           if (_error != null) ...[
             const SizedBox(height: 10),
             Text(

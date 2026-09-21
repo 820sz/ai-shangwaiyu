@@ -133,13 +133,14 @@ class _ArticleReaderScreenState extends State<ArticleReaderScreen> {
               Icon(Icons.bookmark_outline, size: 16, color: Colors.grey[500]),
               const SizedBox(width: 4),
               Text('包含 ${article.vocabCount} 个生词',
-                  style: TextStyle(color: Colors.grey[500], fontSize: 13)),
+                  // P2-31:正文灰阶对比度 <4.5:1,提到 grey[600] 达 WCAG AA
+                  style: TextStyle(color: Colors.grey[600], fontSize: 13)),
               const SizedBox(width: 16),
               Icon(Icons.calendar_today, size: 14, color: Colors.grey[500]),
               const SizedBox(width: 4),
               Text(
                   '${article.createdAt.month}月${article.createdAt.day}日',
-                  style: TextStyle(color: Colors.grey[500], fontSize: 13)),
+                  style: TextStyle(color: Colors.grey[600], fontSize: 13)),
             ],
           ),
           const SizedBox(height: 20),

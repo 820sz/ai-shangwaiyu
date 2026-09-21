@@ -36,11 +36,21 @@ class _VocabListScreenState extends State<VocabListScreen> {
       _selectedBook = widget.sourceBook!;
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      // P2-10:进页立刻返回时 element 已 deactivate,
+      // 不加这道判断会抛错并被 CrashLogger 记成"崩溃",污染诊断日志
+      if (!mounted) return;
       context.read<VocabProvider>().loadVocabularies(
             sourceBook:
                 _selectedBook == '全部' ? null : _selectedBook,
           );
     });
+  }
+
+  @override
+  void dispose() {
+    // P2-13:此前没有 dispose → 反复进出"生词本"会累积泄漏控制器
+    _searchCtrl.dispose();
+    super.dispose();
   }
 
   void _exitSelectionMode() {
@@ -236,7 +246,8 @@ class _VocabListScreenState extends State<VocabListScreen> {
                 children: [
                   Text(
                     '共 ${items.length} 个生词',
-                    style: TextStyle(color: Colors.grey[500], fontSize: 13),
+                    // P2-31:正文灰阶对比度 <4.5:1,提到 AA
+                    style: TextStyle(color: Colors.grey[600], fontSize: 13),
                   ),
                   const Spacer(),
                   if (_selectedBook != '全部')
@@ -255,7 +266,7 @@ class _VocabListScreenState extends State<VocabListScreen> {
                 ? Center(
                     child: Text(
                       _searchQuery.isEmpty ? '还没有生词' : '没有匹配结果',
-                      style: TextStyle(color: Colors.grey[400]),
+                      style: TextStyle(color: Colors.grey[600]),
                     ),
                   )
                 : ListView.builder(

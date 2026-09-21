@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
@@ -19,15 +21,30 @@ class UpdateInfo {
   /// 当前安装版本
   final String currentVersion;
 
+  /// 官方给出的 sha256 十六进制串(v1.9.0,审查 P0-1)。
+  /// 来自 GitHub Release asset 的 `digest` 字段;取不到时为空串,
+  /// 此时下载后至少校验字节数。
+  final String sha256;
+  /// 官方给出的字节数(0 = 未知)
+  final int sizeBytes;
+  /// 本次元数据的来源:'github'(直连)或镜像域名(审查 P0-1/P2-9 的知情权)
+  final String source;
+
   const UpdateInfo({
     required this.version,
     required this.downloadUrl,
     required this.releaseNotes,
     required this.currentVersion,
+    this.sha256 = '',
+    this.sizeBytes = 0,
+    this.source = 'github',
   });
 
-  /// 远程版本是否比当前新
+  /// 远程版本是否比当前新(v1.9.0:比较四段,含 build 号)
   bool get hasUpdate => UpdateService.compareVersions(version, currentVersion) > 0;
+
+  /// 是否走第三方镜像(用于界面上如实告知下载来源)
+  bool get viaMirror => source != 'github';
 }
 
 /// 自动更新服务:检查 GitHub Release → 下载 APK → 调起系统安装器
@@ -70,7 +87,7 @@ class UpdateService {
       const Duration(seconds: 20),
       onTimeout: () => null,
     );
-    if (direct != null) return _buildInfo(direct);
+    if (direct != null) return _buildInfo(direct, source: 'github');
 
     // 直连失败:并发收镜像(15s 截断),取版本最高者(可能 stale,但优于无响应)
     final mirrorResponses = <Map<String, dynamic>>[];
@@ -100,18 +117,30 @@ class UpdateService {
     }
   }
 
-  static Future<UpdateInfo?> _buildInfo(Map<String, dynamic> d) async {
+  static Future<UpdateInfo?> _buildInfo(
+    Map<String, dynamic> d, {
+    String source = 'github',
+  }) async {
     final tag = (d['tag_name'] as String? ?? '').replaceFirst(
       RegExp(r'^v'), '',
     );
     final body = d['body'] as String? ?? '';
     final assets = d['assets'] as List? ?? [];
 
-    // 找第一个 APK 资源
+    // 找第一个 APK 资源;v1.9.0(审查 P0-1):同时取 GitHub 提供的
+    // digest(sha256) 与 size,作为下载后完整性校验的依据
     String? apkUrl;
+    var sha256 = '';
+    var sizeBytes = 0;
     for (final asset in assets) {
       if (asset is Map && (asset['name'] as String? ?? '').endsWith('.apk')) {
         apkUrl = asset['browser_download_url'] as String?;
+        final digest = asset['digest']?.toString() ?? '';
+        if (digest.startsWith('sha256:')) {
+          sha256 = digest.substring('sha256:'.length).toLowerCase();
+        }
+        final size = asset['size'];
+        if (size is int) sizeBytes = size;
         break;
       }
     }
@@ -123,6 +152,9 @@ class UpdateService {
       downloadUrl: apkUrl,
       releaseNotes: body,
       currentVersion: current,
+      sha256: sha256,
+      sizeBytes: sizeBytes,
+      source: source,
     );
   }
 
@@ -154,22 +186,30 @@ class UpdateService {
 
   /// 版本号比较:a > b 返回正数,a < b 返回负数,相等返回 0。
   /// 支持 "1.2.3" / "1.2.3+4" / "v1.2.3" 格式。
+  /// v1.9.0(审查 P2-9):**纳入 `+build` 号** —— 旧实现 `split('+').first`
+  /// 把 build 号整个丢掉,于是"只升 build 号的修复版"会被判成"无更新",
+  /// 用户永远收不到(README 的发布流程也没约束必须改 versionName)。
   static int compareVersions(String a, String b) {
     final na = _parseVersion(a);
     final nb = _parseVersion(b);
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 4; i++) {
       if (na[i] != nb[i]) return na[i].compareTo(nb[i]);
     }
     return 0;
   }
 
+  /// 解析版本号为 [major, minor, patch, build](缺失补 0)
   static List<int> _parseVersion(String v) {
-    final clean = v.replaceFirst(RegExp(r'^v'), '').split('+').first;
-    final parts = clean.split('.');
-    final out = [0, 0, 0];
+    final clean = v.replaceFirst(RegExp(r'^v'), '').trim();
+    final plusIdx = clean.indexOf('+');
+    final namePart = plusIdx >= 0 ? clean.substring(0, plusIdx) : clean;
+    final buildPart = plusIdx >= 0 ? clean.substring(plusIdx + 1) : '';
+    final parts = namePart.split('.');
+    final out = [0, 0, 0, 0];
     for (int i = 0; i < parts.length && i < 3; i++) {
-      out[i] = int.tryParse(parts[i]) ?? 0;
+      out[i] = int.tryParse(parts[i].trim()) ?? 0;
     }
+    out[3] = int.tryParse(buildPart.trim()) ?? 0;
     return out;
   }
 
@@ -185,23 +225,37 @@ class UpdateService {
   ];
 
   /// 下载 APK 到应用缓存目录,返回本地文件路径。
-  /// 并发竞速:所有候选(镜像 + 直连)同时下载到独立临时文件,
+  /// 并发竞速:所有候选(**直连优先**)同时下载到独立临时文件,
   /// 首个完成者胜出,其余立即取消——串行试错会卡死在
   /// "连接成功但吐数据极慢"的镜像上,竞速模式不会。
   /// 进度取所有节点中的最大值(最快节点的进展)。
+  ///
+  /// v1.9.0(审查 P0-1):下载完成后**校验完整性** ——
+  /// 优先比对 GitHub 给出的 sha256(官方 digest),取不到时至少比字节数;
+  /// 不一致就删文件并抛错,绝不把来路不明的字节交给系统安装器。
+  /// 另外默认**只信直连**:只有直连失败才退回镜像(镜像按公开公益节点维护,
+  /// 被投毒/抢注时用户无从察觉)。
   static Future<String> downloadApk(
     String url, {
     void Function(int received, int total)? onProgress,
+    String expectedSha256 = '',
+    int expectedSize = 0,
   }) async {
-    final dir = await getApplicationCacheDirectory();
+    // P2-24:APK 下到缓存目录的 updates/ 子目录 —— FileProvider(file_paths.xml)
+    // 只声明这一层,不再把 cache/files/外部存储整根暴露给系统安装器。
+    final cacheRoot = await getApplicationCacheDirectory();
+    final dir = Directory('${cacheRoot.path}/updates');
+    if (!dir.existsSync()) {
+      await dir.create(recursive: true);
+    }
 
-    // 候选去重(镜像前缀 + 直连)
+    // 候选顺序:直连在前,镜像兜底(去重)
     final candidates = <String>[];
+    if (!candidates.contains(url)) candidates.add(url);
     for (final p in _mirrorPrefixes) {
       final c = '$p$url';
       if (!candidates.contains(c)) candidates.add(c);
     }
-    if (!candidates.contains(url)) candidates.add(url);
 
     // 总预算:120s 内没有任一候选完成 → 报错让用户重试
     const totalBudget = Duration(seconds: 120);
@@ -231,6 +285,19 @@ class UpdateService {
           },
         );
         if (!settled) {
+          // v1.9.0(审查 P0-1):竞速窗口内先校验完整性,不合格的候选直接淘汰
+          final verify = await verifyApk(
+            file,
+            expectedSha256: expectedSha256,
+            expectedSize: expectedSize,
+          );
+          if (verify != null) {
+            debugPrint('ReadFlow 更新包校验失败($candidate): $verify');
+            try {
+              if (file.existsSync()) file.deleteSync();
+            } catch (_) {}
+            return; // 让其它候选继续;全都不合格 → 总预算超时报错
+          }
           settled = true;
           // 竞速临时名是 .part——PackageInstaller 按 URI 文件名扩展名
           // 判断是否 APK,非 .apk 会静默拒绝打开(进度满但不跳安装界面)。
@@ -268,6 +335,40 @@ class UpdateService {
       }
       throw Exception('下载超时(120s),请检查网络后重试');
     });
+  }
+
+  /// 校验下载到的安装包(v1.9.0,审查 P0-1)。
+  /// 返回 null = 通过;返回字符串 = 失败原因(调用方据此淘汰该候选)。
+  ///
+  /// 规则:
+  /// - 有官方 sha256 → **必须**匹配(这是唯一能挡住"镜像被投毒"的手段);
+  /// - 没有 sha256 但有官方字节数 → 比对字节数;
+  /// - 两者都没有 → 拒绝(宁可让用户手动下载,也不静默安装未知文件)。
+  static Future<String?> verifyApk(
+    File file, {
+    required String expectedSha256,
+    required int expectedSize,
+  }) async {
+    if (!file.existsSync()) return '文件不存在';
+    final actualSize = await file.length();
+    if (actualSize <= 0) return '文件为空';
+    if (expectedSize > 0 && actualSize != expectedSize) {
+      return '字节数不符(期望 $expectedSize,实际 $actualSize)';
+    }
+    if (expectedSha256.isEmpty) {
+      return expectedSize > 0 ? null : '发布方未提供校验信息(sha256/size),已拒绝安装';
+    }
+    try {
+      final digest = await sha256.bind(file.openRead()).first;
+      final actual = digest.toString().toLowerCase();
+      if (actual != expectedSha256.toLowerCase()) {
+        return 'sha256 不符(期望 ${expectedSha256.substring(0, 12)}…,'
+            '实际 ${actual.substring(0, 12)}…)';
+      }
+    } catch (e) {
+      return '计算 sha256 失败: $e';
+    }
+    return null;
   }
 
   /// 调起系统安装器安装 APK(Android 会引导"未知来源"授权)。

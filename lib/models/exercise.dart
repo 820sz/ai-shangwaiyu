@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 /// 回译练习模型
 class Exercise {
   final int? id;
@@ -25,33 +27,34 @@ class Exercise {
       if (id != null) 'id': id,
       'article_id': articleId,
       'type': type,
-      'source_sentences': _encodeJson(sourceSentences),
+      'source_sentences': encodeAnswers(sourceSentences),
       'reference_answers':
-          referenceAnswers != null ? _encodeJson(referenceAnswers!) : null,
+          referenceAnswers != null ? encodeAnswers(referenceAnswers!) : null,
       'user_answers':
-          userAnswers != null ? _encodeJson(userAnswers!) : null,
+          userAnswers != null ? encodeAnswers(userAnswers!) : null,
       'score': score,
       'created_at': createdAt.toIso8601String(),
     };
   }
 
+  /// v1.9.0(审查 P1-8):字段级兜底,单行坏数据不再炸掉整页。
   factory Exercise.fromMap(Map<String, dynamic> map) {
     final refRaw = map['reference_answers'] as String?;
     return Exercise(
-      id: map['id'] as int?,
-      articleId: map['article_id'] as int,
+      id: map['id'] is int ? map['id'] as int : null,
+      articleId: map['article_id'] is int ? map['article_id'] as int : 0,
       type: map['type'] as String? ?? 'back_translation',
-      sourceSentences: _decodeJsonList(map['source_sentences'] as String?)
+      sourceSentences: decodeAnswers(map['source_sentences'] as String?)
           .whereType<String>()
           .toList(),
       referenceAnswers: refRaw != null
-          ? _decodeJsonList(refRaw).whereType<String>().toList()
+          ? decodeAnswers(refRaw).whereType<String>().toList()
           : null,
       userAnswers: map['user_answers'] != null
-          ? _decodeJsonList(map['user_answers'] as String?)
+          ? decodeAnswers(map['user_answers'] as String?)
           : null,
       score: (map['score'] as num?)?.toDouble(),
-      createdAt: DateTime.parse(map['created_at'] as String),
+      createdAt: DateTime.tryParse('${map['created_at']}') ?? DateTime.now(),
     );
   }
 
@@ -65,13 +68,30 @@ class Exercise {
         : answered / sourceSentences.length;
   }
 
-  // ── 私有 JSON 编解码 ──
-  static String _encodeJson(Iterable<String?> list) {
-    return list.map((s) => s ?? '').join('|||');
-  }
+  // ── 答案列表的编解码 ──
 
-  static List<String?> _decodeJsonList(String? raw) {
+  /// 编码为 JSON(v1.9.0,审查 P2-3)。
+  ///
+  /// 旧实现用 `'|||'` 拼串冒充 JSON:用户答案里只要出现 `|||` 就会错位
+  /// (得分与逐句对照全错),空串与"未作答"也不可区分。
+  static String encodeAnswers(Iterable<String?> list) =>
+      jsonEncode(list.map((s) => s ?? '').toList());
+
+  /// 解码:**兼容历史 `'|||'` 数据**(老库里的行仍是旧格式),
+  /// 新写入一律 JSON。坏数据返回空列表,不抛异常。
+  static List<String?> decodeAnswers(String? raw) {
     if (raw == null || raw.isEmpty) return [];
+    final trimmed = raw.trim();
+    if (trimmed.startsWith('[')) {
+      try {
+        final decoded = jsonDecode(trimmed);
+        if (decoded is List) {
+          return decoded.map((e) => e?.toString()).toList();
+        }
+      } catch (_) {
+        // 落到旧格式分支
+      }
+    }
     return raw.split('|||').map((s) => s.isEmpty ? null : s).toList();
   }
 }

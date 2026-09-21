@@ -9,16 +9,27 @@ class BookmarkProvider extends ChangeNotifier {
   List<Bookmark> _items = [];
   bool _loaded = false;
 
+  /// 加载失败原因(P2-30 三态):页面据此区分
+  /// 「加载失败,可重试」与「还没有收藏」。
+  /// 只记录 [load] 的失败——删除失败不该把整页变成错误态。
+  String? _error;
+
   List<Bookmark> get items => _items;
   bool get loaded => _loaded;
+  String? get error => _error;
 
   Future<void> load() async {
     try {
       _items = await DatabaseService.getBookmarks();
       _loaded = true;
+      _error = null;
       notifyListeners();
     } catch (e) {
       debugPrint('ReadFlow bookmark load: $e');
+      // 关键:失败必须留下痕迹。此前只 debugPrint,`_loaded` 停在 false
+      // → 收藏夹永远转圈,用户既看不到原因也没有重试入口。
+      _error = '收藏夹加载失败：$e';
+      notifyListeners();
     }
   }
 

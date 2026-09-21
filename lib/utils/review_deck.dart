@@ -56,6 +56,16 @@ class ReviewProgress {
   final bool flipped;
   final DateTime updatedAt;
 
+  /// 每张卡已标记的掌握度(word id → 0/1/2)。
+  /// v1.9.0(审查 P1-5):必须随进度一起存 —— 旧实现只存计数,续看后
+  /// 卡片的"已标记：X"消失,且对同一张卡再点标记会**再计一次数**,
+  /// 统计数超过实际卡片数(用户抱怨过的"刷进度"同类缺陷)。
+  final Map<int, int> marks;
+
+  /// 断点所在的最后一词 id(v1.9.0):恢复时按 id 定位,
+  /// 不再用保存时的下标硬夹(删过词就会跳到"最后一张")。
+  final int? lastId;
+
   const ReviewProgress({
     required this.deckIds,
     required this.index,
@@ -66,6 +76,8 @@ class ReviewProgress {
     required this.filterDays,
     required this.flipped,
     required this.updatedAt,
+    this.marks = const {},
+    this.lastId,
   });
 
   bool get isEmpty => deckIds.isEmpty;
@@ -91,22 +103,40 @@ class ReviewProgress {
     'filter_days': filterDays,
     'flipped': flipped,
     'updated_at': updatedAt.toIso8601String(),
+    // 标记表按 "id:level" 字符串存:Hive 读回的 Map 键类型会漂,
+    // 用字符串编码可避免 int 键读不回来
+    if (marks.isNotEmpty)
+      'marks': marks.entries.map((e) => '${e.key}:${e.value}').toList(),
+    if (lastId != null) 'last_id': lastId,
   };
 
-  factory ReviewProgress.fromJson(Map<String, dynamic> json) => ReviewProgress(
-    deckIds: ((json['deck_ids'] as List?) ?? [])
-        .map((e) => e is int ? e : int.tryParse('$e') ?? -1)
-        .where((e) => e >= 0)
-        .toList(),
-    index: (json['index'] as int?) ?? 0,
-    countMastered: (json['mastered'] as int?) ?? 0,
-    countLearning: (json['learning'] as int?) ?? 0,
-    countNew: (json['new'] as int?) ?? 0,
-    filterLevel: (json['filter_level'] as int?) ?? -1,
-    filterDays: (json['filter_days'] as int?) ?? 0,
-    flipped: (json['flipped'] as bool?) ?? false,
-    updatedAt: DateTime.tryParse('${json['updated_at']}') ?? DateTime.now(),
-  );
+  factory ReviewProgress.fromJson(Map<String, dynamic> json) {
+    final marks = <int, int>{};
+    for (final raw in ((json['marks'] as List?) ?? const [])) {
+      final s = '$raw';
+      final idx = s.indexOf(':');
+      if (idx <= 0) continue;
+      final id = int.tryParse(s.substring(0, idx));
+      final level = int.tryParse(s.substring(idx + 1));
+      if (id != null && level != null) marks[id] = level;
+    }
+    return ReviewProgress(
+      deckIds: ((json['deck_ids'] as List?) ?? [])
+          .map((e) => e is int ? e : int.tryParse('$e') ?? -1)
+          .where((e) => e >= 0)
+          .toList(),
+      index: (json['index'] as int?) ?? 0,
+      countMastered: (json['mastered'] as int?) ?? 0,
+      countLearning: (json['learning'] as int?) ?? 0,
+      countNew: (json['new'] as int?) ?? 0,
+      filterLevel: (json['filter_level'] as int?) ?? -1,
+      filterDays: (json['filter_days'] as int?) ?? 0,
+      flipped: (json['flipped'] as bool?) ?? false,
+      updatedAt: DateTime.tryParse('${json['updated_at']}') ?? DateTime.now(),
+      marks: marks,
+      lastId: json['last_id'] is int ? json['last_id'] as int : null,
+    );
+  }
 }
 
 /// 把保存的顺序映射回当前卡组(词序可能因刷新变化):
@@ -124,7 +154,13 @@ class ReviewProgress {
     final v = byId[id];
     if (v != null) deck.add(v);
   }
+  // v1.9.0:优先按"断点词 id"定位(删过词也落在原词附近),
+  // 找不到才退回保存时的下标并夹到合法范围
   var index = progress.index;
+  if (progress.lastId != null) {
+    final byLast = deck.indexWhere((v) => v.id == progress.lastId);
+    if (byLast >= 0) index = byLast;
+  }
   if (index < 0) index = 0;
   if (index >= deck.length) index = deck.isEmpty ? 0 : deck.length - 1;
   return (deck: deck, index: index);

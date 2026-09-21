@@ -112,6 +112,9 @@ class _DownloadDialogState extends State<_DownloadDialog>
     try {
       final path = await UpdateService.downloadApk(
         widget.info.downloadUrl,
+        // v1.9.0(P0-1):把官方 sha256/字节数传进下载器做完整性校验
+        expectedSha256: widget.info.sha256,
+        expectedSize: widget.info.sizeBytes,
         onProgress: (received, total) {
           if (total > 0 && mounted) {
             setState(() => _progress = received / total);

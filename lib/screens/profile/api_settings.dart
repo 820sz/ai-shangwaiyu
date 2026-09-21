@@ -275,7 +275,8 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
             '模型列表按视觉能力过滤。Key 填 sk- 开头(DeepSeek 官方)时,'
             'Base URL 留空自动使用 https://api.deepseek.com;ark- 开头(火山方舟)'
             '自动使用方舟端点。DeepSeek 视觉模型为 deepseek-v4-flash-vision-exp。',
-            style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+            // P2-31:正文灰阶对比度 <4.5:1,提到 grey[600] 达 WCAG AA
+            style: TextStyle(fontSize: 11, color: Colors.grey[600]),
           ),
           const SizedBox(height: 8),
           _ApiField(
@@ -307,7 +308,7 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
           const SizedBox(height: 4),
           Text(
             '文章生成 / 回译练习 / 个性化建议。未配置时自动使用主 API。',
-            style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+            style: TextStyle(fontSize: 11, color: Colors.grey[600]),
           ),
           const SizedBox(height: 8),
           _ApiField(
@@ -338,7 +339,7 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
           Text(
             '可填任意 OpenAI 兼容端点。模型列表可直接选择，也可手动输入。'
             'Key 保存在手机本地，不上传任何服务器。',
-            style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+            style: TextStyle(fontSize: 11, color: Colors.grey[600]),
           ),
         ],
       ),
@@ -384,7 +385,7 @@ class _ApiField extends StatelessWidget {
         decoration: InputDecoration(
           labelText: label,
           hintText: hint,
-          hintStyle: TextStyle(fontSize: 12, color: Colors.grey[400]),
+          hintStyle: TextStyle(fontSize: 12, color: Colors.grey[600]),
           border: const OutlineInputBorder(),
           isDense: true,
         ),
@@ -423,7 +424,7 @@ class _ModelRow extends StatelessWidget {
               decoration: InputDecoration(
                 labelText: label,
                 hintText: hint,
-                hintStyle: TextStyle(fontSize: 12, color: Colors.grey[400]),
+                hintStyle: TextStyle(fontSize: 12, color: Colors.grey[600]),
                 border: const OutlineInputBorder(),
                 isDense: true,
               ),
@@ -576,7 +577,7 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
                 padding: const EdgeInsets.only(bottom: 4),
                 child: Text(
                   '未找到需要的模型？手动输入到上方文本框即可',
-                  style: TextStyle(fontSize: 11, color: Colors.grey[400]),
+                  style: TextStyle(fontSize: 11, color: Colors.grey[600]),
                 ),
               ),
               // 列表

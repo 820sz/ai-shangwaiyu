@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/stats_provider.dart';
+import '../../widgets/error_state.dart';
 import '../../widgets/stats_chart.dart';
 
 class StatsPageScreen extends StatefulWidget {
@@ -15,6 +16,9 @@ class _StatsPageScreenState extends State<StatsPageScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      // P2-10:进页立刻返回时 context 已经 deactivate,
+      // 不加这道判断会抛错并被 CrashLogger 记成"崩溃",污染诊断日志
+      if (!mounted) return;
       context.read<StatsProvider>().loadStats();
     });
   }
@@ -23,20 +27,31 @@ class _StatsPageScreenState extends State<StatsPageScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final stats = context.watch<StatsProvider>();
+    final appBar = AppBar(title: const Text('学习统计'));
 
     if (stats.loading) {
       return Scaffold(
-        appBar: AppBar(title: const Text('学习统计')),
+        appBar: appBar,
         body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    // P2-30:DB 读失败以前是"永久转圈"(provider 的 _loading 不复位),
+    // 现在给明确原因 + 重试入口,而不是让用户以为 App 卡死
+    if (stats.error != null) {
+      return Scaffold(
+        appBar: appBar,
+        body: ErrorState(
+          message: stats.error!,
+          onRetry: () => context.read<StatsProvider>().loadStats(),
+        ),
       );
     }
 
     final monthly = stats.getMonthlyStats();
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('学习统计'),
-      ),
+      appBar: appBar,
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [

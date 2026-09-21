@@ -7,6 +7,7 @@ import '../../../services/api_endpoint.dart';
 import '../../../services/base_api.dart';
 import '../../../services/doubao_api.dart';
 import '../../../utils/follow_up_context.dart';
+import '../../../widgets/confirm_destructive.dart';
 import 'follow_up_bubble.dart';
 import 'follow_up_models.dart';
 import 'model_avatars.dart';
@@ -53,7 +54,24 @@ class FollowUpController {
   final FocusNode focusNode = FocusNode();
 
   StreamSubscription<SseChunk>? _sub;
+  /// 流内空闲看门狗(v1.9.0,P1-3):60s 无新数据即断开,避免永久转圈
+  Timer? _idleTimer;
   bool pendingScroll = false;
+  /// P3:本帧是否已经注册过"滚到底"的 postFrameCallback(防同帧重复注册)
+  bool scrollScheduled = false;
+
+  /// 页面/控制器已销毁(P2-11/P2-12)。
+  /// 抽屉是独立路由,主屏 dispose 之后在途的异步回调仍可能拿着本对象
+  /// (最典型的是 `_stream` 里 `await imageDataUrisFor()` 的那几秒)——
+  /// 没有这道总闸,回调会往已 dispose 的 ValueNotifier 里写值。
+  bool _disposed = false;
+
+  /// 本轮流式的身份令牌(P2-11)。stop / editMessage / clear / 新一次 _stream
+  /// 都会自增它,于是"上一轮"的回调在写回气泡前就能发现自己是旧的并退出。
+  ///
+  /// 为什么需要:`_stream` 在 await 期间存在窗口,这期间用户可能已经
+  /// 编辑提问或清空了列表,旧闭包仍按旧的 aiMsgIndex 写回 → 写错气泡。
+  int _streamToken = 0;
 
   /// 本次会话是否有追问内容(退出时提示保存)
   bool dirty = false;
@@ -96,6 +114,7 @@ class FollowUpController {
   // ── 发送 / 停止 / 编辑 ──
 
   void send(String text) {
+    if (_disposed) return;
     final q = text.trim();
     if (q.isEmpty || loading.value) return;
     final userMsg = FollowUpMessage(role: 'user', content: q);
@@ -114,6 +133,9 @@ class FollowUpController {
   }
 
   void stop() {
+    if (_disposed) return;
+    // 作废本轮:在途回调(可能正卡在 await 里)之后不许再写气泡
+    _streamToken++;
     _sub?.cancel();
     _sub = null;
     final msgs = List<FollowUpMessage>.from(messages.value);
@@ -135,6 +157,7 @@ class FollowUpController {
 
   /// 编辑用户消息:替换内容 + 删除其后消息 + 重新生成
   void editMessage(int index, String newText) {
+    if (_disposed) return;
     final msgs = List<FollowUpMessage>.from(messages.value);
     if (index < 0 || index >= msgs.length) return;
     _sub?.cancel();
@@ -147,10 +170,13 @@ class FollowUpController {
     loading.value = true;
     dirty = true;
     pendingScroll = true;
+    // _stream 开头会自增 _streamToken,旧流至此彻底作废
     _stream(newText, trimmed.length - 1);
   }
 
   void clear() {
+    if (_disposed) return;
+    _streamToken++; // 同 stop:清空后旧流不许再往列表里写
     _sub?.cancel();
     _sub = null;
     messages.value = [];
@@ -159,6 +185,8 @@ class FollowUpController {
   }
 
   Future<void> _stream(String question, int aiMsgIndex) async {
+    if (_disposed) return;
+    final token = ++_streamToken; // 本次流的身份,旧流从这里开始失效
     _sub?.cancel();
     String reasoning = '';
     String content = '';
@@ -179,9 +207,16 @@ class FollowUpController {
       }
     }
 
+    // 准备图片可能要几秒:await 之后、listen 之前再判一次 ——
+    // 这段时间里页面可能已销毁,或用户已停止/编辑/清空(P2-11)。
+    // 不判就会"页面已经销毁但仍在发请求",并往错的/已释放的气泡里写。
+    if (_disposed || token != _streamToken) return;
+
     void updateMsg({bool done = false}) {
+      // 旧流的回调一律丢弃:只认自己那一轮令牌,且只写 AI 气泡
+      if (_disposed || token != _streamToken) return;
       final msgs = List<FollowUpMessage>.from(messages.value);
-      if (aiMsgIndex < msgs.length) {
+      if (aiMsgIndex < msgs.length && msgs[aiMsgIndex].role == 'ai') {
         msgs[aiMsgIndex] = FollowUpMessage(
           role: 'ai',
           content: done
@@ -213,6 +248,7 @@ class FollowUpController {
       );
       _sub = stream.listen(
         (chunk) {
+          _armIdleWatchdog(); // P1-3:每个 chunk 重置空闲看门狗
           if (chunk.isReasoning) {
             reasoning += chunk.text;
           } else {
@@ -220,8 +256,12 @@ class FollowUpController {
           }
           updateMsg();
         },
-        onDone: () => updateMsg(done: true),
+        onDone: () {
+          _idleTimer?.cancel();
+          updateMsg(done: true);
+        },
         onError: (e) {
+          _idleTimer?.cancel();
           // 保留已流式显示的内容,追加友好错误
           content = content.isNotEmpty
               ? '$content\n\n[错误] ${BaseApiService.friendlyError(e)}'
@@ -231,9 +271,39 @@ class FollowUpController {
         cancelOnError: false,
       );
     } catch (e) {
+      _idleTimer?.cancel();
       content = BaseApiService.friendlyError(e);
       updateMsg(done: true);
     }
+  }
+
+  /// 流内空闲看门狗(v1.9.0,审查 P1-3):60s 没收到任何字节就主动收尾。
+  /// dio 的 receiveTimeout 只覆盖"等响应头",流式 body 中途卡死时
+  /// 旧实现会一直转圈,用户只能杀进程。
+  void _armIdleWatchdog() {
+    _idleTimer?.cancel();
+    _idleTimer = Timer(const Duration(seconds: 60), () {
+      if (_disposed) return;
+      _sub?.cancel();
+      _sub = null;
+      loading.value = false;
+      final msgs = List<FollowUpMessage>.from(messages.value);
+      for (int i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].role == 'ai' && msgs[i].streaming) {
+          msgs[i] = FollowUpMessage(
+            role: 'ai',
+            content: msgs[i].content.isEmpty
+                ? '（60 秒没有收到新数据，已中止。可重试或降低思考档位）'
+                : '${msgs[i].content}\n\n[已中止] 60 秒没有收到新数据',
+            reasoningText: msgs[i].reasoningText,
+            streaming: false,
+            model: msgs[i].model,
+          );
+          break;
+        }
+      }
+      messages.value = msgs;
+    });
   }
 
   // ── 历史对话持久化 ──
@@ -307,7 +377,11 @@ class FollowUpController {
   }
 
   void dispose() {
+    // 先立旗再拆资源:在途回调看到 _disposed 就不会再去碰已释放的 ValueNotifier
+    _disposed = true;
+    _streamToken++; // 顺带作废在途流(它 await 回来后不会再 listen)
     _sub?.cancel();
+    _sub = null;
     inputCtrl.dispose();
     focusNode.dispose();
     messages.dispose();
@@ -434,29 +508,37 @@ class _FollowUpSheet extends StatelessWidget {
                   return Center(
                     child: Text(
                       controller.emptyHint,
-                      style: TextStyle(fontSize: 12, color: Colors.grey[400]),
+                      // P2-31:正文灰阶对比度 <4.5:1,提到 grey[600] 达 WCAG AA
+                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                     ),
                   );
                 }
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  if (!scrollCtrl.hasClients) return;
-                  final pos = scrollCtrl.position;
-                  final nearBottom = pos.maxScrollExtent - pos.pixels < 150;
-                  if (controller.pendingScroll || nearBottom) {
-                    controller.pendingScroll = false;
-                    if (pos.maxScrollExtent > 0) {
-                      if (nearBottom) {
-                        scrollCtrl.jumpTo(pos.maxScrollExtent);
-                      } else {
-                        scrollCtrl.animateTo(
-                          pos.maxScrollExtent,
-                          duration: const Duration(milliseconds: 250),
-                          curve: Curves.easeOut,
-                        );
+                // P3:这段 builder 在流式期间每个 chunk 都会重跑,同一帧内可能
+                // 注册多次 postFrameCallback → animateTo 被重复触发。用一个
+                // 控制器上的标志位保证"每帧至多注册一次"。
+                if (!controller.scrollScheduled) {
+                  controller.scrollScheduled = true;
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    controller.scrollScheduled = false;
+                    if (!scrollCtrl.hasClients) return;
+                    final pos = scrollCtrl.position;
+                    final nearBottom = pos.maxScrollExtent - pos.pixels < 150;
+                    if (controller.pendingScroll || nearBottom) {
+                      controller.pendingScroll = false;
+                      if (pos.maxScrollExtent > 0) {
+                        if (nearBottom) {
+                          scrollCtrl.jumpTo(pos.maxScrollExtent);
+                        } else {
+                          scrollCtrl.animateTo(
+                            pos.maxScrollExtent,
+                            duration: const Duration(milliseconds: 250),
+                            curve: Curves.easeOut,
+                          );
+                        }
                       }
                     }
-                  }
-                });
+                  });
+                }
                 return Stack(
                   children: [
                     ListView.builder(
@@ -691,13 +773,8 @@ class _FollowUpSheet extends StatelessWidget {
                     ),
                     const Spacer(),
                     TextButton(
-                      onPressed: () {
-                        controller.savedConversations.clear();
-                        Hive.box(
-                          AppConstants.hiveBoxSettings,
-                        ).delete(controller.historyKey);
-                        Navigator.pop(ctx);
-                      },
+                      // P2-28:此前这一下就把整库历史追问删光,无确认、无反馈
+                      onPressed: () => _confirmClearAll(ctx, controller),
                       child: const Text(
                         '清空全部',
                         style: TextStyle(fontSize: 12, color: Colors.red),
@@ -730,16 +807,10 @@ class _FollowUpSheet extends StatelessWidget {
                     ),
                     trailing: IconButton(
                       icon: const Icon(Icons.delete_outline, size: 18),
-                      onPressed: () {
-                        controller.savedConversations.removeAt(i);
-                        Hive.box(AppConstants.hiveBoxSettings).put(
-                          controller.historyKey,
-                          controller.savedConversations
-                              .map((c) => c.toJson())
-                              .toList(),
-                        );
-                        setLocalState(() {});
-                      },
+                      // P2-28:单条历史也是永久删除,同样先确认;删除后给反馈。
+                      // 用 conv 对象定位而不是下标 —— 确认弹窗期间列表可能变化
+                      onPressed: () =>
+                          _deleteConversation(ctx, controller, conv),
                     ),
                     onTap: () {
                       Navigator.pop(ctx);
@@ -753,6 +824,69 @@ class _FollowUpSheet extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  /// 清空全部历史追问(P2-28):一次性、不可撤销的永久删除,
+  /// 必须先确认;删完给一条"已清空"的反馈,否则用户不知道点没点上。
+  ///
+  /// [panelCtx] 是历史面板(showModalBottomSheet 那条路由)的 context:
+  /// 确认弹窗与关闭面板都用它,不能拿抽屉自己的 context —— 那样会关错路由。
+  Future<void> _confirmClearAll(
+    BuildContext panelCtx,
+    FollowUpController controller,
+  ) async {
+    final count = controller.savedConversations.length;
+    final ok = await confirmDestructive(
+      panelCtx,
+      title: '清空历史追问',
+      message: '将删除全部 $count 条已保存的追问对话，删除后不可恢复。',
+      confirmText: '清空',
+    );
+    if (!ok || !panelCtx.mounted) return;
+    controller.savedConversations.clear();
+    try {
+      await Hive.box(
+        AppConstants.hiveBoxSettings,
+      ).delete(controller.historyKey);
+    } catch (e) {
+      debugPrint('ReadFlow clearFollowUpHistory: $e');
+    }
+    if (!panelCtx.mounted) return;
+    _closePanelWithFeedback(panelCtx, '已清空历史追问');
+  }
+
+  /// 删除一条已保存的追问(P2-28):单条也是永久删除,同样先确认再删、
+  /// 删完给反馈(此前是单击即从 Hive 里抹掉,删错了没有任何补救机会)。
+  Future<void> _deleteConversation(
+    BuildContext panelCtx,
+    FollowUpController controller,
+    FollowUpSavedConversation conv,
+  ) async {
+    final ok = await confirmDestructive(
+      panelCtx,
+      title: '删除追问记录',
+      message: '确定删除「${conv.title}」吗？删除后不可恢复。',
+    );
+    if (!ok || !panelCtx.mounted) return;
+    controller.savedConversations.remove(conv);
+    try {
+      await Hive.box(AppConstants.hiveBoxSettings).put(
+        controller.historyKey,
+        controller.savedConversations.map((c) => c.toJson()).toList(),
+      );
+    } catch (e) {
+      debugPrint('ReadFlow deleteFollowUpHistory: $e');
+    }
+    if (!panelCtx.mounted) return;
+    _closePanelWithFeedback(panelCtx, '已删除追问记录');
+  }
+
+  /// 先弹反馈、再关历史面板。
+  /// 顺序不能反:SnackBar 是挂在下面的 Scaffold 上的,面板还盖在屏幕上时
+  /// 先弹出来会被面板挡住(弹出动画与面板收起动画同时进行,收完就看得见)。
+  void _closePanelWithFeedback(BuildContext panelCtx, String message) {
+    showFeedbackSnack(panelCtx, message);
+    Navigator.pop(panelCtx);
   }
 }
 
@@ -788,7 +922,7 @@ class CompactModelPicker extends StatelessWidget {
         style: TextStyle(
           fontSize: 10,
           fontWeight: FontWeight.w600,
-          color: Colors.grey[500],
+          color: Colors.grey[600],
         ),
       ),
     );
@@ -897,7 +1031,7 @@ class CompactModelPicker extends StatelessWidget {
               isSecondary ? '副·' : '主·',
               style: TextStyle(
                 fontSize: 9,
-                color: Colors.grey[400],
+                color: Colors.grey[600],
                 fontWeight: FontWeight.w600,
               ),
             ),

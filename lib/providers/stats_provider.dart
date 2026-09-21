@@ -8,6 +8,7 @@ class StatsProvider extends ChangeNotifier {
   int _totalVocab = 0;
   int _totalExercises = 0;
   bool _loading = false;
+  String? _error;
 
   List<LearningRecord> get dailyLogs => _dailyLogs;
   int get streakDays => _streakDays;
@@ -15,25 +16,39 @@ class StatsProvider extends ChangeNotifier {
   int get totalExercises => _totalExercises;
   bool get loading => _loading;
 
-  /// 加载统计数据
+  /// 加载失败原因(P2-30 三态):页面据此从"转圈"切到"可重试的错误态"
+  String? get error => _error;
+
+  /// 加载统计数据。
+  ///
+  /// P2-30:整段 try/catch + finally —— 此前任何一次 DB 读抛异常,
+  /// `_loading` 就永久停在 true,统计页永远转圈且没有任何提示。
   Future<void> loadStats() async {
     _loading = true;
+    _error = null;
     notifyListeners();
 
-    // 最近 365 天的记录
-    final now = DateTime.now();
-    _dailyLogs = await DatabaseService.getDailyLogsInRange(
-      now.subtract(const Duration(days: 365)),
-      now,
-    );
+    try {
+      // 最近 365 天的记录
+      final now = DateTime.now();
+      _dailyLogs = await DatabaseService.getDailyLogsInRange(
+        now.subtract(const Duration(days: 365)),
+        now,
+      );
 
-    // 计算连续天数
-    _streakDays = _calculateStreak(_dailyLogs);
-    _totalVocab = await DatabaseService.getTotalVocabCount();
-    _totalExercises = await DatabaseService.getTotalExerciseCount();
-
-    _loading = false;
-    notifyListeners();
+      // 计算连续天数
+      _streakDays = _calculateStreak(_dailyLogs);
+      _totalVocab = await DatabaseService.getTotalVocabCount();
+      _totalExercises = await DatabaseService.getTotalExerciseCount();
+    } catch (e) {
+      debugPrint('ReadFlow stats load: $e');
+      _error = '统计数据加载失败：$e';
+    } finally {
+      // 复位放在 finally:中途失败也必须结束 loading,
+      // 否则用户只能杀进程(与 P1-8 的 article_provider 同一类缺陷)
+      _loading = false;
+      notifyListeners();
+    }
   }
 
   /// 计算连续学习天数

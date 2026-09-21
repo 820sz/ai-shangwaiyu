@@ -13,13 +13,29 @@ class ApiEndpointConfig {
   final String defaultBaseUrl;
   final String defaultModel;
 
+  /// 是否 DeepSeek **官方**端点(v1.9.0 修 P2-19,纯逻辑可单测)。
+  ///
+  /// 旧实现只看模型名子串(`contains('deepseek')`),于是"方舟 baseUrl +
+  /// deepseek 模型名"会被误判成官方:请求会**不发 max_tokens、不发
+  /// temperature、反而带 stream_options.include_usage** —— 方舟对未知字段
+  /// 通常直接 400,且它需要显式 max_tokens。参数发错 → 用户只能靠降级重试撞运气。
+  /// 现在改为 baseUrl + 模型名**双条件**。
+  bool get isDeepSeekOfficial => isDeepSeekOfficialEndpoint(baseUrl, model);
+
+  static bool isDeepSeekOfficialEndpoint(String baseUrl, String model) {
+    final b = baseUrl.toLowerCase();
+    final m = model.toLowerCase();
+    return b.contains('deepseek.com') && m.contains('deepseek');
+  }
+
   /// 槽位模型是否支持 reasoning_effort 的 minimal 分档。
-  /// 豆包/Ark 支持 minimal;DeepSeek 只认 low/medium/high——
+  /// 豆包/Ark 支持 minimal;DeepSeek 官方只认 low/high/max——
   /// 发错枚举直接 400,且流式路径的降级逻辑读不到错误体(F6),
   /// 所以必须在这里发对,不能指望降级兜底。
   /// 2026-08-21:主槽位可能被用户配成 DeepSeek 视觉模型
-  /// (deepseek-v4-flash-vision-exp),按当前模型名推断,不再写死豆包。
-  bool get supportsMinimalEffort => !model.toLowerCase().contains('deepseek');
+  /// (deepseek-v4-flash-vision-exp)。v1.9.0:改为按"官方端点"判定,
+  /// 不再只看模型名(方舟转售的 deepseek 系仍属于 Ark 参数族)。
+  bool get supportsMinimalEffort => !isDeepSeekOfficial;
 
   const ApiEndpointConfig({
     required this.hiveKey,
@@ -161,7 +177,14 @@ class ApiEndpointConfig {
     // serialize.ts 对非 low/high/max 直接抛 UNSUPPORTED_REASONING_EFFORT)
     final String effective;
     if (supportsMinimalEffort) {
-      effective = level; // 豆包:minimal/low/medium/high 全合法
+      // 豆包/方舟族:minimal/low/medium/high 全合法,**没有 max**。
+      // v1.9.0:方舟 baseUrl + 模型名含 deepseek(方舟转售的 deepseek 系、
+      // 或用户把 DS 模型名填在方舟端点下)时,档位表按模型名给的是 DS 表
+      // (含「极致」=max),而端点其实是方舟族 —— 把 max 原样发出去就是
+      // 非法枚举 → 400 → 降级重试会把 reasoning_effort 整个删掉并关思考,
+      // 用户看到的就是 v1.7.0 那个老 bug:「选了极致,结果不思考」。
+      // 这里把 max 归一到方舟最高档 high,宁可稍浅也不掉进"不思考"。
+      effective = level == 'max' ? 'high' : level;
     } else {
       effective = switch (level) {
         'medium' || 'standard' => 'high', // DS 无 medium → 临近档 high

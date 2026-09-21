@@ -212,7 +212,8 @@ class _InfoTile extends StatelessWidget {
         children: [
           SizedBox(
             width: 72,
-            child: Text(label, style: TextStyle(color: Colors.grey[500], fontSize: 14)),
+            // P2-31:正文灰阶对比度 <4.5:1,提到 grey[600] 达 WCAG AA
+            child: Text(label, style: TextStyle(color: Colors.grey[600], fontSize: 14)),
           ),
           Expanded(
             child: Text(value, style: const TextStyle(fontSize: 14)),

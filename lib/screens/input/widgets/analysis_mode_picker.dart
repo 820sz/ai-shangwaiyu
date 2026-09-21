@@ -109,11 +109,12 @@ class _ModeCard extends StatelessWidget {
                     style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
                   ),
                   const SizedBox(height: 2),
-                  Text(subtitle, style: TextStyle(fontSize: 13, color: Colors.grey[500])),
+                  // P2-31:正文灰阶对比度 <4.5:1,提到 grey[600] 达 WCAG AA
+                  Text(subtitle, style: TextStyle(fontSize: 13, color: Colors.grey[600])),
                   const SizedBox(height: 6),
                   Text(
                     detail,
-                    style: TextStyle(fontSize: 11, color: Colors.grey[400]),
+                    style: TextStyle(fontSize: 11, color: Colors.grey[600]),
                   ),
                 ],
               ),

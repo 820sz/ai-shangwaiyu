@@ -323,7 +323,7 @@ class _CategoryVocabSheetState extends State<_CategoryVocabSheet> {
               const Spacer(),
               if (_items != null)
                 Text('${_items!.length} 个生词',
-                    style: TextStyle(fontSize: 12, color: Colors.grey[500])),
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600])),
             ],
           ),
         ),
@@ -334,7 +334,7 @@ class _CategoryVocabSheetState extends State<_CategoryVocabSheet> {
               : _items == null || _items!.isEmpty
                   ? Center(
                       child: Text('该分类暂无生词',
-                          style: TextStyle(color: Colors.grey[400])))
+                          style: TextStyle(color: Colors.grey[600])))
                   : _buildGroupedList(),
         ),
       ],
@@ -349,10 +349,13 @@ class _CategoryVocabSheetState extends State<_CategoryVocabSheet> {
       final subs = groups.first.subgroups;
       if (subs.length <= 1) {
         final only = subs.isEmpty ? <Vocabulary>[] : subs.values.first;
-        return ListView(
+        // P2-4:改为惰性构建 —— 原 `ListView(children: ...)` 会把该分组下
+        // 全部词条一次性建成 ListTile(词表上限 5000,最坏一次建几千个)
+        return ListView.builder(
           controller: widget.scrollCtrl,
           padding: const EdgeInsets.symmetric(vertical: 8),
-          children: _buildVocabList(only),
+          itemCount: only.length,
+          itemBuilder: (_, i) => _buildVocabRow(only[i]),
         );
       }
     }
@@ -390,7 +393,7 @@ class _CategoryVocabSheetState extends State<_CategoryVocabSheet> {
             subtitle: Text(
               '${g.totalCount} 个生词'
               '${hasSubgroups ? ' · ${subs.length} 个${widget.category == '书籍' ? '页码/章节' : '子分类'}' : ''}',
-              style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+              style: TextStyle(fontSize: 11, color: Colors.grey[600]),
             ),
             // 重命名(v1.8.0):书名/材料名可手动改
             trailing: isUncategorized
@@ -436,7 +439,7 @@ class _CategoryVocabSheetState extends State<_CategoryVocabSheet> {
         ),
         subtitle: Text(
           '${items.length} 个生词',
-          style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+          style: TextStyle(fontSize: 11, color: Colors.grey[600]),
         ),
         // 改页码/章节(v1.8.0):整组一起改,输入自动归一
         trailing: IconButton(
@@ -449,37 +452,41 @@ class _CategoryVocabSheetState extends State<_CategoryVocabSheet> {
     );
   }
 
-  List<Widget> _buildVocabList(List<Vocabulary> items) {
-    return items.map((v) {
-      return ListTile(
-        dense: true,
-        title: Text(v.word,
-            style: const TextStyle(fontWeight: FontWeight.w500)),
-        subtitle: v.translation != null
-            ? Text(v.translation!,
-                maxLines: 1, overflow: TextOverflow.ellipsis)
-            : null,
-        trailing: v.wordType == 'word'
-            ? null
-            : Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: v.wordType == 'phrase'
-                      ? Colors.orange[50]
-                      : Colors.purple[50],
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Text(
-                  v.wordType == 'phrase' ? '短语' : '句子',
-                  style: TextStyle(
-                      fontSize: 10,
-                      color: v.wordType == 'phrase'
-                          ? Colors.orange[700]
-                          : Colors.purple[700]),
-                ),
+  /// 单个词条行(从原 _buildVocabList 抽出,P2-4:支持 ListView.builder 惰性构建)
+  Widget _buildVocabRow(Vocabulary v) {
+    return ListTile(
+      dense: true,
+      title: Text(v.word,
+          style: const TextStyle(fontWeight: FontWeight.w500)),
+      subtitle: v.translation != null
+          ? Text(v.translation!,
+              maxLines: 1, overflow: TextOverflow.ellipsis)
+          : null,
+      trailing: v.wordType == 'word'
+          ? null
+          : Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: v.wordType == 'phrase'
+                    ? Colors.orange[50]
+                    : Colors.purple[50],
+                borderRadius: BorderRadius.circular(4),
               ),
-      );
-    }).toList();
+              child: Text(
+                v.wordType == 'phrase' ? '短语' : '句子',
+                style: TextStyle(
+                    fontSize: 10,
+                    color: v.wordType == 'phrase'
+                        ? Colors.orange[700]
+                        : Colors.purple[700]),
+              ),
+            ),
+    );
+  }
+
+  /// ExpansionTile 的 children 仍需 Widget 列表(那里本来就一次性展开)
+  List<Widget> _buildVocabList(List<Vocabulary> items) {
+    return items.map(_buildVocabRow).toList();
   }
 }
