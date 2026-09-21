@@ -322,6 +322,7 @@
 
 **B6 工程化（4/4 + 1 部分）**
 - CI（analyze + test）已加；README 重写（发布 checklist 含 build 号纪律、mapping 归档、aapt 校验）；`PLAN.md` 状态区恢复为唯一事实源；mapping 归档已在本版发布时执行（`tool/symbols/1.9.0/`）。
+- **注意（v1.9.0 发布时的一次性卡点）**：`.github/workflows/ci.yml` 这类 workflow 文件需要 gh token 具备 **`workflow` scope**，当前 token（`gho_`，scope: repo/gist/read:org/delete_repo）没有 → 经 git-data API 推送含该文件的 commit 会被 GitHub 拒绝（返回 404 Not Found，不是权限提示，很容易误判）。本版先同步了**不含** CI 文件的内容，CI 文件留在本地待 `gh auth refresh -s workflow` 后补推。
 - 依赖治理：`permission_handler` 删除；`flutter_markdown`（discontinued）/`hive`/`fl_chart` 升级**未做**——三者都需要独立版本验证，不与本次 bug 修复混版（与审查 §3 的建议一致）。
 
 **补充（子代理中断后由主审收尾）**

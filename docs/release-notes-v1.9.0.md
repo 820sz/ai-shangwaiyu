@@ -35,7 +35,7 @@
 - 动效：选中卡片有极轻的缩放回应、复习卡片切换有方向语感、系统开启"移除动画"时全部瞬时完成、回顶/回底时长统一。
 
 ### 工程
-- 新增 GitHub Actions：每次提交自动跑 `flutter analyze` + `flutter test`。
+- 新增 GitHub Actions 配置（`flutter analyze` + `flutter test`，让本轮这类"单测能拦住"的问题提交即被拦截）。
 - 删除约 200 行死代码（3 个整文件 + 数个无调用者的方法，含 v1.8.0 后废弃的"补漏"链路与被重写取代的材料搜索服务）。
 - README 重写（含发布 checklist、FAQ）；`PLAN.md` 状态区恢复为唯一事实源；仓库卫生清理。
 

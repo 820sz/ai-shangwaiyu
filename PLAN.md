@@ -39,7 +39,7 @@
 - **P1-7/P1-8/P1-9 数据一致性**:批量路径单事务分片、`fromMap` 全容错、dbVersion 10 补 9 索引 + 外键 + 清孤儿练习。
 - **P0-1 更新链路**:下载后校验 sha256 + 字节数(料取自 Release asset 的 `digest`/`size`),校验不过拒绝安装;签名仍为 debug keystore(A/B/C 三条路需产品决策,本版按 C 走)。
 **验证**:analyze 0 error / 0 warning(24 infos,与修复前同量级);193 测试全绿 +1 skip(修复前 176+1);APK arm64 versionName=1.9.0/versionCode=49,sha256 与 Release asset `digest` 逐字一致。
-**未做(留 v1.9.1+)**:`process_chat.dart` 三分拆、`follow_up_drawer` 控制器分文件、交互组件抽取、`flutter_markdown`(已 discontinued)/`hive`/`fl_chart` 依赖升级、§5 的三条增量动效、`process_chat` 结果区 Sliver 惰性化。
+**未做(留 v1.9.1+)**:`process_chat.dart` 三分拆、`follow_up_drawer` 控制器分文件、交互组件抽取、`flutter_markdown`(已 discontinued)/`hive`/`fl_chart` 依赖升级、§5 的三条增量动效、`process_chat` 结果区 Sliver 惰性化、`.github/workflows/ci.yml` 推远端(需先 `gh auth refresh -s workflow`)。
 
 ### v1.4.2 — 追问第二问400根因+收藏提示/总览布局+全文翻译分组(2026-08-27,已发布)
 **背景**:用户真机实测 v1.4.1:DS 不思考能识图但思考低度失败;追问第一问成功、第二问必 400;收藏提示相反;总览单词被挤拆行;首页模型菜单不跟随配置;全文翻译段落挤在一起。
