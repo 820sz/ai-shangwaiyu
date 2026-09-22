@@ -1,9 +1,9 @@
 # PLAN.md — AI上外语 (readflow)
 
 ## 状态
-- 当前版本:**v1.9.0+49**(Release v1.9.0 = Latest;aapt versionCode=49/versionName=1.9.0;上版 v1.8.0)
-- 当前阶段:✅ **2026-09-19 代码审查修复已交付**(`docs/CODE-REVIEW-2026-09-19.md`,P0 3/3、P1 9/9、P2 34/34;落地记录见该文档 §10)
-- 状态协议:DONE(analyze 0 error/0 warning、193 测试全绿 +1 skip、APK 已发 Release、远端已同步)
+- 当前版本:**v1.9.1+50**(Release v1.9.1 = Latest;v1.9.0 有流式致命 bug 已弃用;aapt versionCode=50/versionName=1.9.1)
+- 当前阶段:✅ **2026-09-19 代码审查修复已交付 + v1.9.1 真机回归热修**(`docs/CODE-REVIEW-2026-09-19.md` §10)
+- 状态协议:DONE(analyze 0 error/0 warning、195 测试全绿 +1 skip、APK 已发 Release、远端已同步)
 - 维护约定:本状态区是版本/阶段的唯一事实源,**每次发版必须同步更新这三行**(历史小节只追加,不回改)
 
 ## 需求摘要
@@ -27,6 +27,15 @@
 **被否掉的方案**:只改设置页标签不角色化;单一 API 槽位。
 
 ## 版本记录(最新在前)
+
+### v1.9.1 — 紧急修复 v1.9.0 流式全线不可用(Utf8Decoder 类型错)(2026-09-22,已发布)
+**背景**:用户在真机装 v1.9.0 后实测"识图直接用不了了",界面报
+`type 'Utf8Decoder' is not a subtype of type 'StreamTransformer<Uint8List, String>' of 'streamTransformer'`;追问/AI 文章/材料推荐一并失效(凡走流式的功能)。
+**根因**:v1.9.0 修 P1-2(中文跨包乱码)时把 SSE 解析改成 `rawStream.transform(utf8.decoder)`,而 `rawStream` **声明**为 `Stream<List<int>>`、**运行时**是 `Stream<Uint8List>`(dio `ResponseBody.stream`);`Stream.transform` 按接收者实际类型参数做检查 → `Utf8Decoder` 被判不匹配 → 运行时 `_TypeError`,整条流读不出任何内容。
+**为什么单测没拦住**:测试用 `Stream<List<int>>.fromIterable` 造流,接收者类型参数是 `List<int>`,检查通过 —— **真机类型与测试类型不一致,把缺陷测绿了**。
+**修复**:`parseSseStream` 里先 `rawStream.cast<List<int>>()`(Dart 官方修法),4 个流式调用点全经此解析器,一处修复全覆盖;测试改用 `Stream<Uint8List>`/`StreamController<Uint8List>` 造流,新增 2 条针对该报错的回归用例(修复前逐字复现真机错误)。
+**验证**:195 测试全绿 +1 skip(v1.9.0 为 193);analyze 0 error/0 warning;APK 1.9.1+50。
+
 
 ### v1.9.0 — 全面代码审查修复（P0 3/3 · P1 9/9 · P2 34/34）(2026-09-21,已发布)
 **背景**:用户要求"把软件做一个好好的 review,再依次修复所有问题"。审查产出 `docs/CODE-REVIEW-2026-09-19.md`(45 个文件逐行过 + 5 维度审计 + 主审逐条复核,剔除 3 条不成立结论、改写 2 条机制错误、降级 2 条严重度),本版按该报告 §8 的 B1–B6 批次全部实施;落地记录见该文档 §10。
@@ -316,6 +325,7 @@
 - Hive 读回嵌套 Map 是 `_Map<dynamic,dynamic>`,`as Map<String,dynamic>` 必炸 → 用 Map.from 重建
 - 临时文件命名别用系统组件靠扩展名识别的场景(PackageInstaller 按 .apk 判断)
 - 插件硬编码配置(open_filex authority)须与 Manifest 逐字核对
+- **🚨 2026-09-22 单测造流用错类型 → 真机流式全挂(v1.9.0→v1.9.1)**:`utf8.decoder` 是 `StreamTransformer<List<int>, String>`,而 dio 的 `ResponseBody.stream` 运行时是 `Stream<Uint8List>`;`stream.transform(utf8.decoder)` 会在**运行时**抛 `type 'Utf8Decoder' is not a subtype of type 'StreamTransformer<Uint8List, String>'`(编译期查不出来,因为声明类型是 `Stream<List<int>>`)。**修法:`stream.cast<List<int>>()` 再 transform。** 单测当时用 `Stream<List<int>>.fromIterable` 造流 → 接收者类型参数是 `List<int>` → 检查通过 → 缺陷被"测绿"。**教训:凡是测流/字节管道,造流必须用与生产一致的运行时类型(`StreamController<Uint8List>`),否则等于没测。**
 - **🚨 2026-09-21 血的教训:别用脚本做批量字符串替换。** 为把 60 处灰阶正文色收敛到 AA,用 pwsh 写了个 `[System.IO.File]::ReadAllText / Replace / WriteAllText` 的批量替换,数组构造写错导致替换对变成了单字符 `'s'→'t'`,**一次把 4 个源文件的每个 s 都改成了 t**(process_chat.dart 122KB、my_materials_section.dart、vocab_list.dart、writing_logs_screen.dart 全毁)。救援路径记下来备用:
   1. **`app.dill` 里有完整源码文本**。Flutter 构建产物 `.dart_tool/flutter_build/<hash>/app.dill`(kernel)内嵌了每个源文件的**原文**(注释都在),因为损坏是"每个 s→t"这种长度不变的双射,可以先用正则 `escape(损坏内容前 200 字) + t→[st]` 定位,再按**原始字符数**切出候选、用 `候选.Replace('s','t') == 损坏内容` 逐字节验证,1:1 还原(本次 4 个文件全部 VERIFIED 后还原成功,analyze 回到 24 infos 基线)。
   2. 前提是**损坏前刚跑过 build/test**;所以改代码后跑一次 `flutter analyze`/`build` 同时也是给自己留了份"可反解的编译快照"。

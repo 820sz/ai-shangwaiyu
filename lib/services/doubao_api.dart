@@ -360,7 +360,17 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
       }
     }
 
+    // ⚠️ v1.9.1 真机修复:`rawStream` 的**运行时**类型是 `Stream<Uint8List>`
+    // (dio 的 `ResponseBody.stream` 就是这个),而 `utf8.decoder` 是
+    // `StreamTransformer<List<int>, String>` —— 直接 transform 会被运行时类型
+    // 检查拒绝,真机上识图/追问/推荐全线报:
+    //   type 'Utf8Decoder' is not a subtype of type
+    //   'StreamTransformer<Uint8List, String>' of 'streamTransformer'
+    // 单测当时用 `Stream<List<int>>` 造流,把这个坑测绿了(v1.9.1 起测试改用
+    // Uint8List 造流)。`cast<List<int>>()` 让接收者的类型参数变成 List<int>,
+    // transform 才能通过检查 —— 这是 Dart 官方推荐的修法。
     final lines = rawStream
+        .cast<List<int>>()
         .transform(utf8.decoder) // allowMalformed:false —— 坏字节必须暴露
         .transform(const LineSplitter());
 

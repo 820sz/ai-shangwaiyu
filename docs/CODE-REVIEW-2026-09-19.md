@@ -326,7 +326,7 @@
 - 依赖治理：`permission_handler` 删除；`flutter_markdown`（discontinued）/`hive`/`fl_chart` 升级**未做**——三者都需要独立版本验证，不与本次 bug 修复混版（与审查 §3 的建议一致）。
 
 **补充（子代理中断后由主审收尾）**
-- P2-31 的灰度收敛补齐：`process_chat`、`my_materials_section`、`vocab_list`、`writing_logs_screen` 等文件的**正文**灰阶统一提到 `grey[600]`；图标/边框/分隔线/背景有意保留原灰阶（不是正文，改了只会改变视觉层次）。
+- **P1-2 的修复在真机上翻过车（v1.9.1 已修）**：SSE 改流式解码时写了 `rawStream.transform(utf8.decoder)`，而 dio 的流运行时是 `Stream<Uint8List>` → 真机抛 `type 'Utf8Decoder' is not a subtype of type 'StreamTransformer<Uint8List, String>'`，识图/追问/文章/推荐全线失效。单测用 `Stream<List<int>>` 造流所以没拦住。修法 `cast<List<int>>()`，并把 SSE 全部用例改用 `Stream<Uint8List>` 造流 + 新增 2 条回归用例（修复前逐字复现真机报错）。**结论：审查给的"改法"本身没错，但"流式解码"这类改动的验证必须用与生产一致的运行时类型，否则测试会给出虚假的安全感。**- P2-31 的灰度收敛补齐：`process_chat`、`my_materials_section`、`vocab_list`、`writing_logs_screen` 等文件的**正文**灰阶统一提到 `grey[600]`；图标/边框/分隔线/背景有意保留原灰阶（不是正文，改了只会改变视觉层次）。
 - P2-32 的"2× 字号不溢出"断言**真的抓到一处缺陷**：`WordListTile` 的词性标签没有弹性约束，2× 系统字号下 `Row overflowed by 25 pixels` → 标签改为 `Flexible`（超宽时省略，长词条优先完整），已随测试一起修掉。
 - P3 收尾：`Image.file` 缩略图与大图预览按显示宽度解码（`cacheWidth`，12MP 原图不再整张进内存）；追问抽屉"滚到底"的 `postFrameCallback` 改为每帧至多注册一次（原来流式期间每个 chunk 都注册一次）。
 

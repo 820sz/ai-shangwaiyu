@@ -71,7 +71,7 @@ App **未开启明文 HTTP**（全站强制 https），也**关闭了系统备�
 > 每一步都对应一次真实踩过的坑，别跳步。
 
 1. **bump 版本**：改 `pubspec.yaml` 的 `version: X.Y.Z+NN`。v1.9.0 起 `UpdateService.compareVersions` 已比较四段（含 `+build`），**只升 build 号也会被判为新版本**；但为便于用户辨认，功能修复仍建议升 `X.Y.Z`。
-2. **静态检查与测试**：`flutter analyze --no-fatal-infos`（0 error / 0 warning）+ `flutter test`（当前基线 193 例全绿 + 1 skip）。
+2. **静态检查与测试**：`flutter analyze --no-fatal-infos`（0 error / 0 warning）+ `flutter test`（当前基线 195 例全绿 + 1 skip）。
 3. **构建**：`flutter build apk --release --target-platform android-arm64`（只打 arm64，56MB → 20MB）。
 4. **包内校验**：`aapt dump badging build/app/outputs/flutter-apk/app-release.apk | findstr version`，确认 `versionName`/`versionCode` 与 `pubspec.yaml` 一致（搞错版本号会让"检查更新"永远判无更新）。
 5. **完整性比对**：`sha256sum app-release.apk`（PowerShell `Get-FileHash -Algorithm SHA256`）与 Release asset 的 `digest` 字段逐字比对，字节数也要一致 —— 证明线上件就是本地件。

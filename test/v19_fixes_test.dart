@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -28,10 +30,17 @@ void main() {
   });
 
   group('SSE 解析(P1-2:中文跨包 / CRLF / 多行 data / 上限)', () {
-    Future<List<SseChunk>> parse(List<List<int>> chunks) =>
-        DoubaoApiService.parseSseStream(Stream.fromIterable(chunks)).toList();
+    // ⚠️ v1.9.1 真机回归:流必须是 **Stream<Uint8List>**(dio 的响应流就是这个
+    // 运行时类型)。用 Stream<List<int>> 造流会把这条路径测绿,而真机上
+    // `utf8.decoder`(StreamTransformer<List<int>, String>)会被运行时类型检查
+    // 拒绝:type 'Utf8Decoder' is not a subtype of type
+    // 'StreamTransformer<Uint8List, String>' —— v1.9.0 就是这么把识图打挂的。
+    Future<List<SseChunk>> parse(List<Uint8List> chunks) =>
+        DoubaoApiService.parseSseStream(
+          Stream<Uint8List>.fromIterable(chunks),
+        ).toList();
 
-    List<int> frame(String text, {bool reasoning = false}) {
+    Uint8List frame(String text, {bool reasoning = false}) {
       final key = reasoning ? 'reasoning_content' : 'content';
       final payload = jsonEncode({
         'choices': [
@@ -97,6 +106,34 @@ void main() {
         () => parse([utf8.encode('data: not-json\n\n')]),
         throwsA(isA<Exception>()),
       );
+    });
+
+    // ── v1.9.1 真机回归(用户实测"识图直接用不了了") ──
+    test('回归:dio 真实流类型 StreamController<Uint8List> 不再抛类型错', () async {
+      // 真机报错:type 'Utf8Decoder' is not a subtype of type
+      // 'StreamTransformer<Uint8List, String>' of 'streamTransformer'
+      final ctrl = StreamController<Uint8List>();
+      final done = DoubaoApiService.parseSseStream(ctrl.stream).toList();
+      ctrl.add(
+        utf8.encode(
+          'data: ${jsonEncode({
+            'choices': [
+              {
+                'delta': {'content': 'ok'},
+              },
+            ],
+          })}\n\n',
+        ),
+      );
+      await ctrl.close();
+      final chunks = await done;
+      expect(chunks.single.text, 'ok');
+    });
+
+    test('回归:非 SSE 端点返回的整块 JSON 也不因类型转换炸(单块 Uint8List)', () async {
+      // 与上面同源:真实链路里 chunk 可能只有一块,类型仍是 Uint8List
+      final chunks = await parse([frame('单块')]);
+      expect(chunks.single.text, '单块');
     });
   });
 
