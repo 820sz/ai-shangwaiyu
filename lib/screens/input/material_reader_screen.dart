@@ -4,12 +4,14 @@ import 'package:provider/provider.dart';
 
 import '../../models/vocabulary.dart';
 import '../../providers/vocab_provider.dart';
+import '../../services/audio_service.dart';
 import '../../services/database.dart';
 import '../../services/doubao_api.dart';
 import '../../services/material_library.dart';
 import '../../services/reading_quiz.dart';
 import '../../services/text_difficulty.dart';
 import '../../services/tts_service.dart';
+import '../../widgets/audio_player_bar.dart';
 import 'reading_quiz_screen.dart';
 
 /// 材料阅读器(v2.0)。
@@ -293,6 +295,12 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
                 )
               : Column(
                   children: [
+                    // 听力材料(播客/TED)在顶部给播放条:边听边看稿
+                    if (AudioService.looksPlayable(_material?['audio_url'] as String?))
+                      AudioPlayerBar(
+                        url: '${_material!['audio_url']}',
+                        title: '${_material!['title'] ?? ''}',
+                      ),
                     if (a != null)
                       Container(
                         width: double.infinity,

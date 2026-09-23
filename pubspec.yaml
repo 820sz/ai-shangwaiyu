@@ -39,6 +39,11 @@ dependencies:
   flutter_tts: ^4.2.0
   # 更新包 sha256 完整性校验(v1.9.0;原为传递依赖,这里显式声明)
   crypto: ^3.0.6
+  # v2.2 听力:播客/TED 音频播放与听写(用户已确认引入音频播放依赖)
+  just_audio: ^0.9.42
+  # 音频会话(语音内容而非音乐):接电话/其它 App 播放时正确让路。
+  # just_audio 的传递依赖,这里显式声明 —— 与 crypto 同理,依赖被直接 import。
+  audio_session: ^0.1.25
 
 dev_dependencies:
   flutter_test:
