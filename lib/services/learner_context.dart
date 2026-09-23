@@ -98,13 +98,23 @@ class LearnerContext {
   /// 材料难度提示语(给"这份材料对你难不难"用),与 PLAN-2.0 §3.2 的
   /// i+1 阈值一致 —— 阈值写在一处,UI 与推荐引擎不要各写一份
   static String difficultyHint(double knownTokenRatio) {
-    if (knownTokenRatio >= 0.98) return '轻松泛读(几乎无生词)';
-    if (knownTokenRatio >= 0.95) return '舒适精读(每 100 词 2-5 个生词)';
-    if (knownTokenRatio >= 0.90) return '挑战精读(需要先预热生词)';
+    if (knownTokenRatio >= tooEasyTokenRatio) return '轻松泛读(几乎无生词)';
+    if (knownTokenRatio >= comfortableMin) return '舒适精读(每 100 词 2-5 个生词)';
+    if (knownTokenRatio >= tooHardTokenRatio) return '挑战精读(需要先预热生词)';
     return '偏难(生词过密,建议换更简单的材料)';
   }
 
+  /// i+1 阈值(单一事实源:材料库、推荐、导师诊断、阅读器都读这几个常量)
+  ///
+  /// 依据:Nation(2006)与 Laufer & Ravenhorst-Kalovski(2010)的**词次覆盖率**
+  /// 经验值(98% 可泛读、95% 可精读);这里算的是同一口径(词次,不是词形),
+  /// 所以直接用文献阈值,不再额外下调。
+  static const double tooEasyTokenRatio = 0.99;
+  static const double comfortableMin = 0.95;
+  static const double comfortableMax = 0.98;
+  static const double tooHardTokenRatio = 0.90;
+
   /// 是否落在"舒适精读"区间(推荐材料时的默认目标)
   static bool isComfortable(double knownTokenRatio) =>
-      knownTokenRatio >= 0.95 && knownTokenRatio < 0.98;
+      knownTokenRatio >= comfortableMin && knownTokenRatio < comfortableMax;
 }

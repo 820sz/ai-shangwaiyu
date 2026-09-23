@@ -11,6 +11,7 @@ import '../../services/doubao_api.dart';
 import '../../services/api_endpoint.dart';
 import 'process_chat.dart';
 import 'widgets/ai_article_section.dart';
+import 'material_center_screen.dart';
 import 'widgets/analysis_mode_picker.dart';
 import 'widgets/my_materials_section.dart';
 import 'widgets/ai_discovery_section.dart';
@@ -65,17 +66,66 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
             // ── 板块1：拍照识文 ──
             _buildCaptureSectionCard(theme),
 
-            // ── 板块2：特色功能 · AI 生词定制文章(v1.8.0 从输出页迁来) ──
+            // ── 板块2：材料中心(v2.0)──
+            // 定位:由软件提供**真实材料**的渠道(公开源 + 自备文本),
+            // 入库即本地算难度与生词分布,读完的词直接进复习队列。
+            _buildMaterialCenterCard(theme),
+
+            // ── 板块3：特色功能 · AI 生词定制文章(v1.8.0 从输出页迁来) ──
             const AiArticleSection(),
 
-            // ── 板块3：我的学习材料 ──
+            // ── 板块4：我的学习材料 ──
             const MyMaterialsSection(),
 
-            // ── 板块4：AI 推荐学习资源 ──
+            // ── 板块5：AI 推荐学习资源(实验性;已被材料中心取代,保留待下版移除)──
             const AiDiscoverySection(),
 
             const SizedBox(height: 24),
           ],
+        ),
+      ),
+    );
+  }
+
+  /// 材料中心入口(v2.0):软件提供的真实材料渠道
+  Widget _buildMaterialCenterCard(ThemeData theme) {
+    final muted = theme.colorScheme.onSurfaceVariant;
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      elevation: 1,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const MaterialCenterScreen()),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Icon(Icons.local_library_outlined,
+                  size: 22, color: theme.colorScheme.primary),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('材料中心',
+                        style: theme.textTheme.titleSmall
+                            ?.copyWith(fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 2),
+                    Text(
+                      '外刊 / 原版书 / 播客 / 百科 · 打开即算难度与生词分布',
+                      style:
+                          theme.textTheme.bodySmall?.copyWith(color: muted),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right),
+            ],
+          ),
         ),
       ),
     );
