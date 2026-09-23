@@ -42,9 +42,21 @@ class TtsService {
   Future<bool> speakPreferred(String text) =>
       speakWithLanguage(text, ttsLanguageForAccent(loadTtsAccent()));
 
+  /// 慢速朗读(v2.2 听写):语速降到 0.35 —— 听写练习里"听不清"的第一反应
+  /// 是放慢,而不是反复重放同一速度(后者只是重复听不清)
+  Future<bool> speakSlow(String text) => _speak(text, null, rate: 0.35);
+
+  /// 慢速 + 用户音色(听写默认用这个)
+  Future<bool> speakSlowPreferred(String text) =>
+      _speak(text, ttsLanguageForAccent(loadTtsAccent()), rate: 0.35);
+
   /// [language] 为 null → 用引擎当前语言(即"跟随系统"),
   /// 同时把语言恢复成默认,避免残留上一次的英/美选择。
-  Future<bool> speakWithLanguage(String text, String? language) async {
+  Future<bool> speakWithLanguage(String text, String? language) =>
+      _speak(text, language);
+
+  /// 真正的朗读实现(带可选语速):正常 0.5,听写慢速 0.35
+  Future<bool> _speak(String text, String? language, {double rate = 0.5}) async {
     final t = text.trim();
     if (t.isEmpty) return false;
     final tts = await _ensureTts();
@@ -54,6 +66,9 @@ class TtsService {
       // 让它用默认声音念出来,总好过"点了没反应")
       try {
         await tts.setLanguage(language ?? _defaultLanguage);
+      } catch (_) {}
+      try {
+        await tts.setSpeechRate(rate);
       } catch (_) {}
       await tts.stop();
       final result = await tts.speak(t);

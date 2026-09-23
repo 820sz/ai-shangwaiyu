@@ -12,6 +12,7 @@ import '../../services/reading_quiz.dart';
 import '../../services/text_difficulty.dart';
 import '../../services/tts_service.dart';
 import '../../widgets/audio_player_bar.dart';
+import 'dictation_screen.dart';
 import 'reading_quiz_screen.dart';
 
 /// 材料阅读器(v2.0)。
@@ -277,6 +278,24 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
       appBar: AppBar(
         title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
         actions: [
+          // 听写练习(v2.2):用 TTS 按句出题 —— 文字与音频天然对齐,可客观判分
+          IconButton(
+            tooltip: '听写练习',
+            onPressed: _chunks.isEmpty
+                ? null
+                : () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => DictationScreen(
+                          title: '${_material?['title'] ?? '材料'}',
+                          text: _chunks
+                              .map((c) => '${c['text'] ?? ''}')
+                              .join('\n\n'),
+                        ),
+                      ),
+                    ),
+            icon: const Icon(Icons.headphones_outlined),
+          ),
           if (!_finished)
             TextButton(
               onPressed: _finishReading,
