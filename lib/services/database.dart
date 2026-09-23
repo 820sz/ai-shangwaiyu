@@ -34,6 +34,17 @@ class DatabaseService {
     );
   }
 
+  /// 仅供测试:关掉缓存连接,让下一次 [database] 重新走 open/onCreate/onUpgrade。
+  /// 迁移测试需要在同一个测试进程里连续验证"全新安装"与"从旧版本升级"两条路径,
+  /// 没有这个钩子就只能测到第一条。
+  @visibleForTesting
+  static Future<void> resetForTest() async {
+    try {
+      await _db?.close();
+    } catch (_) {}
+    _db = null;
+  }
+
   /// 连接级配置:开外键约束(v1.9.0,审查 P1-9)。
   /// sqlite 默认关闭外键 → `deleteArticle` 删文章后 exercises 变成孤儿行,
   /// 还被 `getTotalExerciseCount` 计入"已完成练习"(用户看到练习数虚高)。
@@ -173,7 +184,176 @@ class DatabaseService {
     'CREATE INDEX IF NOT EXISTS idx_bookmark_created ON bookmarks(created_at DESC)',
     'CREATE INDEX IF NOT EXISTS idx_writing_log_created ON writing_logs(created_at DESC)',
     'CREATE INDEX IF NOT EXISTS idx_recommend_category ON recommendations(category, created_at DESC)',
+    // ── v2.0(dbVersion 11)──
+    // 复习队列按到期时间取词是最热的查询(每次打开导师页/复习页都要算)
+    'CREATE INDEX IF NOT EXISTS idx_word_review_due ON word_review(due_at)',
+    'CREATE INDEX IF NOT EXISTS idx_materials_kind ON materials(kind, created_at DESC)',
+    'CREATE INDEX IF NOT EXISTS idx_materials_source ON materials(source, source_id)',
+    'CREATE INDEX IF NOT EXISTS idx_material_progress_updated ON material_progress(updated_at DESC)',
+    'CREATE INDEX IF NOT EXISTS idx_reading_started ON reading_sessions(started_at DESC)',
+    'CREATE INDEX IF NOT EXISTS idx_quiz_kind ON quiz_results(kind, created_at DESC)',
+    'CREATE INDEX IF NOT EXISTS idx_error_tag ON error_tags(tag, status)',
+    'CREATE INDEX IF NOT EXISTS idx_tutor_task_date ON tutor_tasks(plan_date, done_at)',
+    'CREATE INDEX IF NOT EXISTS idx_tutor_msg_created ON tutor_messages(created_at DESC)',
   ];
+
+  // ═══════════════ v2.0(dbVersion 11)新增表 ═══════════════
+  // 设计原则(对应 PLAN-2.0 §7):
+  // - **明细进 SQL,单行配置留在 Hive**(学习者模型是单行 JSON,放 Hive 更合适);
+  // - 每张表都带 `created_at`,便于"按时间倒序"与复盘;
+  // - 外键暂不声明:SQLite 的外键需要每次连接开启,而历史数据里有孤儿行,
+  //   这里用**定期清理**代替硬约束(与 v1.9.0 清孤儿练习同一思路)。
+
+  /// 词级复习状态(FSRS):v2.1 起驱动复习队列,先建表并在迁移时初始化
+  static const String _wordReviewTableSql = '''
+    CREATE TABLE IF NOT EXISTS word_review (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      vocab_id INTEGER NOT NULL UNIQUE,
+      stability REAL NOT NULL DEFAULT 0,
+      difficulty REAL NOT NULL DEFAULT 0,
+      due_at TEXT,
+      last_review_at TEXT,
+      reps INTEGER NOT NULL DEFAULT 0,
+      lapses INTEGER NOT NULL DEFAULT 0,
+      last_rating INTEGER,
+      created_at TEXT,
+      updated_at TEXT
+    )
+  ''';
+
+  /// 材料元数据(材料中心):不存正文,正文分块在 material_content
+  static const String _materialsTableSql = '''
+    CREATE TABLE IF NOT EXISTS materials (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      kind TEXT NOT NULL,
+      source TEXT NOT NULL,
+      source_id TEXT,
+      title TEXT NOT NULL,
+      author TEXT,
+      url TEXT,
+      license TEXT,
+      language TEXT DEFAULT 'en',
+      word_count INTEGER DEFAULT 0,
+      unique_words INTEGER DEFAULT 0,
+      cefr TEXT,
+      flesch REAL,
+      coverage REAL,
+      new_word_density REAL,
+      est_minutes INTEGER,
+      chapters INTEGER DEFAULT 0,
+      audio_url TEXT,
+      transcript_ref TEXT,
+      difficulty_json TEXT,
+      created_at TEXT,
+      cached_at TEXT
+    )
+  ''';
+
+  /// 材料正文分块(按章/段):阅读器按块加载,避免整本进内存
+  static const String _materialContentTableSql = '''
+    CREATE TABLE IF NOT EXISTS material_content (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      material_id INTEGER NOT NULL,
+      chunk_index INTEGER NOT NULL,
+      title TEXT,
+      text TEXT NOT NULL,
+      UNIQUE(material_id, chunk_index)
+    )
+  ''';
+
+  /// 阅读进度(一份材料一行)
+  static const String _materialProgressTableSql = '''
+    CREATE TABLE IF NOT EXISTS material_progress (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      material_id INTEGER NOT NULL UNIQUE,
+      position INTEGER DEFAULT 0,
+      percent REAL DEFAULT 0,
+      minutes INTEGER DEFAULT 0,
+      lookups INTEGER DEFAULT 0,
+      picked_words INTEGER DEFAULT 0,
+      started_at TEXT,
+      finished_at TEXT,
+      updated_at TEXT
+    )
+  ''';
+
+  /// 阅读/听力会话(行为数据的原子记录:导师与统计都读它)
+  static const String _readingSessionsTableSql = '''
+    CREATE TABLE IF NOT EXISTS reading_sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      material_id INTEGER,
+      article_id INTEGER,
+      started_at TEXT,
+      ended_at TEXT,
+      words INTEGER DEFAULT 0,
+      lookups INTEGER DEFAULT 0,
+      wpm REAL,
+      created_at TEXT
+    )
+  ''';
+
+  /// 测验结果(词汇量测试 / 读后测验 / 回译 / 听写统一进这张表)
+  static const String _quizResultsTableSql = '''
+    CREATE TABLE IF NOT EXISTS quiz_results (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      kind TEXT NOT NULL,
+      ref_id INTEGER,
+      total INTEGER DEFAULT 0,
+      correct INTEGER DEFAULT 0,
+      detail_json TEXT,
+      created_at TEXT
+    )
+  ''';
+
+  /// 错误标签画像(v2.1 错误档案的地基;现在就开始记,历史越早越值钱)
+  static const String _errorTagsTableSql = '''
+    CREATE TABLE IF NOT EXISTS error_tags (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source TEXT NOT NULL,
+      tag TEXT NOT NULL,
+      count INTEGER NOT NULL DEFAULT 1,
+      first_at TEXT,
+      last_at TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      evidence TEXT
+    )
+  ''';
+
+  /// 导师任务卡
+  static const String _tutorTasksTableSql = '''
+    CREATE TABLE IF NOT EXISTS tutor_tasks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      plan_date TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      title TEXT NOT NULL,
+      payload_json TEXT,
+      target_minutes INTEGER DEFAULT 0,
+      done_at TEXT,
+      result_json TEXT,
+      created_at TEXT
+    )
+  ''';
+
+  /// 导师会话(长期记忆的另一半:短期对话)
+  static const String _tutorMessagesTableSql = '''
+    CREATE TABLE IF NOT EXISTS tutor_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      tool_calls TEXT,
+      created_at TEXT
+    )
+  ''';
+
+  /// 导师长期记忆(用户偏好/承诺/障碍/结论)
+  static const String _tutorMemoryTableSql = '''
+    CREATE TABLE IF NOT EXISTS tutor_memory (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      kind TEXT NOT NULL,
+      text TEXT NOT NULL,
+      created_at TEXT
+    )
+  ''';
 
   static Future<void> _onCreate(Database db, int version) async {
     await db.execute(_vocabularyTableSql);
@@ -184,6 +364,17 @@ class DatabaseService {
     await db.execute(_bookmarksTableSql);
     await db.execute(_writingLogsTableSql);
     await db.execute(_recommendationsTableSql);
+    // v2.0
+    await db.execute(_wordReviewTableSql);
+    await db.execute(_materialsTableSql);
+    await db.execute(_materialContentTableSql);
+    await db.execute(_materialProgressTableSql);
+    await db.execute(_readingSessionsTableSql);
+    await db.execute(_quizResultsTableSql);
+    await db.execute(_errorTagsTableSql);
+    await db.execute(_tutorTasksTableSql);
+    await db.execute(_tutorMessagesTableSql);
+    await db.execute(_tutorMemoryTableSql);
     await _createIndexes(db);
   }
 
@@ -231,6 +422,25 @@ class DatabaseService {
       await _createIndexes(db);
       await _cleanOrphanExercises(db);
     }
+    if (oldV < 11) {
+      // v2.0:材料中心 / 复习状态 / 导师 的明细表,外加英式美式两套音标列。
+      // 全部是"新建表 + 加列",不动既有数据 → 失败回滚也不会丢东西。
+      await _ensureTable(db, 'word_review', _wordReviewTableSql);
+      await _ensureTable(db, 'materials', _materialsTableSql);
+      await _ensureTable(db, 'material_content', _materialContentTableSql);
+      await _ensureTable(db, 'material_progress', _materialProgressTableSql);
+      await _ensureTable(db, 'reading_sessions', _readingSessionsTableSql);
+      await _ensureTable(db, 'quiz_results', _quizResultsTableSql);
+      await _ensureTable(db, 'error_tags', _errorTagsTableSql);
+      await _ensureTable(db, 'tutor_tasks', _tutorTasksTableSql);
+      await _ensureTable(db, 'tutor_messages', _tutorMessagesTableSql);
+      await _ensureTable(db, 'tutor_memory', _tutorMemoryTableSql);
+      // v2.0 决策:音标英式美式都给(词条同时显示两套)
+      await _ensureColumn(db, 'vocabulary', 'phonetic_uk', 'TEXT');
+      await _ensureColumn(db, 'vocabulary', 'phonetic_us', 'TEXT');
+      await _createIndexes(db);
+      await _seedWordReviewFromMastery(db);
+    }
   }
 
   /// 打开后自检(v1.9.0,审查 P0-2 的兜底):
@@ -244,19 +454,84 @@ class DatabaseService {
       await _ensureColumn(db, 'vocabulary', 'category', "TEXT DEFAULT '其他'", repaired);
       await _ensureColumn(db, 'vocabulary', 'material_path', 'TEXT', repaired);
       await _ensureColumn(db, 'vocabulary', 'phonetic', 'TEXT', repaired);
+      await _ensureColumn(db, 'vocabulary', 'phonetic_uk', 'TEXT', repaired);
+      await _ensureColumn(db, 'vocabulary', 'phonetic_us', 'TEXT', repaired);
       await _ensureColumn(db, 'exercises', 'reference_answers', 'TEXT', repaired);
       await _ensureColumn(db, 'articles', 'translation', 'TEXT', repaired);
       await _ensureTable(db, 'daily_log', _dailyLogTableSql, repaired);
       await _ensureTable(db, 'bookmarks', _bookmarksTableSql, repaired);
       await _ensureTable(db, 'writing_logs', _writingLogsTableSql, repaired);
       await _ensureTable(db, 'recommendations', _recommendationsTableSql, repaired);
+      // v2.0 的十张表也在自检范围内:历史库若曾静默失败,这里补上
+      await _ensureTable(db, 'word_review', _wordReviewTableSql, repaired);
+      await _ensureTable(db, 'materials', _materialsTableSql, repaired);
+      await _ensureTable(db, 'material_content', _materialContentTableSql, repaired);
+      await _ensureTable(db, 'material_progress', _materialProgressTableSql, repaired);
+      await _ensureTable(db, 'reading_sessions', _readingSessionsTableSql, repaired);
+      await _ensureTable(db, 'quiz_results', _quizResultsTableSql, repaired);
+      await _ensureTable(db, 'error_tags', _errorTagsTableSql, repaired);
+      await _ensureTable(db, 'tutor_tasks', _tutorTasksTableSql, repaired);
+      await _ensureTable(db, 'tutor_messages', _tutorMessagesTableSql, repaired);
+      await _ensureTable(db, 'tutor_memory', _tutorMemoryTableSql, repaired);
       await _createIndexes(db);
+      // v2.0 不变式:每个生词都有一条复习状态(word_review)。
+      // 放在自检里而不是只放迁移里:这样"迁移后新增的词"也有状态,
+      // v2.1 的复习队列不会因为缺少记录而漏词(幂等,只补缺的)。
+      await _seedWordReviewFromMastery(db);
     } catch (e) {
       // 自检是"尽力而为":绝不因为补建失败而让 App 起不来
       debugPrint('ReadFlow DB 自检失败: $e');
     }
     if (repaired.isNotEmpty) {
       debugPrint('ReadFlow DB 自检补建: ${repaired.join(', ')}');
+    }
+  }
+
+  /// 用旧的 `mastery_level` 给 FSRS 状态一个**保守初值**(v2.0 → v2.1 的衔接)。
+  ///
+  /// 语义:新词(0) = 从未复习,due 立刻;学习中(1) = 刚接触,3 天后到期;
+  /// 已掌握(2) = 给 14 天稳定期,但**绝不设成永不到期** —— 旧数据没有复习
+  /// 历史,把它当"已经记住"正是 v1.9 复习模式的病根(用户实测"点认识能一直
+  /// 刷进度")。宁可让老词重新排队,也不要让复习队列永远空着。
+  ///
+  /// 幂等:只为还没有 word_review 记录的词插入(LEFT JOIN ... IS NULL)。
+  static Future<void> _seedWordReviewFromMastery(Database db) async {
+    try {
+      final rows = await db.rawQuery('''
+        SELECT v.id AS vid, v.mastery_level AS m
+        FROM vocabulary v
+        LEFT JOIN word_review r ON r.vocab_id = v.id
+        WHERE r.id IS NULL
+      ''');
+      if (rows.isEmpty) return;
+      final now = DateTime.now();
+      final iso = now.toIso8601String();
+      final batch = db.batch();
+      for (final r in rows) {
+        final vid = r['vid'] as int?;
+        if (vid == null) continue;
+        final m = (r['m'] as int?) ?? 0;
+        final int days = switch (m) {
+          2 => 14,
+          1 => 3,
+          _ => 0,
+        };
+        batch.insert('word_review', {
+          'vocab_id': vid,
+          'stability': days.toDouble(),
+          'difficulty': 5.0,
+          'due_at': now.add(Duration(days: days)).toIso8601String(),
+          'reps': m == 0 ? 0 : 1,
+          'lapses': 0,
+          'created_at': iso,
+          'updated_at': iso,
+        });
+      }
+      await batch.commit(noResult: true);
+      debugPrint('ReadFlow 复习状态初始化: ${rows.length} 个词');
+    } catch (e) {
+      // 初值失败不能挡住启动:复习队列下一版会自己补
+      debugPrint('ReadFlow 复习状态初始化失败(不影响启动): $e');
     }
   }
 

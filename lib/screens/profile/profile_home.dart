@@ -6,8 +6,11 @@ import '../../providers/vocab_provider.dart';
 import '../../providers/article_provider.dart';
 import '../../providers/bookmark_provider.dart';
 import '../../config/constants.dart';
+import '../../models/learner_model.dart';
 import '../../services/api_endpoint.dart';
 import '../../services/doubao_api.dart';
+import '../../services/learner_context.dart';
+import '../../services/learner_model_store.dart';
 import '../../utils/crash_logger.dart';
 import '../../widgets/stats_chart.dart';
 import '../../widgets/update_dialog.dart';
@@ -17,6 +20,7 @@ import 'stats_page.dart';
 import 'api_settings.dart';
 import 'bookmarks_screen.dart';
 import '../review/review_screen.dart';
+import '../tutor/placement_test_screen.dart';
 
 class ProfileHomeScreen extends StatefulWidget {
   const ProfileHomeScreen({super.key});
@@ -32,6 +36,10 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
   /// 用户只能反复下拉刷新。留一个标志位给「重新生成」入口。
   bool _adviceFailed = false;
 
+  /// 学习者模型(v2.0):词汇量基线卡片的数据来源。
+  /// Hive 同步读,不阻塞首帧;测试页返回后再刷一次。
+  LearnerModel _learnerModel = LearnerModel();
+
   @override
   void initState() {
     super.initState();
@@ -44,6 +52,8 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
   }
 
   Future<void> _loadAll() async {
+    // 学习者模型先读(Hive 同步,页面一渲染就能显示基线)
+    _learnerModel = LearnerModelStore.load();
     await Future.wait([
       context.read<StatsProvider>().loadStats(),
       context.read<VocabProvider>().loadVocabularies(),
@@ -198,6 +208,11 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
             ),
             const SizedBox(height: 16),
 
+            // ── 词汇量基线(v2.0) ──
+            // 这一块把"水平"从"生词本收藏数瞎估"变成**测量值 + 区间 + 依据**。
+            // 导师与材料推荐都以它为地基,所以入口放在「我的」页显眼处。
+            _buildBaselineCard(theme),
+
             // ── 学习曲线预览 ──
             if (stats.dailyLogs.isNotEmpty) ...[
               Text('学习趋势',
@@ -291,6 +306,84 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
       context,
       MaterialPageRoute(builder: (_) => const ApiSettingsScreen()),
     );
+  }
+
+  /// 词汇量基线卡片(v2.0):显示测量值/区间/来源,并提供两个测试入口
+  Widget _buildBaselineCard(ThemeData theme) {
+    final model = _learnerModel;
+    final muted = theme.colorScheme.onSurfaceVariant;
+    final f = model.vocabEstimate;
+    final hasBaseline = (f?.value ?? 0) > 0;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.straighten, size: 18, color: theme.colorScheme.primary),
+                const SizedBox(width: 8),
+                Text('词汇量基线',
+                    style: theme.textTheme.titleSmall
+                        ?.copyWith(fontWeight: FontWeight.w600)),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              hasBaseline
+                  ? '约 ${f!.value} 词'
+                      '${model.vocabLow != null && model.vocabHigh != null ? '(${model.vocabLow}-${model.vocabHigh})' : ''}'
+                      '${model.cefr != null && model.cefr!.value.isNotEmpty ? ' · ${model.cefr!.value}' : ''}'
+                  : '尚未测量',
+              style: theme.textTheme.headlineSmall
+                  ?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              // 依据必须摆出来:这行的存在就是为了让用户知道数字是怎么来的
+              LearnerContext.describeBaseline(model),
+              style: theme.textTheme.bodySmall?.copyWith(color: muted),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton(
+                    onPressed: () => _startPlacement(full: false),
+                    child: const Text('速测(5 分钟)'),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => _startPlacement(full: true),
+                    child: const Text('完整版(10 分钟)'),
+                  ),
+                ),
+              ],
+            ),
+            if (hasBaseline) ...[
+              const SizedBox(height: 6),
+              Text(
+                '测试会给出区间而不是单一数字;隔一段时间可以重测,基线会更新。',
+                style: theme.textTheme.bodySmall?.copyWith(color: muted),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _startPlacement({required bool full}) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => PlacementTestScreen(full: full)),
+    );
+    if (!mounted) return;
+    // 回来时刷新基线展示(测试结果已写进学习者模型)
+    setState(() => _learnerModel = LearnerModelStore.load());
   }
 
   /// 诊断信息:崩溃日志 + 当前 API 配置摘要(key 打码)。

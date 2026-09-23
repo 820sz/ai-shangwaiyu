@@ -44,9 +44,15 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  # v2.0:在纯 Dart 测试里跑真实 SQLite,用来验证数据库迁移 ——
+  # 迁移是"一旦错就不可自愈"的代码(审查 P0-2),必须能在提交前拦住。
+  # 仅测试依赖,不进 APK。
+  sqflite_common_ffi: ^2.3.4
 
 flutter:
   uses-material-design: true
   assets:
     - assets/
     - assets/icons/
+    # v2.0:词频表(难度分析/词汇量测试的地基,离线可算、零 API 成本)
+    - assets/data/
