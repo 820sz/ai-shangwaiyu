@@ -193,7 +193,8 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
             const SizedBox(height: 4),
             Text(
               '拍摄阅读材料，识别标记内容',
-              style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey),
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
             ),
             const SizedBox(height: 12),
             // 从相册选择
@@ -372,7 +373,11 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.model_training, size: 14, color: Colors.grey[500]),
+          Icon(
+            Icons.model_training,
+            size: 14,
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
           const SizedBox(width: 6),
           Flexible(
             child: PopupMenuButton<String>(
@@ -407,7 +412,9 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
                         Icon(
                           isSel ? Icons.lightbulb : Icons.lightbulb_outline,
                           size: 12,
-                          color: isSel ? Colors.orange : Colors.grey,
+                          color: isSel
+                              ? Colors.orange
+                              : theme.colorScheme.onSurfaceVariant,
                         ),
                         const SizedBox(width: 6),
                         Text(
@@ -440,25 +447,28 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                 decoration: BoxDecoration(
-                  border: Border.all(color: Colors.grey[300]!),
+                  border: Border.all(color: theme.colorScheme.outlineVariant),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
                   _currentModel.length > 22
                       ? '${_currentModel.substring(0, 22)}…'
                       : _currentModel,
-                  style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
             ),
           ),
           const SizedBox(width: 6),
-          // 思考强度快捷标签
+          // 思考强度快捷标签(橙色描边:半透明色相,深色下同样成立)
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
             decoration: BoxDecoration(
-              border: Border.all(color: Colors.orange[200]!),
+              border: Border.all(color: Colors.orange.withAlpha(110)),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Text(
@@ -613,9 +623,11 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
               ),
             ),
             if (_savedSessions.isEmpty)
-              const Padding(
-                padding: EdgeInsets.all(32),
-                child: Text('暂无暂存的会话', style: TextStyle(color: Colors.grey)),
+              Padding(
+                padding: const EdgeInsets.all(32),
+                child: Text('暂无暂存的会话',
+                    style:
+                        TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
               )
             else
               ...List.generate(_savedSessions.length, (i) {

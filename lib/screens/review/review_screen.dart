@@ -925,13 +925,17 @@ class _ReviewScreenState extends State<ReviewScreen> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.style_outlined, size: 56, color: Colors.grey[300]),
+          Icon(
+            Icons.style_outlined,
+            size: 56,
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
           const SizedBox(height: 12),
           Text(
             _filterLevel >= 0 || _filterDays > 0
                 ? '该筛选条件下暂无带释义的词汇'
                 : '生词本里还没有带释义的词汇',
-            style: TextStyle(color: Colors.grey[600]),
+            style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
           ),
           const SizedBox(height: 16),
           OutlinedButton(
@@ -1008,7 +1012,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
                   child: Icon(
                     Icons.event_outlined,
                     size: 16,
-                    color: Colors.grey[800],
+                    color: theme.colorScheme.onSurface,
                   ),
                 ),
                 for (final f in ReviewDateFilter.options)
@@ -1044,10 +1048,12 @@ class _ReviewScreenState extends State<ReviewScreen> {
           decoration: BoxDecoration(
             color: selected
                 ? theme.colorScheme.primary.withAlpha(28)
-                : Colors.grey[100],
+                : theme.colorScheme.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
-              color: selected ? theme.colorScheme.primary : Colors.grey[400]!,
+              color: selected
+                  ? theme.colorScheme.primary
+                  : theme.colorScheme.outlineVariant,
               width: selected ? 1.6 : 1,
             ),
           ),
@@ -1056,7 +1062,9 @@ class _ReviewScreenState extends State<ReviewScreen> {
             style: TextStyle(
               fontSize: 13,
               fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-              color: selected ? theme.colorScheme.primary : Colors.grey[850],
+              color: selected
+                  ? theme.colorScheme.primary
+                  : theme.colorScheme.onSurface,
             ),
           ),
         ),
@@ -1076,10 +1084,10 @@ class _ReviewScreenState extends State<ReviewScreen> {
             children: [
               Text(
                 _finished ? '本轮完成' : '第 $current / $total 张',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w700,
-                  color: Colors.black87,
+                  color: theme.colorScheme.onSurface,
                 ),
               ),
               const Spacer(),
@@ -1087,7 +1095,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
                 '认识/已掌握 $_countMastered · 模糊/学习中 $_countLearning · 不认识/新词 $_countNew',
                 style: TextStyle(
                   fontSize: 12,
-                  color: Colors.grey[850],
+                  color: theme.colorScheme.onSurface,
                   fontWeight: FontWeight.w500,
                 ),
               ),
@@ -1099,7 +1107,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
             child: LinearProgressIndicator(
               value: total == 0 ? 0 : current / total,
               minHeight: 7,
-              backgroundColor: Colors.grey[300],
+              backgroundColor: theme.colorScheme.surfaceContainerHighest,
               valueColor: AlwaysStoppedAnimation<Color>(
                 theme.colorScheme.primary,
               ),
@@ -1128,10 +1136,10 @@ class _ReviewScreenState extends State<ReviewScreen> {
           Expanded(
             child: Text(
               '上次复习到第 ${p.index + 1} 张',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
-                color: Colors.black87,
+                color: theme.colorScheme.onSurface,
               ),
             ),
           ),
@@ -1234,10 +1242,10 @@ class _ReviewScreenState extends State<ReviewScreen> {
             const SizedBox(width: 10),
             Text(
               '${_index + 1} / ${_deck.length}',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
-                color: Colors.black87,
+                color: theme.colorScheme.onSurface,
               ),
             ),
             const SizedBox(width: 10),
@@ -1316,7 +1324,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
           style: TextStyle(
             fontSize: 12,
             fontWeight: FontWeight.w700,
-            color: Colors.grey[600],
+            color: theme.colorScheme.onSurfaceVariant,
             letterSpacing: 2,
           ),
         ),
@@ -1336,7 +1344,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
             style: TextStyle(
               fontSize: 16,
               fontStyle: FontStyle.italic,
-              color: Colors.grey[700],
+              color: theme.colorScheme.onSurfaceVariant,
             ),
           ),
         ],
@@ -1353,7 +1361,10 @@ class _ReviewScreenState extends State<ReviewScreen> {
         const Spacer(),
         Text(
           '保存于 ${v.createdLabel}',
-          style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+          style: TextStyle(
+            fontSize: 12,
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
         ),
       ],
     );
@@ -1383,7 +1394,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
             style: TextStyle(
               fontSize: 14,
               fontStyle: FontStyle.italic,
-              color: Colors.grey[700],
+              color: theme.colorScheme.onSurfaceVariant,
             ),
           ),
         ],
@@ -1401,7 +1412,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
                     v.originalSentence!,
                     style: theme.textTheme.bodyMedium?.copyWith(
                       fontStyle: FontStyle.italic,
-                      color: Colors.grey[800],
+                      color: theme.colorScheme.onSurface,
                       height: 1.5,
                     ),
                   ),
@@ -1411,14 +1422,17 @@ class _ReviewScreenState extends State<ReviewScreen> {
                   Text(
                     v.grammarNote!,
                     style: theme.textTheme.bodySmall?.copyWith(
-                      color: Colors.grey[700],
+                      color: theme.colorScheme.onSurfaceVariant,
                     ),
                   ),
                 ],
                 const SizedBox(height: 10),
                 Text(
                   '保存于 ${v.createdLabel}',
-                  style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ],
             ),
@@ -1470,7 +1484,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
             const SizedBox(height: 12),
             Text(
               '共 $_countMastered 张认识 · $_countLearning 张模糊 · $_countNew 张不认识',
-              style: TextStyle(color: Colors.grey[700]),
+              style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
             ),
             const SizedBox(height: 24),
             FilledButton.icon(

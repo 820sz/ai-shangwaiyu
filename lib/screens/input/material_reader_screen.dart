@@ -1,10 +1,12 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../models/vocabulary.dart';
 import '../../providers/vocab_provider.dart';
 import '../../services/audio_service.dart';
+import '../../services/backup_service.dart';
 import '../../services/database.dart';
 import '../../services/doubao_api.dart';
 import '../../services/material_library.dart';
@@ -148,6 +150,54 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     final total = _intOf(_material?['word_count']);
     if (total <= 0 || _chunks.isEmpty) return total;
     return (total * ((_lastChunkIndex + 1) / _chunks.length)).round();
+  }
+
+  /// 导出这篇材料为 Markdown 阅读包(v2.2):正文 + 元信息 + 生词表,
+  /// 带出去在电脑/笔记软件里继续读 —— 材料库不能只进不出。
+  Future<void> _exportPack() async {
+    try {
+      final file = await BackupService.exportMaterialPack(widget.materialId);
+      if (!mounted) return;
+      final messenger = ScaffoldMessenger.of(context);
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('阅读包已导出'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('已写成 Markdown(${file.bytes} 字符),含正文、来源与生词表。'),
+              const SizedBox(height: 8),
+              SelectableText('文件:${file.path}'),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: file.content));
+                if (!ctx.mounted) return;
+                Navigator.pop(ctx);
+                // 用弹窗前取好的 messenger:此时外层 context 可能已随弹窗关闭失效
+                messenger.showSnackBar(
+                  const SnackBar(content: Text('Markdown 全文已复制')),
+                );
+              },
+              child: const Text('复制全文'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('关闭'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('导出失败:$e')),
+      );
+    }
   }
 
   Future<void> _finishReading() async {
@@ -295,6 +345,12 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
                       ),
                     ),
             icon: const Icon(Icons.headphones_outlined),
+          ),
+          // 导出这篇为 Markdown 阅读包(带来源/许可/生词表)
+          IconButton(
+            tooltip: '导出这篇(Markdown)',
+            onPressed: _chunks.isEmpty ? null : _exportPack,
+            icon: const Icon(Icons.download_outlined),
           ),
           if (!_finished)
             TextButton(

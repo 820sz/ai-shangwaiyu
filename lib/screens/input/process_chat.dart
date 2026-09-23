@@ -1115,7 +1115,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                   },
                   child: Text(
                     '取消选择(${_selected.length})',
-                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                    style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
                   ),
                 ),
                 IconButton(
@@ -1308,7 +1308,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
       padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
       decoration: BoxDecoration(
         color: theme.scaffoldBackgroundColor,
-        border: Border(top: BorderSide(color: Colors.grey[200]!)),
+        border: Border(top: BorderSide(color: theme.colorScheme.outlineVariant)),
       ),
       child: Row(
         children: [
@@ -1365,7 +1365,9 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                         Icon(
                           isSel ? Icons.lightbulb : Icons.lightbulb_outline,
                           size: 14,
-                          color: isSel ? Colors.orange : Colors.grey,
+                          color: isSel
+                              ? Colors.orange
+                              : theme.colorScheme.onSurfaceVariant,
                         ),
                         const SizedBox(width: 6),
                         Text(
@@ -1398,7 +1400,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
                 decoration: BoxDecoration(
-                  border: Border.all(color: Colors.grey[300]!),
+                  border: Border.all(color: theme.colorScheme.outlineVariant),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Row(
@@ -1407,7 +1409,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                     Icon(
                       Icons.model_training,
                       size: 14,
-                      color: Colors.grey[600],
+                      color: theme.colorScheme.onSurfaceVariant,
                     ),
                     const SizedBox(width: 2),
                     Flexible(
@@ -1415,13 +1417,13 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                         '模型',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                        style: TextStyle(fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
                       ),
                     ),
                     Icon(
                       Icons.arrow_drop_up,
                       size: 14,
-                      color: Colors.grey[400],
+                      color: theme.colorScheme.onSurfaceVariant,
                     ),
                   ],
                 ),
@@ -1570,12 +1572,12 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                     vertical: 8,
                   ),
                   decoration: BoxDecoration(
-                    color: Colors.grey[100],
+                    color: theme.colorScheme.surfaceContainerHighest,
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(
                     '图片副本已丢失，仅恢复识别结果',
-                    style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                    style: TextStyle(fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
                   ),
                 ),
               ] else ...[
@@ -1590,7 +1592,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                           child: Container(
                             decoration: BoxDecoration(
                               borderRadius: BorderRadius.circular(16),
-                              border: Border.all(color: Colors.grey[300]!),
+                              border: Border.all(color: theme.colorScheme.outlineVariant),
                             ),
                             clipBehavior: Clip.antiAlias,
                             child: Image.file(
@@ -1615,7 +1617,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                               width: imgWidth,
                               decoration: BoxDecoration(
                                 borderRadius: BorderRadius.circular(12),
-                                border: Border.all(color: Colors.grey[300]!),
+                                border: Border.all(color: theme.colorScheme.outlineVariant),
                               ),
                               clipBehavior: Clip.antiAlias,
                               child: Stack(
@@ -1661,7 +1663,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                 children: [
                   Text(
                     '共 $count 张图片',
-                    style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                    style: TextStyle(fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
                   ),
                   const Spacer(),
                   // 追加图片:圈画/全文翻译模式都支持(v1.4.0 问题 10)
@@ -1674,9 +1676,12 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                           vertical: 3,
                         ),
                         decoration: BoxDecoration(
-                          color: Colors.blue[50],
+                          // 语义色面板用"半透明色相"而不是 50/100 号色阶:
+                          // 浅色下观感与 blue[50] 几乎一致,深色下自动变成
+                          // 深底上的淡蓝色调,不会变成一块近白的亮斑
+                          color: Colors.blue.withAlpha(28),
                           borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: Colors.blue[100]!),
+                          border: Border.all(color: Colors.blue.withAlpha(80)),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
@@ -1718,9 +1723,10 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                             vertical: 3,
                           ),
                           decoration: BoxDecoration(
-                            color: Colors.blue[50],
+                            color: Colors.blue.withAlpha(28),
                             borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: Colors.blue[100]!),
+                            border:
+                                Border.all(color: Colors.blue.withAlpha(80)),
                           ),
                           child: Text(
                             'p${i + 1}',
@@ -1743,7 +1749,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
           children: [
             userAvatar(context: context),
             const SizedBox(height: 2),
-            Text('我', style: TextStyle(fontSize: 9, color: Colors.grey[600])),
+            Text('我', style: TextStyle(fontSize: 9, color: theme.colorScheme.onSurfaceVariant)),
           ],
         ),
       ],
@@ -1762,7 +1768,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
             const SizedBox(height: 2),
             Text(
               _providerName,
-              style: TextStyle(fontSize: 9, color: Colors.grey[600]),
+              style: TextStyle(fontSize: 9, color: theme.colorScheme.onSurfaceVariant),
             ),
           ],
         ),
@@ -1832,7 +1838,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
               const SizedBox(height: 4),
               Text(
                 '$_currentModel · ${AppConstants.thinkingOptionsFor(_currentModel)[_currentThinking] ?? "不思考"}',
-                style: TextStyle(fontSize: 10, color: Colors.grey[600]),
+                style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurfaceVariant),
               ),
             ],
           ),
@@ -1937,7 +1943,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.grey[50],
+        color: theme.colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(16),
       ),
       child: Column(
@@ -1959,12 +1965,12 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
             widget.analysisMode == AppConstants.analysisModeFullText
             ? 'AI 正在翻译图片中的文字…'
             : 'AI 正在识别图片中的标记内容…',
-            style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+            style: TextStyle(fontSize: 13, color: theme.colorScheme.onSurfaceVariant),
           ),
           const SizedBox(height: 4),
           Text(
             '模型: $_currentModel',
-            style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+            style: TextStyle(fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
           ),
         ],
       ),
@@ -2026,7 +2032,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                       : (_thinkingSeconds > 0
                             ? '正在生成… (思考耗时$_thinkingSeconds秒)'
                             : '正在生成…'),
-                  style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                  style: TextStyle(fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
                 ),
               ],
             ),
@@ -2044,7 +2050,8 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                 style: TextStyle(
                   fontFamily: 'monospace',
                   fontSize: 12,
-                  color: Colors.grey[700],
+                  // 这是用户要读的**正文**(流式生成中),不是次要说明 → 高对比
+                  color: theme.colorScheme.onSurface,
                   height: 1.5,
                 ),
               ),
@@ -2135,7 +2142,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
             color: isSel ? cs.primary.withAlpha(8) : theme.colorScheme.surface,
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
-              color: isSel ? barColor.withAlpha(80) : Colors.grey[200]!,
+              color: isSel ? barColor.withAlpha(80) : theme.colorScheme.outlineVariant,
               width: isSel ? 1.5 : 1,
             ),
           ),
@@ -2190,7 +2197,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                     child: Icon(
                       Icons.edit_outlined,
                       size: 15,
-                      color: Colors.grey[500],
+                      color: theme.colorScheme.onSurfaceVariant,
                     ),
                   ),
                 ),
@@ -2207,7 +2214,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                       size: 15,
                       color: _isVocabBookmarked(item)
                           ? Colors.amber[700]
-                          : Colors.grey[400],
+                          : theme.colorScheme.onSurfaceVariant,
                     ),
                   ),
                 ),
@@ -2225,7 +2232,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                   _typeChip(item.wordType, barColor),
                   if (item.partOfSpeech != null &&
                       item.partOfSpeech!.isNotEmpty)
-                    _typeChip(item.partOfSpeech!, Colors.grey[600]!),
+                    _typeChip(item.partOfSpeech!, theme.colorScheme.onSurfaceVariant),
                 ],
               ),
             ],
@@ -2235,7 +2242,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
               Text(
                 item.translation!,
                 style: theme.textTheme.bodyMedium?.copyWith(
-                  color: Colors.grey[800],
+                  color: theme.colorScheme.onSurface,
                 ),
               ),
             ],
@@ -2247,7 +2254,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                 width: double.infinity,
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: Colors.grey[50],
+                  color: theme.colorScheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(6),
                 ),
                 // 冗长例句限行 3 行 + 展开;出处句中目标词加粗
@@ -2257,7 +2264,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                   highlightWord: item.word,
                   style: TextStyle(
                     fontSize: 12,
-                    color: Colors.grey[600],
+                    color: theme.colorScheme.onSurfaceVariant,
                     fontStyle: FontStyle.italic,
                   ),
                 ),
@@ -2268,14 +2275,14 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
               const SizedBox(height: 4),
               Text(
                 item.grammarNote!,
-                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
               ),
             ],
             // 底部提示
             const SizedBox(height: 4),
             Text(
               '点击询问 AI 详解 · 长按选中',
-              style: TextStyle(fontSize: 11, color: Colors.grey[700]),
+              style: TextStyle(fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
             ),
           ],
           ),
@@ -2332,7 +2339,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         // 选中计数
         Text(
           '已选 ${_selected.length}/${_results.length}',
-          style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+          style: TextStyle(fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
         ),
         const SizedBox(height: 4),
         // 词汇列表 — 多图时按来源图片分组
@@ -2365,7 +2372,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
             style: TextStyle(
               fontSize: 12,
               color: _selected.isEmpty
-                  ? Colors.grey[600] // P2-31:正文灰阶对比度 <4.5:1,提到 AA
+                  ? theme.colorScheme.onSurfaceVariant // P2-31:次要文字用主题色(深浅色都达 AA)
                   : theme.colorScheme.primary,
               fontWeight: _selected.isEmpty ? FontWeight.normal : FontWeight.w600,
             ),
@@ -2597,9 +2604,10 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
             width: double.infinity,
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: Colors.orange[50],
+              // 思考过程面板:橙色语义 + 半透明填充(深色下不会变亮块)
+              color: Colors.orange.withAlpha(28),
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.orange[100]!),
+              border: Border.all(color: Colors.orange.withAlpha(80)),
             ),
             child: SelectableText(
               _reasoningText.length > 1500
@@ -2624,9 +2632,10 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.red[50],
+        // 错误面板:红色语义 + 半透明填充(深色下不会变亮块)
+        color: Colors.red.withAlpha(28),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.red[200]!),
+        border: Border.all(color: Colors.red.withAlpha(90)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2639,7 +2648,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
           const SizedBox(height: 4),
           Text(
             '模型: $_currentModel',
-            style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+            style: TextStyle(fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
           ),
           const SizedBox(height: 12),
           Row(
@@ -2673,13 +2682,15 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
   // ── 归属标注 ──
 
   Widget _attributionLine() {
+    final theme = Theme.of(context);
     return Text(
       '翻译释义由 $_providerName 大模型 ($_currentModel) 生成 · 仅供参考',
-      style: TextStyle(fontSize: 11, color: Colors.grey[700]),
+      style: TextStyle(fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
     );
   }
 
   void _editItem(int index) {
+    final theme = Theme.of(context);
     final item = _results[index];
     final wordCtrl = TextEditingController(text: item.word);
     final transCtrl = TextEditingController(text: item.translation ?? '');
@@ -2756,7 +2767,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
               // 修改原文后例句自动替换提示
               Text(
                 '修改「原文」后，例句中的「${item.displayWordText.length > 12 ? '${item.displayWordText.substring(0, 12)}…' : item.displayWordText}」会自动替换为新词',
-                style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                style: TextStyle(fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
               ),
             ],
           ),

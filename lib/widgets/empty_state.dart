@@ -33,13 +33,13 @@ class EmptyState extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 48, color: Colors.grey[300]),
+            Icon(icon, size: 48, color: theme.colorScheme.onSurfaceVariant),
             const SizedBox(height: 12),
             Text(
               title,
               textAlign: TextAlign.center,
               style: theme.textTheme.bodyMedium?.copyWith(
-                color: Colors.grey[600],
+                color: theme.colorScheme.onSurfaceVariant,
               ),
             ),
             if (hint != null) ...[
@@ -48,8 +48,8 @@ class EmptyState extends StatelessWidget {
                 hint!,
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodySmall?.copyWith(
-                  // P2-31:正文灰阶对比度 <4.5:1,提到 grey[600] 达 WCAG AA
-                  color: Colors.grey[600],
+                  // P2-31:次要文字对比度不足 → 用主题的次要文字色(深浅色都达 AA)
+                  color: theme.colorScheme.onSurfaceVariant,
                 ),
               ),
             ],

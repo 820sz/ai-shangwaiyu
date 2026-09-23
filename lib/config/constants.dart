@@ -141,6 +141,17 @@ class AppConstants {
     'us': '美式发音',
   };
 
+  /// 深浅色(v2.2):'system' | 'light' | 'dark',默认跟随系统。
+  /// 存语义档位而不是 `Brightness`:'跟随系统' 是用户意图,
+  /// 存成当时的亮/暗就把这层意图丢了(系统夜间切换后 App 不会跟着变)。
+  static const String keyThemeMode = 'theme_mode';
+
+  static const Map<String, String> themeModeOptions = {
+    'system': '跟随系统',
+    'light': '浅色',
+    'dark': '深色',
+  };
+
   // ── 生词类型 ──
   static const String wordTypeWord = 'word';
   static const String wordTypePhrase = 'phrase';

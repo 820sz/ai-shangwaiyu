@@ -116,7 +116,7 @@ class _AiArticleSectionState extends State<AiArticleSection> {
               padding: const EdgeInsets.only(top: 12),
               child: Text(
                 '生成的文章会出现在这里，点开可精读',
-                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
               ),
             )
           else
@@ -143,7 +143,7 @@ class _AiArticleSectionState extends State<AiArticleSection> {
       ),
       subtitle: Text(
         '${a.vocabCount} 生词 · ${a.createdAt.month}/${a.createdAt.day}',
-        style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+        style: TextStyle(fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
       ),
       trailing: IconButton(
         tooltip: '删除',

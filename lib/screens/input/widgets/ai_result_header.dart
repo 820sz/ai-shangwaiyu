@@ -50,8 +50,8 @@ class AiResultHeader extends StatelessWidget {
           const SizedBox(height: 6),
           Text(
             '$modelName · $thinkingLabel',
-            // P2-31:正文灰阶对比度 <4.5:1,提到 grey[600] 达 WCAG AA
-            style: TextStyle(fontSize: 10, color: Colors.grey[600]),
+            // P2-31:次要文字对比度不足 → 用主题的次要文字色(深浅色都达 AA)
+            style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurfaceVariant),
           ),
         ],
       ),

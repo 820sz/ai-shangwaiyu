@@ -11,8 +11,9 @@ class LearningCurveChart extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (dailyLogs.isEmpty) {
-      return const Center(
-        child: Text('暂无学习数据', style: TextStyle(color: Colors.grey)),
+      return Center(
+        child: Text('暂无学习数据',
+            style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
       );
     }
 
@@ -45,7 +46,9 @@ class LearningCurveChart extends StatelessWidget {
                 reservedSize: 30,
                 getTitlesWidget: (value, meta) => Text(
                   '${value.toInt()}',
-                  style: const TextStyle(fontSize: 10, color: Colors.grey),
+                  style: TextStyle(
+                      fontSize: 10,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant),
                 ),
               ),
             ),
@@ -58,7 +61,9 @@ class LearningCurveChart extends StatelessWidget {
                   if (index < 0 || index >= recent.length) return const Text('');
                   return Text(
                     '${recent[index].date.month}/${recent[index].date.day}',
-                    style: const TextStyle(fontSize: 9, color: Colors.grey),
+                    style: TextStyle(
+                        fontSize: 9,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant),
                   );
                 },
               ),
@@ -126,8 +131,9 @@ class StudyCalendar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (dailyLogs.isEmpty) {
-      return const Center(
-        child: Text('暂无打卡记录', style: TextStyle(color: Colors.grey)),
+      return Center(
+        child: Text('暂无打卡记录',
+            style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
       );
     }
 

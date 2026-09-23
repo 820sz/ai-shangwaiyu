@@ -43,7 +43,9 @@ class VocabCard extends StatelessWidget {
                   child: Icon(
                     selected! ? Icons.check_circle : Icons.radio_button_unchecked,
                     size: 22,
-                    color: selected! ? theme.colorScheme.primary : Colors.grey[400],
+                    color: selected!
+                        ? theme.colorScheme.primary
+                        : theme.colorScheme.outline,
                   ),
                 )
               else
@@ -91,7 +93,7 @@ class VocabCard extends StatelessWidget {
                           icon: Icon(
                             Icons.volume_up_outlined,
                             size: 16,
-                            color: Colors.grey[500],
+                            color: theme.colorScheme.onSurfaceVariant,
                           ),
                           padding: EdgeInsets.zero,
                           constraints: const BoxConstraints(),

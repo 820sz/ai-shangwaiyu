@@ -302,10 +302,10 @@ class _LearnerPreferencesScreenState extends State<LearnerPreferencesScreen> {
       children: [
         Text(
           '$label(${items.length})',
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 12,
             fontWeight: FontWeight.w600,
-            color: Colors.black87,
+            color: Theme.of(context).colorScheme.onSurface,
           ),
         ),
         const SizedBox(height: 6),
@@ -331,10 +331,10 @@ class _LearnerPreferencesScreenState extends State<LearnerPreferencesScreen> {
         padding: const EdgeInsets.only(bottom: 6),
         child: Text(
           text,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 13,
             fontWeight: FontWeight.w600,
-            color: Colors.black87,
+            color: theme.colorScheme.onSurface,
           ),
         ),
       );
@@ -352,12 +352,14 @@ class _LearnerPreferencesScreenState extends State<LearnerPreferencesScreen> {
         decoration: BoxDecoration(
           color: selected
               ? theme.colorScheme.primary.withAlpha(28)
-              : Colors.grey[100],
+              : theme.colorScheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(16),
           // 屏蔽项用错误色描边,和"偏好题材"的选中态在视觉上区分开:
           // 这两个列表语义相反(一个是要看的,一个是不看的)
           border: Border.all(
-            color: selected ? Colors.red[400]! : Colors.grey[400]!,
+            color: selected
+                ? Colors.red[400]!
+                : theme.colorScheme.outlineVariant,
             width: selected ? 1.6 : 1,
           ),
         ),
@@ -366,7 +368,7 @@ class _LearnerPreferencesScreenState extends State<LearnerPreferencesScreen> {
           style: TextStyle(
             fontSize: 13,
             fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-            color: selected ? Colors.red[700] : Colors.grey[850],
+            color: selected ? Colors.red[700] : theme.colorScheme.onSurface,
           ),
         ),
       ),

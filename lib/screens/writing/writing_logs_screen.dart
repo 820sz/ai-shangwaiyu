@@ -72,8 +72,11 @@ class _WritingLogsScreenState extends State<WritingLogsScreen> {
               child: Center(
                 child: Text(
                   '共 ${logs!.length} 篇',
-                  // P2-31:正文灰阶对比度 <4.5:1,提到 grey[600] 达 WCAG AA
-                  style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                  // P2-31:次要文字对比度不足 → 用主题的次要文字色(深浅色都达 AA)
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ),
             ),
@@ -151,7 +154,10 @@ class _WritingLogsScreenState extends State<WritingLogsScreen> {
                 const SizedBox(width: 8),
                 Text(
                   '${groups[date]!.length} 篇',
-                  style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ],
             ),
@@ -227,8 +233,11 @@ class _WritingLogsScreenState extends State<WritingLogsScreen> {
             children: [
               Text(
                 log.timeLabel,
-                // P2-31:正文灰阶对比度 <4.5:1,提到 AA
-                style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                // P2-31:次要文字对比度不足 → 用主题的次要文字色(深浅色都达 AA)
+                style: TextStyle(
+                  fontSize: 11,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
               ),
               _chip(
                 materialTypeLabel(log.sourceType),
@@ -331,7 +340,7 @@ class _WritingLogsScreenState extends State<WritingLogsScreen> {
                 height: 4,
                 margin: const EdgeInsets.only(bottom: 12),
                 decoration: BoxDecoration(
-                  color: Colors.grey[300],
+                  color: theme.colorScheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -408,7 +417,7 @@ class _WritingLogsScreenState extends State<WritingLogsScreen> {
                         text: TextSpan(
                           style: theme.textTheme.bodySmall?.copyWith(
                             height: 1.5,
-                            color: Colors.black87,
+                            color: theme.colorScheme.onSurface,
                           ),
                           children: [
                             TextSpan(
@@ -467,7 +476,7 @@ class _WritingLogsScreenState extends State<WritingLogsScreen> {
                           it['reason']!,
                           style: TextStyle(
                             fontSize: 12,
-                            color: Colors.grey[600],
+                            color: theme.colorScheme.onSurfaceVariant,
                           ),
                         ),
                     ],
@@ -491,14 +500,17 @@ class _WritingLogsScreenState extends State<WritingLogsScreen> {
               log.originalText,
               style: theme.textTheme.bodyMedium?.copyWith(
                 height: 1.6,
-                color: Colors.grey[700],
+                color: theme.colorScheme.onSurfaceVariant,
               ),
             ),
             if ((log.model ?? '').isNotEmpty) ...[
               const SizedBox(height: 12),
               Text(
                 '批改模型:${log.model}',
-                style: TextStyle(fontSize: 10, color: Colors.grey[600]),
+                style: TextStyle(
+                  fontSize: 10,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
               ),
             ],
           ],

@@ -177,10 +177,10 @@ class _LearnerProfileScreenState extends State<LearnerProfileScreen> {
     padding: const EdgeInsets.only(bottom: 8),
     child: Text(
       text,
-      style: const TextStyle(
+      style: TextStyle(
         fontSize: 13,
         fontWeight: FontWeight.w600,
-        color: Colors.black87,
+        color: theme.colorScheme.onSurface,
       ),
     ),
   );
@@ -198,10 +198,12 @@ class _LearnerProfileScreenState extends State<LearnerProfileScreen> {
         decoration: BoxDecoration(
           color: selected
               ? theme.colorScheme.primary.withAlpha(28)
-              : Colors.grey[100],
+              : theme.colorScheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: selected ? theme.colorScheme.primary : Colors.grey[400]!,
+            color: selected
+                ? theme.colorScheme.primary
+                : theme.colorScheme.outlineVariant,
             width: selected ? 1.6 : 1,
           ),
         ),
@@ -210,7 +212,9 @@ class _LearnerProfileScreenState extends State<LearnerProfileScreen> {
           style: TextStyle(
             fontSize: 13,
             fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-            color: selected ? theme.colorScheme.primary : Colors.grey[850],
+            color: selected
+                ? theme.colorScheme.primary
+                : theme.colorScheme.onSurface,
           ),
         ),
       ),

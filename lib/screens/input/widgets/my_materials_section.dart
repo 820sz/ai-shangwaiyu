@@ -88,11 +88,11 @@ class MyMaterialsSection extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 20),
       child: Column(
         children: [
-          Icon(Icons.inbox_outlined, size: 40, color: Colors.grey[300]),
+          Icon(Icons.inbox_outlined, size: 40, color: theme.colorScheme.onSurfaceVariant),
           const SizedBox(height: 8),
           Text(
             '暂无材料',
-            style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey),
+            style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
           ),
         ],
       ),
@@ -148,11 +148,11 @@ class _CategoryRow extends StatelessWidget {
             style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w600,
-              color: count > 0 ? theme.colorScheme.primary : Colors.grey,
+              color: count > 0 ? theme.colorScheme.primary : theme.colorScheme.onSurfaceVariant,
             ),
           ),
           const SizedBox(width: 4),
-          Icon(Icons.chevron_right, size: 18, color: Colors.grey[400]),
+          Icon(Icons.chevron_right, size: 18, color: theme.colorScheme.onSurfaceVariant),
         ],
       ),
       onTap: count > 0 ? onTap : null,
@@ -304,7 +304,7 @@ class _CategoryVocabSheetState extends State<_CategoryVocabSheet> {
             width: 40,
             height: 4,
             decoration: BoxDecoration(
-              color: Colors.grey[300],
+              color: theme.colorScheme.outlineVariant,
               borderRadius: BorderRadius.circular(2),
             ),
           ),
@@ -323,7 +323,7 @@ class _CategoryVocabSheetState extends State<_CategoryVocabSheet> {
               const Spacer(),
               if (_items != null)
                 Text('${_items!.length} 个生词',
-                    style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                    style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurfaceVariant)),
             ],
           ),
         ),
@@ -334,7 +334,7 @@ class _CategoryVocabSheetState extends State<_CategoryVocabSheet> {
               : _items == null || _items!.isEmpty
                   ? Center(
                       child: Text('该分类暂无生词',
-                          style: TextStyle(color: Colors.grey[600])))
+                          style: TextStyle(color: theme.colorScheme.onSurfaceVariant)))
                   : _buildGroupedList(),
         ),
       ],
@@ -343,6 +343,7 @@ class _CategoryVocabSheetState extends State<_CategoryVocabSheet> {
   }
 
   Widget _buildGroupedList() {
+    final theme = Theme.of(context);
     final groups = _grouped();
     // 只有一个分组且无有效二级 → 扁平列表
     if (groups.length == 1) {
@@ -375,7 +376,7 @@ class _CategoryVocabSheetState extends State<_CategoryVocabSheet> {
           elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(10),
-            side: BorderSide(color: Colors.grey[200]!),
+            side: BorderSide(color: theme.colorScheme.outlineVariant),
           ),
           child: ExpansionTile(
             initiallyExpanded: !isUncategorized,
@@ -384,7 +385,7 @@ class _CategoryVocabSheetState extends State<_CategoryVocabSheet> {
             leading: Icon(
               isUncategorized ? Icons.folder_outlined : Icons.folder,
               size: 20,
-              color: isUncategorized ? Colors.grey : Colors.amber[700],
+              color: isUncategorized ? theme.colorScheme.onSurfaceVariant : Colors.amber[700],
             ),
             title: Text(
               g.label,
@@ -393,7 +394,7 @@ class _CategoryVocabSheetState extends State<_CategoryVocabSheet> {
             subtitle: Text(
               '${g.totalCount} 个生词'
               '${hasSubgroups ? ' · ${subs.length} 个${widget.category == '书籍' ? '页码/章节' : '子分类'}' : ''}',
-              style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+              style: TextStyle(fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
             ),
             // 重命名(v1.8.0):书名/材料名可手动改
             trailing: isUncategorized
@@ -417,13 +418,14 @@ class _CategoryVocabSheetState extends State<_CategoryVocabSheet> {
 
   /// 二级:页码/章节(书籍)或子分类
   Widget _buildSubgroupTile(String label, List<Vocabulary> items) {
+    final theme = Theme.of(context);
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
       elevation: 0,
-      color: Colors.grey[50],
+      color: theme.colorScheme.surfaceContainerHighest,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(8),
-        side: BorderSide(color: Colors.grey[200]!),
+        side: BorderSide(color: theme.colorScheme.outlineVariant),
       ),
       child: ExpansionTile(
         tilePadding: const EdgeInsets.symmetric(horizontal: 12),
@@ -431,7 +433,7 @@ class _CategoryVocabSheetState extends State<_CategoryVocabSheet> {
         leading: Icon(
           Icons.bookmark_border,
           size: 16,
-          color: Colors.grey[500],
+          color: theme.colorScheme.onSurfaceVariant,
         ),
         title: Text(
           label.isEmpty ? '未标页码' : label,
@@ -439,7 +441,7 @@ class _CategoryVocabSheetState extends State<_CategoryVocabSheet> {
         ),
         subtitle: Text(
           '${items.length} 个生词',
-          style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+          style: TextStyle(fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
         ),
         // 改页码/章节(v1.8.0):整组一起改,输入自动归一
         trailing: IconButton(
@@ -468,9 +470,10 @@ class _CategoryVocabSheetState extends State<_CategoryVocabSheet> {
               padding:
                   const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
+                // 词型角标:半透明色相(浅色下≈orange[50]/purple[50],深色下成立)
                 color: v.wordType == 'phrase'
-                    ? Colors.orange[50]
-                    : Colors.purple[50],
+                    ? Colors.orange.withAlpha(34)
+                    : Colors.purple.withAlpha(34),
                 borderRadius: BorderRadius.circular(4),
               ),
               child: Text(

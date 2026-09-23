@@ -147,7 +147,8 @@ class _StatsPageScreenState extends State<StatsPageScreen> {
                                         ? e.value / (stats.totalVocab * 1.5)
                                         : 0,
                                     minHeight: 8,
-                                    backgroundColor: Colors.grey[200],
+                                    backgroundColor:
+                                        theme.colorScheme.surfaceContainerHighest,
                                   ),
                                 ),
                               ),
@@ -179,6 +180,8 @@ class _LegendDot extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -191,7 +194,9 @@ class _LegendDot extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 4),
-        Text(label, style: const TextStyle(fontSize: 10, color: Colors.grey)),
+        Text(label,
+            style: TextStyle(
+                fontSize: 10, color: theme.colorScheme.onSurfaceVariant)),
       ],
     );
   }

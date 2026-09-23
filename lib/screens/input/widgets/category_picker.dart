@@ -54,7 +54,7 @@ class _CategoryPickerSheet extends StatelessWidget {
               width: 40,
               height: 4,
               decoration: BoxDecoration(
-                color: Colors.grey[300],
+                color: theme.colorScheme.outlineVariant,
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
@@ -68,7 +68,7 @@ class _CategoryPickerSheet extends StatelessWidget {
             const SizedBox(height: 6),
             Text(
               '将生词归类，方便后续复习和查找',
-              style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey),
+              style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
             ),
             const SizedBox(height: 16),
             // 分类网格（2列）
@@ -138,7 +138,7 @@ class _CategoryCard extends StatelessWidget {
         decoration: BoxDecoration(
           color: theme.colorScheme.surface,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.grey[200]!),
+          border: Border.all(color: theme.colorScheme.outlineVariant),
         ),
         child: Column(
           children: [
@@ -154,7 +154,7 @@ class _CategoryCard extends StatelessWidget {
             Text(
               subtitle,
               style: theme.textTheme.bodySmall?.copyWith(
-                color: Colors.grey,
+                color: theme.colorScheme.onSurfaceVariant,
                 fontSize: 10,
               ),
               textAlign: TextAlign.center,

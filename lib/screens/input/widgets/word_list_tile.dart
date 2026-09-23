@@ -80,8 +80,8 @@ class WordListTile extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w600,
-                        // P2-31:正文灰阶对比度 <4.5:1,提到 grey[600] 达 WCAG AA
-                        color: Colors.grey[600],
+                        // P2-31:次要文字对比度不足 → 用主题的次要文字色(深浅色都达 AA)
+                        color: theme.colorScheme.onSurfaceVariant,
                       ),
                     ),
                   ),
@@ -134,7 +134,7 @@ class WordListTile extends StatelessWidget {
                       child: Icon(
                         Icons.volume_up_outlined,
                         size: 15,
-                        color: Colors.grey[500],
+                        color: theme.colorScheme.onSurfaceVariant,
                       ),
                     ),
                   ),
@@ -150,12 +150,12 @@ class WordListTile extends StatelessWidget {
                       child: Icon(
                         bookmarked ? Icons.star : Icons.star_border,
                         size: 16,
-                        color: bookmarked ? Colors.amber[700] : Colors.grey[400],
+                        color: bookmarked ? Colors.amber[700] : theme.colorScheme.onSurfaceVariant,
                       ),
                     ),
                   )
                 else
-                  Icon(Icons.chevron_right, size: 18, color: Colors.grey[300]),
+                  Icon(Icons.chevron_right, size: 18, color: theme.colorScheme.onSurfaceVariant),
               ],
             ),
             // 行2:音标(v1.5.0 AI 补全生成;v2.0 起英/美双音标一并显示)+ 释义(独占整行)
@@ -166,7 +166,7 @@ class WordListTile extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 11,
                   fontStyle: FontStyle.italic,
-                  color: Colors.grey[600],
+                  color: theme.colorScheme.onSurfaceVariant,
                 ),
                 maxLines: null,
                 overflow: TextOverflow.visible,
@@ -177,7 +177,7 @@ class WordListTile extends StatelessWidget {
               Text(
                 item.translation ?? '',
                 style: theme.textTheme.bodySmall?.copyWith(
-                  color: Colors.grey[600],
+                  color: theme.colorScheme.onSurface,
                 ),
                 maxLines: null,
                 overflow: TextOverflow.visible,

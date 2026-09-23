@@ -140,7 +140,7 @@ class _ExerciseScreenState extends State<ExerciseScreen> {
                                 : null,
                             filled: _submitted,
                             fillColor: _submitted
-                                ? Colors.grey[50]
+                                ? theme.colorScheme.surfaceContainerHighest
                                 : null,
                           ),
                           maxLines: 2,

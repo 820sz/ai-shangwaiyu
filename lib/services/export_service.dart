@@ -12,6 +12,17 @@ import 'fsrs.dart';
 /// 2. 生词本导出成 CSV / Anki 格式,让用户能把资产搬到别的工具里(不被本项目锁死);
 /// 3. 全部是纯函数:格式化、转义、解析都能单测 —— 备份这种东西"写错一个引号"
 ///    就等于数据丢了。
+/// 阅读包里的一段正文。
+///
+/// 为什么不直接用 `MaterialChunk`:导出是**纯函数层**,不该依赖抓取层的
+/// 网络/切块实现;调用方映射一下字段即可,测试也能直接造数据。
+class ExportParagraph {
+  const ExportParagraph({this.title, required this.text});
+
+  final String? title;
+  final String text;
+}
+
 class ExportService {
   ExportService._();
 
@@ -237,6 +248,72 @@ class ExportService {
       lapses: i(j['lapses']),
       lastRating: rating is int ? FsrsRating.fromValue(rating) : null,
     );
+  }
+
+  // ── ④ 阅读包(Markdown) ──
+
+  /// 把一份材料导成 Markdown「阅读包」:元信息 + 正文 + 生词表。
+  ///
+  /// 为什么要它:材料库里攒的都是**真实语料**,用户会想带走(存到网盘/笔记/打印)。
+  /// 带上元信息(来源/许可/难度/覆盖率)和生词表,离线看也知道这份材料
+  /// 从哪来、自己该注意哪些词 —— 这才叫"包",不是一堆裸文本。
+  static String materialPackMarkdown({
+    required String title,
+    required List<ExportParagraph> chunks,
+    String author = '',
+    String source = '',
+    String license = '',
+    String url = '',
+    String cefr = '',
+    double? coverage,
+    int? wordCount,
+    int? estMinutes,
+    List<String> newWords = const [],
+    DateTime? now,
+  }) {
+    final at = now ?? DateTime.now();
+    final b = StringBuffer();
+    b.writeln('# $title');
+    b.writeln();
+    b.writeln('> 导出时间:${_dateTime(at)}');
+    if (author.trim().isNotEmpty) b.writeln('> 作者/主播:${author.trim()}');
+    if (source.trim().isNotEmpty) b.writeln('> 来源:${source.trim()}');
+    if (url.trim().isNotEmpty) b.writeln('> 原文链接:${url.trim()}');
+    if (license.trim().isNotEmpty) b.writeln('> 版权许可:${license.trim()}');
+    final meta = <String>[
+      if (wordCount != null && wordCount > 0) '$wordCount 词',
+      if (estMinutes != null && estMinutes > 0) '约 $estMinutes 分钟',
+      if (cefr.trim().isNotEmpty) '难度 $cefr',
+      if (coverage != null) '已知词覆盖率 ${(coverage * 100).toStringAsFixed(1)}%',
+    ];
+    if (meta.isNotEmpty) b.writeln('> 篇幅与难度:${meta.join(' · ')}');
+    b.writeln();
+    b.writeln('---');
+    b.writeln();
+    for (final c in chunks) {
+      final t = (c.title ?? '').trim();
+      if (t.isNotEmpty) {
+        b.writeln('## $t');
+        b.writeln();
+      }
+      b.writeln(c.text.trim());
+      b.writeln();
+    }
+    if (newWords.isNotEmpty) {
+      b.writeln('---');
+      b.writeln();
+      b.writeln('## 生词表(${newWords.length} 个,阅读时优先留意)');
+      b.writeln();
+      for (var i = 0; i < newWords.length; i++) {
+        b.writeln('${i + 1}. ${newWords[i]}');
+      }
+    }
+    return b.toString();
+  }
+
+  static String _dateTime(DateTime d) {
+    String two(int v) => v.toString().padLeft(2, '0');
+    return '${d.year}-${two(d.month)}-${two(d.day)} ${two(d.hour)}:${two(d.minute)}';
   }
 
   // ── 文案映射(与 UI 共用同一份,避免导出结果与界面说法不一致) ──

@@ -19,6 +19,7 @@ import '../../services/update_service.dart';
 import 'vocab_list.dart';
 import 'stats_page.dart';
 import 'api_settings.dart';
+import 'appearance_screen.dart';
 import 'bookmarks_screen.dart';
 import 'backup_screen.dart';
 import 'error_archive_screen.dart';
@@ -250,6 +251,17 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
                 if (!mounted) return;
                 setState(() => _learnerModel = LearnerModelStore.load());
               },
+            ),
+            // 外观(v2.2):深浅色。放在"学习偏好"旁边但独立成页 ——
+            // 一个是学习策略,一个是设备/环境选择,混在一起两个都找不着。
+            _MenuTile(
+              icon: Icons.brightness_6_outlined,
+              title: '外观',
+              subtitle: '浅色 / 深色 / 跟随系统',
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const AppearanceScreen()),
+              ),
             ),
             _MenuTile(
               icon: Icons.medical_information,
@@ -566,6 +578,8 @@ class _StatCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Expanded(
       child: Card(
         child: Padding(
@@ -581,8 +595,9 @@ class _StatCard extends StatelessWidget {
               ),
               Text(
                 label,
-                // P2-31:正文灰阶对比度 <4.5:1,提到 grey[600] 达 WCAG AA
-                style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                // P2-31:次要文字对比度不足 → 用主题的次要文字色(深浅色都达 AA)
+                style: TextStyle(
+                    fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
               ),
             ],
           ),

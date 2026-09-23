@@ -71,7 +71,7 @@ class _VocabDetailScreenState extends State<VocabDetailScreen> {
                 style: TextStyle(
                   fontSize: 16,
                   fontStyle: FontStyle.italic,
-                  color: Colors.grey[600],
+                  color: theme.colorScheme.onSurfaceVariant,
                 ),
               ),
             ),
@@ -80,7 +80,7 @@ class _VocabDetailScreenState extends State<VocabDetailScreen> {
             Text(
               _vocab.translation!,
               style: theme.textTheme.titleMedium
-                  ?.copyWith(color: Colors.grey[600]),
+                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
             ),
           const Divider(height: 32),
 
@@ -111,9 +111,10 @@ class _VocabDetailScreenState extends State<VocabDetailScreen> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: Colors.grey[50],
+                  color: theme.colorScheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: Colors.grey[200]!),
+                  border:
+                      Border.all(color: theme.colorScheme.outlineVariant),
                 ),
                 child: ExampleSentence(
                   sentence: _vocab.originalSentence!,
@@ -189,12 +190,14 @@ class _SectionTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Text(
       title,
-      style: const TextStyle(
+      style: TextStyle(
         fontSize: 13,
         fontWeight: FontWeight.w600,
-        color: Colors.grey,
+        color: theme.colorScheme.onSurfaceVariant,
       ),
     );
   }
@@ -207,6 +210,8 @@ class _InfoTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
@@ -214,8 +219,10 @@ class _InfoTile extends StatelessWidget {
         children: [
           SizedBox(
             width: 72,
-            // P2-31:正文灰阶对比度 <4.5:1,提到 grey[600] 达 WCAG AA
-            child: Text(label, style: TextStyle(color: Colors.grey[600], fontSize: 14)),
+            // P2-31:次要文字对比度不足 → 用主题的次要文字色(深浅色都达 AA)
+            child: Text(label,
+                style: TextStyle(
+                    color: theme.colorScheme.onSurfaceVariant, fontSize: 14)),
           ),
           Expanded(
             child: Text(value, style: const TextStyle(fontSize: 14)),
@@ -243,6 +250,7 @@ class _MasteryButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final isSelected = current == level;
     return Expanded(
       child: GestureDetector(
@@ -250,10 +258,12 @@ class _MasteryButton extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 12),
           decoration: BoxDecoration(
-            color: isSelected ? color.withAlpha(30) : Colors.grey[100],
+            color: isSelected
+                ? color.withAlpha(30)
+                : theme.colorScheme.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
-              color: isSelected ? color : Colors.grey[300]!,
+              color: isSelected ? color : theme.colorScheme.outlineVariant,
               width: isSelected ? 2 : 1,
             ),
           ),
@@ -261,7 +271,8 @@ class _MasteryButton extends StatelessWidget {
             children: [
               Icon(
                 isSelected ? Icons.check_circle : Icons.circle_outlined,
-                color: isSelected ? color : Colors.grey,
+                color:
+                    isSelected ? color : theme.colorScheme.onSurfaceVariant,
                 size: 20,
               ),
               const SizedBox(height: 4),
@@ -269,7 +280,7 @@ class _MasteryButton extends StatelessWidget {
                 label,
                 style: TextStyle(
                   fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                  color: isSelected ? color : Colors.grey[600],
+                  color: isSelected ? color : theme.colorScheme.onSurface,
                   fontSize: 12,
                 ),
               ),

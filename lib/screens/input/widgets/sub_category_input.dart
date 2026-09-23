@@ -184,7 +184,7 @@ class _SubCategoryInputSheetState extends State<_SubCategoryInputSheet> {
                 width: 40,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: Colors.grey[300],
+                  color: theme.colorScheme.outlineVariant,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -212,7 +212,7 @@ class _SubCategoryInputSheetState extends State<_SubCategoryInputSheet> {
                 child: Text(
                   '历史分类',
                   style: theme.textTheme.bodySmall
-                      ?.copyWith(color: Colors.grey),
+                      ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                 ),
               ),
               const SizedBox(height: 6),
@@ -231,7 +231,7 @@ class _SubCategoryInputSheetState extends State<_SubCategoryInputSheet> {
                     selected: false,
                     onSelected: (_) => _applyHistory(p),
                     visualDensity: VisualDensity.compact,
-                    side: BorderSide(color: Colors.grey[300]!),
+                    side: BorderSide(color: theme.colorScheme.outlineVariant),
                   );
                 }).toList(),
               ),

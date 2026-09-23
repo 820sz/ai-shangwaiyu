@@ -48,7 +48,7 @@ class _AiFollowUpBubbleState extends State<AiFollowUpBubble> {
               ),
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color: Colors.grey[100],
+                color: theme.colorScheme.surfaceContainerHighest,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Column(
@@ -66,8 +66,8 @@ class _AiFollowUpBubbleState extends State<AiFollowUpBubble> {
                               msg.model!,
                               style: TextStyle(
                                 fontSize: 10,
-                                // P2-31:正文灰阶对比度 <4.5:1,提到 grey[600] 达 WCAG AA
-                                color: Colors.grey[600],
+                                // P2-31:次要文字对比度不足 → 用主题的次要文字色(深浅色都达 AA)
+                                color: theme.colorScheme.onSurfaceVariant,
                               ),
                             ),
                           )
@@ -129,7 +129,7 @@ class _AiFollowUpBubbleState extends State<AiFollowUpBubble> {
                           p: theme.textTheme.bodyMedium?.copyWith(
                             fontSize: 13,
                             height: 1.5,
-                            color: Colors.grey[800],
+                            color: theme.colorScheme.onSurface,
                           ),
                           h1: theme.textTheme.titleMedium?.copyWith(
                             fontSize: 16,
@@ -146,10 +146,10 @@ class _AiFollowUpBubbleState extends State<AiFollowUpBubble> {
                           strong: theme.textTheme.bodyMedium?.copyWith(
                             fontSize: 13,
                             fontWeight: FontWeight.w700,
-                            color: Colors.black87,
+                            color: theme.colorScheme.onSurface,
                           ),
                           tableBorder: TableBorder.all(
-                            color: Colors.grey.shade300,
+                            color: theme.colorScheme.outlineVariant,
                             width: 0.5,
                           ),
                           tableHead: TextStyle(
@@ -164,18 +164,19 @@ class _AiFollowUpBubbleState extends State<AiFollowUpBubble> {
                           ),
                           blockquote: TextStyle(
                             fontSize: 12,
-                            color: Colors.grey[600],
+                            color: theme.colorScheme.onSurfaceVariant,
                             fontStyle: FontStyle.italic,
                           ),
                           code: TextStyle(
                             fontSize: 12,
-                            color: Colors.deepOrange[700],
+                            // 深色下 deepOrange[700] 偏暗,浅色下也用主题的 error 系更统一
+                            color: theme.colorScheme.tertiary,
                             fontFamily: 'monospace',
                           ),
                           horizontalRuleDecoration: BoxDecoration(
                             border: Border(
                               top: BorderSide(
-                                color: Colors.grey[300]!,
+                                color: theme.colorScheme.outlineVariant,
                                 width: 1,
                               ),
                             ),
@@ -198,16 +199,16 @@ class _AiFollowUpBubbleState extends State<AiFollowUpBubble> {
                             '正在思考…',
                             style: TextStyle(
                               fontSize: 12,
-                              color: Colors.grey[600],
+                              color: theme.colorScheme.onSurfaceVariant,
                             ),
                           ),
                         ],
                       ),
                     )
                   else
-                    const Text(
+                    Text(
                       '（AI 未返回内容）',
-                      style: TextStyle(fontSize: 12, color: Colors.grey),
+                      style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
                     ),
                 ],
               ),
@@ -227,6 +228,7 @@ class _AiBookmarkStar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Consumer<BookmarkProvider>(
       builder: (ctx, bp, _) {
         final content = message.content;
@@ -265,7 +267,7 @@ class _AiBookmarkStar extends StatelessWidget {
             child: Icon(
               saved ? Icons.star : Icons.star_border,
               size: 16,
-              color: saved ? Colors.amber[700] : Colors.grey[400],
+              color: saved ? Colors.amber[700] : theme.colorScheme.onSurfaceVariant,
             ),
           ),
         );

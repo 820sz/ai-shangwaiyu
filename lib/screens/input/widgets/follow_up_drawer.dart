@@ -427,6 +427,7 @@ class _FollowUpSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return DraggableScrollableSheet(
       initialChildSize: 0.6,
       minChildSize: 0.3,
@@ -441,7 +442,7 @@ class _FollowUpSheet extends StatelessWidget {
               width: 40,
               height: 4,
               decoration: BoxDecoration(
-                color: Colors.grey[300],
+                color: theme.colorScheme.outlineVariant,
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
@@ -492,7 +493,7 @@ class _FollowUpSheet extends StatelessWidget {
                     child: Icon(
                       Icons.history,
                       size: 18,
-                      color: Colors.grey[500],
+                      color: theme.colorScheme.onSurfaceVariant,
                     ),
                   ),
               ],
@@ -508,8 +509,8 @@ class _FollowUpSheet extends StatelessWidget {
                   return Center(
                     child: Text(
                       controller.emptyHint,
-                      // P2-31:正文灰阶对比度 <4.5:1,提到 grey[600] 达 WCAG AA
-                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                      // P2-31:次要文字对比度不足 → 用主题的次要文字色(深浅色都达 AA)
+                      style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
                     ),
                   );
                 }
@@ -636,6 +637,7 @@ class _FollowUpSheet extends StatelessWidget {
   }
 
   Widget _buildBubble(BuildContext context, FollowUpMessage msg, int index) {
+    final theme = Theme.of(context);
     if (msg.role != 'user') {
       return AiFollowUpBubble(
         message: msg,
@@ -667,9 +669,9 @@ class _FollowUpSheet extends StatelessWidget {
                     Expanded(
                       child: Text(
                         msg.content,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 13,
-                          color: Colors.black87,
+                          color: Theme.of(context).colorScheme.onSurface,
                           height: 1.4,
                         ),
                       ),
@@ -682,12 +684,12 @@ class _FollowUpSheet extends StatelessWidget {
                         msg.content,
                       ),
                       borderRadius: BorderRadius.circular(8),
-                      child: const Padding(
-                        padding: EdgeInsets.all(4),
+                      child: Padding(
+                        padding: const EdgeInsets.all(4),
                         child: Icon(
                           Icons.edit_outlined,
                           size: 14,
-                          color: Colors.grey,
+                          color: theme.colorScheme.onSurfaceVariant,
                         ),
                       ),
                     ),
@@ -749,6 +751,7 @@ class _FollowUpSheet extends StatelessWidget {
   }
 
   void _showHistoryPicker(BuildContext context, FollowUpController controller) {
+    final theme = Theme.of(context);
     showModalBottomSheet(
       context: context,
       useSafeArea: true,
@@ -784,11 +787,11 @@ class _FollowUpSheet extends StatelessWidget {
                 ),
               ),
               if (controller.savedConversations.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.all(32),
+                Padding(
+                  padding: const EdgeInsets.all(32),
                   child: Text(
                     '暂无保存的对话',
-                    style: TextStyle(color: Colors.grey),
+                    style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
                   ),
                 )
               else
@@ -905,6 +908,7 @@ class CompactModelPicker extends StatelessWidget {
   }
 
   Widget _buildMenu(BuildContext context) {
+    final theme = Theme.of(context);
     final secConfigured = ApiEndpointConfig.secondary.isConfigured;
     final isSecondary = controller.slot == 'secondary' && secConfigured;
     final primaryModels = primaryModelChoices();
@@ -922,7 +926,7 @@ class CompactModelPicker extends StatelessWidget {
         style: TextStyle(
           fontSize: 10,
           fontWeight: FontWeight.w600,
-          color: Colors.grey[600],
+          color: theme.colorScheme.onSurfaceVariant,
         ),
       ),
     );
@@ -951,12 +955,12 @@ class CompactModelPicker extends StatelessWidget {
         const PopupMenuDivider(),
         groupTitle(secConfigured ? '副 API(专项文本)' : '副 API(专项文本 · 未配置)'),
         if (!secConfigured)
-          const PopupMenuItem(
+          PopupMenuItem(
             enabled: false,
             height: 36,
             child: Text(
               '到「我的 → API 设置」填写副 API Key 后即可切换',
-              style: TextStyle(fontSize: 10, color: Colors.grey),
+              style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurfaceVariant),
             ),
           )
         else
@@ -989,7 +993,7 @@ class CompactModelPicker extends StatelessWidget {
                 Icon(
                   isSel ? Icons.lightbulb : Icons.lightbulb_outline,
                   size: 12,
-                  color: isSel ? Colors.orange : Colors.grey,
+                  color: isSel ? Colors.orange : theme.colorScheme.onSurfaceVariant,
                 ),
                 const SizedBox(width: 6),
                 Text(
@@ -1021,7 +1025,7 @@ class CompactModelPicker extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
         decoration: BoxDecoration(
-          border: Border.all(color: Colors.grey[300]!),
+          border: Border.all(color: theme.colorScheme.outlineVariant),
           borderRadius: BorderRadius.circular(6),
         ),
         child: Row(
@@ -1031,7 +1035,7 @@ class CompactModelPicker extends StatelessWidget {
               isSecondary ? '副·' : '主·',
               style: TextStyle(
                 fontSize: 9,
-                color: Colors.grey[600],
+                color: theme.colorScheme.onSurfaceVariant,
                 fontWeight: FontWeight.w600,
               ),
             ),
@@ -1039,9 +1043,9 @@ class CompactModelPicker extends StatelessWidget {
               controller.model.length > 16
                   ? '${controller.model.substring(0, 16)}…'
                   : controller.model,
-              style: TextStyle(fontSize: 10, color: Colors.grey[600]),
+              style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurfaceVariant),
             ),
-            Icon(Icons.arrow_drop_down, size: 14, color: Colors.grey[400]),
+            Icon(Icons.arrow_drop_down, size: 14, color: theme.colorScheme.onSurfaceVariant),
           ],
         ),
       ),

@@ -228,4 +228,91 @@ void main() {
       expect(data.summaryLine, contains('设置'));
     });
   });
+
+  group('阅读包 Markdown', () {
+    test('元信息齐全:标题/来源/链接/许可/难度/覆盖率', () {
+      final md = ExportService.materialPackMarkdown(
+        title: 'The Cost of Convenience',
+        author: 'NPR',
+        source: 'NPR News',
+        license: 'NPR 版权内容,仅限个人学习使用',
+        url: 'https://example.com/a',
+        cefr: 'B1',
+        coverage: 0.963,
+        wordCount: 812,
+        estMinutes: 4,
+        chunks: const [ExportParagraph(text: 'First paragraph.')],
+      );
+      expect(md.startsWith('# The Cost of Convenience'), isTrue);
+      expect(md, contains('> 来源:NPR News'));
+      expect(md, contains('> 原文链接:https://example.com/a'));
+      expect(md, contains('版权许可:NPR 版权内容'));
+      expect(md, contains('812 词'));
+      expect(md, contains('约 4 分钟'));
+      expect(md, contains('难度 B1'));
+      expect(md, contains('已知词覆盖率 96.3%'));
+      // 元信息与正文之间必须有分隔线,否则标题行会和正文糊在一起
+      expect(md, contains('\n---\n'));
+      expect(md, contains('First paragraph.'));
+    });
+
+    test('多段按顺序输出,段标题写成二级标题', () {
+      final md = ExportService.materialPackMarkdown(
+        title: 'Book',
+        chunks: const [
+          ExportParagraph(title: 'Chapter 1', text: 'One.'),
+          ExportParagraph(text: 'No title here.'),
+          ExportParagraph(title: 'Chapter 2', text: 'Two.'),
+        ],
+      );
+      final i1 = md.indexOf('## Chapter 1');
+      final iOne = md.indexOf('One.');
+      final iNo = md.indexOf('No title here.');
+      final i2 = md.indexOf('## Chapter 2');
+      expect(i1, greaterThan(-1));
+      expect(i1 < iOne && iOne < iNo && iNo < i2, isTrue);
+      expect(md, isNot(contains('## No title here')));
+    });
+
+    test('生词表带序号,空表不留标题', () {
+      final withWords = ExportService.materialPackMarkdown(
+        title: 'T',
+        chunks: const [ExportParagraph(text: 'body')],
+        newWords: const ['ubiquitous', 'nuance'],
+      );
+      expect(withWords, contains('## 生词表(2 个'));
+      expect(withWords, contains('1. ubiquitous'));
+      expect(withWords, contains('2. nuance'));
+
+      final none = ExportService.materialPackMarkdown(
+        title: 'T',
+        chunks: const [ExportParagraph(text: 'body')],
+      );
+      expect(none, isNot(contains('生词表')));
+    });
+
+    test('可选元信息为空时不写空行(无来源就不该出现"来源:")', () {
+      final md = ExportService.materialPackMarkdown(
+        title: 'T',
+        chunks: const [ExportParagraph(text: 'body')],
+        source: '   ',
+        url: '',
+        cefr: '',
+        wordCount: 0,
+      );
+      expect(md, isNot(contains('> 来源:')));
+      expect(md, isNot(contains('> 原文链接:')));
+      expect(md, isNot(contains('篇幅与难度')));
+      expect(md, contains('> 导出时间:'));
+    });
+
+    test('导出时间可注入(测试与"补记历史"都靠它)', () {
+      final md = ExportService.materialPackMarkdown(
+        title: 'T',
+        chunks: const [ExportParagraph(text: 'b')],
+        now: DateTime(2026, 12, 31, 9, 5),
+      );
+      expect(md, contains('2026-12-31 09:05'));
+    });
+  });
 }

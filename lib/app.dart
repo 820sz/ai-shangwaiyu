@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'config/theme.dart';
+import 'services/theme_controller.dart';
 import 'widgets/bottom_nav.dart';
 import 'screens/tutor/tutor_home.dart';
 import 'screens/input/input_home.dart';
@@ -36,28 +37,35 @@ class _ReadFlowAppState extends State<ReadFlowApp> {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'AI上外语',
-      debugShowCheckedModeBanner: false,
-      navigatorKey: appNavigatorKey,
-      theme: AppTheme.lightTheme,
-      home: AppTabs(
-        switchTo: (tab) => setState(() => _currentTab = tab),
-        child: Scaffold(
-          body: IndexedStack(
-            index: _currentTab.index,
-            children: const [
-              TutorHomeScreen(),
-              InputHomeScreen(),
-              OutputHomeScreen(),
-              ProfileHomeScreen(),
-            ],
-          ),
-          bottomNavigationBar: ReadFlowBottomNav(
-            currentTab: _currentTab,
-            onTabChanged: (tab) {
-              setState(() => _currentTab = tab);
-            },
+    // 主题切换要重建整棵 MaterialApp(theme/darkTheme/themeMode 都是它的入参),
+    // 所以这里监听 ValueNotifier 而不是用 Builder 局部刷新
+    return ValueListenableBuilder<ThemeMode>(
+      valueListenable: ThemeController.mode,
+      builder: (context, themeMode, _) => MaterialApp(
+        title: 'AI上外语',
+        debugShowCheckedModeBanner: false,
+        navigatorKey: appNavigatorKey,
+        theme: AppTheme.lightTheme,
+        darkTheme: AppTheme.darkTheme,
+        themeMode: themeMode,
+        home: AppTabs(
+          switchTo: (tab) => setState(() => _currentTab = tab),
+          child: Scaffold(
+            body: IndexedStack(
+              index: _currentTab.index,
+              children: const [
+                TutorHomeScreen(),
+                InputHomeScreen(),
+                OutputHomeScreen(),
+                ProfileHomeScreen(),
+              ],
+            ),
+            bottomNavigationBar: ReadFlowBottomNav(
+              currentTab: _currentTab,
+              onTabChanged: (tab) {
+                setState(() => _currentTab = tab);
+              },
+            ),
           ),
         ),
       ),

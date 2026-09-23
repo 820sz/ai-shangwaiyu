@@ -428,6 +428,7 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
   // ── 编辑态 ──
 
   Widget _buildCompose(BuildContext context) {
+    final theme = Theme.of(context);
     final isHandwritten = _materialType == kMaterialTypeHandwritten;
     final wordCount = _wordCount;
     return ListView(
@@ -459,10 +460,10 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
             children: [
               Text(
                 '手写稿 ${_images.length}/$_maxImages',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
-                  color: Colors.black87,
+                  color: theme.colorScheme.onSurface,
                 ),
               ),
               const Spacer(),
@@ -486,15 +487,17 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
                     onTap: () => _pickImages(fromCamera: false),
                     child: Container(
                       decoration: BoxDecoration(
-                        color: Colors.grey[100],
+                        color: theme.colorScheme.surfaceContainerHighest,
                         borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: Colors.grey[300]!),
+                        border: Border.all(
+                          color: theme.colorScheme.outlineVariant,
+                        ),
                       ),
-                      child: const Center(
+                      child: Center(
                         child: Icon(
                           Icons.add_photo_alternate_outlined,
                           size: 28,
-                          color: Colors.grey,
+                          color: theme.colorScheme.onSurfaceVariant,
                         ),
                       ),
                     ),
@@ -558,16 +561,19 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
           children: [
             Text(
               isHandwritten ? '电子档' : '英文内容',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
-                color: Colors.black87,
+                color: theme.colorScheme.onSurface,
               ),
             ),
             const Spacer(),
             Text(
               '$wordCount 词',
-              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+              style: TextStyle(
+                fontSize: 12,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
             ),
           ],
         ),
@@ -634,6 +640,7 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
   }
 
   Widget _buildLoading(BuildContext context) {
+    final theme = Theme.of(context);
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -642,7 +649,7 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
           const SizedBox(height: 16),
           Text(
             _phase == _Phase.transcribing ? 'AI 正在识别手写内容…' : 'AI 正在批改写作…',
-            style: TextStyle(color: Colors.grey[600]),
+            style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
           ),
         ],
       ),
@@ -771,7 +778,7 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
               _textCtrl.text.trim(),
               style: theme.textTheme.bodyMedium?.copyWith(
                 height: 1.6,
-                color: Colors.grey[700],
+                color: theme.colorScheme.onSurfaceVariant,
               ),
             ),
           ),
@@ -993,7 +1000,10 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
               const SizedBox(height: 6),
               Text(
                 reason,
-                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                style: TextStyle(
+                  fontSize: 12,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
               ),
             ],
           ],

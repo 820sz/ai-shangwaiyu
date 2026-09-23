@@ -273,7 +273,10 @@ class _MaterialRecommendationDetailScreenState
                       padding: const EdgeInsets.only(top: 6),
                       child: Text(
                         '为什么推荐：${_rec.reason}',
-                        style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
                       ),
                     ),
                 ],

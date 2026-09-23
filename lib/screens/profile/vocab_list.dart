@@ -154,17 +154,17 @@ class _VocabListScreenState extends State<VocabListScreen> {
                 ? TextField(
                     controller: _searchCtrl,
                     autofocus: true,
+                    // 颜色走主题(AppBar 前景色):深色模式下写死近黑会变成"看不见的输入框"
                     style: const TextStyle(
-                      color: Color(0xFF1A1A2E),
                       fontSize: 18,
                       fontWeight: FontWeight.w700,
                     ),
-                    cursorColor: const Color(0xFF1A1A2E),
+                    cursorColor: theme.colorScheme.primary,
                     cursorWidth: 2,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       hintText: '搜索生词…',
                       hintStyle: TextStyle(
-                        color: Color(0xFF999999),
+                        color: theme.colorScheme.onSurfaceVariant,
                         fontSize: 18,
                         fontWeight: FontWeight.w400,
                       ),
@@ -177,7 +177,6 @@ class _VocabListScreenState extends State<VocabListScreen> {
                   )
                 : const Text('生词本',
                     style: TextStyle(
-                      color: Color(0xFF1A1A2E),
                       fontSize: 18,
                       fontWeight: FontWeight.w700,
                     )),
@@ -246,8 +245,10 @@ class _VocabListScreenState extends State<VocabListScreen> {
                 children: [
                   Text(
                     '共 ${items.length} 个生词',
-                    // P2-31:正文灰阶对比度 <4.5:1,提到 AA
-                    style: TextStyle(color: Colors.grey[600], fontSize: 13),
+                    // P2-31:次要文字对比度不足 → 用主题的次要文字色(深浅色都达 AA)
+                    style: TextStyle(
+                        color: theme.colorScheme.onSurfaceVariant,
+                        fontSize: 13),
                   ),
                   const Spacer(),
                   if (_selectedBook != '全部')
@@ -266,7 +267,8 @@ class _VocabListScreenState extends State<VocabListScreen> {
                 ? Center(
                     child: Text(
                       _searchQuery.isEmpty ? '还没有生词' : '没有匹配结果',
-                      style: TextStyle(color: Colors.grey[600]),
+                      style: TextStyle(
+                          color: theme.colorScheme.onSurfaceVariant),
                     ),
                   )
                 : ListView.builder(
@@ -323,14 +325,18 @@ class _VocabListScreenState extends State<VocabListScreen> {
                   label: Text(book == '全部' ? '📚 全部' : book,
                       style: TextStyle(
                         fontSize: 12,
-                        color: isSelected ? const Color(0xFF1A1A2E) : const Color(0xFF555555),
+                        color: isSelected
+                            ? theme.colorScheme.onSurface
+                            : theme.colorScheme.onSurfaceVariant,
                         fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
                       )),
                   selected: isSelected,
-                  selectedColor: const Color(0xFF1A1A2E).withAlpha(18),
-                  checkmarkColor: const Color(0xFF1A1A2E),
+                  selectedColor: theme.colorScheme.primary.withAlpha(30),
+                  checkmarkColor: theme.colorScheme.primary,
                   side: BorderSide(
-                    color: isSelected ? const Color(0xFF1A1A2E) : Colors.grey[300]!,
+                    color: isSelected
+                        ? theme.colorScheme.primary
+                        : theme.colorScheme.outlineVariant,
                   ),
                   onSelected: (v) {
                     setState(() => _selectedBook = book);
@@ -348,7 +354,10 @@ class _VocabListScreenState extends State<VocabListScreen> {
               );
             }),
             const SizedBox(width: 8),
-            Container(width: 1, height: 24, color: Colors.grey[300]),
+            Container(
+                width: 1,
+                height: 24,
+                color: theme.colorScheme.outlineVariant),
             const SizedBox(width: 8),
             // 类型筛选
             ...['全部', '单词', '短语', '句子'].map((type) {
@@ -359,14 +368,18 @@ class _VocabListScreenState extends State<VocabListScreen> {
                   label: Text(type,
                       style: TextStyle(
                         fontSize: 12,
-                        color: isSelected ? const Color(0xFF1A1A2E) : const Color(0xFF555555),
+                        color: isSelected
+                            ? theme.colorScheme.onSurface
+                            : theme.colorScheme.onSurfaceVariant,
                         fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
                       )),
                   selected: isSelected,
-                  selectedColor: const Color(0xFF1A1A2E).withAlpha(18),
-                  checkmarkColor: const Color(0xFF1A1A2E),
+                  selectedColor: theme.colorScheme.primary.withAlpha(30),
+                  checkmarkColor: theme.colorScheme.primary,
                   side: BorderSide(
-                    color: isSelected ? const Color(0xFF1A1A2E) : Colors.grey[300]!,
+                    color: isSelected
+                        ? theme.colorScheme.primary
+                        : theme.colorScheme.outlineVariant,
                   ),
                   onSelected: (v) {
                     setState(() => _selectedType = type);

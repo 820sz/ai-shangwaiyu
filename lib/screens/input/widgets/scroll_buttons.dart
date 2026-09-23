@@ -72,8 +72,9 @@ class _FollowUpScrollButtonsState extends State<FollowUpScrollButtons> {
   }
 
   Widget _smallButton(IconData icon, VoidCallback onTap) {
+    final theme = Theme.of(context);
     return Material(
-      color: Colors.white,
+      color: theme.colorScheme.surfaceContainerHigh,
       elevation: 2,
       shape: const CircleBorder(),
       child: InkWell(
@@ -81,7 +82,7 @@ class _FollowUpScrollButtonsState extends State<FollowUpScrollButtons> {
         onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.all(6),
-          child: Icon(icon, size: 16, color: Colors.grey[600]),
+          child: Icon(icon, size: 16, color: theme.colorScheme.onSurfaceVariant),
         ),
       ),
     );
@@ -139,9 +140,10 @@ class _ScrollToTopButtonState extends State<ScrollToTopButton> {
             curve: Curves.easeOut,
           );
         },
-        child: const Padding(
-          padding: EdgeInsets.all(8),
-          child: Icon(Icons.arrow_upward, size: 18, color: Colors.white),
+        child: Padding(
+          padding: const EdgeInsets.all(8),
+          // 图标色跟随主色的 on 色:深色模式下主色是亮蓝,配深色图标才有对比度
+          child: Icon(Icons.arrow_upward, size: 18, color: cs.onPrimary),
         ),
       ),
     );

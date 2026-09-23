@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../config/theme.dart';
 import '../writing/write_review_screen.dart';
 import '../writing/writing_logs_screen.dart';
 
@@ -72,7 +73,7 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
                 size: 26,
                 color: highlighted
                     ? theme.colorScheme.primary
-                    : const Color(0xFFB07A1E),
+                    : AppTheme.amber(context),
               ),
               const SizedBox(width: 14),
               Expanded(
@@ -88,12 +89,15 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
                     const SizedBox(height: 2),
                     Text(
                       subtitle,
-                      style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
                     ),
                   ],
                 ),
               ),
-              Icon(Icons.chevron_right, color: Colors.grey[400]),
+              Icon(Icons.chevron_right, color: theme.colorScheme.outline),
             ],
           ),
         ),

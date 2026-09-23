@@ -99,14 +99,15 @@ class _ArticleReaderScreenState extends State<ArticleReaderScreen> {
                     _shareTranslation(article);
                 }
               },
-              itemBuilder: (_) => const [
+              itemBuilder: (_) => [
                 PopupMenuItem(
                   value: 'copy',
                   child: Row(
                     children: [
-                      Icon(Icons.copy_all, size: 18, color: Colors.grey),
-                      SizedBox(width: 8),
-                      Text('复制全文翻译'),
+                      Icon(Icons.copy_all,
+                          size: 18, color: theme.colorScheme.onSurfaceVariant),
+                      const SizedBox(width: 8),
+                      const Text('复制全文翻译'),
                     ],
                   ),
                 ),
@@ -114,9 +115,10 @@ class _ArticleReaderScreenState extends State<ArticleReaderScreen> {
                   value: 'share',
                   child: Row(
                     children: [
-                      Icon(Icons.save_alt, size: 18, color: Colors.grey),
-                      SizedBox(width: 8),
-                      Text('保存/分享翻译'),
+                      Icon(Icons.save_alt,
+                          size: 18, color: theme.colorScheme.onSurfaceVariant),
+                      const SizedBox(width: 8),
+                      const Text('保存/分享翻译'),
                     ],
                   ),
                 ),
@@ -130,17 +132,23 @@ class _ArticleReaderScreenState extends State<ArticleReaderScreen> {
           // 元信息
           Row(
             children: [
-              Icon(Icons.bookmark_outline, size: 16, color: Colors.grey[500]),
+              Icon(Icons.bookmark_outline,
+                  size: 16, color: theme.colorScheme.onSurfaceVariant),
               const SizedBox(width: 4),
               Text('包含 ${article.vocabCount} 个生词',
-                  // P2-31:正文灰阶对比度 <4.5:1,提到 grey[600] 达 WCAG AA
-                  style: TextStyle(color: Colors.grey[600], fontSize: 13)),
+                  // P2-31:正文灰阶对比度不够,这里用主题的次要文字色(深浅色都达 AA)
+                  style: TextStyle(
+                      color: theme.colorScheme.onSurfaceVariant,
+                      fontSize: 13)),
               const SizedBox(width: 16),
-              Icon(Icons.calendar_today, size: 14, color: Colors.grey[500]),
+              Icon(Icons.calendar_today,
+                  size: 14, color: theme.colorScheme.onSurfaceVariant),
               const SizedBox(width: 4),
               Text(
                   '${article.createdAt.month}月${article.createdAt.day}日',
-                  style: TextStyle(color: Colors.grey[600], fontSize: 13)),
+                  style: TextStyle(
+                      color: theme.colorScheme.onSurfaceVariant,
+                      fontSize: 13)),
             ],
           ),
           const SizedBox(height: 20),
@@ -167,7 +175,7 @@ class _ArticleReaderScreenState extends State<ArticleReaderScreen> {
                           style: TextStyle(
                             height: 1.8,
                             fontSize: 14,
-                            color: Colors.grey[700],
+                            color: theme.colorScheme.onSurfaceVariant,
                           ),
                         ),
                       ),
@@ -188,11 +196,13 @@ class _ArticleReaderScreenState extends State<ArticleReaderScreen> {
             ...exercises.map((ex) => Card(
                   child: ListTile(
                     leading: CircleAvatar(
+                      // 成绩徽章的底色也用半透明色相:浅色下≈green[100]/orange[100],
+                      // 深色下不会变成一圈亮白
                       backgroundColor: ex.score != null
                           ? (ex.score! >= 60
-                              ? Colors.green[100]
-                              : Colors.orange[100])
-                          : Colors.grey[100],
+                              ? Colors.green.withAlpha(60)
+                              : Colors.orange.withAlpha(60))
+                          : theme.colorScheme.surfaceContainerHighest,
                       child: Text(
                         ex.score != null ? '${ex.score!.toInt()}%' : '—',
                         style: TextStyle(
@@ -200,7 +210,7 @@ class _ArticleReaderScreenState extends State<ArticleReaderScreen> {
                           fontWeight: FontWeight.w600,
                           color: ex.score != null
                               ? (ex.score! >= 60 ? Colors.green : Colors.orange)
-                              : Colors.grey,
+                              : theme.colorScheme.onSurfaceVariant,
                         ),
                       ),
                     ),

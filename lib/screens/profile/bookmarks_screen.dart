@@ -119,8 +119,10 @@ class _BookmarkCard extends StatelessWidget {
                       '${bookmark.createdAt.year}-'
                       '${bookmark.createdAt.month.toString().padLeft(2, '0')}-'
                       '${bookmark.createdAt.day.toString().padLeft(2, '0')}',
-                      // P2-31:正文灰阶对比度 <4.5:1,提到 grey[600] 达 WCAG AA
-                      style: TextStyle(fontSize: 10, color: Colors.grey[600]),
+                      // P2-31:次要文字对比度不足 → 用主题的次要文字色(深浅色都达 AA)
+                      style: TextStyle(
+                          fontSize: 10,
+                          color: theme.colorScheme.onSurfaceVariant),
                     ),
                     const SizedBox(height: 4),
                     Text(
@@ -129,13 +131,16 @@ class _BookmarkCard extends StatelessWidget {
                           : bookmark.content,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                      style: TextStyle(
+                          fontSize: 11,
+                          color: theme.colorScheme.onSurfaceVariant),
                     ),
                   ],
                 ),
               ),
               IconButton(
-                icon: Icon(Icons.delete_outline, size: 18, color: Colors.grey[400]),
+                icon: Icon(Icons.delete_outline,
+                    size: 18, color: theme.colorScheme.onSurfaceVariant),
                 tooltip: '删除收藏',
                 onPressed: () => _confirmDelete(context),
               ),

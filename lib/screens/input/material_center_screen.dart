@@ -166,13 +166,21 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
         padding: const EdgeInsets.only(bottom: 6),
         child: RichText(
           text: TextSpan(
-            style: const TextStyle(fontSize: 13, color: Colors.black87),
+            style: TextStyle(
+              fontSize: 13,
+              color: Theme.of(context).colorScheme.onSurface,
+            ),
             children: [
               TextSpan(
                 text: '$k：',
                 style: const TextStyle(fontWeight: FontWeight.w600),
               ),
-              TextSpan(text: v, style: const TextStyle(color: Colors.black54)),
+              TextSpan(
+                text: v,
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
             ],
           ),
         ),

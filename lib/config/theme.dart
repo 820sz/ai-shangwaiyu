@@ -1,10 +1,22 @@
 import 'package:flutter/material.dart';
 
-/// 简约、高效的 ReadFlow 主题
+/// 简约、高效的 ReadFlow 主题(v2.2 起支持深色)。
+///
+/// 深色不是"把浅色反一下":三个坑必须避开 ——
+/// 1. **底色不用纯黑**。纯黑上放白字会发光晕(尤其 PMOLED/LCD),长时间阅读更累;
+///    这里用 #12141A(近黑的冷灰),正文用 #E6E8EC 而不是纯白,夜间不刺眼。
+/// 2. **层次靠亮度差,不靠阴影**。深色下阴影几乎看不见,所以卡片(#1B1F27)、
+///    输入框(#262B35)都比底色**亮**一档,层级关系与浅色版一致(卡片在页面上浮起)。
+/// 3. **主色要换**。浅色的主色是近黑 #1A1A2E,放在深底上等于隐形;
+///    深色版主色换成亮蓝,并把 onPrimary 交给 M3 调色板(深色模式里
+///    实心按钮是"亮底深字",保证对比度)。
+///
+/// 对比度(实测 WCAG 比值,正文标准 4.5:1):
+/// 正文/底色 ≈ 14.6;次要文字/卡片 ≈ 6.5;主色/底色 ≈ 7.4。
 class AppTheme {
   AppTheme._();
 
-  // ── 颜色系统 ──
+  // ── 浅色色板 ──
   static const Color primary = Color(0xFF1A1A2E);
   static const Color accent = Color(0xFF0F3460);
   static const Color highlight = Color(0xFF4A90D9);
@@ -16,38 +28,107 @@ class AppTheme {
   static const Color error = Color(0xFFDC3545);
   static const Color divider = Color(0xFFE9ECEF);
 
+  // ── 深色色板 ──
+  static const Color darkBackground = Color(0xFF12141A);
+
+  /// 卡片/AppBar/导航栏表面(比底色亮一档)
+  static const Color darkSurface = Color(0xFF1B1F27);
+
+  /// 输入框、Chip 等"再亮一档"的填充色
+  static const Color darkSurfaceVariant = Color(0xFF262B35);
+  static const Color darkTextPrimary = Color(0xFFE6E8EC);
+  static const Color darkTextSecondary = Color(0xFF9BA3B0);
+  static const Color darkDivider = Color(0xFF2E3440);
+
+  /// 深色主色(亮蓝,与浅色的 highlight 同色系)
+  static const Color darkPrimary = Color(0xFF6BA8E8);
+  static const Color darkAccent = Color(0xFF8FC0F0);
+
   // ── 主题数据 ──
-  static ThemeData get lightTheme {
+  static ThemeData get lightTheme => _build(Brightness.light);
+  static ThemeData get darkTheme => _build(Brightness.dark);
+
+  /// 按主题设置解析 MaterialApp.themeMode(纯函数,便于单测)
+  static ThemeMode themeModeOf(String? id) => switch (id) {
+        'light' => ThemeMode.light,
+        'dark' => ThemeMode.dark,
+        _ => ThemeMode.system,
+      };
+
+  /// "琥珀色强调"(未高亮的入口图标之类)。
+  ///
+  /// 为什么单独给一个函数:浅色下 #B07A1E 在深底上只有 ~2.5:1、深色下
+  /// 又太暗,同一个琥珀色不可能两头都对 —— 它必须随明暗切换,而这类**语义色**
+  /// 不属于 Material 调色板角色,塞进 colorScheme 反而是误导。
+  static Color amber(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark
+          ? const Color(0xFFE0A83C)
+          : const Color(0xFFB07A1E);
+
+  /// themeMode → 存储用的语义档位
+  static String themeModeId(ThemeMode mode) => switch (mode) {
+        ThemeMode.light => 'light',
+        ThemeMode.dark => 'dark',
+        ThemeMode.system => 'system',
+      };
+
+  static ThemeData _build(Brightness brightness) {
+    final dark = brightness == Brightness.dark;
+    final scheme = dark
+        ? ColorScheme.fromSeed(
+            seedColor: highlight,
+            brightness: Brightness.dark,
+          ).copyWith(
+            primary: darkPrimary,
+            secondary: darkAccent,
+            surface: darkSurface,
+            onSurface: darkTextPrimary,
+            onSurfaceVariant: darkTextSecondary,
+            outline: darkDivider,
+            error: const Color(0xFFFF6B6B),
+          )
+        : ColorScheme.fromSeed(
+            seedColor: primary,
+            primary: primary,
+            secondary: accent,
+            surface: surface,
+            error: error,
+          );
+
+    final bg = dark ? darkBackground : background;
+    final card = dark ? darkSurface : surface;
+    final line = dark ? darkDivider : divider;
+    final titleColor = dark ? darkTextPrimary : textPrimary;
+    final mutedColor = dark ? darkTextSecondary : textSecondary;
+    final accentColor = dark ? darkPrimary : highlight;
+
     return ThemeData(
       useMaterial3: true,
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: primary,
-        primary: primary,
-        secondary: accent,
-        surface: surface,
-        error: error,
-      ),
-      scaffoldBackgroundColor: background,
+      brightness: brightness,
+      colorScheme: scheme,
+      scaffoldBackgroundColor: bg,
+      dividerColor: line,
 
       // 底部导航栏
-      bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-        backgroundColor: surface,
-        selectedItemColor: highlight,
-        unselectedItemColor: textSecondary,
+      bottomNavigationBarTheme: BottomNavigationBarThemeData(
+        backgroundColor: card,
+        selectedItemColor: accentColor,
+        unselectedItemColor: mutedColor,
         type: BottomNavigationBarType.fixed,
         elevation: 8,
-        selectedLabelStyle: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-        unselectedLabelStyle: TextStyle(fontSize: 12),
+        selectedLabelStyle:
+            const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+        unselectedLabelStyle: const TextStyle(fontSize: 12),
       ),
 
       // AppBar
-      appBarTheme: const AppBarTheme(
-        backgroundColor: surface,
-        foregroundColor: textPrimary,
+      appBarTheme: AppBarTheme(
+        backgroundColor: card,
+        foregroundColor: titleColor,
         elevation: 0,
         centerTitle: true,
         titleTextStyle: TextStyle(
-          color: textPrimary,
+          color: titleColor,
           fontSize: 18,
           fontWeight: FontWeight.w600,
         ),
@@ -55,7 +136,7 @@ class AppTheme {
 
       // 卡片
       cardTheme: CardThemeData(
-        color: surface,
+        color: card,
         elevation: 1,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
@@ -66,8 +147,8 @@ class AppTheme {
       // 按钮
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
-          backgroundColor: primary,
-          foregroundColor: Colors.white,
+          backgroundColor: dark ? darkPrimary : primary,
+          foregroundColor: dark ? const Color(0xFF0B1220) : Colors.white,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(10),
           ),
@@ -75,34 +156,64 @@ class AppTheme {
         ),
       ),
 
-      // 输入框
+      // 输入框:浅色下沿用原设计(填充与页面同色,靠描边区分);
+      // 深色下描边太弱,必须靠填充区分 —— 所以深色填充比页面**亮**一档。
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: background,
+        fillColor: dark ? darkSurfaceVariant : background,
         contentPadding:
             const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        hintStyle: TextStyle(color: mutedColor),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: divider),
+          borderSide: BorderSide(color: line),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: divider),
+          borderSide: BorderSide(color: line),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: highlight, width: 2),
+          borderSide: BorderSide(color: accentColor, width: 2),
         ),
       ),
 
       // 标签Chip
       chipTheme: ChipThemeData(
-        backgroundColor: background,
-        selectedColor: highlight.withAlpha(30),
+        backgroundColor: dark ? darkSurfaceVariant : background,
+        selectedColor: accentColor.withAlpha(dark ? 60 : 30),
         labelStyle: const TextStyle(fontSize: 13),
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(8),
+        ),
+      ),
+
+      // 弹窗/Tab 之类用 M3 默认色即可,但对话框在深色下要跟卡片同色,
+      // 否则会浮出一块比页面更亮的面板
+      dialogTheme: DialogThemeData(backgroundColor: card),
+      snackBarTheme: SnackBarThemeData(
+        behavior: SnackBarBehavior.fixed,
+        backgroundColor: dark ? darkSurfaceVariant : const Color(0xFF323232),
+        contentTextStyle: TextStyle(
+          color: dark ? darkTextPrimary : Colors.white,
+        ),
+      ),
+      tabBarTheme: TabBarThemeData(
+        labelColor: accentColor,
+        unselectedLabelColor: mutedColor,
+        indicatorColor: accentColor,
+      ),
+      listTileTheme: ListTileThemeData(iconColor: mutedColor),
+      progressIndicatorTheme: ProgressIndicatorThemeData(color: accentColor),
+      switchTheme: SwitchThemeData(
+        thumbColor: WidgetStateProperty.resolveWith(
+          (s) => s.contains(WidgetState.selected) ? accentColor : null,
+        ),
+        trackColor: WidgetStateProperty.resolveWith(
+          (s) => s.contains(WidgetState.selected)
+              ? accentColor.withAlpha(90)
+              : null,
         ),
       ),
     );

@@ -25,7 +25,7 @@ class FulltextResultCard extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        border: Border.all(color: Colors.grey[200]!),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
@@ -94,13 +94,13 @@ class FulltextResultCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 6),
-          Divider(color: Colors.grey[200], height: 1),
+          Divider(color: theme.colorScheme.outlineVariant, height: 1),
           const SizedBox(height: 6),
           // 译文
           Text(
             translation,
             style: theme.textTheme.bodyMedium?.copyWith(
-              color: Colors.grey[700],
+              color: theme.colorScheme.onSurfaceVariant,
             ),
           ),
         ],

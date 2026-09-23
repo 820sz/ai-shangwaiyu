@@ -10,7 +10,17 @@ import 'database.dart';
 import 'export_service.dart';
 import 'fsrs.dart';
 import 'learner_model_store.dart';
+import 'material_library.dart';
+import 'material_source.dart';
 import 'review_queue.dart';
+
+/// 组装好的阅读包(标题 + Markdown 正文)
+class _MaterialPack {
+  final String title;
+  final String content;
+
+  const _MaterialPack({required this.title, required this.content});
+}
 
 /// 导出文件(路径 + 内容,便于 UI 同时给"打开位置"与"复制")
 class ExportedFile {
@@ -50,6 +60,27 @@ class RestoreReport {
     if (cardsRestored > 0) parts.add('恢复 $cardsRestored 条复习状态');
     if (replacedModel) parts.add('恢复学习画像');
     return parts.join(' · ');
+  }
+}
+
+/// 阅读包导出结果(单篇时 dirPath 为 null)
+class MaterialPackReport {
+  final List<String> files;
+  final String? dirPath;
+  final int failed;
+
+  const MaterialPackReport({
+    this.files = const [],
+    this.dirPath,
+    this.failed = 0,
+  });
+
+  int get count => files.length;
+
+  String get summary {
+    final where = dirPath == null ? '导出目录' : dirPath!.split('/').last;
+    final base = '已导出 $count 篇到 $where';
+    return failed > 0 ? '$base($failed 篇无正文,已跳过)' : base;
   }
 }
 
@@ -124,6 +155,141 @@ class BackupService {
         },
       ),
     );
+  }
+
+  // ── 阅读包:把材料导出成可带走的 Markdown ──
+
+  /// 单篇材料 → 一个 Markdown 文件(元信息 + 正文 + 生词表)。
+  ///
+  /// 失败时抛异常(材料不存在/没有正文),由 UI 显示中文原因 ——
+  /// 导出一个空文件比报错更糟:用户以为备份成功了。
+  static Future<ExportedFile> exportMaterialPack(int materialId) async {
+    final pack = await _buildMaterialPack(materialId);
+    if (pack == null) {
+      throw StateError('这篇材料没有正文,无法导出');
+    }
+    return write(
+      'readflow-阅读包-${_slug(pack.title)}-${stamp()}.md',
+      pack.content,
+    );
+  }
+
+  /// 全部材料 → 一个文件夹,一篇一个 .md。
+  ///
+  /// 为什么分文件而不是合成一个大 Markdown:材料可能上千篇,合成一份既打不开
+  /// 也没法挑着看;一篇一个文件可以直接丢进笔记软件/网盘按篇管理。
+  static Future<MaterialPackReport> exportAllMaterialsPack({
+    int limit = 500,
+  }) async {
+    final rows = await DatabaseService.getMaterials(limit: limit);
+    if (rows.isEmpty) {
+      throw StateError('材料库还是空的,先抓一篇再导出');
+    }
+    Directory dir;
+    try {
+      dir = (await getExternalStorageDirectory()) ??
+          await getApplicationDocumentsDirectory();
+    } catch (_) {
+      dir = await getApplicationDocumentsDirectory();
+    }
+    final outDir = Directory('${dir.path}/exports/阅读包-${stamp()}');
+    if (!outDir.existsSync()) await outDir.create(recursive: true);
+
+    final files = <String>[];
+    var failed = 0;
+    for (var i = 0; i < rows.length; i++) {
+      final id = rows[i]['id'];
+      if (id is! int) {
+        failed++;
+        continue;
+      }
+      final pack = await _buildMaterialPack(id);
+      if (pack == null) {
+        failed++;
+        continue;
+      }
+      // 序号前缀:文件管理器按名字排序时保持材料库的顺序(新的在前由 id 决定)
+      final name = '${(i + 1).toString().padLeft(3, '0')}-'
+          '${_slug(pack.title)}.md';
+      final file = File('${outDir.path}/$name');
+      await file.writeAsString(pack.content, flush: true);
+      files.add(name);
+    }
+    if (files.isEmpty) {
+      throw StateError('$limit 篇材料里没有一篇带正文,已取消导出');
+    }
+    return MaterialPackReport(
+      files: files,
+      dirPath: outDir.path,
+      failed: failed,
+    );
+  }
+
+  /// 组装单篇阅读包(材料不存在或没有正文时返回 null)
+  static Future<_MaterialPack?> _buildMaterialPack(int materialId) async {
+    final row = await DatabaseService.getMaterialById(materialId);
+    if (row == null) return null;
+    final chunkRows = await DatabaseService.getMaterialChunks(materialId);
+    final paragraphs = <ExportParagraph>[
+      for (final c in chunkRows)
+        if (('${c['text'] ?? ''}').trim().isNotEmpty)
+          ExportParagraph(
+            title: (c['title'] as String?)?.trim().isEmpty ?? true
+                ? null
+                : '${c['title']}'.trim(),
+            text: '${c['text']}'.trim(),
+          ),
+    ];
+    if (paragraphs.isEmpty) return null;
+
+    final title = '${row['title'] ?? '未命名材料'}'.trim();
+    final source = '${row['source'] ?? ''}'.trim();
+    final meta = _sourceMeta(source);
+    final analysis =
+        row['difficulty'] is MaterialAnalysis ? row['difficulty'] as MaterialAnalysis : null;
+    return _MaterialPack(
+      title: title,
+      content: ExportService.materialPackMarkdown(
+        title: title,
+        chunks: paragraphs,
+        author: '${row['author'] ?? ''}'.trim(),
+        source: meta?.label ?? source,
+        license: ('${row['license'] ?? ''}'.trim().isEmpty
+                ? (meta?.license ?? '')
+                : '${row['license']}'.trim()),
+        url: '${row['url'] ?? ''}'.trim(),
+        cefr: '${row['cefr'] ?? ''}'.trim(),
+        coverage: row['coverage'] is num
+            ? (row['coverage'] as num).toDouble()
+            : analysis?.coverage,
+        wordCount: row['word_count'] is num
+            ? (row['word_count'] as num).toInt()
+            : analysis?.wordCount,
+        estMinutes: row['est_minutes'] is num
+            ? (row['est_minutes'] as num).toInt()
+            : analysis?.estMinutes,
+        newWords: analysis?.topNewWords ?? const [],
+      ),
+    );
+  }
+
+  static MaterialSource? _sourceMeta(String id) {
+    if (id.isEmpty) return null;
+    for (final s in MaterialSourceService.sources) {
+      if (s.id == id) return s;
+    }
+    return null;
+  }
+
+  /// 文件名安全化:去掉路径分隔符与 Windows 保留字符,限长 —— 标题来自网络,
+  /// 里面出现 `/`、`:`、换行都会让写文件失败或造出奇怪的路径。
+  static String _slug(String title) {
+    var s = title.replaceAll(RegExp(r'[\\/:*?"<>|\r\n\t]'), ' ').trim();
+    s = s.replaceAll(RegExp(r'\s+'), ' ').replaceAll(RegExp(r'^\.+'), '');
+    if (s.isEmpty) s = '材料';
+    final runes = s.runes.toList();
+    if (runes.length > 40) s = String.fromCharCodes(runes.take(40));
+    return s;
   }
 
   static Future<Map<int, FsrsCard>> _cardsByVocabId() async {

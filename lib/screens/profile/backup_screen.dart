@@ -57,6 +57,50 @@ class _BackupScreenState extends State<BackupScreen> {
     }
   }
 
+  /// 阅读包导出:返回的是"文件夹 + 若干文件",与单个文件导出不是同一形态,
+  /// 所以单独一条路径(复用同一个 _busy 锁,避免并发写盘)
+  Future<void> _runPack() async {
+    setState(() => _busy = true);
+    try {
+      final report = await BackupService.exportAllMaterialsPack();
+      if (!mounted) return;
+      setState(() => _busy = false);
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('阅读包已导出'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('导出 ${report.count} 篇材料(每篇一个 Markdown 文件)。'),
+              const SizedBox(height: 8),
+              SelectableText('位置:${report.dirPath}'),
+              if (report.failed > 0) ...[
+                const SizedBox(height: 8),
+                Text('另有 ${report.failed} 篇没有正文,已跳过。'),
+              ],
+              const SizedBox(height: 8),
+              const Text('每个文件都带来源、原文链接与版权许可 —— 请勿再分发。'),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('知道了'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _busy = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('阅读包导出失败:$e')),
+      );
+    }
+  }
+
   Future<void> _copy(ExportedFile file) async {
     await Clipboard.setData(ClipboardData(text: file.content));
     if (!mounted) return;
@@ -187,6 +231,15 @@ class _BackupScreenState extends State<BackupScreen> {
             title: 'Anki 导入包(TSV)',
             subtitle: '正面=单词,背面=释义+音标+例句,标签带掌握度 —— 可导入 Anki 等工具',
             onTap: _busy ? null : () => _run(BackupService.exportVocabAnkiTsv, 'Anki 包'),
+          ),
+
+          _exportCard(
+            theme,
+            icon: Icons.auto_stories_outlined,
+            title: '阅读包(全部材料 · Markdown)',
+            subtitle: '材料库里每篇材料导成一个 .md(元信息 + 正文 + 生词表),'
+                '可丢进网盘或笔记软件按篇管理',
+            onTap: _busy ? null : _runPack,
           ),
 
           if (_lastExport != null) ...[

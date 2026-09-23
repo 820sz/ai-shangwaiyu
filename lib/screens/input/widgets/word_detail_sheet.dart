@@ -42,7 +42,7 @@ void showWordDetailSheet({
                 height: 4,
                 margin: const EdgeInsets.only(bottom: 16),
                 decoration: BoxDecoration(
-                  color: Colors.grey[300],
+                  color: theme.colorScheme.outlineVariant,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -80,7 +80,7 @@ void showWordDetailSheet({
                 style: TextStyle(
                   fontSize: 15,
                   fontStyle: FontStyle.italic,
-                  color: Colors.grey[600],
+                  color: theme.colorScheme.onSurfaceVariant,
                 ),
               ),
               const SizedBox(height: 6),
@@ -93,7 +93,7 @@ void showWordDetailSheet({
                     _typeColor(item.wordType)),
                 if (item.partOfSpeech != null && item.partOfSpeech!.isNotEmpty) ...[
                   const SizedBox(width: 8),
-                  _tag(item.partOfSpeech!, Colors.grey[600]!),
+                  _tag(item.partOfSpeech!, theme.colorScheme.onSurfaceVariant),
                 ],
               ],
             ),
@@ -114,7 +114,7 @@ void showWordDetailSheet({
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: Colors.grey[100],
+                  color: theme.colorScheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: ExampleSentence(
@@ -122,7 +122,7 @@ void showWordDetailSheet({
                   // 传原始 word:非截断词正常标粗;截断词匹配不到自动原样
                   // (数据层没有"截断前的真实词",保守不标,绝不误标)
                   highlightWord: item.word,
-                  style: TextStyle(fontStyle: FontStyle.italic, color: Colors.grey[700]),
+                  style: TextStyle(fontStyle: FontStyle.italic, color: theme.colorScheme.onSurface),
                 ),
               ),
               const SizedBox(height: 12),
@@ -181,7 +181,7 @@ void showWordDetailSheet({
 }
 
 TextStyle _sectionTitle(ThemeData theme) {
-  return TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.grey[600]);
+  return TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: theme.colorScheme.onSurfaceVariant);
 }
 
 /// 系统 TTS 朗读;失败(无语音引擎)提示一次,不打断查看。

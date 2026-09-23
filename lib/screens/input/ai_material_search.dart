@@ -353,7 +353,10 @@ class _AiMaterialSearchScreenState extends State<AiMaterialSearchScreen> {
                 padding: const EdgeInsets.all(24),
                 child: Text(
                   '还没有推荐，点上面按钮让 AI 按你的水平挑材料',
-                  style: TextStyle(color: Colors.grey[600], fontSize: 13),
+                  style: TextStyle(
+                    color: theme.colorScheme.onSurfaceVariant,
+                    fontSize: 13,
+                  ),
                 ),
               ),
             )
@@ -371,15 +374,19 @@ class _AiMaterialSearchScreenState extends State<AiMaterialSearchScreen> {
                 padding: const EdgeInsets.only(bottom: 8),
                 child: Row(
                   children: [
-                    Icon(Icons.block, size: 14, color: Colors.grey[600]),
+                    Icon(
+                      Icons.block,
+                      size: 14,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
                         '已按你的偏好屏蔽 $hidden 条',
                         style: TextStyle(
                           fontSize: 12,
-                          // P2-31:灰阶对比度达标
-                          color: Colors.grey[700],
+                          // P2-31:次要文字用主题色,深浅色都达 AA
+                          color: theme.colorScheme.onSurfaceVariant,
                         ),
                       ),
                     ),
@@ -395,7 +402,10 @@ class _AiMaterialSearchScreenState extends State<AiMaterialSearchScreen> {
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 child: Text(
                   '当前 ${_saved.length} 条推荐都被你的屏蔽条件挡住了',
-                  style: TextStyle(color: Colors.grey[600], fontSize: 13),
+                  style: TextStyle(
+                    color: theme.colorScheme.onSurfaceVariant,
+                    fontSize: 13,
+                  ),
                 ),
               )
             else
@@ -478,7 +488,10 @@ class _AiMaterialSearchScreenState extends State<AiMaterialSearchScreen> {
                   padding: const EdgeInsets.only(top: 4),
                   child: Text(
                     '为什么推荐：${r.reason}',
-                    style: TextStyle(fontSize: 11, color: Colors.grey[700]),
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
                   ),
                 ),
               if (r.hasContent)

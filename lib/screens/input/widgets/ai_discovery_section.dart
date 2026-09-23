@@ -38,9 +38,10 @@ class AiDiscoverySection extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
-                color: Colors.amber[50],
+                // "实验性"角标:半透明琥珀(浅色下≈amber[50],深色下是深底上的琥珀调)
+                color: Colors.amber.withAlpha(34),
                 borderRadius: BorderRadius.circular(4),
-                border: Border.all(color: Colors.amber[200]!),
+                border: Border.all(color: Colors.amber.withAlpha(110)),
               ),
               child: Text(
                 '实验性',
@@ -125,7 +126,7 @@ class _DiscoveryCard extends StatelessWidget {
         decoration: BoxDecoration(
           color: theme.colorScheme.surface,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: Colors.grey[200]!),
+          border: Border.all(color: theme.colorScheme.outlineVariant),
         ),
         child: Column(
           children: [

@@ -26,7 +26,7 @@ Future<String?> showAnalysisModePicker(BuildContext context) {
                 height: 4,
                 margin: const EdgeInsets.only(bottom: 16),
                 decoration: BoxDecoration(
-                  color: Colors.grey[300],
+                  color: theme.colorScheme.outlineVariant,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -84,7 +84,7 @@ class _ModeCard extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          border: Border.all(color: Colors.grey[200]!),
+          border: Border.all(color: theme.colorScheme.outlineVariant),
           borderRadius: BorderRadius.circular(12),
         ),
         child: Row(
@@ -109,12 +109,12 @@ class _ModeCard extends StatelessWidget {
                     style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
                   ),
                   const SizedBox(height: 2),
-                  // P2-31:正文灰阶对比度 <4.5:1,提到 grey[600] 达 WCAG AA
-                  Text(subtitle, style: TextStyle(fontSize: 13, color: Colors.grey[600])),
+                  // P2-31:次要文字对比度不足 → 用主题的次要文字色(深浅色都达 AA)
+                  Text(subtitle, style: TextStyle(fontSize: 13, color: theme.colorScheme.onSurfaceVariant)),
                   const SizedBox(height: 6),
                   Text(
                     detail,
-                    style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                    style: TextStyle(fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
                   ),
                 ],
               ),

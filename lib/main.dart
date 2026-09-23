@@ -7,6 +7,7 @@ import 'providers/vocab_provider.dart';
 import 'providers/article_provider.dart';
 import 'providers/stats_provider.dart';
 import 'providers/bookmark_provider.dart';
+import 'services/theme_controller.dart';
 import 'services/update_service.dart';
 import 'utils/crash_logger.dart';
 import 'widgets/update_dialog.dart';
@@ -21,6 +22,9 @@ void main() async {
   // 初始化 Hive（本地 KV 存储，用于 API Key 等配置）
   await Hive.initFlutter();
   await Hive.openBox(AppConstants.hiveBoxSettings);
+
+  // 主题档位要在 runApp 之前读回来,否则首帧会先亮白底再跳深色(闪一下)
+  ThemeController.load();
 
   runApp(
     MultiProvider(
