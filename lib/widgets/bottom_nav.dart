@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
-enum ReadFlowTab { input, output, profile }
+/// 底部导航。v2.0 起四栏:**导师 / 输入 / 输出 / 我的** ——
+/// 导师排第一是产品决策(PLAN-2.0 §8):个性化学习系统的每日入口应该是
+/// "今天学什么",而不是"上传图片"。其余三栏保持原有工具属性不变。
+enum ReadFlowTab { tutor, input, output, profile }
 
 class ReadFlowBottomNav extends StatelessWidget {
   final ReadFlowTab currentTab;
@@ -31,6 +34,13 @@ class ReadFlowBottomNav extends StatelessWidget {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
+              _NavItem(
+                icon: Icons.assistant_outlined,
+                activeIcon: Icons.assistant,
+                label: '导师',
+                isActive: currentTab == ReadFlowTab.tutor,
+                onTap: () => onTabChanged(ReadFlowTab.tutor),
+              ),
               _NavItem(
                 icon: Icons.camera_alt_outlined,
                 activeIcon: Icons.camera_alt,
