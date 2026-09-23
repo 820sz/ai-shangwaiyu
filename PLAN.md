@@ -330,6 +330,7 @@
   1. **`app.dill` 里有完整源码文本**。Flutter 构建产物 `.dart_tool/flutter_build/<hash>/app.dill`(kernel)内嵌了每个源文件的**原文**(注释都在),因为损坏是"每个 s→t"这种长度不变的双射,可以先用正则 `escape(损坏内容前 200 字) + t→[st]` 定位,再按**原始字符数**切出候选、用 `候选.Replace('s','t') == 损坏内容` 逐字节验证,1:1 还原(本次 4 个文件全部 VERIFIED 后还原成功,analyze 回到 24 infos 基线)。
   2. 前提是**损坏前刚跑过 build/test**;所以改代码后跑一次 `flutter analyze`/`build` 同时也是给自己留了份"可反解的编译快照"。
   3. 真要做批量替换,必须用 `edit` 工具(带确切 old/new 字面量),或者替换前 `git add` 一次留个 index 快照。
+- **🚨 2026-09-22 同类事故第二次:别用 PowerShell 管道读写源码文件。** 为了把一个方法改名,用了 `Get-Content | -replace | Set-Content -Encoding UTF8` —— Windows PowerShell 5.1 的 `Get-Content` 对**无 BOM 的 UTF-8** 文件按系统 ANSI(中文机是 GBK)解码,于是整个文件的中文注释/字符串变成乱码,并因乱码里的引号把字符串字面量截断 → analyzer 一次报 525 个错。救援:该文件是**未提交的新文件**,直接用 `write` 工具按内容重写(凡是走 PowerShell 管道改过的源码,都要假设中文已损坏并复核)。**结论:改代码只用 `read`/`edit`/`write` 工具;PowerShell 只用来跑命令与查状态。**
 
 ## v1.2.15 — 思考参数根治(budget_tokens→reasoning_effort)+ 新 logo(2026-08-07)
 
