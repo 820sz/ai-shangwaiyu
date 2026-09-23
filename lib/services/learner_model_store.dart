@@ -122,6 +122,7 @@ class LearnerModelStore {
     String? cefr,
     String? goal,
     int? dailyMinutes,
+    int? maxNewWords,
     List<String>? interests,
     List<String>? blockedTopics,
     List<String>? blockedKeywords,
@@ -151,6 +152,15 @@ class LearnerModelStore {
               confidence: 0.7,
             ),
       clearDailyMinutes: dailyMinutes != null && dailyMinutes <= 0,
+      maxNewWords: (maxNewWords == null || maxNewWords < 0)
+          ? null
+          : ProfileField<int>(
+              value: maxNewWords,
+              source: ProfileSource.self,
+              confidence: 0.7,
+            ),
+      // 0 是合法值(今天不学新词),不算"清空" ✗ —— 只有负数才当未设置
+      clearMaxNewWords: maxNewWords != null && maxNewWords < 0,
       interests: (interests == null || interests.isEmpty)
           ? null
           : ProfileField<List<String>>(

@@ -13,6 +13,19 @@ import '../../services/tts_service.dart';
 import '../../services/tutor_engine.dart' show TutorEngine;
 import '../../utils/review_deck.dart';
 
+/// 复习题型(v2.1 扩展):
+/// - [recognize] 认词:看词回想释义(原来的卡片方式)
+/// - [spell] 拼写:看中文释义拼出英文 —— 检验"能产出"而不只是"能认得"
+/// - [dictate] 听写:听发音写单词 —— 音频输入先落到单词层(v2.2 再扩展到句子)
+enum ReviewCardMode {
+  recognize('认词'),
+  spell('拼写'),
+  dictate('听写');
+
+  final String label;
+  const ReviewCardMode(this.label);
+}
+
 /// 复习模式(v1.5.0 初版 / v1.7.0 重做 / **v2.1 接入 FSRS**)。
 ///
 /// v2.1 的变化(这是间隔重复真正开始工作的版本):
@@ -77,11 +90,24 @@ class _ReviewScreenState extends State<ReviewScreen> {
   /// 本次会话的评分统计(评分值 → 次数)
   final Map<int, int> _ratingCounts = {};
 
+  /// 复习题型(v2.1 扩展):认词 / 拼写 / 听写
+  ReviewCardMode _cardMode = ReviewCardMode.recognize;
+
+  /// 拼写/听写模式的输入框与提交结果(null = 未提交)
+  final _spellCtrl = TextEditingController();
+  String? _spellAnswer;
+
   @override
   void initState() {
     super.initState();
     _load();
     _loadQueue();
+  }
+
+  @override
+  void dispose() {
+    _spellCtrl.dispose();
+    super.dispose();
   }
 
   // ─── v2.1:队列加载与评分 ───
@@ -104,6 +130,8 @@ class _ReviewScreenState extends State<ReviewScreen> {
         now: now,
         dailyMinutes:
             model.dailyMinutes?.value ?? TutorEngine.defaultDailyMinutes,
+        // 配额来自「学习偏好」页(v2.1):默认 20,复习吃满预算时自动降到 0
+        maxNewWords: model.maxNewWords?.value ?? 20,
       );
       if (!mounted) return;
       setState(() {
@@ -120,6 +148,23 @@ class _ReviewScreenState extends State<ReviewScreen> {
         _error = '读取复习队列失败:$e';
       });
     }
+  }
+
+  /// 拼写/听写模式:提交后对比答案(忽略大小写与首尾空白)
+  void _checkSpelling() {
+    final typed = _spellCtrl.text.trim();
+    setState(() {
+      _spellAnswer = typed;
+      _qFlipped = true; // 提交即翻面:显示正确拼写与释义
+    });
+  }
+
+  /// 拼写是否正确(提交前为 null)
+  bool? get _spellCorrect {
+    if (_spellAnswer == null) return null;
+    final item = _queue[_qIndex];
+    // 判分逻辑在 ReviewGrading(纯函数,可单测):忽略大小写/空白/连字符
+    return ReviewGrading.isCorrect(_spellAnswer!, item.vocab.word);
   }
 
   /// 评分:更新 FSRS 卡片(稳定度/难度/到期)+ 同步旧 mastery 档位
@@ -139,6 +184,9 @@ class _ReviewScreenState extends State<ReviewScreen> {
         isNew: false,
       );
       _qFlipped = false;
+      // 清掉拼写/听写的作答状态,否则下一张卡会带着上一张的答案
+      _spellAnswer = null;
+      _spellCtrl.clear();
       _qIndex++;
     });
 
@@ -506,6 +554,8 @@ class _ReviewScreenState extends State<ReviewScreen> {
     final v = item.vocab;
     final total = _queue.length;
     final progress = _qIndex / total;
+    final isTyping =
+        _cardMode == ReviewCardMode.spell || _cardMode == ReviewCardMode.dictate;
     return Column(
       children: [
         Padding(
@@ -519,6 +569,23 @@ class _ReviewScreenState extends State<ReviewScreen> {
                   Text('${_qIndex + 1} / $total',
                       style: theme.textTheme.bodySmall
                           ?.copyWith(color: muted, fontWeight: FontWeight.w600)),
+                  const SizedBox(width: 8),
+                  // 题型切换:同一批词换一种问法(拼写/听写检验"能产出")
+                  for (final m in ReviewCardMode.values)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 4),
+                      child: ChoiceChip(
+                        label: Text(m.label, style: const TextStyle(fontSize: 11)),
+                        selected: _cardMode == m,
+                        visualDensity: VisualDensity.compact,
+                        onSelected: (_) => setState(() {
+                          _cardMode = m;
+                          _spellCtrl.clear();
+                          _spellAnswer = null;
+                          _qFlipped = false;
+                        }),
+                      ),
+                    ),
                   const Spacer(),
                   if (item.isNew)
                     Container(
@@ -538,29 +605,43 @@ class _ReviewScreenState extends State<ReviewScreen> {
           ),
         ),
         Expanded(
-          child: GestureDetector(
-            onTap: () => setState(() => _qFlipped = !_qFlipped),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-              child: Card(
-                elevation: 3,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: SizedBox(
-                  width: double.infinity,
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.all(20),
-                    child: _qFlipped
-                        ? _cardBack(theme, v, null)
-                        : _cardFront(theme, v),
-                  ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            child: Card(
+              elevation: 3,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: SizedBox(
+                width: double.infinity,
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(20),
+                  child: isTyping
+                      ? _buildTypingCard(theme, v)
+                      : GestureDetector(
+                          onTap: () => setState(() => _qFlipped = !_qFlipped),
+                          child: _qFlipped
+                              ? _cardBack(theme, v, null)
+                              : _cardFront(theme, v),
+                        ),
                 ),
               ),
             ),
           ),
         ),
-        if (!_qFlipped)
+        // ── 底部操作区:按题型给不同动作 ──
+        if (isTyping && _spellAnswer == null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: _spellCtrl.text.trim().isEmpty ? null : _checkSpelling,
+                child: const Text('检查'),
+              ),
+            ),
+          )
+        else if (!isTyping && !_qFlipped)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
             child: Column(
@@ -583,8 +664,16 @@ class _ReviewScreenState extends State<ReviewScreen> {
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
             child: Column(
               children: [
-                Text('刚才想起来的难度?',
-                    style: theme.textTheme.bodySmall?.copyWith(color: muted)),
+                Text(
+                  _spellAnswer == null
+                      ? '刚才想起来的难度?'
+                      : (_spellCorrect == true ? '拼对了 —— 给自己定个档' : '拼错了 —— 建议选「不认识」'),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: _spellAnswer == null
+                        ? muted
+                        : (_spellCorrect == true ? Colors.green : Colors.red),
+                  ),
+                ),
                 const SizedBox(height: 8),
                 Row(
                   children: [
@@ -593,6 +682,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
                         label: '不认识',
                         color: Colors.red,
                         rating: FsrsRating.again,
+                        emphasized: _spellCorrect == false,
                       ),
                     ),
                     const SizedBox(width: 6),
@@ -609,6 +699,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
                         label: '认识',
                         color: Colors.blue,
                         rating: FsrsRating.good,
+                        emphasized: _spellCorrect == true,
                       ),
                     ),
                     const SizedBox(width: 6),
@@ -628,16 +719,99 @@ class _ReviewScreenState extends State<ReviewScreen> {
     );
   }
 
+  /// 拼写/听写模式的卡面:给提示 + 输入框(听写自动朗读一次)
+  Widget _buildTypingCard(ThemeData theme, Vocabulary v) {
+    final muted = theme.colorScheme.onSurfaceVariant;
+    final isDictate = _cardMode == ReviewCardMode.dictate;
+    if (isDictate) {
+      // 听写进入时念一遍(用户可点喇叭重听)
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) TtsService.instance.speakPreferred(v.displayWordText);
+      });
+    }
+    if (_spellAnswer != null) {
+      // 已提交 → 直接展示答案卡(正确/错误对比)
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(_spellCorrect == true ? Icons.check_circle : Icons.cancel,
+                  color: _spellCorrect == true ? Colors.green : Colors.red),
+              const SizedBox(width: 6),
+              Text(
+                _spellCorrect == true ? '拼写正确' : '拼写错误',
+                style: theme.textTheme.titleSmall,
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text('你的答案:${_spellAnswer!.isEmpty ? '(空)' : _spellAnswer}',
+              style: theme.textTheme.bodyMedium),
+          const SizedBox(height: 4),
+          Text(v.word,
+              style: theme.textTheme.headlineSmall
+                  ?.copyWith(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 10),
+          _cardBack(theme, v, null),
+        ],
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (isDictate) ...[
+          Text('听发音,写出这个单词', style: theme.textTheme.bodySmall?.copyWith(color: muted)),
+          const SizedBox(height: 12),
+          Center(
+            child: IconButton.filledTonal(
+              tooltip: '再听一遍',
+              onPressed: () => TtsService.instance.speakPreferred(v.displayWordText),
+              icon: const Icon(Icons.volume_up),
+              iconSize: 32,
+            ),
+          ),
+        ] else ...[
+          Text('看中文,拼出英文单词',
+              style: theme.textTheme.bodySmall?.copyWith(color: muted)),
+          const SizedBox(height: 12),
+          Text(
+            (v.translation ?? '').trim().isEmpty
+                ? '(这个词没有中文释义,可以直接跳过)'
+                : v.translation!,
+            style: theme.textTheme.titleLarge,
+          ),
+        ],
+        const SizedBox(height: 20),
+        TextField(
+          controller: _spellCtrl,
+          autofocus: true,
+          textInputAction: TextInputAction.done,
+          decoration: const InputDecoration(
+            hintText: '输入英文',
+            border: OutlineInputBorder(),
+          ),
+          onChanged: (_) => setState(() {}),
+          onSubmitted: (_) {
+            if (_spellCtrl.text.trim().isNotEmpty) _checkSpelling();
+          },
+        ),
+      ],
+    );
+  }
+
   Widget _ratingButton({
     required String label,
     required Color color,
     required FsrsRating rating,
+    bool emphasized = false,
   }) {
     return OutlinedButton(
       onPressed: () => _rate(rating),
       style: OutlinedButton.styleFrom(
         foregroundColor: color,
-        side: BorderSide(color: color.withAlpha(120)),
+        side: BorderSide(color: color.withAlpha(emphasized ? 255 : 120)),
+        backgroundColor: emphasized ? color.withAlpha(20) : null,
         padding: const EdgeInsets.symmetric(vertical: 12),
       ),
       child: Text(label, style: const TextStyle(fontSize: 13)),

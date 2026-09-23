@@ -109,6 +109,10 @@ class LearnerModel {
   /// 每日可投入分钟数
   final ProfileField<int>? dailyMinutes;
 
+  /// 每日新词上限(v2.1 配额管理):复习吃满预算时自动降到 0,
+  /// 这是"别让复习债滚起来"的旋钮
+  final ProfileField<int>? maxNewWords;
+
   /// 偏好题材
   final ProfileField<List<String>>? interests;
 
@@ -130,6 +134,7 @@ class LearnerModel {
     this.falseAlarmRate,
     this.goal,
     this.dailyMinutes,
+    this.maxNewWords,
     this.interests,
     this.blockedTopics = const [],
     this.blockedKeywords = const [],
@@ -145,6 +150,7 @@ class LearnerModel {
     double? falseAlarmRate,
     ProfileField<String>? goal,
     ProfileField<int>? dailyMinutes,
+    ProfileField<int>? maxNewWords,
     ProfileField<List<String>>? interests,
     List<String>? blockedTopics,
     List<String>? blockedKeywords,
@@ -155,6 +161,7 @@ class LearnerModel {
     bool clearCefr = false,
     bool clearGoal = false,
     bool clearDailyMinutes = false,
+    bool clearMaxNewWords = false,
     bool clearInterests = false,
   }) =>
       LearnerModel(
@@ -171,6 +178,8 @@ class LearnerModel {
         goal: clearGoal ? null : (goal ?? this.goal),
         dailyMinutes:
             clearDailyMinutes ? null : (dailyMinutes ?? this.dailyMinutes),
+        maxNewWords:
+            clearMaxNewWords ? null : (maxNewWords ?? this.maxNewWords),
         interests: clearInterests ? null : (interests ?? this.interests),
         blockedTopics: blockedTopics ?? this.blockedTopics,
         blockedKeywords: blockedKeywords ?? this.blockedKeywords,
@@ -204,6 +213,8 @@ class LearnerModel {
     if ((cefr?.value ?? '').isNotEmpty) parts.add('水平:${cefr!.value}[${cefr!.source.name}]');
     if ((goal?.value ?? '').isNotEmpty) parts.add('目的:${goal!.value}');
     if ((dailyMinutes?.value ?? 0) > 0) parts.add('每日可投入:${dailyMinutes!.value} 分钟');
+    // 新词上限 0 是**有意义**的值(只复习不加新词),不能像其它字段那样当"未设置"跳过
+    if (maxNewWords != null) parts.add('每日新词上限:${maxNewWords!.value}');
     if ((interests?.value ?? const []).isNotEmpty) {
       parts.add('偏好题材:${interests!.value.join('、')}');
     }
@@ -225,6 +236,7 @@ class LearnerModel {
         if (falseAlarmRate != null) 'false_alarm_rate': falseAlarmRate,
         if (goal != null) 'goal': goal!.toJson(),
         if (dailyMinutes != null) 'daily_minutes': dailyMinutes!.toJson(),
+    if (maxNewWords != null) 'max_new_words': maxNewWords!.toJson(),
         if (interests != null) 'interests': interests!.toJson(),
         'blocked_topics': blockedTopics,
         'blocked_keywords': blockedKeywords,
@@ -250,6 +262,10 @@ class LearnerModel {
         ),
         dailyMinutes: ProfileField.fromJson<int>(
           json['daily_minutes'],
+          (v) => v is int ? v : int.tryParse('$v'),
+        ),
+        maxNewWords: ProfileField.fromJson<int>(
+          json['max_new_words'],
           (v) => v is int ? v : int.tryParse('$v'),
         ),
         interests: ProfileField.fromJson<List<String>>(

@@ -1,7 +1,45 @@
 import '../models/vocabulary.dart';
 import 'fsrs.dart';
 
-/// 今日复习队列(v2.1)—— **纯函数、无 IO**。
+/// 拼写/听写模式的判分(v2.1 复习题型扩展)。
+///
+/// 抽成纯函数的原因:复习页的交互没法在单测里跑(FakeAsync 与真实 I/O 冲突,
+/// 见 PLAN.md「坑与教训」),所以"怎么算拼对、错了该建议哪个档"这类判断
+/// 必须放到可测的地方 —— 这是题型扩展里唯一有语义的部分。
+class ReviewGrading {
+  ReviewGrading._();
+
+  /// 拼写是否算对:忽略大小写与首尾空白;**连字符与空格也归一**
+  /// (用户写 "well known" 与 "well-known" 都算对,不该因为标点判错)
+  static bool isCorrect(String typed, String word) {
+    String norm(String s) => s
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'[\s\-]+'), '');
+    final t = norm(typed);
+    if (t.isEmpty) return false;
+    return t == norm(word);
+  }
+
+  /// 根据作答结果给出**建议档位**(UI 会把它高亮,用户一键确认):
+  /// - 拼对 → 认识(连续快速答对时用户可自己改"太简单")
+  /// - 拼错 → 不认识(拼错就是要重新学,不给"模糊"这种体面台阶)
+  /// - 空答案/放弃 → 不认识
+  static FsrsRating suggestRating({required bool correct}) =>
+      correct ? FsrsRating.good : FsrsRating.again;
+
+  /// 拼写模式的提示文案(带用户答案,便于结果页展示)
+  static String resultLine({
+    required bool correct,
+    required String typed,
+    required String word,
+  }) {
+    final shown = typed.trim();
+    return correct
+        ? '拼写正确:$word'
+        : '拼写错误:你写了「${shown.isEmpty ? '空' : shown}」,正确是 $word';
+  }
+}
 ///
 /// 把「生词本 + FSRS 卡片状态 + 每日时间预算」翻译成一份**今天照着做就行**的
 /// 列表。为什么要单独一层:

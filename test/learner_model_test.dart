@@ -158,6 +158,43 @@ void main() {
       expect(LearnerModel().summaryText, '(用户尚未建立学习画像)');
     });
 
+    test('每日配额字段往返(每日分钟数 + 每日新词上限)', () {
+      final m = LearnerModel(
+        dailyMinutes: ProfileField<int>(value: 45, source: ProfileSource.self),
+        maxNewWords: ProfileField<int>(value: 0, source: ProfileSource.self),
+      );
+      final back = LearnerModel.fromJson(m.toJson());
+      expect(back.dailyMinutes!.value, 45);
+      expect(back.maxNewWords!.value, 0, reason: '0 是合法值(只复习不加新词)');
+      expect(back.summaryText, contains('每日新词上限:0'));
+    });
+
+    test('每日配额能写入也能清空(设置页要能改回去)', () async {
+      final base = LearnerModel(
+        dailyMinutes: ProfileField<int>(value: 15, source: ProfileSource.self),
+      );
+      final set = await LearnerModelStore.saveSelfReported(
+        base: base,
+        dailyMinutes: 60,
+        maxNewWords: 10,
+      );
+      expect(set.dailyMinutes!.value, 60);
+      expect(set.maxNewWords!.value, 10);
+      expect(set.maxNewWords!.source, ProfileSource.self);
+
+      // 负数 = 未设置(清空);0 仍然是合法值
+      final cleared = await LearnerModelStore.saveSelfReported(
+        base: set,
+        maxNewWords: -1,
+      );
+      expect(cleared.maxNewWords, isNull);
+      final zero = await LearnerModelStore.saveSelfReported(
+        base: cleared,
+        maxNewWords: 0,
+      );
+      expect(zero.maxNewWords!.value, 0);
+    });
+
     test('clearXxx 开关能真的清空字段(而不是被 ?? 兜回旧值)', () {
       final m = LearnerModel(
         cefr: ProfileField<String>(value: 'B2', source: ProfileSource.self),

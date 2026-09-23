@@ -226,8 +226,51 @@ void main() {
     });
   });
 
-  group('与 FSRS 的衔接', () {
-    test('applyRating 走调度器:答"认识"后 due 往后推且 reps+1', () {
+  group('拼写/听写判分(题型扩展)', () {
+    test('忽略大小写与首尾空白', () {
+      expect(ReviewGrading.isCorrect('  Vocabulary ', 'vocabulary'), isTrue);
+      expect(ReviewGrading.isCorrect('VOCABULARY', 'vocabulary'), isTrue);
+      expect(ReviewGrading.isCorrect('vocabular', 'vocabulary'), isFalse);
+    });
+
+    test('连字符/空格归一:well known 与 well-known 都算对', () {
+      expect(ReviewGrading.isCorrect('well known', 'well-known'), isTrue);
+      expect(ReviewGrading.isCorrect('well-known', 'well-known'), isTrue);
+      expect(ReviewGrading.isCorrect('wellknown', 'well known'), isTrue);
+      expect(ReviewGrading.isCorrect('well', 'well-known'), isFalse);
+    });
+
+    test('空答案/纯空白一律算错(不能因为没作答给过)', () {
+      expect(ReviewGrading.isCorrect('', 'word'), isFalse);
+      expect(ReviewGrading.isCorrect('   ', 'word'), isFalse);
+      expect(ReviewGrading.isCorrect('-', 'word'), isFalse);
+    });
+
+    test('建议档位:拼对给"认识",拼错给"不认识"(不给体面台阶)', () {
+      expect(ReviewGrading.suggestRating(correct: true), FsrsRating.good);
+      expect(ReviewGrading.suggestRating(correct: false), FsrsRating.again);
+    });
+
+    test('结果文案带用户答案,便于回看错在哪', () {
+      expect(
+        ReviewGrading.resultLine(correct: true, typed: 'word', word: 'word'),
+        contains('拼写正确'),
+      );
+      final wrong = ReviewGrading.resultLine(
+        correct: false,
+        typed: 'wrod',
+        word: 'word',
+      );
+      expect(wrong, contains('wrod'));
+      expect(wrong, contains('word'));
+      expect(
+        ReviewGrading.resultLine(correct: false, typed: '  ', word: 'word'),
+        contains('空'),
+      );
+    });
+  });
+
+  group('与 FSRS 的衔接', () {    test('applyRating 走调度器:答"认识"后 due 往后推且 reps+1', () {
       final c0 = FsrsScheduler.newCard(now);
       final c1 = ReviewQueue.applyRating(c0, FsrsRating.good, now: now);
       expect(c1.reps, 1);

@@ -31,6 +31,10 @@ class _LearnerPreferencesScreenState extends State<LearnerPreferencesScreen> {
   /// 朗读音色档位:'system' | 'uk' | 'us'
   String _accent = 'system';
 
+  /// 每日配额(来自学习者模型;缺省与 ReviewQueue 的默认值一致)
+  int _dailyMinutes = 30;
+  int _maxNewWords = 20;
+
   @override
   void initState() {
     super.initState();
@@ -41,6 +45,8 @@ class _LearnerPreferencesScreenState extends State<LearnerPreferencesScreen> {
     _accent = AppConstants.ttsAccentOptions.containsKey(saved)
         ? saved as String
         : 'system';
+    _dailyMinutes = _model.dailyMinutes?.value ?? 30;
+    _maxNewWords = _model.maxNewWords?.value ?? 20;
   }
 
   @override
@@ -62,6 +68,15 @@ class _LearnerPreferencesScreenState extends State<LearnerPreferencesScreen> {
   Future<void> _save() async {
     // 音色直接落 Hive(与 API 设置一致:不需要"保存"按钮也能生效)
     await _box.put(AppConstants.keyTtsAccent, _accent);
+    // ⚠️ 题材/关键词黑名单必须真的写进学习者模型 ——
+    // 之前这里只写了音色,页面上的 _model 是本地副本,退出即丢(用户以为存了)
+    _model = await LearnerModelStore.saveSelfReported(
+      base: _model,
+      blockedTopics: _model.blockedTopics,
+      blockedKeywords: _model.blockedKeywords,
+      dailyMinutes: _dailyMinutes,
+      maxNewWords: _maxNewWords,
+    );
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
@@ -131,6 +146,53 @@ class _LearnerPreferencesScreenState extends State<LearnerPreferencesScreen> {
                   ),
               ],
             ),
+          ),
+
+          const Divider(height: 32),
+
+          // ── 每日配额(v2.1:复习优先的时间预算) ──
+          _sectionTitle(theme, '每日学习配额'),
+          Text(
+            '复习优先:到期的词先占用时间预算,剩下的容量才用来加新词。'
+            '这两个数字决定导师每天给你派多少任务、复习队列放多少个新词。',
+            style: theme.textTheme.bodySmall?.copyWith(color: muted),
+          ),
+          const SizedBox(height: 10),
+          Text('每天可投入时间', style: theme.textTheme.bodyMedium),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final m in const [15, 30, 45, 60, 90])
+                _chip(
+                  theme,
+                  label: '$m 分钟',
+                  selected: _dailyMinutes == m,
+                  onTap: () => setState(() => _dailyMinutes = m),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text('每天最多加几个新词', style: theme.textTheme.bodyMedium),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final n in const [0, 10, 20, 30, 50])
+                _chip(
+                  theme,
+                  label: n == 0 ? '只复习不加新词' : '$n 个',
+                  selected: _maxNewWords == n,
+                  onTap: () => setState(() => _maxNewWords = n),
+                ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '当日到期词太多时,新词配额会自动降到 0 —— 先把欠的账还上。',
+            style: theme.textTheme.bodySmall?.copyWith(color: muted),
           ),
 
           const Divider(height: 32),
