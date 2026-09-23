@@ -197,4 +197,38 @@ class ReviewQueue {
       lapses: 0,
     );
   }
+
+  /// `word_review` 行 → FSRS 卡片(纯函数,容错:坏字段按新卡处理)。
+  /// 放到这里而不是 UI 层,是为了让"数据怎么变成调度状态"这件事可测。
+  static FsrsCard cardFromRow(Map<String, Object?> row, {required DateTime now}) {
+    double d(Object? v) => v is num ? v.toDouble() : double.tryParse('$v') ?? 0;
+    int i(Object? v) => v is int ? v : (v is num ? v.toInt() : int.tryParse('$v') ?? 0);
+    final lastReview = DateTime.tryParse('${row['last_review_at']}');
+    final due = DateTime.tryParse('${row['due_at']}') ?? now;
+    final rating = row['last_rating'];
+    return FsrsCard(
+      stability: d(row['stability']),
+      difficulty: d(row['difficulty']),
+      due: due,
+      lastReview: lastReview,
+      reps: i(row['reps']),
+      lapses: i(row['lapses']),
+      lastRating: rating is int ? FsrsRating.fromValue(rating) : null,
+    );
+  }
+
+  /// 批量:vocabId → 卡片(缺卡的词由 [build] 当新词处理)
+  static Map<int, FsrsCard> cardsFromRows(
+    List<Map<String, Object?>> rows, {
+    required DateTime now,
+  }) {
+    final out = <int, FsrsCard>{};
+    for (final r in rows) {
+      final id = r['vocab_id'];
+      final vid = id is int ? id : (id is num ? id.toInt() : int.tryParse('$id'));
+      if (vid == null) continue;
+      out[vid] = cardFromRow(r, now: now);
+    }
+    return out;
+  }
 }

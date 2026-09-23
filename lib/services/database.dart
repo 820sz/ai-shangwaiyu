@@ -78,6 +78,9 @@ class DatabaseService {
         part_of_speech TEXT,
         grammar_note TEXT,
         phonetic TEXT,
+        -- v2.0:英式/美式双音标(学习偏好里可切音色;两列与迁移里的 _ensureColumn 同名)
+        phonetic_uk TEXT,
+        phonetic_us TEXT,
         category TEXT DEFAULT '其他',
         material_path TEXT,
         created_at TEXT NOT NULL,
@@ -2041,6 +2044,21 @@ class DatabaseService {
     } catch (e) {
       debugPrint('ReadFlow getTrackedReviewCount failed: $e');
       return 0;
+    }
+  }
+
+  /// 读取全部复习卡片(v2.1 队列调度需要逐词状态)。
+  ///
+  /// 为什么一次性读全表:生词本规模是千级、一行几十字节,读全表比"按 due 分批查"
+  /// 更简单也更快,而且排序/配额/负荷预测都能在内存里算(便于单测)。
+  /// 将来词量上万再改成按窗口查询。
+  static Future<List<Map<String, Object?>>> getWordReviews() async {
+    try {
+      final db = await database;
+      return await db.query('word_review');
+    } catch (e) {
+      debugPrint('ReadFlow getWordReviews failed: $e');
+      return const [];
     }
   }
 

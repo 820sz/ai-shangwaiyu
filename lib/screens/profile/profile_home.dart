@@ -8,6 +8,7 @@ import '../../providers/bookmark_provider.dart';
 import '../../config/constants.dart';
 import '../../models/learner_model.dart';
 import '../../services/api_endpoint.dart';
+import '../../services/database.dart';
 import '../../services/doubao_api.dart';
 import '../../services/learner_context.dart';
 import '../../services/learner_model_store.dart';
@@ -19,6 +20,8 @@ import 'vocab_list.dart';
 import 'stats_page.dart';
 import 'api_settings.dart';
 import 'bookmarks_screen.dart';
+import 'error_archive_screen.dart';
+import 'weekly_report_screen.dart';
 import '../review/review_screen.dart';
 import '../input/learner_preferences_screen.dart';
 import '../tutor/placement_test_screen.dart';
@@ -41,6 +44,11 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
   /// Hive 同步读,不阻塞首帧;测试页返回后再刷一次。
   LearnerModel _learnerModel = LearnerModel();
 
+  /// 待处理的错误类数(v2.1 错误档案入口的副标题)。
+  /// 为什么要显示:错误档案是一个"平时没人点"的页面,副标题报出积压量
+  /// 才有被点开的理由 —— 只写"写译与测验的错题"等于没有入口。
+  int _activeErrorKinds = 0;
+
   @override
   void initState() {
     super.initState();
@@ -55,6 +63,10 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
   Future<void> _loadAll() async {
     // 学习者模型先读(Hive 同步,页面一渲染就能显示基线)
     _learnerModel = LearnerModelStore.load();
+    // 错误类数:失败不影响主流程(读不到就退回中性副标题)
+    final errors = await DatabaseService.getErrorTags(status: 'active');
+    if (!mounted) return;
+    setState(() => _activeErrorKinds = errors.length);
     await Future.wait([
       context.read<StatsProvider>().loadStats(),
       context.read<VocabProvider>().loadVocabularies(),
@@ -160,6 +172,38 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
                 context,
                 MaterialPageRoute(builder: (_) => const StatsPageScreen()),
               ),
+            ),
+            _MenuTile(
+              icon: Icons.insights,
+              title: '本周报告',
+              subtitle: '这周做了什么、下周改什么(本地算,不调 AI)',
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const WeeklyReportScreen()),
+              ),
+            ),
+            // 错误档案(v2.1):把"我英语不好"变成"我时态错了 7 次"。
+            // 入口紧挨复习模式:这两页是同一个循环(练 → 记错 → 修 → 再练)。
+            _MenuTile(
+              icon: Icons.fact_check_outlined,
+              title: '错误档案',
+              subtitle: _activeErrorKinds > 0
+                  ? '待处理 $_activeErrorKinds 类'
+                  : '写译批改、读后测验与复习里的错题',
+              onTap: () async {
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const ErrorArchiveScreen(),
+                  ),
+                );
+                // 回来要刷新副标题:用户刚在里面标了「已改正」
+                if (!mounted) return;
+                final errors =
+                    await DatabaseService.getErrorTags(status: 'active');
+                if (!mounted) return;
+                setState(() => _activeErrorKinds = errors.length);
+              },
             ),
             _MenuTile(
               icon: Icons.star_outline,
