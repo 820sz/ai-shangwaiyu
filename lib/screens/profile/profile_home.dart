@@ -20,6 +20,7 @@ import 'vocab_list.dart';
 import 'stats_page.dart';
 import 'api_settings.dart';
 import 'bookmarks_screen.dart';
+import 'backup_screen.dart';
 import 'error_archive_screen.dart';
 import 'weekly_report_screen.dart';
 import '../review/review_screen.dart';
@@ -205,10 +206,19 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
                 setState(() => _activeErrorKinds = errors.length);
               },
             ),
+            // 备份与导出(v2.2):数据只在这台手机上,这是唯一的迁移/保险出口
+            _MenuTile(
+              icon: Icons.backup_outlined,
+              title: '备份与导出',
+              subtitle: '完整备份(可回导)/ 生词本 CSV / Anki 导入包',
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const BackupScreen()),
+              ),
+            ),
             _MenuTile(
               icon: Icons.star_outline,
-              title: '收藏夹',
-              subtitle: '收藏的洞见与好句',
+              title: '收藏夹',              subtitle: '收藏的洞见与好句',
               onTap: () => Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const BookmarksScreen()),

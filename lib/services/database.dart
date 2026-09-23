@@ -2062,6 +2062,18 @@ class DatabaseService {
     }
   }
 
+  /// 清空全部复习状态(v2.2 备份"覆盖恢复"用:先清空再导入,
+  /// 否则旧卡的到期时间会与新数据打架)
+  static Future<int> clearWordReviews() async {
+    try {
+      final db = await database;
+      return await db.delete('word_review');
+    } catch (e) {
+      debugPrint('ReadFlow clearWordReviews failed: $e');
+      return 0;
+    }
+  }
+
   // ── 导师 ──
 
   /// 新建导师任务卡。`plan_date` 存完整 ISO8601(与全表约定一致),
