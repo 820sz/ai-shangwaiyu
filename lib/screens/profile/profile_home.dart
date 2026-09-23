@@ -20,6 +20,7 @@ import 'stats_page.dart';
 import 'api_settings.dart';
 import 'bookmarks_screen.dart';
 import '../review/review_screen.dart';
+import '../input/learner_preferences_screen.dart';
 import '../tutor/placement_test_screen.dart';
 
 class ProfileHomeScreen extends StatefulWidget {
@@ -175,6 +176,27 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
               subtitle: '配置 API Key',
               onTap: () => _showSettings(),
             ),
+            // 学习偏好(v2.0):朗读音色 + 不想看的题材/关键词。
+            // 与 API 设置分开放:一个是技术配置,一个是个人偏好,
+            // 混在一起用户找不到"屏蔽题材"这件事。
+            _MenuTile(
+              icon: Icons.tune,
+              title: '学习偏好',
+              // 副标题直接暴露"当前屏蔽了几个/哪些":用户一眼能看出
+              // 黑名单是不是生效了(静默生效等于没生效)
+              subtitle: _preferencesSubtitle(),
+              onTap: () async {
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const LearnerPreferencesScreen(),
+                  ),
+                );
+                // 黑名单可能刚改过:回来自刷新,让副标题与磁盘保持一致
+                if (!mounted) return;
+                setState(() => _learnerModel = LearnerModelStore.load());
+              },
+            ),
             _MenuTile(
               icon: Icons.medical_information,
               title: '诊断信息',
@@ -306,6 +328,17 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
       context,
       MaterialPageRoute(builder: (_) => const ApiSettingsScreen()),
     );
+  }
+
+  /// 「学习偏好」副标题:没屏蔽就说清这一页有什么,屏蔽了就报数量和内容
+  String _preferencesSubtitle() {
+    final topics = _learnerModel.blockedTopics;
+    final keywords = _learnerModel.blockedKeywords;
+    final total = topics.length + keywords.length;
+    if (total == 0) return '朗读音色 · 屏蔽题材与关键词';
+    final shown = [...topics, ...keywords].take(3).join('、');
+    final more = total > 3 ? ' 等 $total 项' : '';
+    return '已屏蔽:$shown$more';
   }
 
   /// 词汇量基线卡片(v2.0):显示测量值/区间/来源,并提供两个测试入口

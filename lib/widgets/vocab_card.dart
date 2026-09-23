@@ -76,8 +76,8 @@ class VocabCard extends StatelessWidget {
                         // 朗读(v1.5.0):单词点一下朗读(系统 TTS)
                         IconButton(
                           onPressed: () async {
-                            final ok =
-                                await TtsService.instance.speak(vocab.displayLabel);
+                            final ok = await TtsService.instance
+                                .speakPreferred(vocab.displayWordText);
                             if (!ok && context.mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
@@ -100,11 +100,15 @@ class VocabCard extends StatelessWidget {
                         _typeChip(vocab.wordType, theme),
                       ],
                     ),
-                    // 音标(v1.5.0,AI 补全生成)
-                    if (vocab.phonetic != null && vocab.phonetic!.isNotEmpty) ...[
+                    // 音标(v1.5.0 AI 补全生成;v2.0 起英/美双音标)
+                    if (vocab.displayPhonetic != null) ...[
                       const SizedBox(height: 2),
                       Text(
-                        vocab.phonetic!,
+                        // 卡片放得下:两套音标一行(如 "英 /a/ · 美 /b/"),
+                        // 超长由 maxLines 收尾,不撑破卡片
+                        vocab.displayPhonetic!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.bodySmall?.copyWith(
                           fontStyle: FontStyle.italic,
                           color: theme.colorScheme.onSurface.withAlpha(150),

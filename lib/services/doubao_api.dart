@@ -192,7 +192,7 @@ class DoubaoApiService extends BaseApiService {
       _ when calibrate => (
         '''你是严谨的英语学习助手，正在做一次"校准重识别"：用户认为上一次识别有漏识或误识，请重新完整检查图片。
 输出JSON，格式：
-{"items":[{"word":"完整原文","translation":"中文释义","word_type":"word|phrase|sentence","part_of_speech":"词性(可选)","phonetic":"IPA音标(仅单词可选)","original_sentence":"完整句子(短语/句子必填)"}]}
+{"items":[{"word":"完整原文","translation":"中文释义","word_type":"word|phrase|sentence","part_of_speech":"词性(可选)","phonetic_uk":"英式IPA音标(仅单词可选)","phonetic_us":"美式IPA音标(仅单词可选)","original_sentence":"完整句子(短语/句子必填)"}]}
 
 作业流程(必须按此顺序)：
 1. 先整体扫一遍图片，找出所有人工标记的位置，再逐个读取被标记的文字。
@@ -211,14 +211,15 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
       ),
       _ => (
         '''你是英语学习助手。识别照片中"被标注"的英语内容。输出JSON，格式：
-{"items":[{"word":"完整原文","translation":"中文释义","word_type":"word|phrase|sentence","part_of_speech":"词性(可选)","phonetic":"IPA音标(仅单词可选,如 /ˈleɪzi/)","original_sentence":"完整句子(短语/句子必填,单词可选)"}]}
+{"items":[{"word":"完整原文","translation":"中文释义","word_type":"word|phrase|sentence","part_of_speech":"词性(可选)","phonetic_uk":"英式IPA音标(仅单词可选,如 /ˈleɪzi/)","phonetic_us":"美式IPA音标(仅单词可选)","original_sentence":"完整句子(短语/句子必填,单词可选)"}]}
 标记定义：手写笔迹圈画、下划线、波浪线、荧光笔、方框、星号、书签贴、页边批注对应的英文等读者标注痕迹。
 识别纪律(v1.4.4)：
 1. 只输出有明确标记痕迹的内容；正文中未作任何标记的文字一律不要输出。
 2. 如果不能确定某个内容是否被标记，宁可漏掉，也不要输出。
 3. word 必须与照片中的文本完全一致——单词、短语、句子一律完整输出,禁止截断,禁止用省略号(…)代替后半部分。
 4. 短语/句子必须在 original_sentence 中给出其所在的完整句子(必填,不可省略)。
-5. 单词给词性。
+5. 单词给词性,并同时给 phonetic_uk(英式)与 phonetic_us(美式)音标;
+   两者一致时照原样各写一遍,拿不准的音标宁可留空。
 6. 先扫一遍找出所有标记位置，再逐个读取，同一处重复标记只输出一次。${imageUris.length > 1 ? '多图格式：{"items_by_image":[{"image_index":0,"items":[...]},...]}' : ''}
 无任何标记返回{"items":[]}。只输出JSON。简洁思考。''',
         '识别标记的英语内容$bookHint$pageHint$countHint$excludeHint'
@@ -433,8 +434,13 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
           'content':
               '你是英语学习助手。用户给出一个英语单词或短语，请返回 JSON：'
               '{"translation":"中文释义","part_of_speech":"词性(如 n./v./adj./phrase)",'
-              '"phonetic":"IPA 国际音标(用两个斜杠包裹,如 /ˈʌnfetəd/;短语/句子可省)",'
-              '"original_sentence":"包含该词的完整英文例句","grammar_note":"语法要点(可选,单词可省)"}。'
+              // v2.0:一次给英/美两套音标(用户决策)——只回一套时词条页面
+              // 只能显示一个,用户无处可比;两套都拿不到就都留空。
+              '"phonetic_uk":"英式 IPA 音标(用两个斜杠包裹,如 /ˈʌnfetəd/;'
+              '英式与美式一致时照原样再写一遍,短语/句子可省)",'
+              '"phonetic_us":"美式 IPA 音标(同上格式)",'
+              '"original_sentence":"包含该词的完整英文例句",'
+              '"grammar_note":"语法要点(可选,单词可省)"}。'
               '只输出 JSON。',
         },
         {'role': 'user', 'content': word},
@@ -454,6 +460,10 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
 
   /// 解析 AI 补全返回的 JSON(纯静态,可单测)。
   /// 兼容 ```json 包裹;缺字段回空串,绝不抛异常——用户仍可手动填。
+  ///
+  /// v2.0:同时解析 phonetic_uk / phonetic_us(英/美双音标)。
+  /// 模型只回老字段 `phonetic` 时,把它同时回填到两边(词条页面至少能显示
+  /// 一套);`phonetic` 也保持原样返回,老调用方(表单回填)行为不变。
   static Map<String, String> parseWordInfo(String content) {
     String jsonStr = content.trim();
     if (jsonStr.startsWith('```')) {
@@ -466,15 +476,20 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
     try {
       final parsed = jsonDecode(jsonStr);
       if (parsed is! Map) return {};
+      // trim + 去空:模型偶尔给 "  " 或 null,空串在词条页要当"没有"处理
       String s(String key) => parsed[key]?.toString().trim() ?? '';
+      final legacy = s('phonetic');
       return {
         'translation': s('translation'),
         'part_of_speech': s('part_of_speech'),
-        'phonetic': s('phonetic'),
+        'phonetic': legacy,
+        'phonetic_uk': s('phonetic_uk').isNotEmpty ? s('phonetic_uk') : legacy,
+        'phonetic_us': s('phonetic_us').isNotEmpty ? s('phonetic_us') : legacy,
         'original_sentence': s('original_sentence'),
         'grammar_note': s('grammar_note'),
       };
     } catch (_) {
+      // 类型不对(如 items 是列表、整体是数组)→ 当作"没解析出",不抛
       return {};
     }
   }
@@ -930,6 +945,9 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
             'original_sentence': os,
             'part_of_speech': e['part_of_speech']?.toString(),
             'phonetic': e['phonetic']?.toString(),
+            // v2.0:识别侧也可能直接给双音标(见上面 prompt)
+            'phonetic_uk': e['phonetic_uk']?.toString(),
+            'phonetic_us': e['phonetic_us']?.toString(),
             'grammar_note': e['grammar_note']?.toString(),
             'image_index': imgIdx,
           });
@@ -953,6 +971,9 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
             'original_sentence': os,
             'part_of_speech': e['part_of_speech']?.toString(),
             'phonetic': e['phonetic']?.toString(),
+            // v2.0:识别侧也可能直接给双音标(见识别 prompt)
+            'phonetic_uk': e['phonetic_uk']?.toString(),
+            'phonetic_us': e['phonetic_us']?.toString(),
             'grammar_note': e['grammar_note']?.toString(),
           };
         })

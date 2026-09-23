@@ -712,6 +712,12 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
             wordType: (r['word_type'] as String?) ?? 'word',
             partOfSpeech: r['part_of_speech'] as String?,
             phonetic: r['phonetic'] as String?,
+            // v2.0:识别侧现在会同时给英/美两套音标;老返回只有 phonetic 时
+            // 由 Vocabulary.fromMap 的同款回退规则兜底(两边都可读)
+            phoneticUk: (r['phonetic_uk'] as String?) ??
+                (r['phonetic'] as String?),
+            phoneticUs: (r['phonetic_us'] as String?) ??
+                (r['phonetic'] as String?),
             grammarNote: r['grammar_note'] as String?,
           );
         }).toList();

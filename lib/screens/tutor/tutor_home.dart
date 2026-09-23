@@ -13,6 +13,7 @@ import '../../services/learner_snapshot_loader.dart';
 import '../../services/tutor_engine.dart';
 import '../../widgets/bottom_nav.dart';
 import '../review/review_screen.dart';
+import '../input/learner_preferences_screen.dart';
 import 'placement_test_screen.dart';
 
 /// 导师页(v2.0,v1 版本)。
@@ -259,6 +260,11 @@ $evidence''';
         title: const Text('导师'),
         actions: [
           IconButton(
+            tooltip: '不想看的题材',
+            onPressed: _openPreferences,
+            icon: const Icon(Icons.block),
+          ),
+          IconButton(
             tooltip: '重新诊断',
             onPressed: _refresh,
             icon: const Icon(Icons.refresh),
@@ -453,6 +459,20 @@ $evidence''';
     if (!mounted) return;
     setState(() {});
     // 画像变了 → 诊断与任务都可能变,重新生成
+    await _refresh();
+  }
+
+  /// 学习偏好(v2.0):朗读音色 + 题材/关键词黑名单。
+  /// 导师选材已读 `_model.blockedTopics`(见 TutorEngine),回到本页必须重读
+  /// 模型 —— 否则刚屏蔽的题材在这一页的选材建议里还会出现。
+  Future<void> _openPreferences() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const LearnerPreferencesScreen()),
+    );
+    if (!mounted) return;
+    _model = LearnerModelStore.load();
+    setState(() {});
     await _refresh();
   }
 

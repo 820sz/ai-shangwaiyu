@@ -129,6 +129,18 @@ class AppConstants {
   // ── Hive 额外 Key ──
   static const String keyMaterialSearchHistory = 'material_search_history';
 
+  /// 朗读音色(v2.0):'system' | 'uk' | 'us',默认跟随系统。
+  /// 存的是**语义档位**而不是 BCP-47 语言码:'system' 要按手机当前语区解析
+  /// (解析不了才回退 en-US),存语言码就把这层信息丢了。
+  static const String keyTtsAccent = 'tts_accent';
+
+  /// 音色档位 → 设置页文案(顺序即展示顺序:默认项在第一个)
+  static const Map<String, String> ttsAccentOptions = {
+    'system': '跟随系统',
+    'uk': '英式发音',
+    'us': '美式发音',
+  };
+
   // ── 生词类型 ──
   static const String wordTypeWord = 'word';
   static const String wordTypePhrase = 'phrase';

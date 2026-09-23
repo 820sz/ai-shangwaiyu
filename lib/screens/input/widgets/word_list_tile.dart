@@ -158,11 +158,11 @@ class WordListTile extends StatelessWidget {
                   Icon(Icons.chevron_right, size: 18, color: Colors.grey[300]),
               ],
             ),
-            // 行2:音标(v1.5.0,AI 补全生成)+ 释义(独占整行)
-            if ((item.phonetic ?? '').isNotEmpty) ...[
+            // 行2:音标(v1.5.0 AI 补全生成;v2.0 起英/美双音标一并显示)+ 释义(独占整行)
+            if (item.displayPhonetic != null) ...[
               const SizedBox(height: 2),
               Text(
-                item.phonetic!,
+                item.displayPhonetic!,
                 style: TextStyle(
                   fontSize: 11,
                   fontStyle: FontStyle.italic,

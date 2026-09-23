@@ -537,6 +537,11 @@ class TutorEngine {
       parts.add('偏好 ${m.interests!.value.join('、')}');
     }
     if (m.blockedTopics.isNotEmpty) parts.add('屏蔽 ${m.blockedTopics.join('、')}');
+    // v2.0:关键词黑名单同样要进上下文 —— 只给题材时,选材建议会绕过
+    // 用户明确不想看到的关键词
+    if (m.blockedKeywords.isNotEmpty) {
+      parts.add('屏蔽关键词 ${m.blockedKeywords.join('、')}');
+    }
     return parts.isEmpty ? '画像:未填写' : '画像:${parts.join(';')}';
   }
 

@@ -73,10 +73,10 @@ void showWordDetailSheet({
                 ),
               ],
             ),
-            // 音标(v1.5.0:AI 补全生成,如 /ˈʌnfetəd/)
-            if (item.phonetic != null && item.phonetic!.isNotEmpty) ...[
+            // 音标(v1.5.0 AI 补全生成;v2.0 起英/美双音标一并显示)
+            if (item.displayPhonetic != null) ...[
               Text(
-                item.phonetic!,
+                item.displayPhonetic!,
                 style: TextStyle(
                   fontSize: 15,
                   fontStyle: FontStyle.italic,
@@ -185,8 +185,9 @@ TextStyle _sectionTitle(ThemeData theme) {
 }
 
 /// 系统 TTS 朗读;失败(无语音引擎)提示一次,不打断查看。
+/// v2.0:按设置里选的音色朗读(英/美/跟随系统)。
 Future<void> _speak(BuildContext ctx, Vocabulary item) async {
-  final ok = await TtsService.instance.speak(item.displayWordText);
+  final ok = await TtsService.instance.speakPreferred(item.displayWordText);
   if (!ok && ctx.mounted) {
     ScaffoldMessenger.of(ctx)
       ..hideCurrentSnackBar()

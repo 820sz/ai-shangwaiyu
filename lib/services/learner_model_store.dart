@@ -113,6 +113,10 @@ class LearnerModelStore {
   }
 
   /// 用户手动纠正水平(自报覆盖测量值,但保留来源标记)
+  ///
+  /// 注意 [blockedTopics] / [blockedKeywords] 的语义(v2.0 黑名单 UI 依赖它):
+  /// 传 `null` = 不改动现有列表;传 `[]` = 清空。因为 `copyWith` 用 `??` 兜底,
+  /// 空列表能正常写入(不是 falsy),用户删光屏蔽项时能真的删掉。
   static Future<LearnerModel> saveSelfReported({
     required LearnerModel base,
     String? cefr,

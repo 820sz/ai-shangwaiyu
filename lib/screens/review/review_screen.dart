@@ -243,7 +243,8 @@ class _ReviewScreenState extends State<ReviewScreen> {
   }
 
   Future<void> _speak(Vocabulary v) async {
-    final ok = await TtsService.instance.speak(v.displayLabel);
+    // v2.0:按设置的音色朗读(英/美/跟随系统)
+    final ok = await TtsService.instance.speakPreferred(v.displayWordText);
     if (!ok && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -692,10 +693,10 @@ class _ReviewScreenState extends State<ReviewScreen> {
             height: 1.3,
           ),
         ),
-        if (v.phonetic != null && v.phonetic!.isNotEmpty) ...[
+        if (v.displayPhonetic != null) ...[
           const SizedBox(height: 10),
           Text(
-            v.phonetic!,
+            v.displayPhonetic!,
             style: TextStyle(
               fontSize: 16,
               fontStyle: FontStyle.italic,
@@ -739,10 +740,10 @@ class _ReviewScreenState extends State<ReviewScreen> {
             if (markedLevel != null) _markBadge(markedLevel),
           ],
         ),
-        if (v.phonetic != null && v.phonetic!.isNotEmpty) ...[
+        if (v.displayPhonetic != null) ...[
           const SizedBox(height: 4),
           Text(
-            v.phonetic!,
+            v.displayPhonetic!,
             style: TextStyle(
               fontSize: 14,
               fontStyle: FontStyle.italic,

@@ -5,13 +5,16 @@ import 'package:dio/dio.dart';
 import 'package:provider/provider.dart';
 
 import '../../models/material_recommendation.dart';
+import '../../models/learner_model.dart';
 import '../../providers/vocab_provider.dart';
 import '../../services/base_api.dart';
 import '../../services/database.dart';
 import '../../services/doubao_api.dart';
+import '../../services/learner_model_store.dart';
 import '../../services/learner_profile_store.dart';
 import '../../services/material_recommend_service.dart';
 import 'learner_profile_screen.dart';
+import 'learner_preferences_screen.dart';
 import 'material_recommendation_detail_screen.dart';
 
 /// AI 学习资源推荐(v1.8.0 重做)。
@@ -34,6 +37,8 @@ class _AiMaterialSearchScreenState extends State<AiMaterialSearchScreen> {
   final _api = DoubaoApiService();
 
   LearnerProfile _profile = const LearnerProfile();
+  /// 学习者模型(v2.0):只取题材黑名单用 —— 推荐结果与缓存列表都要过它
+  LearnerModel _learner = LearnerModel();
   List<MaterialRecommendation> _saved = [];
   bool _loadingSaved = true;
   bool _generating = false;
@@ -71,6 +76,7 @@ class _AiMaterialSearchScreenState extends State<AiMaterialSearchScreen> {
     if (_profile.isEmpty) {
       _profile = LearnerProfileStore.suggestFromVocab(vocab.vocabularies);
     }
+    _learner = LearnerModelStore.load();
     await _loadSaved();
   }
 
@@ -94,6 +100,17 @@ class _AiMaterialSearchScreenState extends State<AiMaterialSearchScreen> {
     if (result != null && mounted) {
       setState(() => _profile = result);
     }
+  }
+
+  /// 题材黑名单(v2.0):用户在这里维护,推荐与列表立刻遵守
+  Future<void> _editPreferences() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const LearnerPreferencesScreen()),
+    );
+    if (!mounted) return;
+    // 回来重读黑名单并重算过滤(可能刚屏蔽了当前列表里的东西)
+    setState(() => _learner = LearnerModelStore.load());
   }
 
   /// 流式生成推荐清单(结果落库,可反复查看)
@@ -123,6 +140,9 @@ class _AiMaterialSearchScreenState extends State<AiMaterialSearchScreen> {
           profile: _profile,
           vocab: vocab,
           category: widget.category,
+          // 黑名单进提示词(让模型别推),本地过滤再兜底
+          blockedTopics: _learner.blockedTopics,
+          blockedKeywords: _learner.blockedKeywords,
         ),
         cancelToken: cancelToken,
       );
@@ -178,11 +198,30 @@ class _AiMaterialSearchScreenState extends State<AiMaterialSearchScreen> {
       if (items.isEmpty) {
         throw Exception('AI 未返回可解析的推荐清单');
       }
+      // 题材黑名单(v2.0):入库前先滤掉 —— 提示词只是"请模型避开",
+      // 模型不听话时由代码兜底;顺手也让缓存/库表不再存用户明确不想看的东西。
+      // 被滤掉多少仍然要告诉用户(build 里按 _saved 总数再算一次并显示)。
+      final blocked = MaterialRecommendService.blockedCount(
+        items,
+        blockedTopics: _learner.blockedTopics,
+        blockedKeywords: _learner.blockedKeywords,
+      );
+      final kept = MaterialRecommendService.filterBlocked(
+        items,
+        blockedTopics: _learner.blockedTopics,
+        blockedKeywords: _learner.blockedKeywords,
+      );
+      if (kept.isEmpty) {
+        throw Exception(
+          'AI 推荐的 ${items.length} 条都命中了你屏蔽的题材/关键词,'
+          '可在右上角「不想看的题材」里调整',
+        );
+      }
       if (replace) {
         // 原子替换(P2-2):清空 + 插入在同一事务里,失败整体回滚
-        await DatabaseService.replaceRecommendations(widget.category, items);
+        await DatabaseService.replaceRecommendations(widget.category, kept);
       } else {
-        for (final item in items) {
+        for (final item in kept) {
           await DatabaseService.insertRecommendation(item);
         }
       }
@@ -191,7 +230,11 @@ class _AiMaterialSearchScreenState extends State<AiMaterialSearchScreen> {
         setState(() => _streamText = '');
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('已生成 ${items.length} 条推荐并保存'),
+            content: Text(
+              blocked > 0
+                  ? '已生成 ${kept.length} 条推荐并保存,按你的偏好屏蔽了 $blocked 条'
+                  : '已生成 ${kept.length} 条推荐并保存',
+            ),
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -208,10 +251,23 @@ class _AiMaterialSearchScreenState extends State<AiMaterialSearchScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // 题材黑名单(v2.0):缓存列表与刚生成的结果都过同一道过滤 ——
+    // 只过滤新结果的话,上次生成里被屏蔽的条目会从缓存里"复活"
+    final visible = MaterialRecommendService.filterBlocked(
+      _saved,
+      blockedTopics: _learner.blockedTopics,
+      blockedKeywords: _learner.blockedKeywords,
+    );
+    final hidden = _saved.length - visible.length;
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.category),
         actions: [
+          IconButton(
+            tooltip: '不想看的题材',
+            icon: const Icon(Icons.block),
+            onPressed: _editPreferences,
+          ),
           IconButton(
             tooltip: '学习画像',
             icon: const Icon(Icons.person_outline),
@@ -303,13 +359,47 @@ class _AiMaterialSearchScreenState extends State<AiMaterialSearchScreen> {
             )
           else ...[
             Text(
-              '推荐材料（${_saved.length}）',
+              '推荐材料（${visible.length}）',
               style: theme.textTheme.titleSmall?.copyWith(
                 fontWeight: FontWeight.w600,
               ),
             ),
             const SizedBox(height: 8),
-            ..._saved.map((r) => _recommendationCard(theme, r)),
+            // 屏蔽不静默(v2.0):告诉用户挡掉了几条,并给入口去看/改黑名单
+            if (hidden > 0)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  children: [
+                    Icon(Icons.block, size: 14, color: Colors.grey[600]),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        '已按你的偏好屏蔽 $hidden 条',
+                        style: TextStyle(
+                          fontSize: 12,
+                          // P2-31:灰阶对比度达标
+                          color: Colors.grey[700],
+                        ),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: _editPreferences,
+                      child: const Text('调整'),
+                    ),
+                  ],
+                ),
+              ),
+            if (visible.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Text(
+                  '当前 ${_saved.length} 条推荐都被你的屏蔽条件挡住了',
+                  style: TextStyle(color: Colors.grey[600], fontSize: 13),
+                ),
+              )
+            else
+              ...visible.map((r) => _recommendationCard(theme, r)),
           ],
         ],
       ),

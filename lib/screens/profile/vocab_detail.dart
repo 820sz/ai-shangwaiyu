@@ -61,12 +61,13 @@ class _VocabDetailScreenState extends State<VocabDetailScreen> {
             ],
           ),
           const SizedBox(height: 4),
-          // 音标(v1.5.0,AI 补全生成)
-          if (_vocab.phonetic != null && _vocab.phonetic!.isNotEmpty)
+          // 音标(v1.5.0 AI 补全生成;v2.0 起同时显示英/美两套)
+          // 只有一边 → 只显示那一边(不加标签);两边都空 → 整块不渲染
+          if (_vocab.displayPhonetic != null)
             Padding(
               padding: const EdgeInsets.only(bottom: 4),
               child: Text(
-                _vocab.phonetic!,
+                _vocab.displayPhonetic!,
                 style: TextStyle(
                   fontSize: 16,
                   fontStyle: FontStyle.italic,
@@ -161,7 +162,8 @@ class _VocabDetailScreenState extends State<VocabDetailScreen> {
   }
 
   Future<void> _speak() async {
-    final ok = await TtsService.instance.speak(_vocab.displayWordText);
+    // v2.0:按用户在设置里选的音色朗读(默认跟随系统)
+    final ok = await TtsService.instance.speakPreferred(_vocab.displayWordText);
     if (!ok && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
