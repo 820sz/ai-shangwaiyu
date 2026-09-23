@@ -172,6 +172,72 @@ void main() {
       expect(navPage, contains('This is the only real paragraph on the page'));
     });
 
+    test('同一种标签出现多次时要全部删掉,不能只删第一处', () {
+      // 回归用例:真实页面动辄十几个 <script>(埋点/同意管理/播放器各一个)。
+      // 早期实现每类标签只调一次 removeBlock(只删第一处),结果 NPR 文章页
+      // 正文里漏进 OneTrust 的 JS,词数从 800 涨到 2200。
+      const multi = '<html><head>'
+          '<script>var a = 1;</script>'
+          '<style>.one{color:red}</style>'
+          '<script>var b = 2; console.log("SECOND_SCRIPT");</script>'
+          '<style>.two{color:blue}</style>'
+          '</head><body>'
+          '<nav><a href="/x">Menu</a></nav>'
+          '<footer>FIRST_FOOTER</footer>'
+          '<aside>SECOND_ASIDE</aside>'
+          '<p>The only real sentence of this page, kept for comparison.</p>'
+          '</body></html>';
+      final text = HtmlText.readableText(multi);
+      expect(text, contains('The only real sentence of this page'));
+      expect(text, isNot(contains('SECOND_SCRIPT')));
+      expect(text, isNot(contains('var a')));
+      expect(text, isNot(contains('var b')));
+      expect(text, isNot(contains('color:red')));
+      expect(text, isNot(contains('color:blue')));
+      expect(text, isNot(contains('FIRST_FOOTER')));
+      expect(text, isNot(contains('SECOND_ASIDE')));
+      expect(text, isNot(contains('Menu')));
+    });
+
+    test('removeAllBlocks 收敛且删干净(不会死循环)', () {
+      const html = '<p>keep</p><script>1</script><script>2</script>'
+          '<script>3</script>';
+      final out = HtmlText.removeAllBlocks(html, 'script');
+      expect(out, equals('<p>keep</p>'));
+      // 已经删干净后再调用不应改变内容
+      expect(HtmlText.removeAllBlocks(out, 'script'), equals(out));
+      // 未闭合的标签:返回原串,不抛异常
+      const broken = '<p>keep</p><script>never closed';
+      expect(HtmlText.removeAllBlocks(broken, 'script'), equals(broken));
+    });
+
+    test('列表里的跳转链接(nav 之外的 <ul><li><a>)也要丢掉', () {
+      // 回归用例:真实 NPR 页头的 skip-links 结构长这样 ——
+      // 链接不在 <nav> 里,只能靠"整段就是一个短链接"判断;
+      // 早期实现把 </a> 一起删了,导致这个判断彻底失效。
+      const page = '<html><body>'
+          '<div class="skip-links"><ul>'
+          '<li><a href="#mainContent" class="skiplink">Skip to main content</a></li>'
+          '<li><a href="/help/article?name=keyboard">'
+          'Keyboard shortcuts for audio player</a></li>'
+          '</ul></div>'
+          '<p>The article body itself must survive this filter.</p>'
+          '</body></html>';
+      final text = HtmlText.readableText(page);
+      expect(text, isNot(contains('Skip to main content')));
+      expect(text, isNot(contains('Keyboard shortcuts')));
+      expect(text, isNot(contains('<a')));
+      expect(text, isNot(contains('</a>')));
+      expect(text, contains('The article body itself must survive this filter.'));
+    });
+
+    test('锚点闭合标签不会被误删(开闭标签成对处理)', () {
+      // `</a>` 若被当成普通标签删掉,"整段是链接"的判断就永远不成立
+      const html = '<p>Text <a href="/x">link</a> more text.</p>';
+      final text = HtmlText.readableText(html);
+      expect(text, equals('Text link more text.'));
+    });
+
     test('空输入 / 无标签的纯文本 / 只有 script 的页面', () {
       expect(HtmlText.readableText(''), '');
       // 没有任何标签说明调用方用错了 API:不假装抽出了正文
@@ -538,12 +604,13 @@ void main() {
       }
     });
 
-    test('有音频的源恰好是 4 个教学内容源', () {
+    test('有音频的源恰好是 3 个真正带 enclosure 的教学源', () {
+      // NPR 的 1001 新闻订阅实测没有 enclosure,所以不算音频源(见 sources 注释)
       final audio = MaterialSourceService.sources
           .where((s) => s.hasAudio)
           .map((s) => s.id)
           .toList();
-      expect(audio, equals(['bbc_le', 'voa_le', 'npr', 'ted']));
+      expect(audio, equals(['bbc_le', 'voa_le', 'ted']));
     });
 
     test('sourceOf 命中与未命中', () {
@@ -654,6 +721,43 @@ void main() {
       expect(e.message, contains('weibo'));
       expect(e.message, contains('gutenberg'));
       expect(e.toString(), contains('材料中心'));
+    });
+
+    test('stripSiteSuffix:砍掉站点名尾巴,不误伤标题里的冒号', () {
+      expect(
+        MaterialSourceService.stripSiteSuffix(
+          'Hydropower and the Himalayas: What does the future hold? : NPR',
+          'https://www.npr.org/2026/09/23/g-s1-144536/floods',
+        ),
+        equals('Hydropower and the Himalayas: What does the future hold?'),
+      );
+      expect(
+        MaterialSourceService.stripSiteSuffix(
+          'The joys of writing lists | TED',
+          'https://www.ted.com/talks/x',
+        ),
+        equals('The joys of writing lists'),
+      );
+      expect(
+        MaterialSourceService.stripSiteSuffix(
+          'Can apps teach you a language? - BBC Learning English',
+          'https://www.bbc.co.uk/learningenglish/features/6-minute-english/ep-260917',
+        ),
+        equals('Can apps teach you a language?'),
+      );
+      // 尾段不是站点名时保持原样(冒号在标题里很常见)
+      expect(
+        MaterialSourceService.stripSiteSuffix(
+          'Nepal: a country of contrasts',
+          'https://www.npr.org/x',
+        ),
+        equals('Nepal: a country of contrasts'),
+      );
+      expect(MaterialSourceService.stripSiteSuffix('', 'https://npr.org'), '');
+      expect(
+        MaterialSourceService.stripSiteSuffix('Title', 'not a url'),
+        equals('Title'),
+      );
     });
 
     test('unknownSource 的 id 与 sources 清单一一对应', () {

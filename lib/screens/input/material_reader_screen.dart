@@ -7,8 +7,10 @@ import '../../providers/vocab_provider.dart';
 import '../../services/database.dart';
 import '../../services/doubao_api.dart';
 import '../../services/material_library.dart';
+import '../../services/reading_quiz.dart';
 import '../../services/text_difficulty.dart';
 import '../../services/tts_service.dart';
+import 'reading_quiz_screen.dart';
 
 /// 材料阅读器(v2.0)。
 ///
@@ -41,6 +43,9 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
   int _lastChunkIndex = 0;
   int _lookups = 0;
   int _picked = 0;
+
+  /// 本轮拾取的词(出读后测验要用它们;只存在内存,不入库)
+  final List<String> _pickedWords = [];
   bool _finished = false;
 
   @override
@@ -150,6 +155,53 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('已标记读完 —— 进度与用时已记入导师数据')),
     );
+    await _startQuiz();
+  }
+
+  /// 读后测验:从材料原文 + 本轮拾取的词本地出题(不花 API、离线可用)
+  Future<void> _startQuiz() async {
+    final text = _chunks.map((c) => '${c['text'] ?? ''}').join('\n\n');
+    final targets = <String>[
+      ..._pickedWords,
+      ...?_analysis?.topNewWords,
+    ];
+    if (targets.isEmpty || text.trim().length < 200) {
+      // 材料太短或没拾词就不硬出题(卷子没意义比没有卷子更糟)
+      return;
+    }
+    // 有中文释义的拾取词可以用来出"中译英"回想题
+    final translations = <String, String>{};
+    try {
+      for (final w in _pickedWords) {
+        final rows = await DatabaseService.getVocabularies(limit: 500);
+        final hit = rows.where((v) => v.word.toLowerCase() == w.toLowerCase());
+        if (hit.isNotEmpty && (hit.first.translation ?? '').isNotEmpty) {
+          translations[w.toLowerCase()] = hit.first.translation!;
+        }
+      }
+    } catch (e) {
+      debugPrint('取释义失败(不影响出题): $e');
+    }
+
+    final questions = ReadingQuiz.build(
+      text: text,
+      targetWords: targets,
+      translations: translations,
+      maxQuestions: 5,
+      // seed 用 materialId:同一份材料每次出同一批题,便于复盘
+      seed: widget.materialId,
+    );
+    if (questions.isEmpty || !mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ReadingQuizScreen(
+          materialId: widget.materialId,
+          title: '${_material?['title'] ?? '材料'}',
+          questions: questions,
+        ),
+      ),
+    );
   }
 
   // ── 点词:释义 / 朗读 / 收进生词本 ──
@@ -203,6 +255,9 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
         );
       }
       _picked++;
+      if (!_pickedWords.any((w) => w.toLowerCase() == v.word.toLowerCase())) {
+        _pickedWords.add(v.word);
+      }
       return '已收进生词本(会出现在复习里)';
     } catch (e) {
       return '保存失败:$e';

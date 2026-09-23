@@ -252,7 +252,12 @@ class MaterialSourceService {
       kind: 'news',
       description: '美国国家公共电台新闻(Up First 等),真实语速的时事报道',
       license: 'NPR 版权内容,仅限个人学习使用;原文链接与署名必须保留',
-      hasAudio: true,
+      // 实测:`feeds.npr.org/1001/rss.xml` 的条目里**没有** `<enclosure>`
+      // (逐条检查过),所以这条源目前只提供文字,不提供音频 —— 元数据不能
+      // 谎报能力,否则"听力材料"筛选会给出点开没声音的结果。
+      // TODO(v2.x 听力):改用 NPR 的单节目播客订阅(带 enclosure)拿音频,
+      // 例如 Up First;需要先确认具体 feed id,不要凭印象写死。
+      hasAudio: false,
     ),
     MaterialSource(
       id: 'ted',
@@ -1028,14 +1033,7 @@ class MaterialSourceService {
   Future<MaterialDoc> _fetchWebArticle(MaterialSource source, String url) async {
     final abs = _absolutize(url, source);
     final html = await _getText(abs, source);
-    var title = HtmlText.titleOf(html);
-    // 站点标题常带尾巴("… - BBC Learning English" / "… | NPR"),
-    // 只砍掉明显的站点名尾巴,不动标题主体
-    for (final sep in [' - BBC Learning English', ' | NPR', ' - NPR', ' | TED']) {
-      if (title.endsWith(sep)) {
-        title = title.substring(0, title.length - sep.length).trim();
-      }
-    }
+    var title = stripSiteSuffix(HtmlText.titleOf(html), abs);
     final text = _cleanArticleText(HtmlText.readableText(html));
     if (text.length < 120) {
       throw MaterialSourceException(
@@ -1060,6 +1058,62 @@ class MaterialSourceService {
     );
   }
 
+  /// 去掉标题尾部的站点名(纯函数,可单测)。
+  ///
+  /// 页面标题几乎都带站点名尾巴,且各家分隔符不一样:`… : NPR`、
+  /// `… | TED`、`… - BBC Learning English`。硬编码一张后缀表迟早漏 ——
+  /// 这里改成**从 URL 推断站点名**再比对尾段:
+  /// `https://www.npr.org/…` → 站点标记 `npr`,于是 `… : NPR` 被砍掉,
+  /// 而正文标题里的冒号("Hydropower and the Himalayas: What does the future hold?")
+  /// 不会被误伤 —— 因为尾段 `What does the future hold?` 不等于站点名。
+  static String stripSiteSuffix(String title, String url) {
+    final t = title.trim();
+    if (t.isEmpty) return t;
+    final names = _siteNamesOf(url);
+    if (names.isEmpty) return t;
+    for (final sep in const [': ', ' | ', ' - ', ' — ', ' – ']) {
+      final i = t.lastIndexOf(sep);
+      if (i <= 0) continue;
+      final tail = t.substring(i + sep.length).trim().toLowerCase();
+      if (tail.isEmpty || tail.length > 24) continue;
+      for (final n in names) {
+        if (tail == n || tail == '$n.com' || tail == '$n.org') {
+          return t.substring(0, i).trim();
+        }
+        // "BBC Learning English" / "NPR News" 这类"站点名 + 栏目名"的尾巴:
+        // 以站点名开头且不超过 4 个词时也砍掉。
+        // 已知代价:极少数标题的副标题正好以站点名开头(如 "…: NPR reports from Kyiv")
+        // 会被误砍。权衡后认为"标题里挂着站点名"更常见、更影响阅读,故保留此规则。
+        if (tail.startsWith('$n ') && tail.split(' ').length <= 4) {
+          return t.substring(0, i).trim();
+        }
+      }
+    }
+    return t;
+  }
+
+  /// 从 URL 推断站点标识:`https://www.npr.org/x` → ['npr', 'npr.org']。
+  /// 取"去掉 www 与公共后缀之后剩下的最后一段",够用且不引依赖。
+  static List<String> _siteNamesOf(String url) {
+    final m = RegExp(r'^[a-zA-Z][a-zA-Z0-9+.\-]*://([^/?#]+)').firstMatch(url.trim());
+    if (m == null) return const [];
+    var host = m.group(1)!.toLowerCase();
+    final colon = host.indexOf(':');
+    if (colon > 0) host = host.substring(0, colon);
+    var labels = host.split('.').where((l) => l.isNotEmpty).toList();
+    if (labels.isNotEmpty && labels.first == 'www') labels = labels.sublist(1);
+    const generic = {
+      'com', 'org', 'net', 'edu', 'gov', 'io', 'co', 'uk', 'cn', 'us', 'me', 'tv',
+    };
+    while (labels.length > 1 && generic.contains(labels.last)) {
+      labels.removeLast();
+    }
+    if (labels.isEmpty) return const [];
+    final core = labels.last;
+    if (core.isEmpty) return const [];
+    return [core, host];
+  }
+
   /// 正文清理(纯函数):删掉页面里的时间戳/播放器控件残留行。
   /// 播客/视频页的正文里常混进 `(00:00)`、`Media player`、`Download` 这类行,
   /// 留着会污染词频与难度统计。只删**整行匹配**的,不误伤正文里的括号时间。
@@ -1078,9 +1132,13 @@ class MaterialSourceService {
   static final RegExp _noiseLine = RegExp(
     r'^(?:\(\d{1,2}:\d{2}(?::\d{2})?\)|'
     r'\d{1,2}:\d{2}(?::\d{2})?|'
-    r'media player|download|share|subscribe|sign in|log in|'
+    r'media player|download|share|subscribe|sign in|log in|sign up|'
     r'read more|watch now|listen now|play|pause|menu|search|'
-    r'copyright ©?.*|terms of use|privacy policy)$',
+    // 页面控件文案(skip-links/无障碍跳转条):真实 NPR/新闻站页头常驻这几条,
+    // 它们不是链接也不是 <nav>,标签层拦不住,只能按文案整行丢
+    r'accessibility links?|skip to main content|skip to content|'
+    r'keyboard shortcuts?[^|]{0,40}|'
+    r'copyright ©?.*|terms of use|privacy policy|advertisement)$',
     caseSensitive: false,
   );
 
@@ -1196,9 +1254,18 @@ class MaterialSourceService {
           statusCode: code,
         );
       case DioExceptionType.unknown:
+        // `unknown` 是 dio 的"兜底"类型:底层可能是 SocketException(连接被对端
+        // 掐断)、TLS 握手失败等。e.message 经常为空,必须把 e.error 也带上,
+        // 否则用户(和排查的人)只看到"未知网络错误",完全无从下手 ——
+        // 实测抓古腾堡 763KB 全文时中途被 reset 就是这种情况。
+        final detail = [
+          if ((e.message ?? '').trim().isNotEmpty) e.message!.trim(),
+          if (e.error != null) '${e.error}'.trim(),
+        ].join(' / ');
         return MaterialSourceException(
           sourceLabel: source.label,
-          message: '请求失败:${_short(e.message ?? '未知网络错误')}',
+          message: '网络中断:${_short(detail.isEmpty ? '连接被中断' : detail)}。'
+              '大文件(公版书全文)首次抓取可能被中途掐断,重试一次通常就好',
         );
     }
   }

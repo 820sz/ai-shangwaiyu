@@ -85,11 +85,18 @@ class HtmlText {
     s = s.replaceAll(_liOpen, paraMark);
     s = s.replaceAll(_brTag, paraMark);
 
-    // ③ 剩下的标签全删(此时 s 里已经不该有 script/style 文本了)
-    s = s.replaceAll(_anyTag, zeroWidth);
+    // ③ 除 `<a>` 之外的标签全删。**`<a>` 故意留到段落阶段之后**:
+    //    "整段就是一个短链接"(菜单/按钮/跳转提示)只能靠标签本身判断 ——
+    //    先把 `<a>` 删了,段落阶段只看到一串纯文字,就再也分不出它是导航还是正文
+    //    (真实 NPR 页面的 "Accessibility links"、"Skip to main content"
+    //    就是这么漏进正文的)。
+    s = s.replaceAll(_nonAnchorTag, zeroWidth);
     s = decodeEntities(s);
 
-    return _paragraphize(s);
+    // ④ 逐行成段(纯链接的导航段在这里被丢掉)
+    final text = _paragraphize(s);
+    // ⑤ 段落成型后再去掉残留的 `<a>` 标签(正文里的行内链接文字要留下)
+    return text.replaceAll(_anchorTagAny, '').trim();
   }
 
   /// 抽出所有 `<a href>` 的链接并绝对化(相对路径按 [baseUrl] 解析)。
@@ -268,6 +275,21 @@ class HtmlText {
   static final RegExp _schemeHead = RegExp(r'^[a-zA-Z][a-zA-Z0-9+.\-]*:');
   static final RegExp _absBase = RegExp(r'^([a-zA-Z][a-zA-Z0-9+.\-]*)://([^/?#]+)([\s\S]*)$');
   static final RegExp _anyTag = RegExp(r'<[^>]*>');
+
+  /// 除 `<a>`(任意大小写,含 `</a>`)之外的所有标签。
+  ///
+  /// 两个先行断言分别管开标签与闭标签,**不能用 `</?(?!a\b)` 那种写法**:
+  /// `</?` 里的 `/?` 可以回溯成"不匹配斜杠",于是 `</a>` 会被 `<[^>]*>` 这一路
+  /// 匹配掉 —— 闭标签一丢,后面的"整段就是一个链接"判断全部失效
+  /// (v2.0 实测:NPR 的 skip-links 两行就是被这个回溯漏进正文的)。
+  static final RegExp _nonAnchorTag = RegExp(
+    r'<(?!a[\s>])(?!/a[\s>])[^>]*>',
+    caseSensitive: false,
+  );
+
+  /// 残留的 `<a …>` / `</a>`(段落成型后清掉)
+  static final RegExp _anchorTagAny = RegExp(r'</?a\b[^>]*>', caseSensitive: false);
+
   static final RegExp _anchorTag = RegExp(
     r'''<a\b[^>]*?\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))''',
     caseSensitive: false,
@@ -423,15 +445,16 @@ class HtmlText {
   }
 
   /// 是不是"导航块":整行只由 `<a>…</a>` 组成(可以多个),没有别的内容。
-  /// 链接文字累计超过 4 个词或 28 个字符时**不丢** —— 那更可能是正文里的引用。
-  /// 例:`<a>Home</a><a>Episodes</a>` 丢掉;`<a>Read the full transcript</a>` 保留。
+  /// 链接文字累计超过 6 个词或 40 个字符时**不丢** —— 那更可能是正文里的引用。
+  /// 例:`<a>Accessibility links</a>`、`<a>Skip to main content</a>` 丢掉;
+  /// `<a>Read the full transcript and listen to the audio</a>` 保留。
   static bool _isNavBlock(String line) {
     if (line.isEmpty || !line.contains('<')) return false;
     if (!_linkOnly.hasMatch(line)) return false;
     final linkText = _oneLine(line.replaceAll(_anyTag, ' '));
     if (linkText.isEmpty) return true; // 空链接(只有图标)
-    if (linkText.length > 28) return false;
-    if (linkText.split(' ').where((w) => w.isNotEmpty).length > 4) return false;
+    if (linkText.length > 40) return false;
+    if (linkText.split(' ').where((w) => w.isNotEmpty).length > 6) return false;
     // `<a>` 之外还有文字(如 `主站 · <a>关于</a>`)就不算纯导航
     final outside = _oneLine(line.replaceAll(_anyLink, ' '));
     return outside.isEmpty;
