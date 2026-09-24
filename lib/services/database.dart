@@ -661,20 +661,43 @@ class DatabaseService {
     return db.insert('vocabulary', v.toMap());
   }
 
-  /// 批量插入生词（用于 AI 返回多条结果时）
+  /// 批量插入生词（用于 AI 返回多条结果时 / 听写收词 / 阅读器收词）。
+  ///
+  /// **一个词一行**(v2.3.3):插入前会把"库里已有的词 + 本批已处理过的词"过一遍,
+  /// 词面按 `trim().toLowerCase()` 比较,重复的直接跳过,返回**真正插入的条数**。
+  ///
+  /// 为什么放在这一层做:所有收词入口(阅读器点词、追问面板、读后测验、听写"一键
+  /// 收词")最终都走这里,而它们**都没有查重** —— 听写页的按钮在保存成功后并没有
+  /// 禁用,用户点两次就会把同一批词插两遍,于是生词本和复习队列里同一张卡出现
+  /// 两次(2026-09-24 由 `review_flow_test` 发现)。放在数据库层一次修好,
+  /// 比在四个界面各写一遍查重可靠。
+  ///
+  /// 与既有约定一致:备份恢复也是"按词面去重、已存在的跳过"。
   static Future<int> insertVocabularies(List<Vocabulary> list) async {
+    if (list.isEmpty) return 0;
     final db = await database;
-    int count = 0;
+    var inserted = 0;
     await db.transaction((txn) async {
+      final existing = <String>{};
+      final rows = await txn.query('vocabulary', columns: ['word']);
+      for (final r in rows) {
+        existing.add(_dedupeKey('${r['word'] ?? ''}'));
+      }
       final batch = txn.batch();
       for (final v in list) {
+        final key = _dedupeKey(v.word);
+        if (key.isEmpty || existing.contains(key)) continue;
+        existing.add(key);
         batch.insert('vocabulary', v.toMap());
-        count++;
+        inserted++;
       }
-      await batch.commit(noResult: true);
+      if (inserted > 0) await batch.commit(noResult: true);
     });
-    return count;
+    return inserted;
   }
+
+  /// 词面去重键:忽略大小写与首尾空白(用户手打的词经常带空格)
+  static String _dedupeKey(String word) => word.trim().toLowerCase();
 
   static Future<List<Vocabulary>> getVocabularies({
     String? sourceBook,

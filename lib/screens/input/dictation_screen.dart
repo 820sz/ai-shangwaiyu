@@ -40,6 +40,7 @@ class _DictationScreenState extends State<DictationScreen> {
   DictationResult? _current;
   final List<DictationResult> _results = [];
   bool _saving = false;
+  bool _saved = false;
   String _saveMsg = '';
 
   @override
@@ -104,7 +105,7 @@ class _DictationScreenState extends State<DictationScreen> {
     });
     try {
       final provider = context.read<VocabProvider>();
-      await provider.saveVocabularies([
+      final added = await provider.saveVocabularies([
         for (final w in words)
           Vocabulary(
             word: w,
@@ -129,9 +130,14 @@ class _DictationScreenState extends State<DictationScreen> {
         linked++;
       }
       if (!mounted) return;
+      final existed = words.length - added;
       setState(() {
         _saving = false;
-        _saveMsg = '已收进生词本 $linked 个(会出现在复习里)';
+        _saved = true;
+        // 如实报告:新增几个、本来就有几个(数据库层会跳过重复词面)
+        _saveMsg = '已收进生词本 $added 个'
+            '${existed > 0 ? '(另有 $existed 个本来就在生词本里)' : ''}'
+            ' · 已挂上复习状态 $linked 个';
       });
     } catch (e) {
       if (!mounted) return;
@@ -314,9 +320,17 @@ class _DictationScreenState extends State<DictationScreen> {
         const SizedBox(height: 12),
         if (missed.isNotEmpty)
           FilledButton.icon(
-            onPressed: _saving ? null : _saveMissedWords,
-            icon: const Icon(Icons.bookmark_add_outlined),
-            label: Text(_saving ? '保存中…' : '把没听出的词收进生词本(${missed.length})'),
+            // 存过一次就禁用:数据库层现在会跳过重复词,但让按钮可继续点等于
+            // 邀请用户"再点一下看看"(点完还是那几个词,只会更困惑)
+            onPressed: (_saving || _saved) ? null : _saveMissedWords,
+            icon: Icon(_saved
+                ? Icons.check_circle_outline
+                : Icons.bookmark_add_outlined),
+            label: Text(_saving
+                ? '保存中…'
+                : (_saved
+                    ? '已收进生词本'
+                    : '把没听出的词收进生词本(${missed.length})')),
           ),
         if (_saveMsg.isNotEmpty) ...[
           const SizedBox(height: 8),
