@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import '../models/learner_model.dart';
 import '../models/learning_record.dart';
 import 'database.dart';
 import 'learner_model_store.dart';
@@ -23,7 +24,11 @@ class LearnerSnapshotLoader {
     DateTime? now,
   }) async {
     final at = now ?? DateTime.now();
-    final model = LearnerModelStore.load();
+    // 这个文件开头承诺"任何一项失败都退化成 0/空,绝不让导师页白屏",
+    // 而模型读取原来**不在** `_safe` 里:Hive 未打开/读坏时会直接抛出去
+    // (2026-09-24 由整链路测试暴露 —— 测试环境没开 Hive 就炸).
+    // 模型读不到就退回空模型:诊断会少几条结论,但页面照常打开。
+    final model = _safeModel();
 
     // ── 词汇维度(直接用 provider 已加载的列表,不再查库) ──
     final dist = <int, int>{0: 0, 1: 0, 2: 0};
@@ -92,7 +97,13 @@ class LearnerSnapshotLoader {
       readingWords30d: _int(stats['words']),
       readingMinutes30d: _int(stats['minutes']),
       avgWpm: _double(stats['avg_wpm']),
-      materialsStarted: recentRows.length,
+      // v2.3.1:getRecentMaterials 已改成 LEFT JOIN(材料库里"入库但没打开过"的
+      // 材料也要出现在书架),所以这里不能再拿行数当"在学份数" —— 只有真正
+      // 有进度(读过 / 标记读完)的才算"在学"
+      materialsStarted: recentRows
+          .where((r) =>
+              (_double(r['percent']) ?? 0) > 0 || r['finished_at'] != null)
+          .length,
       materialsFinished: finished,
       recentMaterials: recentRows.map(_toRecentMaterial).toList(),
       quizAccuracy: quizAcc,
@@ -159,6 +170,17 @@ class LearnerSnapshotLoader {
     } catch (e) {
       debugPrint('ReadFlow 快照读取失败(已降级): $e');
       return fallback;
+    }
+  }
+
+  /// 同步版(模型从 Hive 同步读)。只用于 [LearnerModelStore.load] ——
+  /// 读失败就交回空模型,调用方(诊断)少几条结论但页面照常打开。
+  static LearnerModel _safeModel() {
+    try {
+      return LearnerModelStore.load();
+    } catch (e) {
+      debugPrint('ReadFlow 学习者模型读取失败(已降级,用空模型): $e');
+      return LearnerModel();
     }
   }
 

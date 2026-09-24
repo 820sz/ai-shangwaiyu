@@ -1604,10 +1604,17 @@ class DatabaseService {
     }
   }
 
-  /// 最近读过的材料(材料中心"继续阅读")。
-  /// INNER JOIN:没进度的材料不算"读过";每项含 materials 的
-  /// title/kind/cefr/word_count/coverage 与 progress 的
-  /// percent/minutes/position/updated_at/finished_at —— 列表页一次查询够用,不做 N+1。
+  /// 材料库里"最近的材料"(材料中心书架 / 导师的最近材料)。
+  ///
+  /// ⚠️ 两个都必须对,否则书架整个是坏的(2026-09-24 由整链路测试
+  /// `learning_flow_test` 发现,此前一直没被覆盖):
+  /// 1. **materials LEFT JOIN material_progress**,不能 INNER JOIN ——
+  ///    旧实现从 material_progress 出发,于是"入库但还没打开过"的材料在书架里
+  ///    完全不可见,用户粘贴一份材料没立刻读就会看到"还没有材料",像导入失败;
+  /// 2. **必须选出 `id`**(以及 source/url/audio_url),旧查询只给了
+  ///    `material_id` 别名,而 `ShelfItem` 读的是 `id` → 每一条的 id 都是 0,
+  ///    点书架里任何一份材料都会去打开 id=0 的材料(打不开)。
+  /// 排序用 COALESCE:读过的按最近阅读时间,没读过的按入库时间。
   static Future<List<Map<String, Object?>>> getRecentMaterials({
     int limit = 10,
   }) async {
@@ -1615,9 +1622,13 @@ class DatabaseService {
       final db = await database;
       return await db.rawQuery(
         '''
-        SELECT m.id AS material_id,
+        SELECT m.id AS id,
+               m.id AS material_id,
                m.title AS title,
                m.kind AS kind,
+               m.source AS source,
+               m.url AS url,
+               m.audio_url AS audio_url,
                m.cefr AS cefr,
                m.word_count AS word_count,
                m.coverage AS coverage,
@@ -1625,11 +1636,12 @@ class DatabaseService {
                p.position AS position,
                p.percent AS percent,
                p.minutes AS minutes,
-               p.updated_at AS updated_at,
+               p.picked_words AS picked_words,
+               COALESCE(p.updated_at, m.created_at) AS updated_at,
                p.finished_at AS finished_at
-        FROM material_progress p
-        JOIN materials m ON m.id = p.material_id
-        ORDER BY p.updated_at DESC, m.id DESC
+        FROM materials m
+        LEFT JOIN material_progress p ON p.material_id = m.id
+        ORDER BY COALESCE(p.updated_at, m.created_at) DESC, m.id DESC
         LIMIT ?
       ''',
         [limit],

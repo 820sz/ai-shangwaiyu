@@ -268,19 +268,31 @@ void main() {
     expect(reread!['finished_at'], done['finished_at']);
     expect(reread['minutes'], 16);
 
-    // JOIN:只有进过阅读器的材料才出现在"继续阅读",且带出 materials 的字段
+    // 材料库查询 = materials LEFT JOIN material_progress。
+    // 旧期望是 `length == 1`("没有进度的材料不算读过")—— 那条断言把 bug 锁死了:
+    // 用户入库一份材料却没立刻打开,书架里就看不到它,看起来像导入失败。
+    // v2.3.2 起:材料库里**所有**材料都要出现,没读过的进度字段为空(NOT 0),
+    // 由展示层兜底成"未开始";而且必须带出 `id`(旧实现只给 `material_id`,
+    // 而 ShelfItem 读 `id` → 每条 id 都是 0,点书架条目会去打开 id=0 的材料)。
     final recent = await DatabaseService.getRecentMaterials();
-    expect(recent.length, 1, reason: '没有进度的材料不算"读过"');
-    expect(recent.first['material_id'], mid);
-    expect(recent.first['title'], 'Local A');
-    expect(recent.first['kind'], 'article');
-    expect(recent.first['cefr'], 'B1');
-    expect(recent.first['word_count'], 800);
-    expect(recent.first['coverage'], closeTo(0.8, 1e-9));
-    expect(recent.first['percent'], closeTo(0.01, 1e-9));
-    expect(recent.first['minutes'], 16);
-    expect(recent.first['position'], 10);
-    expect(recent.first['finished_at'], done['finished_at']);
+    expect(recent.length, 2, reason: '有进度与没进度的材料都要出现在材料库里');
+    final withProgress = recent.firstWhere((r) => r['id'] == mid);
+    expect(withProgress['id'], mid, reason: 'id 必须带出来,否则点击打开会失效');
+    expect(withProgress['material_id'], mid);
+    expect(withProgress['title'], 'Local A');
+    expect(withProgress['kind'], 'article');
+    expect(withProgress['cefr'], 'B1');
+    expect(withProgress['word_count'], 800);
+    expect(withProgress['coverage'], closeTo(0.8, 1e-9));
+    expect(withProgress['percent'], closeTo(0.01, 1e-9));
+    expect(withProgress['minutes'], 16);
+    expect(withProgress['position'], 10);
+    expect(withProgress['finished_at'], done['finished_at']);
+
+    final noProgress = recent.firstWhere((r) => r['id'] != mid);
+    expect(noProgress['percent'], isNull, reason: '没读过 → 进度为空,由 UI 显示"未开始"');
+    expect(noProgress['finished_at'], isNull);
+    expect(noProgress['id'], greaterThan(0));
     expect(await DatabaseService.getMaterialProgress(99999), isNull);
   });
 

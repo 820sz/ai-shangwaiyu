@@ -50,7 +50,9 @@ class LearnerContext {
       final conf = f.confidence >= 0.8
           ? '较可信'
           : (f.confidence >= 0.6 ? '参考' : '仅供参考');
-      return '按 $src:${f.value} 词$range($conf)';
+      // 文案:来源与数值之间用空格而不是冒号连写 —— 原写法在"你的自评"这种
+      // 多字来源上会变成"按 你的自评:9000 词",读起来断句困难
+      return '基线:$src ${f.value} 词$range($conf)';
     }
     return '尚未测词汇量,暂按最高频的 $floorWhenUnmeasured 词保守估计 —— '
         '建议先做一次词汇量测试(5 分钟)';
