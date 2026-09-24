@@ -11,6 +11,9 @@ import '../../services/database.dart';
 import '../../services/doubao_api.dart';
 import '../../services/learner_context.dart';
 import '../../services/learner_model_store.dart';
+import '../../services/material_source.dart';
+import '../../services/material_source_status.dart';
+import '../../services/widget_service.dart';
 import '../../utils/crash_logger.dart';
 import '../../widgets/stats_chart.dart';
 import '../../widgets/update_dialog.dart';
@@ -437,6 +440,16 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
       '',
       '── 模型列表加载 ──',
       DoubaoApiService.lastFetchNote,
+      // v2.3:内容源可达性取决于**用户网络**,平时看不见 —— 放这里让"材料中心
+      // 打不开"这类问题一次截图就能定性(哪些源试过、结果、失败原因)
+      ...MaterialSourceStatus.summaryLines(
+        sources: MaterialSourceService.sources,
+        state: MaterialSourceStatus.loadAll(),
+        now: DateTime.now(),
+      ),
+      '',
+      '── 桌面小组件 ──',
+      await WidgetService.statusLine(),
       '',
       '── 崩溃日志 ──',
       log.isEmpty ? '(无崩溃记录)' : log,

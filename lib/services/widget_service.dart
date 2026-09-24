@@ -98,6 +98,20 @@ class WidgetService {
     );
     return (raw ?? '').isNotEmpty;
   }
+
+  /// 诊断页用:桌面小组件现在的状态(已添加几个 + 最后同步时间)。
+  /// 这两个数字要能同时看到 —— "已添加但一直没同步"和"压根没添加"是两种
+  /// 完全不同的故障,用户截图这一行就能定性。
+  static Future<String> statusLine({DateTime? now}) async {
+    final at = now ?? DateTime.now();
+    final count = await installedCount();
+    final raw = await _safe(
+      () => HomeWidget.getWidgetData<String>(WidgetPayload.keySyncedAt),
+      null,
+    );
+    final syncedAt = DateTime.tryParse(raw ?? '');
+    return '已添加 $count 个 · 最后同步 ${WidgetPayload.syncAgeLabel(syncedAt, at)}';
+  }
   /// 已添加到桌面上的小组件数量(设置页显示状态;失败当 0)
   static Future<int> installedCount() async {
     try {

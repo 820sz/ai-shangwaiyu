@@ -140,4 +140,16 @@ void main() {
       expect(DateTime.tryParse(data['rf_synced_at']!), isNotNull);
     });
   });
+
+  group('诊断页:最后同步时间', () {
+    test('从没同步过 / 今天 / 昨天 / 更早 分得清', () {
+      expect(WidgetPayload.syncAgeLabel(null, now), '从没同步过');
+      expect(WidgetPayload.syncAgeLabel(DateTime(2026, 9, 24, 7, 5), now),
+          '今天 07:05');
+      expect(WidgetPayload.syncAgeLabel(DateTime(2026, 9, 23, 22, 30), now),
+          '昨天 22:30');
+      expect(WidgetPayload.syncAgeLabel(DateTime(2026, 9, 20, 9, 0), now),
+          '4 天前(9月20日 09:00)');
+    });
+  });
 }

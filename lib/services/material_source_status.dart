@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
 import '../config/constants.dart';
+import 'material_source.dart';
 
 /// 单个内容源的"最近一次可用性"
 class SourceHealth {
@@ -144,5 +145,29 @@ class MaterialSourceStatus {
       // 记不住不影响本次使用(下次重试即可),不能因为写 KV 失败打断抓取流程
       debugPrint('ReadFlow 保存内容源状态失败: $e');
     }
+  }
+
+  /// 诊断页用的整表文本(纯函数)。
+  ///
+  /// 为什么放进诊断页:内容源能不能用**取决于用户的网络**,而这一点在 App 里
+  /// 平时是看不见的 —— 出问题时让用户截图这一屏,就能一次看清"哪些源试过、
+  /// 结果如何、失败原因是什么",而不是反复问"你点的是哪个源"。
+  static List<String> summaryLines({
+    required List<MaterialSource> sources,
+    required Map<String, SourceHealth> state,
+    required DateTime now,
+  }) {
+    final lines = <String>['', '── 材料源(最近一次可用性) ──'];
+    for (final s in sources) {
+      final h = state[s.id];
+      final mark = h == null ? '—' : (h.ok ? '✔' : '✖');
+      final label = h == null
+          ? (MaterialSourceService.measuredReachable.contains(s.id)
+              ? '还没试过(实测可达)'
+              : '还没试过')
+          : '${h.label(now)}${h.ok ? '' : ' —— ${h.message ?? '未知原因'}'}';
+      lines.add('$mark ${s.id.padRight(11)} $label');
+    }
+    return lines;
   }
 }

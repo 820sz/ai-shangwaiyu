@@ -148,4 +148,44 @@ void main() {
       );
     });
   });
+
+  group('诊断页整表(用户截图就能定性"材料中心为什么打不开")', () {
+    final now = DateTime(2026, 9, 24, 12);
+    final sources = MaterialSourceService.sources;
+
+    test('每个源一行,带标记与结论', () {
+      final lines = MaterialSourceStatus.summaryLines(
+        sources: sources,
+        state: {
+          'npr': SourceHealth(ok: true, at: now.subtract(const Duration(minutes: 3))),
+          'bbc_le': SourceHealth(
+            ok: false,
+            at: now.subtract(const Duration(hours: 2)),
+            message: '网络中断:HandshakeException',
+          ),
+        },
+        now: now,
+      );
+      final text = lines.join('\n');
+      expect(lines.first, isEmpty, reason: '段落前留空行');
+      expect(text, contains('── 材料源(最近一次可用性) ──'));
+      expect(text, contains('✔ npr         最近可用 · 3 分钟前'));
+      expect(text, contains('✖ bbc_le      上次失败 · 2 小时前 —— 网络中断:HandshakeException'));
+      // 每个源都必须出现,不能只列试过的(否则用户不知道还有哪些可选)
+      for (final s in sources) {
+        expect(text.contains(' ${s.id} '), isTrue, reason: '缺了 ${s.id}');
+      }
+    });
+
+    test('没试过的源也列出来,并区分"实测可达"与未知', () {
+      final text = MaterialSourceStatus.summaryLines(
+        sources: sources,
+        state: const {},
+        now: now,
+      ).join('\n');
+      expect(text, contains('— npr         还没试过(实测可达)'));
+      expect(text, contains('— bbc_le      还没试过'));
+      expect(text, isNot(contains('最近可用')));
+    });
+  });
 }

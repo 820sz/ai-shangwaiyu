@@ -1217,10 +1217,10 @@ class MaterialSourceService {
         try {
           resp = await dio.get<dynamic>(url, options: options);
         } on DioException catch (e2) {
-          throw _networkError(e2, source);
+          throw _networkError(e2, source, longFetch: longFetch);
         }
       } else {
-        throw _networkError(e, source);
+        throw _networkError(e, source, longFetch: longFetch);
       }
     } catch (e) {
       throw MaterialSourceException(
@@ -1251,7 +1251,15 @@ class MaterialSourceService {
   /// DioException → 人话错误。**区分"网络不可达"与"源站返回错误"**:
   /// 中国大陆网络下 BBC/VOA/TED/Wikipedia 是不可直连的,用户看到
   /// "解析失败"会以为软件坏了,必须明确说是网络到不了。
-  MaterialSourceException _networkError(DioException e, MaterialSource source) {
+  ///
+  /// [longFetch] 也会影响**提示语**:大文件被掐断可以说"重试一次通常就好",
+  /// 而列表/正文请求被掐断更可能是"这个源在你这儿连不上",说反了会把用户
+  /// 引向错误的排查方向(实测 BBC 列表请求返回的就是 TLS 握手中断)。
+  MaterialSourceException _networkError(
+    DioException e,
+    MaterialSource source, {
+    bool longFetch = false,
+  }) {
     final code = e.response?.statusCode;
     switch (e.type) {
       case DioExceptionType.connectionTimeout:
@@ -1262,8 +1270,9 @@ class MaterialSourceService {
       case DioExceptionType.transformTimeout:
         return MaterialSourceException(
           sourceLabel: source.label,
-          message: '连接超时(${timeout.inSeconds} 秒):该来源在当前网络下可能不可达,'
-              '请检查网络或换一个来源',
+          // 超时秒数要与实际用的那个超时一致(公版书全文是 90 秒,不是 20 秒)
+          message: '连接超时(${(longFetch ? longFetchTimeout : timeout).inSeconds} 秒):'
+              '该来源在当前网络下可能不可达,请检查网络或换一个来源',
         );
       case DioExceptionType.connectionError:
         return MaterialSourceException(
@@ -1292,6 +1301,11 @@ class MaterialSourceService {
         // 掐断)、TLS 握手失败等。e.message 经常为空,必须把 e.error 也带上,
         // 否则用户(和排查的人)只看到"未知网络错误",完全无从下手 ——
         // 实测抓古腾堡 763KB 全文时中途被 reset 就是这种情况。
+        //
+        // 提示语分两种:列表/正文请求被掐断,最常见的原因是**源站在当前网络
+        // 不可直连**(实测 BBC 的 TLS 握手直接被终止);只有"整本书全文"这种
+        // 大文件才适合说"重试一次通常就好"。旧实现不分场景,导致用户请求一个
+        // RSS 列表却被告知"大文件首次抓取可能被掐断",误导排查方向。
         final detail = [
           if ((e.message ?? '').trim().isNotEmpty) e.message!.trim(),
           if (e.error != null) '${e.error}'.trim(),
@@ -1299,7 +1313,7 @@ class MaterialSourceService {
         return MaterialSourceException(
           sourceLabel: source.label,
           message: '网络中断:${_short(detail.isEmpty ? '连接被中断' : detail)}。'
-              '大文件(公版书全文)首次抓取可能被中途掐断,重试一次通常就好',
+              '${longFetch ? '大文件(公版书全文)首次抓取可能被中途掐断,重试一次通常就好' : '该来源在当前网络下可能不可直连(部分网络会重置连接),换一个来源或稍后重试'}',
         );
     }
   }

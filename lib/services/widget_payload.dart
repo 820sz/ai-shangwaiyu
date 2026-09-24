@@ -155,6 +155,17 @@ class WidgetPayload {
 
   static String clock(DateTime t) =>
       '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+
+  /// 诊断页用:最后同步时间的人话描述。
+  /// null = 从没同步过(全新安装或推送一直失败)—— 这两种情况要能分开说,
+  /// 否则用户在"桌面上数字是旧的"和"App 根本没推过"之间无从判断。
+  static String syncAgeLabel(DateTime? syncedAt, DateTime now) {
+    if (syncedAt == null) return '从没同步过';
+    final days = dayDiff(syncedAt, now);
+    if (days == 0) return '今天 ${clock(syncedAt)}';
+    if (days == 1) return '昨天 ${clock(syncedAt)}';
+    return '$days 天前(${syncedAt.month}月${syncedAt.day}日 ${clock(syncedAt)})';
+  }
 }
 
 /// 小组件用到的"今天任务"最小结构(只有标题与完成态,不依赖数据库行)
