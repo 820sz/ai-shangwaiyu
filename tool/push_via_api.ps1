@@ -1,4 +1,4 @@
-﻿$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Stop'
 $repo = '820sz/ai-shangwaiyu'
 $branch = 'master'
 # diff 基准:一个本地提交,其 tree 与远端当前 tree 一致(增量同步)
@@ -92,6 +92,15 @@ Remove-Item $tmpJson -ErrorAction SilentlyContinue
 $dirs = [System.Collections.Generic.HashSet[string]]::new()
 [void]$dirs.Add('')
 foreach ($f in $files) {
+  $d = Split-Path $f -Parent
+  while ($d -ne '') { [void]$dirs.Add($d.Replace('\','/')); $d = Split-Path $d -Parent }
+}
+# 被删除文件的父目录也必须重建!
+# 否则当某个目录里"只有删除、没有新增/修改"时(v2.3.0 就踩到了:
+# 单独删掉 lib/screens/input/widgets/ai_discovery_section.dart),
+# 那个目录的 tree 不会被重新生成,被删的 entry 会永远留在远端树上 →
+# 远端 tree 与本地 tree 不一致,TREE_MISMATCH_ABORT。
+foreach ($f in $deleted) {
   $d = Split-Path $f -Parent
   while ($d -ne '') { [void]$dirs.Add($d.Replace('\','/')); $d = Split-Path $d -Parent }
 }

@@ -390,6 +390,7 @@
   - **不要把 `pumpWidget` 放进 `runAsync`**:会触发框架断言 `'!_dirty': is not true`。
   - 结论:DB 驱动的页面(复习页/材料中心等)不要硬写 widget 集成测试;把逻辑抽成纯函数或可注入回调的控制器来覆盖。
 - **进程/文件锁**:`flutter test` 被中途打断可能留下 `dart` / `flutter_tester` 孤儿进程,它们持有 `build/native_assets/.../sqlite3.dll`,**任何后续构建都会失败**。2026-09-23 已遇到一次(经用户授权结束了 PID 28320/43100)。遇到 `Flutter failed to delete file` 先查这两个进程。
+- **🚨 2026-09-24 `push_via_api.ps1` 的真实缺陷:只删除文件、目录里没有其它改动时,远端那条 entry 永远删不掉。** 现象:`TREE_MISMATCH_ABORT`(本地 tree ≠ api tree),但每个 blob 都上传成功、也没有报错。根因:脚本先收集"要重建的目录集合",而那个集合**只从"新增/修改文件"推导** —— 被删文件所在的目录如果没有任何新增/修改,它的 tree 就不会被重新生成,被删的 entry 原样留在远端树上(v2.3.0 删 `lib/screens/input/widgets/ai_discovery_section.dart` 时正好命中:该目录只有删除)。修法:把**被删文件的父目录**也加进目录集合(见脚本注释)。**教训:凡是"按变更重建"的增量逻辑,删除路径必须单独过一遍 —— 增/改的路径天然带着目录信息,删除的路径不带。**
 - **🚨 2026-09-22 同类事故第二次:别用 PowerShell 管道读写源码文件。** 为了把一个方法改名,用了 `Get-Content | -replace | Set-Content -Encoding UTF8` —— Windows PowerShell 5.1 的 `Get-Content` 对**无 BOM 的 UTF-8** 文件按系统 ANSI(中文机是 GBK)解码,于是整个文件的中文注释/字符串变成乱码,并因乱码里的引号把字符串字面量截断 → analyzer 一次报 525 个错。救援:该文件是**未提交的新文件**,直接用 `write` 工具按内容重写(凡是走 PowerShell 管道改过的源码,都要假设中文已损坏并复核)。**结论:改代码只用 `read`/`edit`/`write` 工具;PowerShell 只用来跑命令与查状态。**
 
 ## v1.2.15 — 思考参数根治(budget_tokens→reasoning_effort)+ 新 logo(2026-08-07)
