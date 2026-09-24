@@ -212,7 +212,7 @@ class _ReadingQuizScreenState extends State<ReadingQuizScreen> {
           const SizedBox(height: 12),
           Text(
             _wrongWords.isEmpty
-                ? '这次没有错词 —— 去导师页看看今天的任务完成了没有。'
+                ? '这次没有错词 —— 去学习助理页看看今天的任务完成了没有。'
                 : '错词已回到复习队列(${_wrongWords.length} 个),并记进错误档案。',
             style: theme.textTheme.bodySmall?.copyWith(color: muted),
           ),

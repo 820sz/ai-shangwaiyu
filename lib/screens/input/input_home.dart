@@ -14,7 +14,6 @@ import 'widgets/ai_article_section.dart';
 import 'material_center_screen.dart';
 import 'widgets/analysis_mode_picker.dart';
 import 'widgets/my_materials_section.dart';
-import 'widgets/ai_discovery_section.dart';
 
 class InputHomeScreen extends StatefulWidget {
   const InputHomeScreen({super.key});
@@ -66,9 +65,11 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
             // ── 板块1：拍照识文 ──
             _buildCaptureSectionCard(theme),
 
-            // ── 板块2：材料中心(v2.0)──
-            // 定位:由软件提供**真实材料**的渠道(公开源 + 自备文本),
-            // 入库即本地算难度与生词分布,读完的词直接进复习队列。
+            // ── 板块2：材料中心(v2.0;v2.2 起是**唯一**的"找材料"入口)──
+            // 定位:由软件提供**真实材料**的渠道 —— 公开源外刊/原版书/播客/百科 +
+            // 按你水平的 AI 推荐 + 自备文本粘贴,入库即本地算难度与生词分布。
+            // (原「其他输入材料」卡片已并入这里:两者定位重复,用户实测反馈
+            //  "本质是同一个功能")
             _buildMaterialCenterCard(theme),
 
             // ── 板块3：特色功能 · AI 生词定制文章(v1.8.0 从输出页迁来) ──
@@ -76,9 +77,6 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
 
             // ── 板块4：我的学习材料 ──
             const MyMaterialsSection(),
-
-            // ── 板块5：AI 推荐学习资源(实验性;已被材料中心取代,保留待下版移除)──
-            const AiDiscoverySection(),
 
             const SizedBox(height: 24),
           ],
@@ -116,7 +114,7 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
                             ?.copyWith(fontWeight: FontWeight.w600)),
                     const SizedBox(height: 2),
                     Text(
-                      '外刊 / 原版书 / 播客 / 百科 · 打开即算难度与生词分布',
+                      '外刊 / 原版书 / 播客 / 百科 + 按你水平的 AI 推荐 + 自备文本',
                       style:
                           theme.textTheme.bodySmall?.copyWith(color: muted),
                     ),

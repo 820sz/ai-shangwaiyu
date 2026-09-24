@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 小组件色彩:写死而不跟 App 主题走 —— 桌面壁纸与系统深色开关是两个维度,
+         自带底色的卡片才在浅色/深色桌面上都清楚(与 values-night 无关,刻意如此)。 -->
+    <color name="widget_bg">#1A1A2E</color>
+    <color name="widget_accent">#8FC0F0</color>
+    <color name="widget_text_primary">#FFFFFF</color>
+    <color name="widget_text_secondary">#C9D1E0</color>
+    <color name="widget_text_muted">#8B93A5</color>
+</resources>

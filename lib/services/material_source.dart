@@ -189,6 +189,10 @@ class MaterialSourceService {
 
   static const Duration timeout = Duration(seconds: 20);
 
+  /// 大文件(公版书全文)专用超时:实测 `pg1342.txt`(614KB)首包 26 秒,
+  /// 用默认 20 秒必然失败 —— 而这不是"源挂了",是整本书本来就大。
+  static const Duration longFetchTimeout = Duration(seconds: 90);
+
   /// 列表页默认抓多少条
   static const int defaultListLimit = 12;
 
@@ -304,6 +308,23 @@ class MaterialSourceService {
     }
     return null;
   }
+
+  /// **默认源**(v2.2 修"材料中心没法用")。
+  ///
+  /// 旧实现取 `sources.first`(BBC Learning English)—— 而 BBC/VOA/TED/Wikipedia
+  /// 在中国大陆**实测全部超时**,于是用户打开材料中心的第一屏必然是失败,
+  /// 看起来像"功能坏了"。默认值必须选**实测可达**的:NPR 新闻。
+  ///
+  /// 更进一步的兜底在 [MaterialSourceStatus]:一旦用户手动切到别的源并成功,
+  /// 下次就默认落到那个源(见 `MaterialSourceStatus.preferredSourceId`)。
+  static const String defaultSourceId = 'npr';
+
+  /// 实测可达的源(2026-09-24,中国大陆家庭宽带):
+  ///   npr 200/2.7s、arxiv 200/0.9s、gutenberg 200/26s(首包慢,已单独放宽超时);
+  ///   bbc_le / voa_le / ted / wikipedia 9 秒无响应。
+  /// 界面上给这些源打"实测可用"标记,是为了让用户**一眼知道该点哪个**,
+  /// 不用靠一个个试错(试错成本是每次 9~20 秒的等待)。
+  static const Set<String> measuredReachable = {'npr', 'arxiv', 'gutenberg'};
 
   /// 未知 sourceId 时的统一异常(带可选值,便于排查打错的 id)
   static MaterialSourceException unknownSource(String sourceId) =>
@@ -535,7 +556,8 @@ class MaterialSourceService {
         message: '书籍 id 不合法:$bookId',
       );
     }
-    final raw = await _getText(gutenbergTextUrl(bookId), source);
+    // 整本书全文:用长超时(实测首包 26 秒)
+    final raw = await _getText(gutenbergTextUrl(bookId), source, longFetch: true);
     var text = raw;
     if (text.startsWith('\uFEFF')) text = text.substring(1);
     if (text.trim().isEmpty) {
@@ -1166,22 +1188,34 @@ class MaterialSourceService {
   /// 中途被 reset 一次就会让用户看到失败 —— 而重试几乎总能成功。只重试
   /// "连接被断/未知网络错"这两类(GET 幂等,重试无副作用);**超时不重试**,
   /// 否则用户要等两个 20 秒;4xx/5xx 也不重试(重试解决不了)。
-  Future<String> _getText(String url, MaterialSource source) async {
+  ///
+  /// [longFetch] = 大文件(公版书全文):用 [longFetchTimeout] 覆盖默认 20 秒 ——
+  /// 实测(2026-09-24)`pg1342.txt` 首包就要 26 秒,默认超时必然失败;
+  /// 这不是网络坏,是"整本书"本来就慢,所以只给这一类放宽,不全局放宽
+  /// (全局放宽会让 NPR 新闻卡在一个坏源上等一分钟)。
+  Future<String> _getText(
+    String url,
+    MaterialSource source, {
+    bool longFetch = false,
+  }) async {
     if (url.trim().isEmpty) {
       throw MaterialSourceException(
         sourceLabel: source.label,
         message: '请求地址为空',
       );
     }
+    final options = longFetch
+        ? Options(receiveTimeout: longFetchTimeout)
+        : null;
     Response<dynamic> resp;
     try {
-      resp = await dio.get<dynamic>(url);
+      resp = await dio.get<dynamic>(url, options: options);
     } on DioException catch (e) {
       final retryable = e.type == DioExceptionType.connectionError ||
           (e.type == DioExceptionType.unknown && e.response == null);
       if (retryable) {
         try {
-          resp = await dio.get<dynamic>(url);
+          resp = await dio.get<dynamic>(url, options: options);
         } on DioException catch (e2) {
           throw _networkError(e2, source);
         }

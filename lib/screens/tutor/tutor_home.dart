@@ -11,6 +11,7 @@ import '../../services/doubao_api.dart';
 import '../../services/learner_model_store.dart';
 import '../../services/learner_snapshot_loader.dart';
 import '../../services/tutor_engine.dart';
+import '../../services/widget_service.dart';
 import '../../widgets/bottom_nav.dart';
 import '../review/review_screen.dart';
 import '../input/learner_preferences_screen.dart';
@@ -103,6 +104,9 @@ class _TutorHomeScreenState extends State<TutorHomeScreen> {
               )));
         _loading = false;
       });
+      // 桌面小组件显示的就是这里刚算出来的"今天该做什么",顺手推一次 ——
+      // 不 await:面板已经画好了,小组件晚半秒无所谓,卡住反而不该
+      WidgetService.sync();
     } catch (e) {
       if (!mounted) return;
       setState(() => _loading = false);
@@ -257,7 +261,7 @@ $evidence''';
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('导师'),
+        title: const Text('学习助理'),
         actions: [
           IconButton(
             tooltip: '不想看的题材',
@@ -305,7 +309,7 @@ $evidence''';
           for (final f in findings) _buildFindingCard(theme, f),
           const SizedBox(height: 16),
 
-          Text('问导师',
+          Text('问助理',
               style: theme.textTheme.titleSmall
                   ?.copyWith(fontWeight: FontWeight.w700)),
           const SizedBox(height: 8),
@@ -317,7 +321,7 @@ $evidence''';
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('导师知道你现在的全部学习数据 —— 可以直接问:',
+                    Text('助理知道你现在的全部学习数据 —— 可以直接问:',
                         style: theme.textTheme.bodySmall?.copyWith(color: muted)),
                     const SizedBox(height: 6),
                     for (final q in const [
@@ -347,7 +351,7 @@ $evidence''';
                 child: TextField(
                   controller: _inputCtrl,
                   decoration: const InputDecoration(
-                    hintText: '问导师任何关于你学习的问题…',
+                    hintText: '问助理任何关于你学习的问题…',
                     isDense: true,
                   ),
                   onSubmitted: (_) => _ask(),
@@ -381,7 +385,7 @@ $evidence''';
                 Icon(Icons.help_outline,
                     size: 18, color: theme.colorScheme.primary),
                 const SizedBox(width: 6),
-                Text('导师还缺这些信息',
+                Text('助理还缺这些信息',
                     style: theme.textTheme.titleSmall
                         ?.copyWith(fontWeight: FontWeight.w700)),
               ],

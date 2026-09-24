@@ -75,7 +75,7 @@ class LearnerSnapshotLoader {
                 r.reviewedCount > 0 ||
                 r.exerciseCompleted > 0))
         .length;
-    final streak = _streakDays(dailyLogs, at);
+    final streak = streakDays(dailyLogs, at);
 
     return LearnerSnapshot(
       model: model,
@@ -120,8 +120,12 @@ class LearnerSnapshotLoader {
     );
   }
 
-  /// 连续天数:从今天(或昨天)往前数,遇到没有记录的一天就停
-  static int _streakDays(List<LearningRecord> logs, DateTime now) {
+  /// 连续天数:从今天(或昨天)往前数,遇到没有记录的一天就停。
+  ///
+  /// **公开**:桌面小组件也要显示"连续 N 天" —— 两个地方各写一份判断
+  /// ("今天没学算不算断")必然会出现桌面和 App 显示不同数字的情况,
+  /// 所以这是唯一实现,谁要显示就调它。
+  static int streakDays(List<LearningRecord> logs, DateTime now) {
     final days = <String>{};
     for (final r in logs) {
       if (r.newWordsCount > 0 ||

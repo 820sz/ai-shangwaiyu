@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 小组件背景:圆角深蓝卡片。用 drawable 而不是颜色值,是因为 RemoteViews 只认
+     资源形状;圆角与 App 内卡片(12dp)保持一致但略大一点(桌面图标间距更松)。 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/widget_bg" />
+    <corners android:radius="16dp" />
+</shape>

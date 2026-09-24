@@ -131,68 +131,6 @@ $vocabText
         .toList();
   }
 
-  // ═══════════════ 个性化学习建议 ═══════════════
-
-  /// 基于学习数据给出个性化建议
-  Future<String> getPersonalizedAdvice({
-    required int totalVocab,
-    required int masteredVocab,
-    required int streakDays,
-    required Map<String, int> vocabByBook,
-    required Map<String, String> memory,
-  }) async {
-    if (!config.isConfigured) {
-      throw Exception('请先在设置中配置 API Key');
-    }
-
-    final memoryContext = memory.entries
-        .map((e) => '${e.key}: ${e.value}')
-        .join('\n');
-    final bookStats = vocabByBook.entries
-        .map((e) => '  《${e.key}》: ${e.value}词')
-        .join('\n');
-
-    const systemPrompt = '''你是一个专业的英语学习导师。根据用户的学习数据，给出个性化建议。
-
-建议方向包括但不限于：
-- 学习节奏是否合理
-- 推荐下一本阅读材料（i+1 原则）
-- 当前薄弱环节
-- 具体的学习方法论改进
-
-保持鼓励的语气，建议要具体可行。200字以内。''';
-
-    final response = await postWithReasoningFallback(
-      '/v1/chat/completions',
-      BaseApiService.buildChatBody(
-        cfg: config,
-        temperature: 0.7,
-        maxTokens: 2048,
-        messages: [
-          {'role': 'system', 'content': systemPrompt},
-          {
-            'role': 'user',
-            'content': '''
-用户学习数据：
-- 总词汇量：$totalVocab
-- 已掌握：$masteredVocab
-- 连续学习天数：$streakDays
-- 按书籍分布：
-$bookStats
-
-用户记忆表格：
-$memoryContext
-
-请给出个性化学习建议。'''
-          },
-        ],
-      ),
-      cfg: config,
-    );
-
-    return BaseApiService.extractContentWithReasoning(response.data);
-  }
-
   // ═══════════════ 通用 JSON 解析 ═══════════════
 
   /// 解析模型返回的 JSON(v1.9.0 加固):

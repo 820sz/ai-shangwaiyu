@@ -3,7 +3,6 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:provider/provider.dart';
 import '../../providers/stats_provider.dart';
 import '../../providers/vocab_provider.dart';
-import '../../providers/article_provider.dart';
 import '../../providers/bookmark_provider.dart';
 import '../../config/constants.dart';
 import '../../models/learner_model.dart';
@@ -23,6 +22,7 @@ import 'appearance_screen.dart';
 import 'bookmarks_screen.dart';
 import 'backup_screen.dart';
 import 'error_archive_screen.dart';
+import 'widget_settings_screen.dart';
 import 'weekly_report_screen.dart';
 import '../review/review_screen.dart';
 import '../input/learner_preferences_screen.dart';
@@ -36,12 +36,6 @@ class ProfileHomeScreen extends StatefulWidget {
 }
 
 class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
-  String _advice = '';
-  bool _loadingAdvice = false;
-  /// 建议接口失败(审查 P2-33):原实现 catch 静默 → 界面与"数据太少"无法区分,
-  /// 用户只能反复下拉刷新。留一个标志位给「重新生成」入口。
-  bool _adviceFailed = false;
-
   /// 学习者模型(v2.0):词汇量基线卡片的数据来源。
   /// Hive 同步读,不阻塞首帧;测试页返回后再刷一次。
   LearnerModel _learnerModel = LearnerModel();
@@ -74,39 +68,6 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
       context.read<VocabProvider>().loadVocabularies(),
       context.read<BookmarkProvider>().load(),
     ]);
-    // P2-10:三个 load 都 await 完之后用户可能已经退出本页,
-    // 此时下面的 _loadAdvice 开头就要读 context,必须先挡一道
-    if (!mounted) return;
-    _loadAdvice();
-  }
-
-  Future<void> _loadAdvice() async {
-    final stats = context.read<StatsProvider>();
-    final vocab = context.read<VocabProvider>();
-    final articleProv = context.read<ArticleProvider>();
-
-    if (stats.totalVocab < 5) return; // 数据太少不推荐(界面会显示说明行,不是消失)
-
-    setState(() {
-      _loadingAdvice = true;
-      _adviceFailed = false;
-    });
-    try {
-      final result = await articleProv.getPersonalizedAdvice(
-        totalVocab: stats.totalVocab,
-        // 审查 P2-33:原先恒为 0 → AI 画像永远是"一个词都没掌握",
-        // 建议内容与实际学习进度脱节(且是付费调用)。按 0=新词/1=学习中/2=掌握 取 2。
-        masteredVocab:
-            vocab.vocabularies.where((v) => v.masteryLevel == 2).length,
-        streakDays: stats.streakDays,
-        vocabByBook: vocab.vocabByBook,
-      );
-      if (mounted) setState(() => _advice = result);
-    } catch (_) {
-      // 失败要能看见(审查 P2-33):只记标志位,由界面给「重新生成」
-      if (mounted) setState(() => _adviceFailed = true);
-    }
-    if (mounted) setState(() => _loadingAdvice = false);
   }
 
   @override
@@ -263,6 +224,18 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
                 MaterialPageRoute(builder: (_) => const AppearanceScreen()),
               ),
             ),
+            // 桌面小组件(v2.2):状态 / 一键添加 / 手动同步并预览
+            _MenuTile(
+              icon: Icons.widgets_outlined,
+              title: '桌面小组件',
+              subtitle: '在桌面看今天的任务与待复习数',
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const WidgetSettingsScreen(),
+                ),
+              ),
+            ),
             _MenuTile(
               icon: Icons.medical_information,
               title: '诊断信息',
@@ -312,77 +285,12 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
 
             const SizedBox(height: 20),
 
-            // ── AI 建议 ──
-            // 四态而不是两态(审查 P2-33):加载中 / 数据不足(说明行,不整块消失)/
-            // 失败(给「重新生成」)/ 有内容。用户要能区分"暂时没有"和"坏了"。
-            if (_loadingAdvice)
-              const Center(
-                child: Padding(
-                  padding: EdgeInsets.all(16),
-                  child: CircularProgressIndicator(),
-                ),
-              )
-            else if (stats.totalVocab < 5)
-              Row(
-                children: [
-                  Icon(Icons.lightbulb_outline,
-                      size: 18, color: theme.colorScheme.onSurfaceVariant),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      '收藏 5 个生词后自动生成学习建议',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
-                ],
-              )
-            else if (_advice.isNotEmpty) ...[
-              Text('AI 学习建议',
-                  style: theme.textTheme.titleSmall
-                      ?.copyWith(fontWeight: FontWeight.w600)),
-              const SizedBox(height: 8),
-              Card(
-                color: theme.colorScheme.primary.withAlpha(12),
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Icon(Icons.lightbulb_outline,
-                          color: Colors.amber, size: 24),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          _advice,
-                          style: theme.textTheme.bodyMedium
-                              ?.copyWith(height: 1.6),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ] else if (_adviceFailed)
-              Row(
-                children: [
-                  Icon(Icons.error_outline,
-                      size: 18, color: theme.colorScheme.error),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      '学习建议生成失败(网络或 API Key 问题)',
-                      style: theme.textTheme.bodySmall
-                          ?.copyWith(color: theme.colorScheme.error),
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: _loadingAdvice ? null : _loadAdvice,
-                    child: const Text('重新生成'),
-                  ),
-                ],
-              ),
+            // ── 这里原本是「AI 学习建议」卡片 ──
+            // 已删除(用户 2026-09-24 实测:"完全没用"):它的输入只有"生词本收藏数 +
+            // 连续天数 + 按书分布",算不出任何真东西 —— 说"先定小目标、每天 10 分钟"
+            // 这种谁都能说的话,还要花一次付费 API 调用。
+            // 现在"今天该做什么"由导师页(即将改名「学习助理」)按本地诊断给出:
+            // 结论带数字依据、可点、可打勾、会随数据变化。两者定位重叠,留一个真的。
           ],
         ),
       ),

@@ -173,23 +173,6 @@ class ArticleProvider extends ChangeNotifier {
     return score;
   }
 
-  /// 获取个性化建议
-  Future<String> getPersonalizedAdvice({
-    required int totalVocab,
-    required int masteredVocab,
-    required int streakDays,
-    required Map<String, int> vocabByBook,
-  }) async {
-    final memory = await DatabaseService.getAllMemory();
-    return _deepseek.getPersonalizedAdvice(
-      totalVocab: totalVocab,
-      masteredVocab: masteredVocab,
-      streakDays: streakDays,
-      vocabByBook: vocabByBook,
-      memory: memory,
-    );
-  }
-
   /// 删除文章
   Future<void> deleteArticle(int id) async {
     await DatabaseService.deleteArticle(id);

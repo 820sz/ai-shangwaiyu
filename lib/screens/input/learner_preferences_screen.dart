@@ -154,7 +154,7 @@ class _LearnerPreferencesScreenState extends State<LearnerPreferencesScreen> {
           _sectionTitle(theme, '每日学习配额'),
           Text(
             '复习优先:到期的词先占用时间预算,剩下的容量才用来加新词。'
-            '这两个数字决定导师每天给你派多少任务、复习队列放多少个新词。',
+            '这两个数字决定学习助理每天给你派多少任务、复习队列放多少个新词。',
             style: theme.textTheme.bodySmall?.copyWith(color: muted),
           ),
           const SizedBox(height: 10),
@@ -200,7 +200,7 @@ class _LearnerPreferencesScreenState extends State<LearnerPreferencesScreen> {
           // ── 不想看的题材 ──
           _sectionTitle(theme, '不想看的题材(可多选)'),
           Text(
-            '选中的题材不会出现在材料推荐里,导师选材也会避开。',
+            '选中的题材不会出现在材料推荐里,学习助理选材也会避开。',
             style: theme.textTheme.bodySmall?.copyWith(color: muted),
           ),
           const SizedBox(height: 8),

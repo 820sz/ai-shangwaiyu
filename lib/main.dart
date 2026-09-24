@@ -9,6 +9,7 @@ import 'providers/stats_provider.dart';
 import 'providers/bookmark_provider.dart';
 import 'services/theme_controller.dart';
 import 'services/update_service.dart';
+import 'services/widget_service.dart';
 import 'utils/crash_logger.dart';
 import 'widgets/update_dialog.dart';
 
@@ -41,6 +42,16 @@ void main() async {
 
   // 启动 3 秒后静默检查更新(失败静默,不打扰使用)
   Future.delayed(const Duration(seconds: 3), _checkUpdateSilently);
+
+  // 桌面小组件(v2.2):等首帧画完再推送。
+  // 为什么不放在 runApp 之前 —— 这一步要查 SQLite(到期数/任务/日志),
+  // 放在启动路径上会让冷启动多等一次数据库;而小组件晚几秒更新没有任何影响。
+  Future.delayed(const Duration(seconds: 2), _syncWidgetSilently);
+}
+
+/// 把"今天该做什么"推给桌面小组件(失败静默:小组件只是顺带,不该打扰使用)
+Future<void> _syncWidgetSilently() async {
+  await WidgetService.sync();
 }
 
 Future<void> _checkUpdateSilently() async {

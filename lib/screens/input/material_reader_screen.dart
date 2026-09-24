@@ -206,7 +206,7 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     if (!mounted) return;
     setState(() => _finished = true);
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('已标记读完 —— 进度与用时已记入导师数据')),
+      const SnackBar(content: Text('已标记读完 —— 进度与用时已记入学习数据')),
     );
     await _startQuiz();
   }

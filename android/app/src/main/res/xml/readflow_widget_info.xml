@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 小组件的元数据。
+     - updatePeriodMillis=1800000(30 分钟,系统允许的最小值是 30 分钟):
+       系统定期回调 provider 重绘,**只重算是"多久以前同步的"**;
+       真正的数据仍由 App 打开时推送(桌面挂件拿不到 App 的数据库)。
+     - minWidth/minHeight 按 3×2 格算(1 格 ≈ 70dp,减 30dp 边距)。
+     - resizeMode 允许横向/纵向拉伸,拉伸后布局按权重自适应。 -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/widget_description"
+    android:initialLayout="@layout/readflow_widget"
+    android:minHeight="110dp"
+    android:minWidth="180dp"
+    android:previewImage="@mipmap/ic_launcher"
+    android:resizeMode="horizontal|vertical"
+    android:targetCellHeight="2"
+    android:targetCellWidth="3"
+    android:updatePeriodMillis="1800000"
+    android:widgetCategory="home_screen" />

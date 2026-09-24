@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 小组件(桌面挂件)在启动器"添加小组件"列表里显示的名字与说明 -->
+    <string name="widget_label">AI上外语 · 今天</string>
+    <string name="widget_description">今天的任务、待复习词数与连续天数;点开即开始</string>
+
+    <!-- 从来没同步过(全新安装,或 App 一次都没打开):给引导,不编数字 -->
+    <string name="widget_empty_headline">打开 App 生成今天的计划</string>
+    <string name="widget_empty_due">导师会按你的水平排今天该做什么</string>
+    <string name="widget_never_synced">还没同步过</string>
+
+    <!-- 同步时间不是今天:App 没运行时的兜底,防止旧数字冒充今天 -->
+    <string name="widget_stale_headline">打开 App 刷新今日任务</string>
+    <string name="widget_stale_due">上次同步 %1$s</string>
+    <string name="widget_stale_footer">数据已过期,不显示旧数字</string>
+
+    <string name="widget_updated_at">更新于 %1$s</string>
+    <string name="widget_age_today">今天 %1$s</string>
+    <string name="widget_age_yesterday">昨天 %1$s</string>
+    <string name="widget_age_days">%1$d 天前</string>
+</resources>

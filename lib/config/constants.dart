@@ -129,6 +129,11 @@ class AppConstants {
   // ── Hive 额外 Key ──
   static const String keyMaterialSearchHistory = 'material_search_history';
 
+  /// 内容源可用性记忆(v2.2):{sourceId: {ok, at, msg}} 的 JSON。
+  /// 为什么存:公开源在不同网络下可达性差别极大(BBC/VOA/TED/Wikipedia 在
+  /// 中国大陆实测超时),记住了才能"下次落在上次成功的源上"并如实标注。
+  static const String keyMaterialSourceStatus = 'material_source_status';
+
   /// 朗读音色(v2.0):'system' | 'uk' | 'us',默认跟随系统。
   /// 存的是**语义档位**而不是 BCP-47 语言码:'system' 要按手机当前语区解析
   /// (解析不了才回退 en-US),存语言码就把这层信息丢了。

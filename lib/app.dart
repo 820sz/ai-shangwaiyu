@@ -32,7 +32,9 @@ class ReadFlowApp extends StatefulWidget {
 }
 
 class _ReadFlowAppState extends State<ReadFlowApp> {
-  /// v2.0:默认落在「导师」页 —— 打开 App 先看到"今天学什么"
+  /// 默认落在「学习助理」页 —— 打开 App 先看到"今天学什么"。
+  /// 注意:它在底栏是**最右**一格(v2.2 用户调整后的顺序),
+  /// 所以启动时选中的是最右项,这是刻意的(入口位 ≠ 优先级)。
   ReadFlowTab _currentTab = ReadFlowTab.tutor;
 
   @override
@@ -52,12 +54,13 @@ class _ReadFlowAppState extends State<ReadFlowApp> {
           switchTo: (tab) => setState(() => _currentTab = tab),
           child: Scaffold(
             body: IndexedStack(
+              // 顺序必须与 ReadFlowTab 枚举一致(输入 / 输出 / 我的 / 学习助理)
               index: _currentTab.index,
               children: const [
-                TutorHomeScreen(),
                 InputHomeScreen(),
                 OutputHomeScreen(),
                 ProfileHomeScreen(),
+                TutorHomeScreen(),
               ],
             ),
             bottomNavigationBar: ReadFlowBottomNav(

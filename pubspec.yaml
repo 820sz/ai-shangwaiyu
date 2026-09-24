@@ -1,7 +1,7 @@
 name: readflow
 description: "AI英语阅读学习助手 - 拍照取词、生词归档、AI文章生成、回译练习"
 publish_to: 'none'
-version: 2.2.0+56
+version: 2.3.0+57
 
 environment:
   # 下限跟本机 Flutter stable SDK 走(审查 P2-23 顺手补约束说明);
@@ -44,6 +44,11 @@ dependencies:
   # 音频会话(语音内容而非音乐):接电话/其它 App 播放时正确让路。
   # just_audio 的传递依赖,这里显式声明 —— 与 crypto 同理,依赖被直接 import。
   audio_session: ^0.1.25
+  # v2.2 桌面小组件:Flutter → 原生 AppWidget 的数据通道(BSD-3-Clause)。
+  # 说明:它**不能**用 Flutter 写小组件 UI,原生布局仍要自己写(Kotlin + RemoteViews),
+  # 这个包只负责"把数据写进 SharedPreferences 并通知刷新"这一段 —— 也正是最容易
+  # 各写一份、写歪的那段。
+  home_widget: ^0.10.0
 
 dev_dependencies:
   flutter_test:

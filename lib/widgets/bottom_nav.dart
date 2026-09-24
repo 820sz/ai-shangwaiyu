@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 
-/// 底部导航。v2.0 起四栏:**导师 / 输入 / 输出 / 我的** ——
-/// 导师排第一是产品决策(PLAN-2.0 §8):个性化学习系统的每日入口应该是
-/// "今天学什么",而不是"上传图片"。其余三栏保持原有工具属性不变。
-enum ReadFlowTab { tutor, input, output, profile }
+/// 底部导航。v2.2 起四栏顺序为:**输入 / 输出 / 我的 / 学习助理** ——
+/// 用户真机实测后的调整:学习助理(原「导师」)从最左挪到最右,
+/// 因为日常最常做的是"拍/读/写"(输入与输出),助理是回头看结论的地方。
+/// 枚举顺序与 `IndexedStack.children` 必须一一对应,改这里要同时改 `app.dart`。
+enum ReadFlowTab { input, output, profile, tutor }
 
 class ReadFlowBottomNav extends StatelessWidget {
   final ReadFlowTab currentTab;
@@ -35,13 +36,6 @@ class ReadFlowBottomNav extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
               _NavItem(
-                icon: Icons.assistant_outlined,
-                activeIcon: Icons.assistant,
-                label: '导师',
-                isActive: currentTab == ReadFlowTab.tutor,
-                onTap: () => onTabChanged(ReadFlowTab.tutor),
-              ),
-              _NavItem(
                 icon: Icons.camera_alt_outlined,
                 activeIcon: Icons.camera_alt,
                 label: '输入',
@@ -61,6 +55,13 @@ class ReadFlowBottomNav extends StatelessWidget {
                 label: '我的',
                 isActive: currentTab == ReadFlowTab.profile,
                 onTap: () => onTabChanged(ReadFlowTab.profile),
+              ),
+              _NavItem(
+                icon: Icons.assistant_outlined,
+                activeIcon: Icons.assistant,
+                label: '学习助理',
+                isActive: currentTab == ReadFlowTab.tutor,
+                onTap: () => onTabChanged(ReadFlowTab.tutor),
               ),
             ],
           ),

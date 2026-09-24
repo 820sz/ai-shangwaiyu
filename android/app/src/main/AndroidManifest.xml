@@ -42,7 +42,28 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!-- 桌面小组件点击后拉起本 Activity 用的 action(home_widget 的
+                 HomeWidgetLaunchIntent 会带上这个 action;显式组件 + 这个 filter
+                 两条路都能到,缺了它在部分机型上点击无反应) -->
+            <intent-filter>
+                <action android:name="es.antonborri.home_widget.action.LAUNCH" />
+            </intent-filter>
         </activity>
+        <!-- 桌面小组件(v2.2):AppWidgetProvider 必须显式声明,否则启动器的
+             "添加小组件"列表里看不到它。exported=true 是 home_widget 官方示例
+             的写法(AppWidget 的更新广播由系统派发);暴露的后果只是"别人能触发
+             我们重绘一次" —— provider 里只读自己写的 SharedPreferences,无副作用 -->
+        <receiver
+            android:name=".ReadFlowWidgetProvider"
+            android:exported="true"
+            android:label="@string/widget_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/readflow_widget_info" />
+        </receiver>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
