@@ -3,10 +3,10 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
-import 'package:image/image.dart' as img;
 import '../config/constants.dart';
 import 'api_endpoint.dart';
 import 'base_api.dart';
+import 'vision_image.dart';
 
 /// SSE 流式数据块
 class SseChunk {
@@ -93,37 +93,19 @@ class DoubaoApiService extends BaseApiService {
   }
 
   /// 读取文件并转为 data URI。
-  /// 小图片（<500KB，image_picker 已控制在1024px）跳过解码，rawBytes 直发。
-  /// 仅大图片才解码判断是否需缩放（>3072px 缩小至 JPEG 输出）。
-  /// 任一环节异常均 fallback 到 rawBytes 直发，保证不崩。
+  ///
+  /// v2.4:统一走 [VisionImagePrep] 预处理 —— **按 EXIF 把像素转正 + 长边压到
+  /// 2000px + JPEG q88**。旧实现只在"文件 >500KB 且 >2048px"时才处理:
+  /// 手机直出的小图(或被 image_picker 压过的图)会**原样发出**,方向与分辨率
+  /// 全凭运气 —— 用户提供的样本里就有横置/倒置的页面,模型得先"歪着读"。
+  /// 失败仍回退原图,绝不因为预处理失败就不给识别。
   Future<String> _imageToDataUri(File imageFile) async {
     final rawBytes = await _readImageBytes(imageFile);
-    final mime = _detectImageMime(rawBytes);
-
-    // 小图片直接发，跳过昂贵的 decode 步骤（image_picker 1024px 一定走这里）
-    if (rawBytes.length < 500 * 1024) {
-      return 'data:$mime;base64,${base64Encode(rawBytes)}';
-    }
-
-    // 大图片才解码判断是否需缩小
     try {
-      final decoded = img.decodeImage(rawBytes);
-      if (decoded == null) {
-        return 'data:$mime;base64,${base64Encode(rawBytes)}';
-      }
-
-      if (decoded.width <= 2048 && decoded.height <= 2048) {
-        return 'data:$mime;base64,${base64Encode(rawBytes)}';
-      }
-
-      // 需要缩小 → JPEG 输出，平衡清晰度与体积
-      final output = img.copyResize(decoded,
-          width: 2048, height: 2048, maintainAspect: true);
-      final compressed = img.encodeJpg(output, quality: 75);
-      return 'data:image/jpeg;base64,${base64Encode(compressed)}';
+      return VisionImagePrep.toDataUri(rawBytes);
     } catch (e) {
-      // decode/resize 失败 → 兜底：rawBytes 直发
       debugPrint('ReadFlow _imageToDataUri fallback: $e');
+      final mime = _detectImageMime(rawBytes);
       return 'data:$mime;base64,${base64Encode(rawBytes)}';
     }
   }
@@ -211,16 +193,30 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
       ),
       _ => (
         '''你是英语学习助手。识别照片中"被标注"的英语内容。输出JSON，格式：
-{"items":[{"word":"完整原文","translation":"中文释义","word_type":"word|phrase|sentence","part_of_speech":"词性(可选)","phonetic_uk":"英式IPA音标(仅单词可选,如 /ˈleɪzi/)","phonetic_us":"美式IPA音标(仅单词可选)","original_sentence":"完整句子(短语/句子必填,单词可选)"}]}
+{"items":[{"word":"完整原文","translation":"中文释义","word_type":"word|phrase|sentence","part_of_speech":"词性(可选)","phonetic_uk":"英式IPA音标(仅单词可选,如 /ˈleɪzi/)","phonetic_us":"美式IPA音标(仅单词可选)","original_sentence":"完整句子(短语/句子必填,单词可选)","line":"该词条所在的整行原文(照抄,用于核对)"}]}
 标记定义：手写笔迹圈画、下划线、波浪线、荧光笔、方框、星号、书签贴、页边批注对应的英文等读者标注痕迹。
-识别纪律(v1.4.4)：
-1. 只输出有明确标记痕迹的内容；正文中未作任何标记的文字一律不要输出。
-2. 如果不能确定某个内容是否被标记，宁可漏掉，也不要输出。
-3. word 必须与照片中的文本完全一致——单词、短语、句子一律完整输出,禁止截断,禁止用省略号(…)代替后半部分。
-4. 短语/句子必须在 original_sentence 中给出其所在的完整句子(必填,不可省略)。
-5. 单词给词性,并同时给 phonetic_uk(英式)与 phonetic_us(美式)音标;
+识别纪律(v1.4.4；v2.4 加固)：
+1. **照片可能是任何方向**(横拍/竖拍/倒置)。先按文字方向在心里把它转正,再逐行读;
+   不确定方向时,以能读出通顺英文的方向为准。
+2. **只输出有明确标记痕迹的内容**;正文中未作任何标记的文字一律不要输出。
+3. **页边手写的中文批注也要输出**(用户会自己挑要不要收):它照原样写进 word,
+   同时把旁边的英文(如果有)单独作为一条输出。
+4. 如果不能确定某个内容是否被标记,宁可漏掉,也不要输出。
+5. word 必须与照片中的文本完全一致——单词、短语、句子一律**完整**输出,禁止截断,
+   禁止用省略号(…)代替后半部分;跨行的标记要把整段文字接起来写完整。
+6. word_type 按长度与结构自己判断:**一个词就是 word**(不要因为页面上有长句就都写成 phrase);
+   两三个词的固定搭配是 phrase;带主谓/句末标点的整句是 sentence。
+   中文批注的 word_type 写 word。
+7. 短语/句子必须在 original_sentence 中给出其所在的完整句子(必填,不可省略)。
+8. **translation 要结合语境**(用户实测过"生硬翻译"):
+   - 单词:先看它在这句话里的词性与含义再给中文(bank 河岸/银行、issue 问题/发行),
+     不要给词典第一个义项;
+   - 短语/句子:给整句通顺的中文,不要逐词硬译、不要保留英文语序。
+9. 单词给词性,并同时给 phonetic_uk(英式)与 phonetic_us(美式)音标;
    两者一致时照原样各写一遍,拿不准的音标宁可留空。
-6. 先扫一遍找出所有标记位置，再逐个读取，同一处重复标记只输出一次。${imageUris.length > 1 ? '多图格式：{"items_by_image":[{"image_index":0,"items":[...]},...]}' : ''}
+10. line 必须是**照抄**图上那一行的原文(判分/核对用,不要改写、不要翻译)。
+11. 先扫一遍找出所有标记位置,再逐个读取。**同一个词在不同位置被标了两次就输出两次**
+    (各自带自己的 line,系统会合并成"出现过 ×2");同一处重复标记只输出一次。${imageUris.length > 1 ? '多图格式：{"items_by_image":[{"image_index":0,"items":[...]},...]}' : ''}
 无任何标记返回{"items":[]}。只输出JSON。简洁思考。''',
         '识别标记的英语内容$bookHint$pageHint$countHint$excludeHint'
       ),
@@ -234,6 +230,10 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
       stream: stream,
       temperature: 0, // 识别要确定性
       maxTokens: 4096,
+      // v2.4(用户决策):**识图固定低思考档**。识别是"照抄"任务,不需要长推理 ——
+      // 实测用户开着"高"档时一次烧掉 6 秒 + 6225 字思考,输出却只有 1 条:
+      // 思考预算挤占正文,长思考还容易跑偏(越想越编)。
+      thinkingLevel: 'low',
       messages: [
         {'role': 'system', 'content': systemPrompt},
         {
@@ -441,6 +441,14 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
               '"phonetic_us":"美式 IPA 音标(同上格式)",'
               '"original_sentence":"包含该词的完整英文例句",'
               '"grammar_note":"语法要点(可选,单词可省)"}。'
+              // v2.4(B3,用户反馈"偶尔是生硬翻译出来的,并不是符合原句中词汇的意思"):
+              // 翻译要**结合语境**,不能给词典第一个义项了事。
+              'translation 的硬性要求:'
+              '① 如果是短语/句子,给**整句通顺**的中文,不要逐词硬译、不要保留英文语序;'
+              '② 如果是单词,先判断它在这句话里的词性与含义,再给中文 —— '
+              '同一个词在不同语境意思不同(bank 河岸/银行、issue 问题/发行),'
+              '给错了等于白背;'
+              '③ 拿不准就先给最贴合语境的那个义项,不要罗列一堆义项。'
               '只输出 JSON。',
         },
         {'role': 'user', 'content': word},

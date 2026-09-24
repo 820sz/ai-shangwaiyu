@@ -43,7 +43,8 @@ class _VocabDetailScreenState extends State<VocabDetailScreen> {
                 child: GestureDetector(
                   onTap: _speak,
                   child: Text(
-                    _vocab.displayWordText,
+                    // v2.4:带次数(apple(×2))与原型备注(taming(tame))
+                    _vocab.displayFull,
                     style: theme.textTheme.headlineMedium
                         ?.copyWith(fontWeight: FontWeight.bold),
                   ),
@@ -94,6 +95,39 @@ class _VocabDetailScreenState extends State<VocabDetailScreen> {
                       ? '短语'
                       : '句子'),
           _InfoTile(label: '出处', value: _vocab.sourceSummary),
+
+          // v2.4(B4):每次出现都列出来(用户:"把每次出现的地方都列出来,
+          // 这样也能起到加强记忆的作用")—— 同一个词第二次被收进来不再是重复词条,
+          // 而是这里多一行。
+          if (_vocab.occurrences.length > 1) ...[
+            const Divider(height: 24),
+            _SectionTitle(title: '出现记录(${_vocab.occurrenceCount} 次)'),
+            for (var i = 0; i < _vocab.occurrences.length; i++)
+              Padding(
+                padding: const EdgeInsets.only(top: 6, bottom: 2),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${i + 1}. ${_vocab.occurrences[i].label}',
+                      style: theme.textTheme.bodyMedium
+                          ?.copyWith(fontWeight: FontWeight.w600),
+                    ),
+                    if (_vocab.occurrences[i].sentence.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(
+                          _vocab.occurrences[i].sentence,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                            height: 1.4,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+          ],
           _InfoTile(
               label: '添加时间',
               value:

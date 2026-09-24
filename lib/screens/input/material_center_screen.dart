@@ -11,7 +11,7 @@ import '../../services/material_source.dart';
 import '../../services/material_source_status.dart';
 import '../../services/word_frequency.dart';
 import '../../widgets/empty_state.dart';
-import 'ai_material_search.dart';
+import 'category_material_screen.dart';
 import 'material_reader_screen.dart';
 
 /// 材料中心(v2.0)。
@@ -385,7 +385,7 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
             for (final item in _items.take(8)) _buildItemCard(theme, item),
           const Divider(height: 32),
 
-          // ── 按你的水平找材料(AI 推荐;原「其他输入材料」并到这里)──
+          // ── 按你的水平找材料(两个方向:资料原文 / AI 整理)──
           Row(
             children: [
               Text('按你的水平找材料',
@@ -393,7 +393,7 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
                       ?.copyWith(fontWeight: FontWeight.w700)),
               const SizedBox(width: 8),
               Expanded(
-                child: Text('AI 按你的词汇量挑,避开你屏蔽的题材',
+                child: Text('默认找**公开源原文**,AI 整理的内容单独一栏并标注',
                     style: theme.textTheme.bodySmall?.copyWith(color: muted)),
               ),
             ],
@@ -588,7 +588,9 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
       onTap: () => Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => AiMaterialSearchScreen(category: category),
+          // v2.4(D1 用户要求):先让用户选**方向** —— 默认「资料原文」
+          // (公开源真实原文,可考究),AI 整理内容单独一栏并明确标注
+          builder: (_) => CategoryMaterialScreen(category: category),
         ),
       ),
       child: Container(

@@ -113,7 +113,7 @@ class VocabCard extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.bodySmall?.copyWith(
                           fontStyle: FontStyle.italic,
-                          color: theme.colorScheme.onSurface.withAlpha(150),
+                          color: theme.colorScheme.onSurfaceVariant,
                         ),
                       ),
                     ],
@@ -123,7 +123,9 @@ class VocabCard extends StatelessWidget {
                       Text(
                         vocab.translation!,
                         style: theme.textTheme.bodyMedium?.copyWith(
-                          color: theme.colorScheme.onSurface.withAlpha(180),
+                          // 释义是词条的主角,用满不透明正文色(曾经的 70% 透明
+                          // 在浅色下只有 ~3.5:1,用户看着"发灰")
+                          color: theme.colorScheme.onSurface,
                         ),
                       ),
                     ],
@@ -134,7 +136,7 @@ class VocabCard extends StatelessWidget {
                           child: Text(
                             vocab.sourceSummary,
                             style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.onSurface.withAlpha(120),
+                              color: theme.colorScheme.onSurfaceVariant,
                               fontSize: 11,
                             ),
                             maxLines: 1,
@@ -146,7 +148,7 @@ class VocabCard extends StatelessWidget {
                         Text(
                           vocab.createdLabel,
                           style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.onSurface.withAlpha(120),
+                            color: theme.colorScheme.onSurfaceVariant,
                             fontSize: 11,
                           ),
                         ),

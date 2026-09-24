@@ -246,7 +246,7 @@ void main() {
             createdAt: now,
           ),
       ]);
-      expect(inserted, missed.length);
+      expect(inserted.added, missed.length);
       final saved = await DatabaseService.getVocabularies(limit: 100);
       var linked = 0;
       for (final w in missed) {
@@ -278,11 +278,13 @@ void main() {
         Vocabulary(word: 'obscure', createdAt: now),
       ];
       final first = await DatabaseService.insertVocabularies(batch);
-      expect(first, 2);
+      expect(first.added, 2);
 
-      // 第二次点「收进生词本」(界面不会因为成功就禁用按钮 → 用户真的会点第二次)
+      // 第二次点「收进生词本」:v2.4 起不再是"跳过",而是**合并一次出现**
+      // (词汇本会显示 refused(×1) 之类;词条数量仍然只有一条)
       final second = await DatabaseService.insertVocabularies(batch);
-      expect(second, 0, reason: '已存在的词不该再插一行');
+      expect(second.added, 0, reason: '已存在的词不该再插一行');
+      expect(second.merged, 2, reason: '两个词都命中已有词条');
 
       final all = await DatabaseService.getVocabularies(limit: 100);
       expect(all.where((v) => v.word == 'refused').length, 1,
@@ -297,7 +299,8 @@ void main() {
         Vocabulary(word: 'Weather', createdAt: now),
         Vocabulary(word: ' weather ', createdAt: now),
       ]);
-      expect(inserted, 1);
+      expect(inserted.added, 1);
+      expect(inserted.merged, 2, reason: '批内后两条合并到第一条');
       final all = await DatabaseService.getVocabularies(limit: 100);
       expect(all.where((v) => v.word.toLowerCase().trim() == 'weather').length, 1);
     });

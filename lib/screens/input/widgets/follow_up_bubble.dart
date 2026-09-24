@@ -90,16 +90,19 @@ class _AiFollowUpBubbleState extends State<AiFollowUpBubble> {
                       ),
                     ),
                   // 正文（Markdown 渲染：标题/加粗/表格/列表层级清晰）
-                  // v1.4.0 问题 7:SelectionArea 自定义工具栏——
-                  // 长按选择后有「复制」和「取消选择」(用户实测:选完只能按返回键)
+                  //
+                  // v2.4 修复(A4,用户反馈"只有复制全部和不复制两个选择"):
+                  // 原来的自定义菜单把**系统默认的「复制」换掉了**,于是选中一段
+                  // 文字反而复制不了那一段。现在先把平台默认项(复制/全选/分享)
+                  // 原样接回来 —— "选中哪段复制哪段"就是系统行为 ——
+                  // 再补两项:「复制整条」与「取消选择」。
                   if (msg.content.isNotEmpty)
                     SelectionArea(
                       contextMenuBuilder: (context, state) {
-                        // 自定义工具栏:复制全部 + 取消选择
-                        // (用户实测:系统选择后没有"叉",只能按返回键)
                         final items = <ContextMenuButtonItem>[
+                          ...state.contextMenuButtonItems,
                           ContextMenuButtonItem(
-                            label: '复制全部',
+                            label: '复制整条',
                             onPressed: () {
                               Clipboard.setData(
                                 ClipboardData(text: msg.content),
@@ -122,7 +125,9 @@ class _AiFollowUpBubbleState extends State<AiFollowUpBubble> {
                       },
                       child: MarkdownBody(
                         data: msg.content,
-                        selectable: false,
+                        // 让 Markdown 文本参与外层 SelectionArea 的选择
+                        // (此前设成 false,选中范围拿不到内容 → 只能"复制整条")
+                        selectable: true,
                         styleSheet: MarkdownStyleSheet.fromTheme(
                           theme,
                         ).copyWith(

@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 import '../config/constants.dart';
+import '../services/lemma.dart';
+import 'vocab_occurrence.dart';
 
 /// 生词/短语/句子模型
 class Vocabulary {
@@ -21,6 +23,11 @@ class Vocabulary {
   final String? phoneticUs;
   final String? category; // 分类：教材/书籍/外刊/碎片文章/其他
   final String? materialPath; // 分层素材路径，如 '教材/新概念英语/第1册'
+
+  /// 出现过的地方(v2.4,B4):同一个词再次被收进来时**不是再存一行**,
+  /// 而是往这里追加一次出现记录 —— 词汇本显示 `apple(×2)` 并列出每处出处。
+  final List<VocabOccurrence> occurrences;
+
   final DateTime createdAt;
   final DateTime? updatedAt;
 
@@ -41,9 +48,36 @@ class Vocabulary {
     this.phoneticUs,
     this.category,
     this.materialPath,
+    this.occurrences = const [],
     DateTime? createdAt,
     this.updatedAt,
   }) : createdAt = createdAt ?? DateTime.now();
+
+  /// 出现过几次(至少 1:词条本身就是一次出现)
+  int get occurrenceCount => occurrences.isEmpty ? 1 : occurrences.length;
+
+  /// 显示用词条文本:**出现多次时带次数**(用户要求 `apple(×2)`)
+  String get wordWithCount {
+    final base = displayWordText;
+    return occurrenceCount > 1 ? '$base(×$occurrenceCount)' : base;
+  }
+
+  /// 原型备注(v2.4,B2):`taming` → `taming(tame)`。
+  /// 只在还原出的原型是**真词**(内嵌词频表里有)时才给 —— 没有把握就不加备注,
+  /// 宁可少写,也不能给错原型(用户会照着背)。
+  String? get wordWithLemma {
+    if (wordType != 'word') return null;
+    final base = displayWordText;
+    final lemma = Lemma.baseOf(base);
+    if (lemma == null || lemma == base.toLowerCase()) return null;
+    return '$base($lemma)';
+  }
+
+  /// 显示用:带次数、带原型备注(列表/详情统一走它)
+  String get displayFull {
+    final base = wordWithLemma ?? displayWordText;
+    return occurrenceCount > 1 ? '$base(×$occurrenceCount)' : base;
+  }
 
   // ── SQLite ↔ Dart ──
   Map<String, dynamic> toMap() {
@@ -64,6 +98,8 @@ class Vocabulary {
       'phonetic_us': phoneticUs,
       'category': category ?? AppConstants.dbCategoryDefault,
       'material_path': materialPath,
+      'occurrences_json':
+          occurrences.isEmpty ? null : VocabOccurrence.encodeList(occurrences),
       'created_at': createdAt.toIso8601String(),
       'updated_at': (updatedAt ?? DateTime.now()).toIso8601String(),
     };
@@ -89,6 +125,8 @@ class Vocabulary {
       phoneticUs: _str(map['phonetic_us']) ?? _str(map['phonetic']),
       category: map['category'] as String?,
       materialPath: map['material_path'] as String?,
+      // v2.4(B4):出现记录;坏 JSON/老库缺列都退成空列表
+      occurrences: VocabOccurrence.decodeList(map['occurrences_json']),
       createdAt: _tryParseDate(map['created_at']),
       updatedAt: map['updated_at'] != null
           ? _tryParseDate(map['updated_at'])
@@ -116,6 +154,7 @@ class Vocabulary {
     Object? phoneticUs = _sentinel,
     Object? category = _sentinel,
     Object? materialPath = _sentinel,
+    List<VocabOccurrence>? occurrences,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) {
@@ -136,6 +175,7 @@ class Vocabulary {
       phoneticUs: _unwrap(phoneticUs, this.phoneticUs) as String?,
       category: _unwrap(category, this.category) as String?,
       materialPath: _unwrap(materialPath, this.materialPath) as String?,
+      occurrences: occurrences ?? this.occurrences,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );

@@ -63,6 +63,17 @@ int pageSortKey(String label) {
   return int.tryParse(m.group(0)!) ?? 1000000;
 }
 
+/// 构造"分类 / 材料名"两级路径(纯函数,v2.4)。
+///
+/// 为什么强制两级:分组逻辑([groupMaterials])按 `material_path` 归类,
+/// 只有一级(如 `书籍`)或空路径都会掉进「未归类」—— 用户手动把词归到
+/// 「书籍」却看到它还在「未归类」,就是这么来的(A6 用户实测)。
+/// 名字为空时落一个明确的分组名,而不是留空或拼出伪路径。
+String buildMaterialPath({required String category, required String name}) {
+  final trimmed = name.trim();
+  return '$category/${trimmed.isEmpty ? '未命名材料' : trimmed}';
+}
+
 /// 分组(纯函数,可单测)
 List<MaterialGroup> groupMaterials(
   List<Vocabulary> items, {

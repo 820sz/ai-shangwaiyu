@@ -102,6 +102,63 @@ void main() {
         greaterThan(light.primary.computeLuminance()),
       );
     });
+
+    // ── 浅色模式看不清(v2.4 用户反馈"很多地方都看不清")────────────────
+    // 用户在真机上看到:识图保存弹窗里的目录/词性标签"完全是泛白的"。
+    // 根因是浅色下把次要文字压在带色阶的容器色上 —— 数值一算就现形:
+    // onSurfaceVariant(#6C757D) 压 surfaceContainerHighest 只有 ~3.7:1,
+    // 小字号下就是"看不清"。这组断言把**实际会用到的每一对**都量一遍。
+    test('浅色:次要文字在容器色上必须达到 4.5:1(修"泛白看不清")', () {
+      final t = AppTheme.lightTheme;
+      final cs = t.colorScheme;
+      final pairs = <String, List<Color>>{
+        '次要文字/卡片': [cs.onSurfaceVariant, t.cardTheme.color!],
+        '次要文字/页面': [cs.onSurfaceVariant, t.scaffoldBackgroundColor],
+        // 复选/筛选 chip 的未选中底(材料中心、学习偏好、保存弹窗都在用)
+        '次要文字/浅色容器': [cs.onSurfaceVariant, cs.surfaceContainerHighest],
+        '次要文字/输入框底': [
+          cs.onSurfaceVariant,
+          t.inputDecorationTheme.fillColor!,
+        ],
+        '正文/浅色容器': [cs.onSurface, cs.surfaceContainerHighest],
+        '实心按钮文字/主色': [cs.onPrimary, cs.primary],
+      };
+      final failures = <String>[];
+      pairs.forEach((label, colors) {
+        final ratio = contrast(colors[0], colors[1]);
+        if (ratio < 4.5) failures.add('$label = ${ratio.toStringAsFixed(2)}:1');
+      });
+      expect(failures, isEmpty,
+          reason: '浅色下这些组合低于 WCAG AA 4.5:1,真机上就是"看不清":\\n'
+              '${failures.join('\\n')}');
+    });
+
+    test('浅色:描边/分隔线对底色的对比 ≥3:1(WCAG 非文字元素标准)', () {
+      final t = AppTheme.lightTheme;
+      final cs = t.colorScheme;
+      final fill = t.inputDecorationTheme.fillColor!;
+      final card = t.cardTheme.color!;
+      final cases = <String, List<Color>>{
+        'outline/卡片': [cs.outline, card],
+        'outlineVariant/卡片': [cs.outlineVariant, card],
+        '输入框描边/填充底': [
+          t.inputDecorationTheme.enabledBorder!.borderSide.color,
+          fill,
+        ],
+        'chip 描边/卡片': [
+          t.chipTheme.side!.color,
+          card,
+        ],
+      };
+      final failures = <String>[];
+      cases.forEach((label, colors) {
+        final ratio = contrast(colors[0], colors[1]);
+        if (ratio < 3.0) failures.add('$label = ${ratio.toStringAsFixed(2)}:1');
+      });
+      expect(failures, isEmpty,
+          reason: '浅色下描边太淡会看不出边界(卡片/输入框/标签都会"泛白"):\\n'
+              '${failures.join('\\n')}');
+    });
   });
 
   group('主题档位解析', () {
@@ -148,7 +205,11 @@ void main() {
       r'Colors\.(black87|black45|black38)'
       r'|Colors\.grey\[(50|100|200|300|400|500|600|700|800|850)\]'
       r'|Colors\.grey\.shade(50|100|200|300|400|500|600|700|800|850)'
-      r'|Colors\.[a-z]+\[(50|100|200)\]',
+      r'|Colors\.[a-z]+\[(50|100|200)\]'
+      // v2.4:文字色别再自己调透明度 —— onSurface/onSurfaceVariant 打 47%~70%
+      // 透明后,浅色下只有 3.0~3.9:1,正是用户说的"看不清/发灰"。
+      // 次要文字直接用 onSurfaceVariant(主题已保证 ≥4.5:1)。
+      r'|onSurface\.withAlpha\(|onSurfaceVariant\.withAlpha\(',
     );
 
     test('lib/ 下不再有浅色专用硬编码颜色(theme.dart 除外)', () {

@@ -44,6 +44,19 @@ class AppTheme {
   static const Color darkPrimary = Color(0xFF6BA8E8);
   static const Color darkAccent = Color(0xFF8FC0F0);
 
+  // ── 描边色(v2.4 修"浅色下看不清")──────────────────────────────
+  //
+  // 用户实测:识图保存弹窗里的目录卡片"完全是泛白的"。根因是描边太淡 ——
+  // M3 由近黑种子生成的浅色 outlineVariant 对白底只有 **1.70:1**,
+  // 而卡片底(surface 白)与页面底(#F8F9FA)本来就几乎同色:
+  // 没有可辨认的边界,整块就"泛白"。WCAG 对非文字元素的要求是 3:1。
+  static const Color outlineLight = Color(0xFF6E6A72); // 白底 5.2:1(输入框/交互边界)
+  static const Color outlineVariantLight = Color(0xFF8F8A93); // 白底 3.4:1(卡片/分隔)
+
+  /// 深色下的描边:比原来的 #2E3440 稍亮一点,边界更清楚但不会显得重
+  static const Color darkOutline = Color(0xFF5A6270);
+  static const Color darkOutlineVariant = Color(0xFF3D4553);
+
   // ── 主题数据 ──
   static ThemeData get lightTheme => _build(Brightness.light);
   static ThemeData get darkTheme => _build(Brightness.dark);
@@ -84,7 +97,8 @@ class AppTheme {
             surface: darkSurface,
             onSurface: darkTextPrimary,
             onSurfaceVariant: darkTextSecondary,
-            outline: darkDivider,
+            outline: darkOutline,
+            outlineVariant: darkOutlineVariant,
             error: const Color(0xFFFF6B6B),
           )
         : ColorScheme.fromSeed(
@@ -93,6 +107,10 @@ class AppTheme {
             secondary: accent,
             surface: surface,
             error: error,
+          ).copyWith(
+            // v2.4:浅色描边整体加深到"看得见"为止(默认生成的太淡,见上方注释)
+            outline: outlineLight,
+            outlineVariant: outlineVariantLight,
           );
 
     final bg = dark ? darkBackground : background;
@@ -156,8 +174,8 @@ class AppTheme {
         ),
       ),
 
-      // 输入框:浅色下沿用原设计(填充与页面同色,靠描边区分);
-      // 深色下描边太弱,必须靠填充区分 —— 所以深色填充比页面**亮**一档。
+      // 输入框:浅色下沿用原设计(填充与页面同色),但**描边必须看得见** ——
+      // 用 scheme.outline(浅色 5.2:1 / 深色对比足够)而不是 divider 那种装饰色
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: dark ? darkSurfaceVariant : background,
@@ -166,11 +184,11 @@ class AppTheme {
         hintStyle: TextStyle(color: mutedColor),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(color: line),
+          borderSide: BorderSide(color: scheme.outline),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(color: line),
+          borderSide: BorderSide(color: scheme.outline),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
@@ -178,12 +196,14 @@ class AppTheme {
         ),
       ),
 
-      // 标签Chip
+      // 标签Chip:补上描边 —— 浅色下 chip 底(background)与卡片底(白)几乎同色,
+      // 没有描边时整排 chip 看着"糊在一起"
       chipTheme: ChipThemeData(
         backgroundColor: dark ? darkSurfaceVariant : background,
         selectedColor: accentColor.withAlpha(dark ? 60 : 30),
         labelStyle: const TextStyle(fontSize: 13),
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        side: BorderSide(color: scheme.outlineVariant),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(8),
         ),

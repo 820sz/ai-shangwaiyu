@@ -712,6 +712,17 @@ void main() {
       );
       expect(await DatabaseService.completeTutorTask(99999), 0);
 
+      // v2.4(A5):勾选要能来回切换 —— 用户实测"划去任务后没法再点回来"
+      expect(await DatabaseService.reopenTutorTask(t1), 1);
+      final afterReopen = await DatabaseService.getTutorTasks(
+        DateTime(2026, 3, 10),
+      );
+      final reopened = afterReopen.firstWhere((t) => t['id'] == t1);
+      expect(reopened['done_at'], isNull, reason: '取消完成后要回到待办');
+      expect(reopened['result'], isNull, reason: '结果一并清掉,不留半截状态');
+      expect(reopened['title'], done['title'], reason: '任务本身不能被动到');
+      expect(await DatabaseService.reopenTutorTask(99999), 0);
+
       expect(await DatabaseService.deleteTutorTask(t1), 1);
       expect(
         (await DatabaseService.getTutorTasks(

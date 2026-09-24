@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../services/database.dart';
+import '../../../utils/material_group.dart';
 import '../../../utils/page_label.dart';
 
 /// 分类子信息（由 showSubCategoryInput 返回）
@@ -144,9 +145,8 @@ class _SubCategoryInputSheetState extends State<_SubCategoryInputSheet> {
   }
 
   CategorySubInfo _buildResult() {
-    final name = _nameCtrl.text.trim();
-    final extra = _extraCtrl.text.trim();
-    final materialName = name.isNotEmpty ? name : widget.category;
+    final name = _ctrlText(_nameCtrl);
+    final extra = _ctrlText(_extraCtrl);
     // v1.4.4:书籍类的第二输入框是"页码/章节",存 sourcePage(独立字段),
     // 不拼进 material_path——同一本书无论存哪页都归入同一个路径,
     // 杜绝"同一本书按页码每页一类"的混乱;教材/外刊的层级信息(单元/
@@ -154,16 +154,19 @@ class _SubCategoryInputSheetState extends State<_SubCategoryInputSheet> {
     // v1.8.0:页码做智能归一——「p9页」「第9页」「9」统一成「p9」,
     // 「p16 p17」压缩成「p16-17」,不再出现「pp9页」这种脏数据。
     final isBook = widget.category == '书籍';
-    final segments = <String>[widget.category];
-    if (name.isNotEmpty) segments.add(name);
-    if (!isBook && extra.isNotEmpty) segments.add(extra);
+    // v2.4(A6):路径交给纯函数构造(强制两级,空名字落「未命名材料」),
+    // 非书籍类再追加单元/期号层级
+    var path = buildMaterialPath(category: widget.category, name: name);
+    if (!isBook && extra.isNotEmpty) path = '$path/$extra';
     final page = isBook ? normalizePageLabel(extra) : '';
     return CategorySubInfo(
-      materialName: materialName,
-      materialPath: segments.join('/'),
+      materialName: name.isEmpty ? '未命名材料' : name,
+      materialPath: path,
       sourcePage: page.isEmpty ? null : page,
     );
   }
+
+  static String _ctrlText(TextEditingController c) => c.text.trim();
 
   @override
   Widget build(BuildContext context) {

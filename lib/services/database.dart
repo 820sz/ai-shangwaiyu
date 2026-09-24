@@ -4,6 +4,7 @@ import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' as p;
 import 'package:flutter/foundation.dart';
 import '../config/constants.dart';
+import '../models/vocab_occurrence.dart';
 import '../models/vocabulary.dart';
 import '../models/article.dart';
 import '../models/exercise.dart';
@@ -14,6 +15,35 @@ import '../models/material_recommendation.dart';
 import '../utils/page_label.dart';
 
 /// 本地 SQLite 数据库服务 — 生词、文章、练习、学习记录全部落本地
+/// 批量收词的结果(v2.4):新增几条 / 合并了几次"又见到" / 累计新增多少处出处
+class VocabInsertOutcome {
+  /// 真正新插入的词条数
+  final int added;
+
+  /// 命中已有词条(合并出现记录)的词条数
+  final int merged;
+
+  /// 新记录的"出现次数"总数(同一词在不同位置被标多次时 >1)
+  final int occurrencesAdded;
+
+  const VocabInsertOutcome({
+    this.added = 0,
+    this.merged = 0,
+    this.occurrencesAdded = 0,
+  });
+
+  bool get isEmpty => added == 0 && merged == 0;
+
+  /// 人话结果(听写/阅读器保存后的提示用)
+  String get summary {
+    if (isEmpty) return '没有可保存的词';
+    final parts = <String>['新增 $added 个'];
+    if (merged > 0) parts.add('已在生词本 $merged 个');
+    if (occurrencesAdded > 0) parts.add('记录出现 $occurrencesAdded 处');
+    return parts.join(' · ');
+  }
+}
+
 class DatabaseService {
   static Database? _db;
 
@@ -83,6 +113,8 @@ class DatabaseService {
         phonetic_us TEXT,
         category TEXT DEFAULT '其他',
         material_path TEXT,
+        -- v2.4(B4):同一个词每次出现的出处记录(JSON 数组:book/page/sentence/at)
+        occurrences_json TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT
       )
@@ -446,6 +478,12 @@ class DatabaseService {
       await _createIndexes(db);
       await _seedWordReviewFromMastery(db);
     }
+    if (oldV < 12) {
+      // v2.4(B4,用户要求):同一个词反复出现要**记次数与出处** —— 词条不再
+      // "再存一行",而是往 occurrences_json 追加一次出现记录(书/页/原句/时间)。
+      // 纯加列、不动既有数据;老词条解析出来是空列表,显示行为与以前一致。
+      await _ensureColumn(db, 'vocabulary', 'occurrences_json', 'TEXT');
+    }
   }
 
   /// 打开后自检(v1.9.0,审查 P0-2 的兜底):
@@ -461,6 +499,8 @@ class DatabaseService {
       await _ensureColumn(db, 'vocabulary', 'phonetic', 'TEXT', repaired);
       await _ensureColumn(db, 'vocabulary', 'phonetic_uk', 'TEXT', repaired);
       await _ensureColumn(db, 'vocabulary', 'phonetic_us', 'TEXT', repaired);
+      // v2.4:出现记录列(半迁移/老库自愈)
+      await _ensureColumn(db, 'vocabulary', 'occurrences_json', 'TEXT', repaired);
       await _ensureColumn(db, 'exercises', 'reference_answers', 'TEXT', repaired);
       await _ensureColumn(db, 'articles', 'translation', 'TEXT', repaired);
       await _ensureTable(db, 'daily_log', _dailyLogTableSql, repaired);
@@ -661,43 +701,117 @@ class DatabaseService {
     return db.insert('vocabulary', v.toMap());
   }
 
-  /// 批量插入生词（用于 AI 返回多条结果时 / 听写收词 / 阅读器收词）。
+  /// 批量插入生词（AI 识别结果 / 听写收词 / 阅读器收词 / 追问存词）。
   ///
-  /// **一个词一行**(v2.3.3):插入前会把"库里已有的词 + 本批已处理过的词"过一遍,
-  /// 词面按 `trim().toLowerCase()` 比较,重复的直接跳过,返回**真正插入的条数**。
+  /// **一个词一行,但出现次数要记**(v2.4,B4 用户要求):
+  /// - 库里没有这个词 → 插一条;
+  /// - 已经有 → **不插新行**,而是把这次的出处(书/页/原句/时间)追加到
+  ///   `occurrences_json`,词汇本显示 `apple(×2)` 并列出每处出现;
+  /// - 已有的释义/音标/掌握度**不被覆盖**(用户改过的数据不能被"又见一次"冲掉),
+  ///   只有原来为空时才用新值补上。
   ///
-  /// 为什么放在这一层做:所有收词入口(阅读器点词、追问面板、读后测验、听写"一键
-  /// 收词")最终都走这里,而它们**都没有查重** —— 听写页的按钮在保存成功后并没有
-  /// 禁用,用户点两次就会把同一批词插两遍,于是生词本和复习队列里同一张卡出现
-  /// 两次(2026-09-24 由 `review_flow_test` 发现)。放在数据库层一次修好,
-  /// 比在四个界面各写一遍查重可靠。
+  /// 词面按 `trim().toLowerCase()` 比较(用户手打的词常带空格)。
+  /// 返回 [VocabInsertOutcome]:新增几条、合并几次出现。
   ///
-  /// 与既有约定一致:备份恢复也是"按词面去重、已存在的跳过"。
-  static Future<int> insertVocabularies(List<Vocabulary> list) async {
-    if (list.isEmpty) return 0;
+  /// 为什么放在这一层:所有收词入口最终都走这里,而它们都没有查重
+  /// (v2.3.3 先做了"跳过重复",v2.4 升级为"合并出现")。
+  static Future<VocabInsertOutcome> insertVocabularies(
+    List<Vocabulary> list,
+  ) async {
+    if (list.isEmpty) return const VocabInsertOutcome();
     final db = await database;
-    var inserted = 0;
+    var added = 0;
+    var merged = 0;
+    var occurrencesAdded = 0;
     await db.transaction((txn) async {
-      final existing = <String>{};
-      final rows = await txn.query('vocabulary', columns: ['word']);
+      // 读出已有词条(整行:合并出现时要保留原有释义/音标/掌握度)
+      final existing = <String, Map<String, Object?>>{};
+      final rows = await txn.query('vocabulary');
       for (final r in rows) {
-        existing.add(_dedupeKey('${r['word'] ?? ''}'));
+        existing[_dedupeKey('${r['word'] ?? ''}')] = Map<String, Object?>.from(r);
       }
+
       final batch = txn.batch();
+      var pending = 0;
       for (final v in list) {
         final key = _dedupeKey(v.word);
-        if (key.isEmpty || existing.contains(key)) continue;
-        existing.add(key);
-        batch.insert('vocabulary', v.toMap());
-        inserted++;
+        if (key.isEmpty) continue;
+        final prev = existing[key];
+        if (prev == null) {
+          // 新词条:把这次的出处写进去(自带 occurrences 优先,否则用词条自身出处)
+          final seeds = _occurrencesOf(v);
+          final row = v.toMap();
+          if (seeds.isNotEmpty && row['occurrences_json'] == null) {
+            row['occurrences_json'] = VocabOccurrence.encodeList(seeds);
+          }
+          batch.insert('vocabulary', row);
+          existing[key] = row;
+          added++;
+          pending++;
+          continue;
+        }
+        // 已存在 → 合并出现记录
+        final prevList = VocabOccurrence.decodeList(prev['occurrences_json']);
+        final keys = {for (final o in prevList) o.key};
+        final incoming = _occurrencesOf(v);
+        final fresh = [
+          for (final o in incoming)
+            if (!o.isEmpty && keys.add(o.key)) o,
+        ];
+        final updates = <String, Object?>{};
+        if (fresh.isNotEmpty) {
+          final all = [...prevList, ...fresh];
+          updates['occurrences_json'] = VocabOccurrence.encodeList(all);
+          occurrencesAdded += fresh.length;
+        }
+        // 只在原来为空时补字段(不覆盖用户/历史的既有值)
+        void fillIfEmpty(String column, String? value) {
+          final cur = '${prev[column] ?? ''}'.trim();
+          final next = (value ?? '').trim();
+          if (cur.isEmpty && next.isNotEmpty) updates[column] = next;
+        }
+
+        fillIfEmpty('translation', v.translation);
+        fillIfEmpty('phonetic_uk', v.phoneticUk);
+        fillIfEmpty('phonetic_us', v.phoneticUs);
+        fillIfEmpty('original_sentence', v.originalSentence);
+        fillIfEmpty('part_of_speech', v.partOfSpeech);
+        if (updates.isNotEmpty || fresh.isNotEmpty) {
+          updates['updated_at'] = DateTime.now().toIso8601String();
+          batch.update(
+            'vocabulary',
+            updates,
+            where: 'id = ?',
+            whereArgs: [prev['id']],
+          );
+          pending++;
+        }
+        merged++;
       }
-      if (inserted > 0) await batch.commit(noResult: true);
+      if (pending > 0) await batch.commit(noResult: true);
     });
-    return inserted;
+    return VocabInsertOutcome(
+      added: added,
+      merged: merged,
+      occurrencesAdded: occurrencesAdded,
+    );
   }
 
   /// 词面去重键:忽略大小写与首尾空白(用户手打的词经常带空格)
   static String _dedupeKey(String word) => word.trim().toLowerCase();
+
+  /// 这个词条这次带来的"出现"记录:自带 occurrences 优先,
+  /// 否则用词条自身的出处兜底(老调用方只传 source_book/source_page/原句)
+  static List<VocabOccurrence> _occurrencesOf(Vocabulary v) {
+    if (v.occurrences.isNotEmpty) return v.occurrences;
+    final fallback = VocabOccurrence(
+      book: v.sourceBook ?? '',
+      page: v.sourcePage ?? '',
+      sentence: v.originalSentence ?? '',
+      at: v.createdAt,
+    );
+    return fallback.isEmpty ? const [] : [fallback];
+  }
 
   static Future<List<Vocabulary>> getVocabularies({
     String? sourceBook,
@@ -2178,6 +2292,23 @@ class DatabaseService {
       );
     } catch (e) {
       debugPrint('ReadFlow completeTutorTask failed: $e');
+      return 0;
+    }
+  }
+
+  /// 取消完成(v2.4,A5):把 done_at 与 result 清掉,任务回到"待办"。
+  /// 用户实测"划去任务后没法再点回来" —— 勾选必须能来回切换。
+  static Future<int> reopenTutorTask(int id) async {
+    try {
+      final db = await database;
+      return await db.update(
+        'tutor_tasks',
+        {'done_at': null, 'result_json': null},
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    } catch (e) {
+      debugPrint('ReadFlow reopenTutorTask failed: $e');
       return 0;
     }
   }

@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../config/constants.dart';
 import '../../models/saved_session.dart';
+import '../../models/vocab_occurrence.dart';
 import '../../models/vocabulary.dart';
 import '../../models/bookmark.dart';
 import '../../providers/vocab_provider.dart';
@@ -17,6 +18,8 @@ import '../../services/api_endpoint.dart';
 import '../../services/base_api.dart';
 import '../../services/doubao_api.dart';
 import '../../services/tts_service.dart';
+import '../../services/vision_guard.dart';
+import '../profile/api_settings.dart';
 import '../../utils/follow_up_context.dart';
 import 'widgets/word_list_tile.dart';
 import 'widgets/ai_result_header.dart';
@@ -116,6 +119,10 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
 
   /// 内容被截断的同档位重试守卫
   bool _truncationRetried = false;
+
+  /// 最近一次识图的本地校验结果(v2.4):界面据此显示"忽略了什么/纠正了什么",
+  /// 让识别不再是黑盒(用户原话:"每次识别简直是开盲盒")
+  VisionGuardResult? _guardResult;
 
   /// 流内空闲看门狗(v1.9.0,审查 P1-3)。
   /// dio 的 receiveTimeout 只覆盖"等响应头"阶段,拿不到流式 body 的看护;
@@ -627,10 +634,18 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     }
 
     try {
-      final rawMaps = DoubaoApiService.parseResponse(
+      final parsedMaps = DoubaoApiService.parseResponse(
         _contentText,
         analysisMode: widget.analysisMode,
       );
+      // v2.4:识图结果先过一遍**本地确定性校验**(vision_guard)——
+      // 丢掉手写中文批注/重复条目/截断碎片,并按本地规则重判 word/phrase/sentence
+      // (用户实测过"一整页批注单词全被标成短语")。全文翻译模式不走这一层。
+      final guard = widget.analysisMode == AppConstants.analysisModeFullText
+          ? null
+          : VisionGuard.apply(parsedMaps);
+      final rawMaps = guard?.kept ?? parsedMaps;
+      if (mounted) setState(() => _guardResult = guard);
       if (rawMaps.isEmpty) {
         if (_recalibrateMode) {
           // 校准重识别没识别到标注 → 保留原结果,明确告知(不丢用户数据)
@@ -719,6 +734,17 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
             phoneticUs: (r['phonetic_us'] as String?) ??
                 (r['phonetic'] as String?),
             grammarNote: r['grammar_note'] as String?,
+            // v2.4(B4):同一个词在两处被标 → 记两次出现(vi 校验层已合并出
+            // occurrences 列表),词汇本里就能显示 apple(×2) 并列出每处原文行
+            occurrences: [
+              for (final line in (r['occurrences'] as List? ?? const []))
+                VocabOccurrence(
+                  book: widget.sourceBook ?? '',
+                  page: widget.sourcePage ?? '',
+                  sentence: '$line',
+                  at: DateTime.now(),
+                ),
+            ],
           );
         }).toList();
 
@@ -2334,6 +2360,19 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
           thinkingLabel:
               AppConstants.thinkingOptionsFor(_currentModel)[_currentThinking] ??
                   '不思考',
+          // v2.4:本地校验做了什么(忽略/纠正/存疑),点开可看明细
+          guardNote: _guardResult?.note,
+          guardDetails: _guardResult == null
+              ? null
+              : [
+                  for (final d in _guardResult!.dropped) '忽略「${d.text}」—— ${d.reason}',
+                  if (_guardResult!.typeFixed > 0)
+                    '纠正类型 ${_guardResult!.typeFixed} 条(按本地规则重判 word/phrase/sentence)',
+                  if (_guardResult!.truncationFixed > 0)
+                    '补全截断 ${_guardResult!.truncationFixed} 条(用完整句替换省略号残片)',
+                  if (_guardResult!.unverified > 0)
+                    '存疑 ${_guardResult!.unverified} 条(所在行里没找到该词条,已保留并标记)',
+                ],
         ),
         const SizedBox(height: 8),
         // 选中计数
@@ -3028,19 +3067,49 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                 ),
                 const SizedBox(height: 8),
                 // ✨ AI 补全：填词后一键回填释义/词性/例句
+                //
+                // v2.4 修复(用户反馈"AI 补全没法用"):旧实现在**追问端点未配置**时
+                // 直接 `onPressed: null` —— 按钮变灰且没有任何解释,用户只会以为
+                // 功能坏了。现在按钮始终可点:未配置就明说缺什么并给一键去设置,
+                // 配置了就走(追问端点未配时自动回落到主 API)。
                 Align(
                   alignment: Alignment.centerLeft,
                   child: OutlinedButton.icon(
-                    onPressed: completing ||
-                            wordCtrl.text.trim().isEmpty ||
-                            !_followUpEndpoint.isConfigured
+                    onPressed: completing || wordCtrl.text.trim().isEmpty
                         ? null
                         : () async {
+                            final endpoint = _followUpEndpoint.isConfigured
+                                ? _followUpEndpoint
+                                : ApiEndpointConfig.primary;
+                            if (!endpoint.isConfigured) {
+                              ScaffoldMessenger.of(ctx).showSnackBar(
+                                SnackBar(
+                                  content: const Text(
+                                    'AI 补全需要先配置 API Key（主 API 或追问槽位任一即可）',
+                                  ),
+                                  behavior: SnackBarBehavior.floating,
+                                  action: SnackBarAction(
+                                    label: '去设置',
+                                    onPressed: () {
+                                      Navigator.pop(ctx);
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) =>
+                                              const ApiSettingsScreen(),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ),
+                              );
+                              return;
+                            }
                             setLocalState(() => completing = true);
                             try {
                               final info = await _api.completeWordInfo(
                                 wordCtrl.text.trim(),
-                                endpoint: _followUpEndpoint,
+                                endpoint: endpoint,
                               );
                               if (info['translation']?.isEmpty ?? true) {
                                 ScaffoldMessenger.of(ctx).showSnackBar(

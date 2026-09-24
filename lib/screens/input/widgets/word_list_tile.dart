@@ -87,7 +87,8 @@ class WordListTile extends StatelessWidget {
                   ),
                 Expanded(
                   child: Text(
-                    item.displayWordText,
+                    // v2.4:同一个词出现过多次 → apple(×2);能推出原型 → taming(tame)
+                    item.displayFull,
                     style: theme.textTheme.bodyMedium?.copyWith(
                       fontWeight: FontWeight.w600,
                     ),

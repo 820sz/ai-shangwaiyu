@@ -11,6 +11,7 @@ import '../../../widgets/confirm_destructive.dart';
 import 'follow_up_bubble.dart';
 import 'follow_up_models.dart';
 import 'model_avatars.dart';
+import 'quick_replies.dart';
 import 'scroll_buttons.dart';
 
 /// 追问抽屉的共享状态与逻辑(v1.6.0 抽取)。
@@ -561,6 +562,10 @@ class _FollowUpSheet extends StatelessWidget {
               },
             ),
           ),
+          // 快捷回复(v2.4,B1):用户要"几个待定的快捷回复 —— 英英词典、梳理内容…"。
+          // 点一下就把预设问题发出去,省得每次手打;内容是**提问**而不是固定答案,
+          // 所以 AI 仍会结合当前材料/识别结果回答。
+          _buildQuickReplies(controller),
           // 输入栏
           StatefulBuilder(
             builder: (ctx, setLocalState) {
@@ -632,6 +637,20 @@ class _FollowUpSheet extends StatelessWidget {
             },
           ),
         ],
+      ),
+    );
+  }
+
+  /// 快捷回复条(v2.4,B1):点一下 = 把预设问题发出去
+  Widget _buildQuickReplies(FollowUpController controller) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 4, bottom: 2),
+      child: ValueListenableBuilder<bool>(
+        valueListenable: controller.loading,
+        builder: (_, loading, _) => QuickReplyBar(
+          enabled: !loading,
+          onPick: (prompt) => controller.send(prompt),
+        ),
       ),
     );
   }

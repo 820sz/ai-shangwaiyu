@@ -6,12 +6,15 @@ import '../../models/learner_model.dart';
 import '../../models/material_recommendation.dart' show LearnerProfile;
 import '../../providers/stats_provider.dart';
 import '../../providers/vocab_provider.dart';
+import '../../services/api_endpoint.dart';
 import '../../services/database.dart';
 import '../../services/doubao_api.dart';
 import '../../services/learner_model_store.dart';
 import '../../services/learner_snapshot_loader.dart';
 import '../../services/tutor_engine.dart';
 import '../../services/widget_service.dart';
+import '../input/widgets/model_avatars.dart';
+import 'tutor_chat_screen.dart';
 import '../../widgets/bottom_nav.dart';
 import '../review/review_screen.dart';
 import '../input/learner_preferences_screen.dart';
@@ -38,12 +41,12 @@ class _TutorHomeScreenState extends State<TutorHomeScreen> {
   LearnerModel _model = LearnerModel();
   LearnerSnapshot? _snapshot;
   List<Map<String, Object?>> _taskRows = const [];
-  final List<_ChatTurn> _chat = [];
   final Set<int> _doneTaskIds = {};
-  final _inputCtrl = TextEditingController();
+
+  /// 最近一条对话摘要(v2.4:对话搬到独立窗口,这里只做入口卡副标题)
+  String _lastChatLine = '';
 
   bool _loading = true;
-  bool _askingTutor = false;
 
   @override
   void initState() {
@@ -58,7 +61,6 @@ class _TutorHomeScreenState extends State<TutorHomeScreen> {
 
   @override
   void dispose() {
-    _inputCtrl.dispose();
     super.dispose();
   }
 
@@ -96,12 +98,9 @@ class _TutorHomeScreenState extends State<TutorHomeScreen> {
       setState(() {
         _snapshot = snap;
         _taskRows = rows;
-        _chat
-          ..clear()
-          ..addAll(msgs.map((m) => _ChatTurn(
-                role: '${m['role']}' == 'user' ? 'user' : 'tutor',
-                text: '${m['content'] ?? ''}',
-              )));
+        // 只留最后一条做入口卡副标题(完整对话在独立窗口里)
+        _lastChatLine =
+            msgs.isEmpty ? '' : '${msgs.last['content'] ?? ''}'.replaceAll('\n', ' ');
         _loading = false;
       });
       // 桌面小组件显示的就是这里刚算出来的"今天该做什么",顺手推一次 ——
@@ -165,77 +164,28 @@ class _TutorHomeScreenState extends State<TutorHomeScreen> {
     }
   }
 
-  // ── 导师会话 ──
-  Future<void> _ask([String? preset]) async {
-    final q = (preset ?? _inputCtrl.text).trim();
-    if (q.isEmpty || _askingTutor) return;
-    _inputCtrl.clear();
-    final snap = _snapshot;
-    if (snap == null) return;
-    final findings = TutorEngine.diagnose(snap);
-
-    setState(() {
-      _chat.add(_ChatTurn(role: 'user', text: q));
-      _askingTutor = true;
-    });
-    await DatabaseService.insertTutorMessage(role: 'user', content: q);
-
+  /// 取消完成(v2.4,A5):勾选要能来回切换 ——
+  /// 用户实测"划去任务后没法再点回来"(旧实现完成态按钮直接 disabled)
+  Future<void> _reopenTask(Map<String, Object?> row) async {
+    final id = row['id'];
+    if (id is! int) return;
     try {
-      final history = <Map<String, String>>[
-        for (final t in _chat.take(_chat.length - 1))
-          {
-            'role': t.role == 'user' ? 'user' : 'assistant',
-            'content': t.text,
-          },
-      ];
-      final api = DoubaoApiService();
-      final buffer = StringBuffer();
-      setState(() => _chat.add(const _ChatTurn(role: 'tutor', text: '')));
-      await for (final chunk in api.followUpStream(
-        q,
-        context: _tutorSystemPrompt(
-          TutorEngine.evidencePrompt(snap, findings),
-        ),
-        history: history,
-      )) {
-        if (!mounted) return;
-        if (chunk.isReasoning) continue; // 思考过程不占正文
-        buffer.write(chunk.text);
-        setState(() {
-          _chat[_chat.length - 1] =
-              _ChatTurn(role: 'tutor', text: buffer.toString());
-        });
-      }
-      final answer = buffer.isEmpty ? '(没有拿到回复,请重试)' : buffer.toString();
-      if (mounted && buffer.isEmpty) {
-        setState(() {
-          _chat[_chat.length - 1] = _ChatTurn(role: 'tutor', text: answer);
-        });
-      }
-      if (!answer.startsWith('(')) {
-        await DatabaseService.insertTutorMessage(role: 'tutor', content: answer);
-      }
+      await DatabaseService.reopenTutorTask(id);
+      if (!mounted) return;
+      setState(() => _doneTaskIds.remove(id));
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _chat.add(_ChatTurn(role: 'tutor', text: '出错了:$e'));
-      });
-    } finally {
-      if (mounted) setState(() => _askingTutor = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('取消失败:$e')),
+      );
     }
   }
 
-  String _tutorSystemPrompt(String evidence) => '''
-你是这位学习者的私人英语导师。你**只能基于下面给出的数据快照与本地诊断结论**回答,
-禁止编造数据、禁止编造材料名、禁止给出与数据矛盾的判断。
-
-回答要求:
-1. 先给结论,再给依据(引用具体数字);
-2. 给可执行的下一步(具体到"读什么/读多少/几分钟/练什么");
-3. 数据不足以判断时,直接说"我缺 X 信息",并向用户提 1-2 个具体问题;
-4. 不要说"加油""坚持就是胜利"这类空话;回答控制在 200 字内。
-
-$evidence''';
+  // ── 导师会话 ──
+  // v2.4(C1 用户要求):对话搬进独立窗口 [TutorChatScreen] ——
+  // 这一页不再内嵌聊天(输入框/气泡/流式接收全部移过去),
+  // 只保留"今天做什么 + 诊断 + 入口卡"。系统提示与证据包也一并搬走,
+  // 避免两处各写一份、说法不一致。
 
   @override
   Widget build(BuildContext context) {
@@ -313,61 +263,49 @@ $evidence''';
               style: theme.textTheme.titleSmall
                   ?.copyWith(fontWeight: FontWeight.w700)),
           const SizedBox(height: 8),
-          if (_chat.isEmpty)
-            Card(
-              color: theme.colorScheme.primary.withAlpha(10),
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('助理知道你现在的全部学习数据 —— 可以直接问:',
-                        style: theme.textTheme.bodySmall?.copyWith(color: muted)),
-                    const SizedBox(height: 6),
-                    for (final q in const [
-                      '我现在该读什么难度的材料?',
-                      '为什么我的复习总是堆着?',
-                      '帮我排一下这周的学习安排',
-                    ])
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 4),
-                        child: InkWell(
-                          onTap: _askingTutor ? null : () => _ask(q),
-                          child: Text('· $q',
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                color: theme.colorScheme.primary,
-                              )),
-                        ),
-                      ),
-                  ],
-                ),
+          // v2.4(C1 用户要求):对话搬进**独立窗口** ——
+          // 这一页只留"今天做什么 + 诊断",聊天不再挤在这里。
+          // 入口卡同时给出最近一条对话的摘要,方便接着聊。
+          Card(
+            color: theme.colorScheme.primary.withAlpha(10),
+            child: ListTile(
+              leading: aiAvatar(radius: 16, modelName: _primaryModelName()),
+              title: Text(
+                _lastChatLine.isEmpty ? '和助理聊聊' : '继续上次的对话',
+                style: theme.textTheme.titleSmall
+                    ?.copyWith(fontWeight: FontWeight.w600),
               ),
-            ),
-          for (final turn in _chat) _buildChatBubble(theme, turn),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _inputCtrl,
-                  decoration: const InputDecoration(
-                    hintText: '问助理任何关于你学习的问题…',
-                    isDense: true,
+              subtitle: Text(
+                _lastChatLine.isEmpty
+                    ? '助理知道你现在的全部学习数据 —— 可以问"我现在该读什么难度"、"为什么复习总是堆着"'
+                    : (_lastChatLine.length > 44
+                        ? '${_lastChatLine.substring(0, 44)}…'
+                        : _lastChatLine),
+                style: TextStyle(fontSize: 12, color: muted),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () async {
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => TutorChatScreen(snapshot: snap),
                   ),
-                  onSubmitted: (_) => _ask(),
-                ),
-              ),
-              const SizedBox(width: 8),
-              FilledButton(
-                onPressed: _askingTutor ? null : () => _ask(),
-                child: Text(_askingTutor ? '…' : '发送'),
-              ),
-            ],
+                );
+                // 回来自刷新:对话里可能问了画像问题、或用户改了设置
+                if (!mounted) return;
+                _refresh();
+              },
+            ),
           ),
         ],
       ),
     );
   }
+
+  /// 当前主模型名(入口卡头像用)
+  String _primaryModelName() => ApiEndpointConfig.primary.model;
 
   // ── 画像表单(缺什么问什么) ──
   Widget _buildProfileForm(ThemeData theme) {
@@ -497,8 +435,9 @@ $evidence''';
         child: Row(
           children: [
             IconButton(
-              tooltip: done ? '已完成' : '标记完成',
-              onPressed: done ? null : () => _completeTask(row),
+              tooltip: done ? '点一下取消完成' : '标记完成',
+              // 完成态**不再禁用**:再点一下就是取消完成(A5)
+              onPressed: () => done ? _reopenTask(row) : _completeTask(row),
               icon: Icon(
                 done ? Icons.check_circle : Icons.radio_button_unchecked,
                 color: done ? Colors.green : muted,
@@ -607,31 +546,4 @@ $evidence''';
     );
   }
 
-  Widget _buildChatBubble(ThemeData theme, _ChatTurn turn) {
-    final isUser = turn.role == 'user';
-    return Align(
-      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 4),
-        padding: const EdgeInsets.all(12),
-        constraints: const BoxConstraints(maxWidth: 320),
-        decoration: BoxDecoration(
-          color: isUser
-              ? theme.colorScheme.primary.withAlpha(20)
-              : theme.colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Text(
-          turn.text.isEmpty ? '思考中…' : turn.text,
-          style: theme.textTheme.bodyMedium,
-        ),
-      ),
-    );
-  }
-}
-
-class _ChatTurn {
-  final String role; // user | tutor
-  final String text;
-  const _ChatTurn({required this.role, required this.text});
 }

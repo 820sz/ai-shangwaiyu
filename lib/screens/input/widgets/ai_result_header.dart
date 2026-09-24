@@ -9,6 +9,13 @@ class AiResultHeader extends StatelessWidget {
   final String modelName;
   final String thinkingLabel;
 
+  /// 本地校验说明(v2.4):忽略了哪些条目、纠正了什么。
+  /// 为空则不显示这一行 —— 识别一切正常时不该多占地方。
+  final String? guardNote;
+
+  /// 点"校验"时的明细(被丢弃条目的原因),为空则不可点
+  final List<String>? guardDetails;
+
   const AiResultHeader({
     super.key,
     required this.totalCount,
@@ -17,6 +24,8 @@ class AiResultHeader extends StatelessWidget {
     required this.sentenceCount,
     required this.modelName,
     required this.thinkingLabel,
+    this.guardNote,
+    this.guardDetails,
   });
 
   @override
@@ -53,6 +62,50 @@ class AiResultHeader extends StatelessWidget {
             // P2-31:次要文字对比度不足 → 用主题的次要文字色(深浅色都达 AA)
             style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurfaceVariant),
           ),
+          if (guardNote != null) ...[
+            const SizedBox(height: 4),
+            // 把"盲盒"打开:告诉用户本地校验动过什么,并允许看明细
+            InkWell(
+              onTap: (guardDetails == null || guardDetails!.isEmpty)
+                  ? null
+                  : () => showDialog<void>(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          title: const Text('本地校验明细'),
+                          content: SingleChildScrollView(
+                            child: Text(
+                              guardDetails!.join('\n'),
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(ctx),
+                              child: const Text('知道了'),
+                            ),
+                          ],
+                        ),
+                      ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.fact_check_outlined,
+                      size: 13, color: theme.colorScheme.onSurfaceVariant),
+                  const SizedBox(width: 4),
+                  Text(
+                    guardNote!,
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: theme.colorScheme.onSurfaceVariant,
+                      decoration: (guardDetails == null || guardDetails!.isEmpty)
+                          ? null
+                          : TextDecoration.underline,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );

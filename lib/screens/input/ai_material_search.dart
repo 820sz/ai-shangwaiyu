@@ -221,8 +221,35 @@ class _AiMaterialSearchScreenState extends State<AiMaterialSearchScreen> {
         // 原子替换(P2-2):清空 + 插入在同一事务里,失败整体回滚
         await DatabaseService.replaceRecommendations(widget.category, kept);
       } else {
+        // 「再多来几条」(v2.4,D2):追加而不是覆盖 —— 但同一批里模型很容易
+        // 把刚推过的书再说一遍,所以先按标题去重(已存在的跳过),
+        // 并在提示里如实告诉用户"新增了几条"。
+        final existingTitles = _saved
+            .map((r) => r.title.trim().toLowerCase())
+            .where((t) => t.isNotEmpty)
+            .toSet();
+        var added = 0;
+        var skipped = 0;
         for (final item in kept) {
+          final key = item.title.trim().toLowerCase();
+          if (key.isNotEmpty && !existingTitles.add(key)) {
+            skipped++;
+            continue;
+          }
           await DatabaseService.insertRecommendation(item);
+          added++;
+        }
+        if (mounted && added == 0) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('这一批和已有的重复了,没新增 —— 可以再点一次,或先「重新推荐」'),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+        if (mounted && skipped > 0) {
+          // 记在 _error 位置上方不打扰,只做提示
+          debugPrint('ReadFlow 追加推荐:新增 $added,跳过重复 $skipped');
         }
       }
       await _loadSaved();
@@ -299,6 +326,17 @@ class _AiMaterialSearchScreenState extends State<AiMaterialSearchScreen> {
                   ),
                 ),
               ),
+              // v2.4(D2 用户要求):原来只有「重新推荐」一个方向(会整组替换),
+              // 现在多一个**追加**方向 —— 推得不满意时先"再多来几条",
+              // 而不是把已经看中的那几条一起丢掉。
+              if (_saved.isNotEmpty) ...[
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                  onPressed: _generating ? null : () => _generate(replace: false),
+                  icon: const Icon(Icons.add, size: 16),
+                  label: const Text('再多来几条'),
+                ),
+              ],
             ],
           ),
           if (_generating)
@@ -454,6 +492,25 @@ class _AiMaterialSearchScreenState extends State<AiMaterialSearchScreen> {
                 r.title,
                 style: const TextStyle(
                   fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            // v2.4(D3 用户要求):AI 整理/编写的内容必须**明确标注** ——
+            // 用户实测反馈过"全是 ai 二手改写的,无法考究真实度",
+            // 所以这里不能让它看起来像一本书的原文推荐。
+            Container(
+              margin: const EdgeInsets.only(left: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+              decoration: BoxDecoration(
+                color: Colors.amber.withAlpha(34),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                'AI 编写',
+                style: TextStyle(
+                  fontSize: 10,
+                  color: Colors.amber[800],
                   fontWeight: FontWeight.w600,
                 ),
               ),

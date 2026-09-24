@@ -29,19 +29,21 @@ class VocabProvider extends ChangeNotifier {
   bool get loading => _loading;
   String? get error => _error;
 
-  /// 确认保存生词到数据库
-  Future<int> saveVocabularies(List<Vocabulary> list) async {
-    final count = await DatabaseService.insertVocabularies(list);
+  /// 确认保存生词到数据库。
+  /// v2.4:返回 [VocabInsertOutcome] —— 已存在的词不再"跳过",而是合并一次
+  /// 出现记录(词汇本显示 ×N),调用方据此给出准确提示。
+  Future<VocabInsertOutcome> saveVocabularies(List<Vocabulary> list) async {
+    final outcome = await DatabaseService.insertVocabularies(list);
 
     // 更新当天的学习记录（非关键路径，失败不阻断保存，但必须留痕）
     try {
-      await DatabaseService.incrementDailyWords(DateTime.now(), count);
+      await DatabaseService.incrementDailyWords(DateTime.now(), outcome.added);
     } catch (e) {
       debugPrint('ReadFlow incrementDailyWords failed: $e');
     }
 
     await _refresh();
-    return count;
+    return outcome;
   }
 
   /// 从数据库加载生词

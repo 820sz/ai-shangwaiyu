@@ -85,7 +85,8 @@ void main() {
     );
 
     final vocabCols = await columns(db, 'vocabulary');
-    expect(vocabCols, containsAll(['phonetic', 'phonetic_uk', 'phonetic_us']));
+    expect(vocabCols,
+        containsAll(['phonetic', 'phonetic_uk', 'phonetic_us', 'occurrences_json']));
     // v1.9.0 修过的坑:phonetic 必须在 onCreate 里就有
     expect(vocabCols, contains('material_path'));
 
@@ -159,7 +160,7 @@ void main() {
     expect(tables, containsAll(v2Tables));
 
     final cols = await columns(db, 'vocabulary');
-    expect(cols, containsAll(['phonetic_uk', 'phonetic_us']));
+    expect(cols, containsAll(['phonetic_uk', 'phonetic_us', 'occurrences_json']));
 
     // ③ 旧词必须有复习状态,且到期时间符合"保守初值"的约定
     final seeded = await db.query('word_review', orderBy: 'vocab_id');

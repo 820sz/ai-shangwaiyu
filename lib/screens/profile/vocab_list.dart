@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/vocab_provider.dart';
+import '../../services/word_frequency.dart';
 import '../../widgets/vocab_card.dart';
 import '../input/widgets/category_picker.dart';
 import '../input/widgets/sub_category_input.dart';
@@ -35,7 +36,7 @@ class _VocabListScreenState extends State<VocabListScreen> {
     if (widget.sourceBook != null) {
       _selectedBook = widget.sourceBook!;
     }
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       // P2-10:进页立刻返回时 element 已 deactivate,
       // 不加这道判断会抛错并被 CrashLogger 记成"崩溃",污染诊断日志
       if (!mounted) return;
@@ -43,6 +44,12 @@ class _VocabListScreenState extends State<VocabListScreen> {
             sourceBook:
                 _selectedBook == '全部' ? null : _selectedBook,
           );
+      // v2.4(B2):原型备注要用内嵌词频表校验候选词是否真词 ——
+      // 先把它加载好再重绘一次,否则列表里"有时有括号有时没有"
+      if (!WordFrequency.isLoaded) {
+        await WordFrequency.ensureLoaded();
+        if (mounted) setState(() {});
+      }
     });
   }
 
@@ -103,30 +110,58 @@ class _VocabListScreenState extends State<VocabListScreen> {
     // 1. 选目标分类
     final category = await showCategoryPicker(context);
     if (category == null || !mounted) return;
-    // 2. 选子分类信息
-    final subInfo = await showSubCategoryInput(context, category: category);
-    if (!mounted) return;
-
+    // 2. 选子分类信息。
+    //    v2.4(A6)修复:原来**取消这一步也会照常移动**,结果是"分类改了、
+    //    material_path 没改" —— 词在「我的学习材料」里仍然挂在「未归类」,
+    //    用户以为归类没生效。现在取消 = 整件事取消。
     final provider = context.read<VocabProvider>();
+    final prefillSource = _commonSourceBook(provider);
+    final subInfo = await showSubCategoryInput(
+      context,
+      category: category,
+      prefill: prefillSource,
+    );
+    if (!mounted) return;
+    if (subInfo == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('已取消:没有填材料名/页码,生词不会被移动'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
     await Future.wait(_selectedIds.toList().map((id) =>
         provider.updateVocabulary(id,
             category: category,
-            materialPath: subInfo?.materialPath,
-            sourceBook: subInfo?.materialName,
-            sourcePage: subInfo?.sourcePage)));
+            materialPath: subInfo.materialPath,
+            sourceBook: subInfo.materialName,
+            sourcePage: subInfo.sourcePage)));
     if (mounted) {
       final count = _selectedIds.length; // 先存计数，再清选择
-      final hasSourceBookOverwrite = subInfo?.materialName != null;
+      final hasSourceBookOverwrite = subInfo.materialName.isNotEmpty;
       _exitSelectionMode();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(hasSourceBookOverwrite
-              ? '已将 $count 个生词移至「$category」，出处已更新'
+              ? '已将 $count 个生词移至「$category / ${subInfo.materialName}」'
               : '已将 $count 个生词移至「$category」'),
           behavior: SnackBarBehavior.floating,
         ),
       );
     }
+  }
+
+  /// 选中词条的共同出处(用于预填子分类对话框,省得重新手打书名)
+  String _commonSourceBook(VocabProvider provider) {
+    final books = <String>{};
+    for (final v in provider.vocabularies) {
+      if (v.id == null || !_selectedIds.contains(v.id)) continue;
+      final b = (v.sourceBook ?? '').trim();
+      if (b.isNotEmpty) books.add(b);
+    }
+    return books.length == 1 ? books.first : '';
   }
 
   @override

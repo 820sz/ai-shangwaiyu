@@ -6,8 +6,8 @@ void main() {
     expect(AppConstants.thinkingOptions.keys, ['disabled', 'low']);
   });
 
-  test('数据库版本为 11(v9 页码归一+推荐表、v10 索引+孤儿清理、v11 v2.0 十张明细表+双音标列)', () {
-    expect(AppConstants.dbVersion, 11);
+  test('数据库版本为 12(v11 v2.0 十张明细表+双音标列、v12 出现记录列)', () {
+    expect(AppConstants.dbVersion, 12);
     expect(AppConstants.bookmarkSourceFollowUp, 'follow_up');
     expect(AppConstants.bookmarkSourceVocab, 'vocab');
   });

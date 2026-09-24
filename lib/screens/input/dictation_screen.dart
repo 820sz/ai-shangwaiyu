@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../models/vocabulary.dart';
+import '../../models/vocab_occurrence.dart';
 import '../../providers/vocab_provider.dart';
 import '../../services/database.dart';
 import '../../services/dictation.dart';
@@ -95,6 +96,16 @@ class _DictationScreenState extends State<DictationScreen> {
     _play();
   }
 
+  /// 这一轮里包含某个漏词的句子(记进出处,复习时能看到"它出现在哪句话里")
+  String _sentenceOf(String word) {
+    for (final r in _results) {
+      if (r.missing.contains(word) || r.reference.toLowerCase().contains(word)) {
+        return r.reference;
+      }
+    }
+    return '';
+  }
+
   /// 把这一轮漏掉的词收进生词本(听不出来 = 最该背的词)
   Future<void> _saveMissedWords() async {
     final words = Dictation.missWords(_results);
@@ -105,13 +116,21 @@ class _DictationScreenState extends State<DictationScreen> {
     });
     try {
       final provider = context.read<VocabProvider>();
-      final added = await provider.saveVocabularies([
+      final outcome = await provider.saveVocabularies([
         for (final w in words)
           Vocabulary(
             word: w,
             sourceBook: widget.title,
             category: '其他',
             wordType: 'word',
+            // v2.4(B4):把"这次在听写里出现"记进出处(句子 + 材料名)
+            occurrences: [
+              VocabOccurrence(
+                book: widget.title,
+                sentence: _sentenceOf(w),
+                at: DateTime.now(),
+              ),
+            ],
           ),
       ]);
       // 与阅读器一致:入库即建立复习状态 → 直接进复习队列
@@ -130,14 +149,11 @@ class _DictationScreenState extends State<DictationScreen> {
         linked++;
       }
       if (!mounted) return;
-      final existed = words.length - added;
       setState(() {
         _saving = false;
         _saved = true;
-        // 如实报告:新增几个、本来就有几个(数据库层会跳过重复词面)
-        _saveMsg = '已收进生词本 $added 个'
-            '${existed > 0 ? '(另有 $existed 个本来就在生词本里)' : ''}'
-            ' · 已挂上复习状态 $linked 个';
+        // 如实报告:新增几个、本来就在生词本里几个(会合并成"又出现一次")
+        _saveMsg = '${outcome.summary} · 已挂上复习状态 $linked 个';
       });
     } catch (e) {
       if (!mounted) return;

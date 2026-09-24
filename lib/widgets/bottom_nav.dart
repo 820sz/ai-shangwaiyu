@@ -90,7 +90,9 @@ class _NavItem extends StatelessWidget {
   Widget build(BuildContext context) {
     final color = isActive
         ? Theme.of(context).colorScheme.primary
-        : Theme.of(context).colorScheme.onSurface.withAlpha(100);
+        // 未选中项用主题的次要文字色:旧写法是 onSurface 40% 透明,
+        // 浅色下只有 ~3:1,底部标签(11px)看着发灰
+        : Theme.of(context).colorScheme.onSurfaceVariant;
 
     return GestureDetector(
       onTap: onTap,
