@@ -6,8 +6,8 @@ void main() {
     expect(AppConstants.thinkingOptions.keys, ['disabled', 'low']);
   });
 
-  test('数据库版本为 12(v11 v2.0 十张明细表+双音标列、v12 出现记录列)', () {
-    expect(AppConstants.dbVersion, 12);
+  test('数据库版本为 13(v12 出现记录列、v13 AI 内容来源与思考过程列)', () {
+    expect(AppConstants.dbVersion, 13);
     expect(AppConstants.bookmarkSourceFollowUp, 'follow_up');
     expect(AppConstants.bookmarkSourceVocab, 'vocab');
   });

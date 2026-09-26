@@ -157,9 +157,22 @@ class AppTheme {
         color: card,
         elevation: 1,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(16),
         ),
+        // v2.5(U1):**保持既有外边距不变** —— 全库约 50 个页面里有不少老卡片
+        // 依赖这个默认边距;一旦改成 0,那些页面会立刻"贴边",属于静默布局回归。
+        // 新代码请用 `AppCard`(它自己管边距),老页面逐屏替换时再统一。
         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      ),
+
+      // 页面切换动画(v2.5,U1):Android 默认是"整页从下往上推",在内容页之间
+      // 显得很重;换成"淡入 + 轻微上移",与卡片入场同一套手感。
+      pageTransitionsTheme: const PageTransitionsTheme(
+        builders: <TargetPlatform, PageTransitionsBuilder>{
+          TargetPlatform.android: FadeUpwardsPageTransitionsBuilder(),
+          TargetPlatform.windows: FadeUpwardsPageTransitionsBuilder(),
+          TargetPlatform.linux: FadeUpwardsPageTransitionsBuilder(),
+        },
       ),
 
       // 按钮

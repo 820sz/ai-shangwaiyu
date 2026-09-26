@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'config/theme.dart';
 import 'services/theme_controller.dart';
 import 'widgets/bottom_nav.dart';
+import 'widgets/exit_prompt.dart';
+import 'screens/splash_screen.dart';
 import 'screens/tutor/tutor_home.dart';
 import 'screens/input/input_home.dart';
 import 'screens/output/output_home.dart';
@@ -50,25 +53,57 @@ class _ReadFlowAppState extends State<ReadFlowApp> {
         theme: AppTheme.lightTheme,
         darkTheme: AppTheme.darkTheme,
         themeMode: themeMode,
-        home: AppTabs(
-          switchTo: (tab) => setState(() => _currentTab = tab),
-          child: Scaffold(
-            body: IndexedStack(
-              // 顺序必须与 ReadFlowTab 枚举一致(输入 / 输出 / 我的 / 学习助理)
-              index: _currentTab.index,
-              children: const [
-                InputHomeScreen(),
-                OutputHomeScreen(),
-                ProfileHomeScreen(),
-                TutorHomeScreen(),
-              ],
-            ),
-            bottomNavigationBar: ReadFlowBottomNav(
-              currentTab: _currentTab,
-              onTabChanged: (tab) {
-                setState(() => _currentTab = tab);
-              },
-            ),
+        // v2.5(M3):开屏动画(logo 渐显 + 文案渐显)包在主界面外面,
+        // 动画结束或用户点一下即进入;分页切换等仍走原来的路由
+        home: SplashScreen(
+          child: _RootShell(
+            currentTab: _currentTab,
+            onTabChanged: (tab) => setState(() => _currentTab = tab),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 主壳(四栏 + 底部导航)。抽成独立 widget 是为了让开屏动画只包住它,
+/// 而不影响 `_ReadFlowAppState` 的 setState 语义。
+class _RootShell extends StatelessWidget {
+  final ReadFlowTab currentTab;
+  final void Function(ReadFlowTab tab) onTabChanged;
+
+  const _RootShell({required this.currentTab, required this.onTabChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return AppTabs(
+      switchTo: onTabChanged,
+      child: PopScope(
+        // v2.5(M3):根页面按返回 → 先出"字幕式退出确认"(一天只问一次);
+        // 用户选"累了~休息啦"才真的退出。子路由的返回不受影响(它们不在这一层)。
+        canPop: false,
+        onPopInvokedWithResult: (didPop, _) async {
+          if (didPop) return;
+          final leave = await ExitPrompt.show(context);
+          if (leave) {
+            // 系统级退出(不杀进程)
+            await SystemNavigator.pop();
+          }
+        },
+        child: Scaffold(
+          body: IndexedStack(
+            // 顺序必须与 ReadFlowTab 枚举一致(输入 / 输出 / 我的 / 学习助理)
+            index: currentTab.index,
+            children: const [
+              InputHomeScreen(),
+              OutputHomeScreen(),
+              ProfileHomeScreen(),
+              TutorHomeScreen(),
+            ],
+          ),
+          bottomNavigationBar: ReadFlowBottomNav(
+            currentTab: currentTab,
+            onTabChanged: onTabChanged,
           ),
         ),
       ),

@@ -22,6 +22,14 @@ class MaterialRecommendation {
 
   /// 生成本次推荐时使用的学习画像快照(便于复盘推荐依据)
   final String profileSnapshot;
+
+  /// 生成用的模型名(v2.5,M2:用户反馈"来源、思考过程全都看不到")
+  final String model;
+
+  /// 生成时的**思考过程**(v2.5,M2):以前只在解析失败时拿来兜底,用完就丢 ——
+  /// 用户看不到 AI 是怎么想的,内容就成了"凭空冒出来的二手货"。
+  final String reasoning;
+
   final DateTime createdAt;
 
   const MaterialRecommendation({
@@ -34,10 +42,14 @@ class MaterialRecommendation {
     this.keywords = '',
     this.content = '',
     this.profileSnapshot = '',
+    this.model = '',
+    this.reasoning = '',
     required this.createdAt,
   });
 
   bool get hasContent => content.trim().isNotEmpty;
+
+  bool get hasReasoning => reasoning.trim().isNotEmpty;
 
   Map<String, dynamic> toMap() => {
     if (id != null) 'id': id,
@@ -49,6 +61,8 @@ class MaterialRecommendation {
     'keywords': keywords,
     'content': content,
     'profile_snapshot': profileSnapshot,
+    'model': model,
+    'reasoning': reasoning,
     'created_at': createdAt.toIso8601String(),
   };
 
@@ -63,11 +77,18 @@ class MaterialRecommendation {
         keywords: (map['keywords'] as String?) ?? '',
         content: (map['content'] as String?) ?? '',
         profileSnapshot: (map['profile_snapshot'] as String?) ?? '',
+        model: (map['model'] as String?) ?? '',
+        reasoning: (map['reasoning'] as String?) ?? '',
         createdAt:
             DateTime.tryParse('${map['created_at']}') ?? DateTime.now(),
       );
 
-  MaterialRecommendation copyWith({String? content, int? id}) =>
+  MaterialRecommendation copyWith({
+    String? content,
+    int? id,
+    String? model,
+    String? reasoning,
+  }) =>
       MaterialRecommendation(
         id: id ?? this.id,
         category: category,
@@ -78,6 +99,8 @@ class MaterialRecommendation {
         keywords: keywords,
         content: content ?? this.content,
         profileSnapshot: profileSnapshot,
+        model: model ?? this.model,
+        reasoning: reasoning ?? this.reasoning,
         createdAt: createdAt,
       );
 }

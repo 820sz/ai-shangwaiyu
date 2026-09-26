@@ -6,9 +6,11 @@ import 'package:provider/provider.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../../providers/vocab_provider.dart';
 import '../../config/constants.dart';
+import '../../config/design_tokens.dart';
 import '../../models/saved_session.dart';
 import '../../services/doubao_api.dart';
 import '../../services/api_endpoint.dart';
+import '../../widgets/app_ui.dart';
 import 'process_chat.dart';
 import 'widgets/ai_article_section.dart';
 import 'material_center_screen.dart';
@@ -60,25 +62,22 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('输入')),
       body: SingleChildScrollView(
+        padding: const EdgeInsets.only(bottom: Gap.lg),
         child: Column(
           children: [
-            // ── 板块1：拍照识文 ──
-            _buildCaptureSectionCard(theme),
+            // ── 主行动:拍照识文(v2.5,U1)──
+            // 训记的本质是"一进来就能开始":这一页的第一屏先给**一个动作**,
+            // 其余(材料中心 / AI 文章 / 我的材料)按重要性往下排。
+            AppStagger(index: 0, child: _buildCaptureSectionCard(theme)),
 
-            // ── 板块2：材料中心(v2.0;v2.2 起是**唯一**的"找材料"入口)──
-            // 定位:由软件提供**真实材料**的渠道 —— 公开源外刊/原版书/播客/百科 +
-            // 按你水平的 AI 推荐 + 自备文本粘贴,入库即本地算难度与生词分布。
-            // (原「其他输入材料」卡片已并入这里:两者定位重复,用户实测反馈
-            //  "本质是同一个功能")
-            _buildMaterialCenterCard(theme),
+            // ── 材料中心(v2.0;唯一的"找材料"入口)──
+            AppStagger(index: 1, child: _buildMaterialCenterCard(theme)),
 
-            // ── 板块3：特色功能 · AI 生词定制文章(v1.8.0 从输出页迁来) ──
-            const AiArticleSection(),
+            // ── AI 生词定制文章 ──
+            const AppStagger(index: 2, child: AiArticleSection()),
 
-            // ── 板块4：我的学习材料 ──
-            const MyMaterialsSection(),
-
-            const SizedBox(height: 24),
+            // ── 我的学习材料 ──
+            const AppStagger(index: 3, child: MyMaterialsSection()),
           ],
         ),
       ),
@@ -86,45 +85,17 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
   }
 
   /// 材料中心入口(v2.0):软件提供的真实材料渠道
+  ///
+  /// v2.5(U1):改用统一的 `AppActionTile`(图标/标题/副标题/箭头全 App 一套),
+  /// 与学习助理页的入口卡长得一致 —— 以前每页各画一种,看起来"不是同一个 App"。
   Widget _buildMaterialCenterCard(ThemeData theme) {
-    final muted = theme.colorScheme.onSurfaceVariant;
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      elevation: 1,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => const MaterialCenterScreen()),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              Icon(Icons.local_library_outlined,
-                  size: 22, color: theme.colorScheme.primary),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('材料中心',
-                        style: theme.textTheme.titleSmall
-                            ?.copyWith(fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 2),
-                    Text(
-                      '外刊 / 原版书 / 播客 / 百科 + 按你水平的 AI 推荐 + 自备文本',
-                      style:
-                          theme.textTheme.bodySmall?.copyWith(color: muted),
-                    ),
-                  ],
-                ),
-              ),
-              const Icon(Icons.chevron_right),
-            ],
-          ),
-        ),
+    return AppActionTile(
+      icon: Icons.local_library_outlined,
+      title: '材料中心',
+      subtitle: '资料原文(公版书/论文/外刊)+ AI 整理 + 自备文本',
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const MaterialCenterScreen()),
       ),
     );
   }

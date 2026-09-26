@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../config/constants.dart';
 import '../../config/theme.dart';
+import '../../services/splash_settings.dart';
 import '../../services/theme_controller.dart';
 
 /// 外观设置(v2.2 深色模式)。
@@ -63,6 +64,10 @@ class _AppearanceScreenState extends State<AppearanceScreen> {
             const SizedBox(height: 12),
             const _ThemePreview(),
             const SizedBox(height: 16),
+
+            // ── 开屏文案(v2.5,M3):用户可自定义 ──
+            const _SplashTaglineCard(),
+            const SizedBox(height: 16),
             Card(
               color: theme.colorScheme.surfaceContainerHighest,
               child: Padding(
@@ -88,6 +93,90 @@ class _AppearanceScreenState extends State<AppearanceScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// 开屏文案设置(v2.5,M3 用户要求:开屏那行文案要能自己改)
+class _SplashTaglineCard extends StatefulWidget {
+  const _SplashTaglineCard();
+
+  @override
+  State<_SplashTaglineCard> createState() => _SplashTaglineCardState();
+}
+
+class _SplashTaglineCardState extends State<_SplashTaglineCard> {
+  String _tagline = SplashSettings.defaultTagline;
+
+  @override
+  void initState() {
+    super.initState();
+    _tagline = SplashSettings.tagline();
+  }
+
+  Future<void> _edit() async {
+    final ctrl = TextEditingController(text: _tagline);
+    final saved = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('开屏文案'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: ctrl,
+              autofocus: true,
+              maxLength: 24,
+              decoration: InputDecoration(
+                hintText: SplashSettings.defaultTagline,
+                border: const OutlineInputBorder(),
+                isDense: true,
+              ),
+            ),
+            Text('留空 = 用默认文案「${SplashSettings.defaultTagline}」',
+                style: const TextStyle(fontSize: 11)),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (saved == null) return;
+    await SplashSettings.setTagline(saved);
+    if (!mounted) return;
+    setState(() => _tagline = SplashSettings.tagline());
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('已保存 —— 下次启动时生效'),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant;
+    return Card(
+      child: ListTile(
+        leading: Icon(Icons.auto_awesome_motion_outlined,
+            color: theme.colorScheme.primary),
+        title: const Text('开屏文案'),
+        subtitle: Text('启动时显示在 logo 下方:$_tagline',
+            style: TextStyle(fontSize: 12, color: muted)),
+        trailing: const Icon(Icons.edit_outlined, size: 18),
+        onTap: _edit,
       ),
     );
   }

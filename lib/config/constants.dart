@@ -109,7 +109,7 @@ class AppConstants {
 
   // ── 数据库 ──
   static const String dbName = 'readflow.db';
-  static const int dbVersion = 12;
+  static const int dbVersion = 13;
 
   // ── 收藏夹 ──
   /// 收藏来源:追问答案 / 词汇卡片
@@ -150,12 +150,17 @@ class AppConstants {
   /// 存语义档位而不是 `Brightness`:'跟随系统' 是用户意图,
   /// 存成当时的亮/暗就把这层意图丢了(系统夜间切换后 App 不会跟着变)。
   static const String keyThemeMode = 'theme_mode';
-
   static const Map<String, String> themeModeOptions = {
     'system': '跟随系统',
     'light': '浅色',
     'dark': '深色',
   };
+
+  /// 开屏文案(v2.5,M3):用户可自定义;空串 = 用默认「让语言,回归本质」
+  static const String keySplashTagline = 'splash_tagline';
+
+  /// 退出提示"一天只问一次"的日期戳(v2.5)
+  static const String keyExitPromptDate = 'exit_prompt_date';
 
   // ── 生词类型 ──
   static const String wordTypeWord = 'word';

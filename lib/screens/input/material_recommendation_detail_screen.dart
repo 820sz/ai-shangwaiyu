@@ -42,6 +42,10 @@ class _MaterialRecommendationDetailScreenState
   late MaterialRecommendation _rec;
   String _content = '';
   bool _generating = false;
+
+  /// 本次生成的思考过程(v2.5,M2:默认折叠,点开可看 AI 怎么想的)
+  String _reasoning = '';
+  bool _showReasoning = false;
   String? _error;
   bool _savedAsArticle = false;
   StreamSubscription<SseChunk>? _sub;
@@ -137,13 +141,24 @@ class _MaterialRecommendationDetailScreenState
       if (_rec.id != null) {
         await DatabaseService.updateRecommendationContent(_rec.id!, text);
       }
-      if (mounted) setState(() => _content = text);
+      if (mounted) {
+        setState(() {
+          _content = text;
+          // v2.5(M2):把这次生成的思考过程留在页面上(用户要求"看得到思考过程")
+          _reasoning = reasoningBuffer.toString();
+        });
+      }
     } catch (e) {
       if (mounted) setState(() => _error = BaseApiService.friendlyError(e));
     } finally {
       if (mounted) setState(() => _generating = false);
     }
   }
+
+  /// 时间显示(生成信息卡用)
+  static String _fmt(DateTime t) =>
+      '${t.year}-${t.month.toString().padLeft(2, '0')}-${t.day.toString().padLeft(2, '0')} '
+      '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 
   /// 保存为文章 → 可在阅读器里精读(含翻译/练习)
   Future<void> _saveAsArticle() async {
@@ -279,6 +294,97 @@ class _MaterialRecommendationDetailScreenState
                         ),
                       ),
                     ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+
+          // ── 这份内容是怎么来的(v2.5,M2)──────────────────────────
+          // 用户原话:「找的资料出处、来源、思考过程也是全都看不到,非常简陋」。
+          // 所以这里把"谁生成的、什么时候、依据什么、AI 想了什么"全部摊开:
+          // 用户自己就能判断这份内容能不能信。
+          Card(
+            color: Colors.amber.withAlpha(24),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.auto_awesome, size: 15, color: Colors.amber[800]),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          '这份内容由 AI 编写,不是出版原文',
+                          style: theme.textTheme.bodyMedium
+                              ?.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '· 生成模型:${_rec.model.isEmpty ? '(未记录)' : _rec.model}\n'
+                    '· 生成时间:${_fmt(_rec.createdAt)}\n'
+                    '· 生成依据:${_rec.profileSnapshot.isEmpty ? '(未记录画像)' : _rec.profileSnapshot}\n'
+                    '· 完整度与出处无法像公版书那样考究 —— 想要可考证的原文,'
+                    '请在上一页用「资料原文」检索。',
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(color: theme.colorScheme.onSurfaceVariant, height: 1.5),
+                  ),
+                  if (_rec.keywords.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        '· 关键词:${_rec.keywords}',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant),
+                      ),
+                    ),
+                  // 思考过程(可展开):AI 是怎么想出这份材料的
+                  if (_rec.hasReasoning || _reasoning.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    InkWell(
+                      onTap: () => setState(() => _showReasoning = !_showReasoning),
+                      child: Row(
+                        children: [
+                          Icon(
+                            _showReasoning
+                                ? Icons.expand_less
+                                : Icons.expand_more,
+                            size: 16,
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            _showReasoning ? '收起思考过程' : '看 AI 的思考过程',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: theme.colorScheme.primary,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (_showReasoning)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: SelectableText(
+                          (_reasoning.trim().isEmpty
+                                  ? _rec.reasoning
+                                  : _reasoning)
+                              .trim(),
+                          style: TextStyle(
+                            fontSize: 11,
+                            height: 1.5,
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                  ],
                 ],
               ),
             ),

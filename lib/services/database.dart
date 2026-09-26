@@ -204,6 +204,9 @@ class DatabaseService {
         keywords TEXT,
         content TEXT,
         profile_snapshot TEXT,
+        -- v2.5(M2):AI 内容的生成来源与思考过程,详情页要展示(用户反馈"全都看不到")
+        model TEXT,
+        reasoning TEXT,
         created_at TEXT NOT NULL
       )
     ''';
@@ -483,6 +486,11 @@ class DatabaseService {
       // "再存一行",而是往 occurrences_json 追加一次出现记录(书/页/原句/时间)。
       // 纯加列、不动既有数据;老词条解析出来是空列表,显示行为与以前一致。
       await _ensureColumn(db, 'vocabulary', 'occurrences_json', 'TEXT');
+    }
+    if (oldV < 13) {
+      // v2.5(M2):AI 推荐内容要能看到"用哪个模型生成的、思考过程是什么"
+      await _ensureColumn(db, 'recommendations', 'model', 'TEXT');
+      await _ensureColumn(db, 'recommendations', 'reasoning', 'TEXT');
     }
   }
 

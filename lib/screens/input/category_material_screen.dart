@@ -37,7 +37,7 @@ class _CategoryMaterialScreenState extends State<CategoryMaterialScreen> {
   List<OriginalHit> _hits = const [];
   bool _loading = false;
   bool _searched = false;
-  String? _error;
+  List<String> _notes = const [];
   LearnerModel _model = LearnerModel();
 
   @override
@@ -45,13 +45,18 @@ class _CategoryMaterialScreenState extends State<CategoryMaterialScreen> {
     super.initState();
     _model = LearnerModelStore.load();
     _queryCtrl.text = _defaultQuery();
+    // v2.5:进来就自动搜一次 —— "打开即行动"(训记的本质):
+    // 不再要求用户先想关键词、再点按钮。书籍类不填关键词时取"最受欢迎书单"。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _search();
+    });
   }
 
-  /// 默认关键词:分类名 + 用户感兴趣的题材(有就用,没有就只用分类名)
+  /// 默认关键词:用户感兴趣的第一个题材;没有就用该分类的默认检索
   String _defaultQuery() {
     final interest = _model.interests?.value;
     if (interest != null && interest.isNotEmpty) return interest.first;
-    return widget.category == '其他' ? 'english' : widget.category;
+    return OriginalSearch.defaultQueryFor(widget.category);
   }
 
   @override
@@ -61,22 +66,19 @@ class _CategoryMaterialScreenState extends State<CategoryMaterialScreen> {
   }
 
   Future<void> _search() async {
-    final q = _queryCtrl.text.trim();
-    if (q.isEmpty) return;
     setState(() {
       _loading = true;
-      _error = null;
       _searched = true;
     });
-    final hits = await OriginalSearch.search(q, category: widget.category);
+    final result = await OriginalSearch.search(
+      _queryCtrl.text,
+      category: widget.category,
+    );
     if (!mounted) return;
     setState(() {
-      _hits = hits;
+      _hits = result.hits;
+      _notes = result.notes;
       _loading = false;
-      _error = hits.isEmpty
-          ? '没有检索到原文。可能是关键词太窄,或者这个分类的源在你当前网络下不可达'
-              '(可在材料中心点「检测可用源」确认)'
-          : null;
     });
   }
 
@@ -152,7 +154,7 @@ class _CategoryMaterialScreenState extends State<CategoryMaterialScreen> {
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
       children: [
         Text(
-          '只搜**公开源的原文**:公版书全文、论文摘要、外刊最新条目 —— '
+          '公开源的**真实原文**:公版书全文、论文、外刊条目 —— '
           '每条都能点开看原文与来源,不是 AI 改写的内容。',
           style: theme.textTheme.bodySmall?.copyWith(color: muted, height: 1.5),
         ),
@@ -163,7 +165,7 @@ class _CategoryMaterialScreenState extends State<CategoryMaterialScreen> {
               child: TextField(
                 controller: _queryCtrl,
                 decoration: const InputDecoration(
-                  hintText: '搜什么?(书名 / 作者 / 主题)',
+                  hintText: '英文关键词(书名 / 作者 / 主题);留空看经典书单',
                   isDense: true,
                 ),
                 onSubmitted: (_) => _search(),
@@ -172,11 +174,23 @@ class _CategoryMaterialScreenState extends State<CategoryMaterialScreen> {
             const SizedBox(width: 8),
             FilledButton(
               onPressed: _loading ? null : _search,
-              child: Text(_loading ? '搜索中…' : '搜索原文'),
+              child: Text(_loading ? '搜索中…' : '搜索'),
             ),
           ],
         ),
-        const SizedBox(height: 12),
+        // 每个源的真实情况(v2.5):通了几条 / 为什么没结果 / 上次没连上已跳过 ——
+        // 旧版只有"没有结果"四个字,用户只能得出"这功能没用"
+        if (_notes.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          for (final n in _notes)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 2),
+              child: Text('· $n',
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: muted, fontSize: 11)),
+            ),
+        ],
+        const SizedBox(height: 10),
         if (_loading)
           const Center(
             child: Padding(
@@ -184,20 +198,12 @@ class _CategoryMaterialScreenState extends State<CategoryMaterialScreen> {
               child: CircularProgressIndicator(),
             ),
           )
-        else if (_error != null)
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(14),
-              child: Text(_error!,
-                  style: theme.textTheme.bodySmall?.copyWith(color: muted)),
-            ),
-          )
         else if (_hits.isEmpty && _searched)
-          const EmptyState(title: '没有结果', hint: '换个关键词再试')
-        else if (_hits.isEmpty)
-          const EmptyState(
-            title: '输入关键词开始找原文',
-            hint: '例如 a christmas carol / climate change / language learning',
+          EmptyState(
+            title: '这次没搜到原文',
+            hint: _notes.any((n) => n.contains('中文关键词'))
+                ? '换成英文关键词再试(这些源都是英文库)'
+                : '换个更常见的英文词,或到材料中心点「检测可用源」看看哪个源通',
           )
         else
           for (final h in _hits) _buildHitCard(theme, muted, h),

@@ -217,9 +217,17 @@ class _AiMaterialSearchScreenState extends State<AiMaterialSearchScreen> {
           '可在右上角「不想看的题材」里调整',
         );
       }
+      // v2.5(M2):把"用哪个模型生成、思考过程是什么"一并落库 ——
+      // 详情页要展示给用户自己判断(用户反馈"来源、思考过程全都看不到")。
+      final reasoningText = reasoningBuffer.toString().trim();
+      final modelName = _api.config.model;
+      final stamped = [
+        for (final item in kept)
+          item.copyWith(model: modelName, reasoning: reasoningText),
+      ];
       if (replace) {
         // 原子替换(P2-2):清空 + 插入在同一事务里,失败整体回滚
-        await DatabaseService.replaceRecommendations(widget.category, kept);
+        await DatabaseService.replaceRecommendations(widget.category, stamped);
       } else {
         // 「再多来几条」(v2.4,D2):追加而不是覆盖 —— 但同一批里模型很容易
         // 把刚推过的书再说一遍,所以先按标题去重(已存在的跳过),
@@ -230,7 +238,7 @@ class _AiMaterialSearchScreenState extends State<AiMaterialSearchScreen> {
             .toSet();
         var added = 0;
         var skipped = 0;
-        for (final item in kept) {
+        for (final item in stamped) {
           final key = item.title.trim().toLowerCase();
           if (key.isNotEmpty && !existingTitles.add(key)) {
             skipped++;

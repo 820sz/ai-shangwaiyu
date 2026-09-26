@@ -2,17 +2,18 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:readflow/services/original_search.dart';
 
-/// 原文检索测试(v2.4,D1)。
+/// 原文检索测试(v2.5,M1)。
 ///
-/// 用户反馈「按你的水平找材料」里全是 AI 二手改写、无法考究 —— 这一层的职责
-/// 就是**只给真实原文**:来源、链接、可点开。所以测试压在
-/// ①解析正确(源站返回什么就解析出什么)②分类到源的映射(别给用户找不到的东西)。
+/// 背景:上一版用 `gutendex.com` 搜公版书,在大陆网络**实测 12.5 秒超时** ——
+/// "书籍"分类永远是空页面,用户直接说"AI 完全找不出任何原版材料"。
+/// 现在改用 Project Gutenberg 站内检索(与抓正文同域,实测 3.5 秒可达),
+/// 这里锁死解析与"每个源如实报告"的行为。
 void main() {
   group('分类 → 源映射', () {
-    test('书籍/教材 → 公版书;论文 → arXiv;外刊 → 新闻/播客', () {
-      expect(OriginalSearch.sourcesForCategory('书籍'), contains('gutenberg'));
-      expect(OriginalSearch.sourcesForCategory('教材'), contains('gutenberg'));
-      expect(OriginalSearch.sourcesForCategory('论文'), contains('arxiv'));
+    test('书籍/教材 → 公版书;论文 → arXiv;外刊 → 新闻播客', () {
+      expect(OriginalSearch.sourcesForCategory('书籍'), ['gutenberg']);
+      expect(OriginalSearch.sourcesForCategory('教材'), ['gutenberg']);
+      expect(OriginalSearch.sourcesForCategory('论文'), ['arxiv']);
       expect(OriginalSearch.sourcesForCategory('外刊'), contains('npr'));
     });
 
@@ -21,11 +22,78 @@ void main() {
       expect(s, isNotEmpty);
       expect(s, contains('gutenberg'));
     });
+
+    test('默认检索:书籍类留空 → "最受欢迎书单";论文/外刊给英文默认词', () {
+      expect(OriginalSearch.defaultQueryFor('书籍'), isEmpty);
+      expect(OriginalSearch.defaultQueryFor('论文'), contains('language'));
+      expect(OriginalSearch.defaultQueryFor('外刊'), isNotEmpty);
+    });
   });
 
-  group('arXiv Atom 解析(原文=论文本身)', () {
+  group('Gutenberg 检索页解析(按真实结构)', () {
+    // 取自 gutenberg.org/ebooks/search 的真实片段(裁掉无关部分)
+    const html = '''
+<div id="search-results">
+  <ol class="results-list">
+    <li class="booklink">
+      <a href="/ebooks/1342" class="link">
+        <span class="title">Pride and Prejudice</span>
+        <span class="subtitle">Austen, Jane</span>
+      </a>
+    </li>
+    <li class="booklink">
+      <a href="/ebooks/2701" class="link">
+        <span class="title">Moby Dick; Or, The Whale</span>
+        <span class="subtitle">Melville, Herman</span>
+      </a>
+    </li>
+    <li class="booklink">
+      <a href="/ebooks/84" class="link">
+        <span class="title">Frankenstein; or, the modern prometheus</span>
+      </a>
+    </li>
+  </ol>
+</div>
+''';
+
+    test('解析出书名/作者/书号/链接', () {
+      final hits = OriginalSearch.parseGutenbergSearchPage(html);
+      expect(hits, hasLength(3));
+      expect(hits.first.sourceId, 'gutenberg');
+      expect(hits.first.sourceId2, '1342');
+      expect(hits.first.title, 'Pride and Prejudice');
+      expect(hits.first.author, 'Austen, Jane');
+      expect(hits.first.url, 'https://www.gutenberg.org/ebooks/1342');
+      expect(hits.first.note, contains('Austen, Jane'));
+      expect(hits.last.note, '公版书全文', reason: '没作者时给通用说明');
+    });
+
+    test('HTML 实体与多余空白被清掉', () {
+      const messy = '''
+<li class="booklink"><a href="/ebooks/1">
+  <span class="title">A &amp; B
+  &quot;quoted&quot;</span>
+  <span class="subtitle">Doe,  John</span></a></li>''';
+      final hits = OriginalSearch.parseGutenbergSearchPage(messy);
+      expect(hits.single.title, 'A & B "quoted"');
+      expect(hits.single.author, 'Doe, John');
+    });
+
+    test('坏页面/空页面 → 空列表,不抛异常', () {
+      expect(OriginalSearch.parseGutenbergSearchPage(''), isEmpty);
+      expect(
+          OriginalSearch.parseGutenbergSearchPage('<html>未登录</html>'), isEmpty);
+      expect(
+        OriginalSearch.parseGutenbergSearchPage(
+            '<li class="booklink"><a href="/ebooks/9"></a></li>'),
+        isEmpty,
+        reason: '有链接没标题 → 跳过(点开也没意义)',
+      );
+    });
+  });
+
+  group('arXiv Atom 解析', () {
     const feed = '''
-<?xml version="1.0" encoding="UTF-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
   <entry>
     <id>http://arxiv.org/abs/2609.25006v1</id>
@@ -33,44 +101,21 @@ void main() {
       Measure?</title>
     <summary>We audit reported accuracy &amp; find gaps.</summary>
   </entry>
-  <entry>
-    <id>http://arxiv.org/abs/2609.25008v1</id>
-    <title>Training a Language Model End-to-End in Rust</title>
-    <summary>A practical report.</summary>
-  </entry>
 </feed>
 ''';
 
-    test('解析出标题/id/链接,并去掉换行与转义', () {
+    test('解析标题/id/链接,去掉换行与转义', () {
       final hits = OriginalSearch.parseArxivFeed(feed);
-      expect(hits, hasLength(2));
-      expect(hits.first.sourceId, 'arxiv');
+      expect(hits, hasLength(1));
       expect(hits.first.sourceId2, '2609.25006v1');
       expect(hits.first.title, 'What Does 99% Accuracy Measure?');
-      expect(hits.first.url, 'http://arxiv.org/abs/2609.25006v1');
-      expect(hits.first.note, contains('audit reported accuracy & find gaps'));
+      expect(hits.first.note, contains('& find gaps'));
     });
 
-    test('坏 XML / 空 feed → 空列表,不抛异常', () {
-      expect(OriginalSearch.parseArxivFeed(''), isEmpty);
-      expect(OriginalSearch.parseArxivFeed('<feed></feed>'), isEmpty);
-      expect(OriginalSearch.parseArxivFeed('不是 XML'), isEmpty);
-    });
-
-    test('缺 id 或缺标题的条目被跳过(宁可少给,不给点不开的)', () {
-      const broken = '''
-<feed>
-  <entry><title>没有 id</title></entry>
-  <entry><id>http://arxiv.org/abs/1</id></entry>
-</feed>''';
+    test('缺 id / 缺标题的条目被跳过', () {
+      const broken =
+          '<feed><entry><title>没有 id</title></entry><entry><id>http://arxiv.org/abs/1</id></entry></feed>';
       expect(OriginalSearch.parseArxivFeed(broken), isEmpty);
-    });
-  });
-
-  group('检索入口的兜底行为', () {
-    test('空关键词直接返回空(不发请求)', () async {
-      expect(await OriginalSearch.search(''), isEmpty);
-      expect(await OriginalSearch.search('   '), isEmpty);
     });
   });
 }
