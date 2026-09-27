@@ -1,10 +1,13 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import '../../config/design_tokens.dart';
+import '../../config/theme.dart';
 import '../../models/writing_log.dart';
 import '../../services/base_api.dart';
 import '../../services/database.dart';
 import '../../services/doubao_api.dart';
+import '../../widgets/app_ui.dart';
 import '../../widgets/error_state.dart';
 import '../../widgets/writing_labels.dart';
 import '../input/widgets/follow_up_drawer.dart';
@@ -432,7 +435,7 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
     final isHandwritten = _materialType == kMaterialTypeHandwritten;
     final wordCount = _wordCount;
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+      padding: Insets.page,
       children: [
         // 材料类型(取值与文案见 lib/widgets/writing_labels.dart,
         // 与「写译记录」页共用一份 —— P2-29 的局部收口)
@@ -452,7 +455,7 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
           selected: {_materialType},
           onSelectionChanged: (s) => setState(() => _materialType = s.first),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: Gap.sm),
 
         // 手写稿:固定高度横向条,永不撑破页面
         if (isHandwritten) ...[
@@ -460,11 +463,8 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
             children: [
               Text(
                 '手写稿 ${_images.length}/$_maxImages',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: theme.colorScheme.onSurface,
-                ),
+                style: theme.textTheme.titleSmall
+                    ?.copyWith(fontWeight: FontWeight.w600),
               ),
               const Spacer(),
               IconButton(
@@ -479,7 +479,7 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: Gap.xxs),
           SizedBox(
             height: 92,
             child: _images.isEmpty
@@ -488,7 +488,7 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
                     child: Container(
                       decoration: BoxDecoration(
                         color: theme.colorScheme.surfaceContainerHighest,
-                        borderRadius: BorderRadius.circular(10),
+                        borderRadius: Radii.controlRadius,
                         border: Border.all(
                           color: theme.colorScheme.outlineVariant,
                         ),
@@ -505,13 +505,14 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
                 : ListView.separated(
                     scrollDirection: Axis.horizontal,
                     itemCount: _images.length,
-                    separatorBuilder: (_, _) => const SizedBox(width: 8),
+                    separatorBuilder: (_, _) => const SizedBox(width: Gap.xs),
                     itemBuilder: (_, i) => Stack(
                       children: [
                         GestureDetector(
                           onTap: () => _openImageViewer(i),
                           child: ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
+                            borderRadius:
+                                BorderRadius.circular(Radii.control - 2),
                             child: Image.file(
                               _images[i],
                               width: 92,
@@ -520,6 +521,7 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
                             ),
                           ),
                         ),
+                        // 角标压在图片上:黑白在两种主题下都对(硬编码色闸门已豁免)
                         Positioned(
                           top: 2,
                           right: 2,
@@ -544,7 +546,7 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
                     ),
                   ),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: Gap.xs),
           SizedBox(
             width: double.infinity,
             child: FilledButton.tonalIcon(
@@ -553,7 +555,7 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
               label: const Text('识别为电子档'),
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: Gap.sm),
         ],
 
         // 文本区:固定高度,内部滚动(长文不会把页面顶爆)
@@ -561,23 +563,18 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
           children: [
             Text(
               isHandwritten ? '电子档' : '英文内容',
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: theme.colorScheme.onSurface,
-              ),
+              style: theme.textTheme.titleSmall
+                  ?.copyWith(fontWeight: FontWeight.w600),
             ),
             const Spacer(),
             Text(
               '$wordCount 词',
-              style: TextStyle(
-                fontSize: 12,
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
             ),
           ],
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: Gap.xs),
         SizedBox(
           height: 240,
           child: TextField(
@@ -589,11 +586,11 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
             decoration: InputDecoration(
               hintText: isHandwritten ? null : '粘贴或输入要批改的英文',
               border: const OutlineInputBorder(),
-              contentPadding: const EdgeInsets.all(12),
+              contentPadding: const EdgeInsets.all(Gap.sm),
             ),
           ),
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: Gap.md),
         SizedBox(
           width: double.infinity,
           child: FilledButton.icon(
@@ -601,7 +598,7 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
             icon: const Icon(Icons.fact_check_outlined, size: 18),
             label: const Text('AI 批改'),
             style: FilledButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 14),
+              padding: const EdgeInsets.symmetric(vertical: Gap.sm + 2),
             ),
           ),
         ),
@@ -640,19 +637,8 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
   }
 
   Widget _buildLoading(BuildContext context) {
-    final theme = Theme.of(context);
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const CircularProgressIndicator(),
-          const SizedBox(height: 16),
-          Text(
-            _phase == _Phase.transcribing ? 'AI 正在识别手写内容…' : 'AI 正在批改写作…',
-            style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
-          ),
-        ],
-      ),
+    return AppLoading(
+      label: _phase == _Phase.transcribing ? 'AI 正在识别手写内容…' : 'AI 正在批改写作…',
     );
   }
 
@@ -672,55 +658,48 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
     final theme = Theme.of(context);
     final scoreTxt = (_result['score'] ?? '').toString();
     final score = int.tryParse(scoreTxt);
+    // 语义色随明暗切换(v2.5,U2):以前写死 Colors.green/orange/red,
+    // 白底上只有 2.5~3.1:1(小字号看不清),深色下又偏刺眼
     final scoreColor = score == null
-        ? Colors.grey
+        ? theme.colorScheme.onSurfaceVariant
         : score >= 80
-        ? Colors.green
+        ? AppTheme.successColor(context)
         : score >= 60
-        ? Colors.orange
-        : Colors.red;
+        ? AppTheme.warningColor(context)
+        : AppTheme.dangerColor(context);
     final hasSummary =
         _errorSummary.values.any((v) => v.trim().isNotEmpty);
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
+      padding: const EdgeInsets.fromLTRB(Gap.md, Gap.md, Gap.md, 96),
       children: [
         // 分数 + 总评
-        Card(
+        AppCard(
           color: scoreColor.withAlpha(12),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                _scoreBadge(
-                  score: score,
-                  scoreTxt: scoreTxt,
-                  color: scoreColor,
+          padding: const EdgeInsets.all(Gap.md),
+          child: Row(
+            children: [
+              _scoreBadge(
+                score: score,
+                scoreTxt: scoreTxt,
+                color: scoreColor,
+              ),
+              const SizedBox(width: Gap.md),
+              Expanded(
+                child: Text(
+                  (_result['summary'] ?? '').toString().isEmpty
+                      ? '批改完成'
+                      : _result['summary'].toString(),
+                  style: theme.textTheme.bodyMedium?.copyWith(height: 1.5),
                 ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Text(
-                    (_result['summary'] ?? '').toString().isEmpty
-                        ? '批改完成'
-                        : _result['summary'].toString(),
-                    style: theme.textTheme.bodyMedium?.copyWith(height: 1.5),
-                  ),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
 
         // 错误分类汇总
         if (hasSummary) ...[
-          const SizedBox(height: 16),
-          Text(
-            '错误分类汇总',
-            style: theme.textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 8),
+          const AppSectionTitle(title: '错误分类汇总'),
           ...WritingLog.categories
               .where((c) => (_errorSummary[c] ?? '').trim().isNotEmpty)
               .map((c) => _summaryCard(theme, c, _errorSummary[c]!)),
@@ -728,14 +707,7 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
 
         // 逐条点评
         if (_issues.isNotEmpty) ...[
-          const SizedBox(height: 16),
-          Text(
-            '逐条点评（${_issues.length}）',
-            style: theme.textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 8),
+          AppSectionTitle(title: '逐条点评（${_issues.length}）'),
           ..._issues.asMap().entries.map(
             (e) => _issueCard(theme, e.key, e.value),
           ),
@@ -743,48 +715,28 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
 
         // 修正后全文
         if ((_result['correction'] ?? '').toString().isNotEmpty) ...[
-          const SizedBox(height: 16),
-          Text(
-            '修正后全文',
-            style: theme.textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(14),
-              child: SelectableText(
-                _result['correction'].toString(),
-                style: theme.textTheme.bodyMedium?.copyWith(height: 1.6),
-              ),
+          const AppSectionTitle(title: '修正后全文'),
+          AppCard(
+            child: SelectableText(
+              _result['correction'].toString(),
+              style: theme.textTheme.bodyMedium?.copyWith(height: 1.6),
             ),
           ),
         ],
 
         // 我的原文
-        const SizedBox(height: 16),
-        Text(
-          '我的原文',
-          style: theme.textTheme.titleSmall?.copyWith(
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: SelectableText(
-              _textCtrl.text.trim(),
-              style: theme.textTheme.bodyMedium?.copyWith(
-                height: 1.6,
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
+        const AppSectionTitle(title: '我的原文'),
+        AppCard(
+          child: SelectableText(
+            _textCtrl.text.trim(),
+            style: theme.textTheme.bodyMedium?.copyWith(
+              height: 1.6,
+              color: theme.colorScheme.onSurfaceVariant,
             ),
           ),
         ),
 
-        const SizedBox(height: 16),
+        const SizedBox(height: Gap.md),
         Row(
           children: [
             OutlinedButton.icon(
@@ -800,7 +752,7 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
             ),
           ],
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: Gap.xs),
         SizedBox(
           width: double.infinity,
           child: FilledButton.tonalIcon(
@@ -890,43 +842,45 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
   }
 
   Widget _summaryCard(ThemeData theme, String category, String text) {
+    // 用调色板角色而不是写死的紫/蓝/青:深浅两套主题下都成立,
+    // 也保证和主色是一家人(不再是一堆"看着很语义"的杂色)
+    final cs = theme.colorScheme;
     final color = switch (category) {
-      '词汇' => Colors.purple,
-      '语法' => Colors.blue,
-      '表达优化' => Colors.teal,
-      _ => Colors.grey,
+      '词汇' => cs.tertiary,
+      '语法' => cs.secondary,
+      '表达优化' => cs.primary,
+      _ => cs.onSurfaceVariant,
     };
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                color: color.withAlpha(20),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Text(
-                category,
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: color,
-                ),
+    return AppCard(
+      margin: const EdgeInsets.only(bottom: Gap.xs),
+      padding: const EdgeInsets.all(Gap.sm),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding:
+                const EdgeInsets.symmetric(horizontal: Gap.xs, vertical: 2),
+            decoration: BoxDecoration(
+              color: color.withAlpha(20),
+              borderRadius: BorderRadius.circular(Radii.control - 4),
+            ),
+            child: Text(
+              category,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: color,
               ),
             ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                text,
-                style: theme.textTheme.bodySmall?.copyWith(height: 1.5),
-              ),
+          ),
+          const SizedBox(width: Gap.xs),
+          Expanded(
+            child: Text(
+              text,
+              style: theme.textTheme.bodySmall?.copyWith(height: 1.5),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -936,78 +890,79 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
     final correction = issue['correction'] ?? '';
     final type = issue['type'] ?? '';
     final reason = issue['reason'] ?? '';
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Text(
-                  '${index + 1}',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                    color: theme.colorScheme.primary,
-                  ),
-                ),
-                const SizedBox(width: 6),
-                if (type.isNotEmpty)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 6,
-                      vertical: 1,
-                    ),
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.primary.withAlpha(15),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(
-                      type,
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: theme.colorScheme.primary,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            if (original.isNotEmpty)
+    return AppCard(
+      margin: const EdgeInsets.only(bottom: Gap.xs),
+      padding: const EdgeInsets.all(Gap.sm),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
               Text(
-                original,
-                style: TextStyle(
-                  fontSize: 13,
-                  color: Colors.red[400],
-                  decoration: TextDecoration.lineThrough,
-                ),
-              ),
-            if (correction.isNotEmpty) ...[
-              const SizedBox(height: 2),
-              Text(
-                correction,
-                style: TextStyle(
-                  fontSize: 13,
-                  color: Colors.green[700],
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-            if (reason.isNotEmpty) ...[
-              const SizedBox(height: 6),
-              Text(
-                reason,
+                '${index + 1}',
                 style: TextStyle(
                   fontSize: 12,
-                  color: theme.colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.bold,
+                  color: theme.colorScheme.primary,
                 ),
               ),
+              const SizedBox(width: Gap.xxs + 2),
+              if (type.isNotEmpty)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: Gap.xxs + 2,
+                    vertical: 1,
+                  ),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.primary.withAlpha(15),
+                    borderRadius: BorderRadius.circular(Radii.control - 6),
+                  ),
+                  child: Text(
+                    type,
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: theme.colorScheme.primary,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
             ],
+          ),
+          const SizedBox(height: Gap.xs),
+          // 原文划掉(红)→ 改后(绿):这对语义色以前写死 Colors.red[400] /
+          // Colors.green[700],深色下亮度不对;现在随主题切换
+          if (original.isNotEmpty)
+            Text(
+              original,
+              style: TextStyle(
+                fontSize: 13,
+                color: AppTheme.dangerColor(context),
+                decoration: TextDecoration.lineThrough,
+              ),
+            ),
+          if (correction.isNotEmpty) ...[
+            const SizedBox(height: 2),
+            Text(
+              correction,
+              style: TextStyle(
+                fontSize: 13,
+                color: AppTheme.successColor(context),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ],
-        ),
+          if (reason.isNotEmpty) ...[
+            const SizedBox(height: Gap.xxs + 2),
+            Text(
+              reason,
+              style: TextStyle(
+                fontSize: 12,
+                color: theme.colorScheme.onSurfaceVariant,
+                height: 1.5,
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }

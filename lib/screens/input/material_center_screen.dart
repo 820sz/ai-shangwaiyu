@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../config/constants.dart';
+import '../../config/design_tokens.dart';
 import '../../models/learner_model.dart';
 import '../../providers/vocab_provider.dart';
 import '../../services/feed_parser.dart' show FeedItem;
@@ -10,7 +11,7 @@ import '../../services/material_library.dart';
 import '../../services/material_source.dart';
 import '../../services/material_source_status.dart';
 import '../../services/word_frequency.dart';
-import '../../widgets/empty_state.dart';
+import '../../widgets/app_ui.dart';
 import 'category_material_screen.dart';
 import 'material_reader_screen.dart';
 
@@ -172,6 +173,7 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
   /// 读前卡:告诉用户"这份材料对你是什么难度",再决定读不读
   Future<void> _showPreview(IngestedMaterial ingested) async {
     final a = ingested.analysis;
+    final theme = Theme.of(context);
     final go = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -189,10 +191,21 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
               if (a.topNewWords.isNotEmpty)
                 _kv('先认这几个词', a.topNewWords.take(8).join('、')),
               if (a.tooHard) ...[
-                const SizedBox(height: 8),
-                const Text(
-                  '⚠️ 这份材料对你偏难(覆盖率低于 90%)。可以先读,但建议只精读前几段,别硬啃。',
-                  style: TextStyle(fontSize: 12, color: Colors.orange),
+                const SizedBox(height: Gap.xs),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(Icons.warning_amber_rounded,
+                        size: 16, color: Colors.orange),
+                    const SizedBox(width: Gap.xxs),
+                    Expanded(
+                      child: Text(
+                        '这份材料对你偏难(覆盖率低于 90%)。可以先读,但建议只精读前几段,别硬啃。',
+                        style: theme.textTheme.bodySmall
+                            ?.copyWith(color: Colors.orange, height: 1.5),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ],
@@ -216,7 +229,7 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
   }
 
   Widget _kv(String k, String v) => Padding(
-        padding: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.only(bottom: Gap.xs),
         child: RichText(
           text: TextSpan(
             style: TextStyle(
@@ -335,94 +348,94 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+        padding: Insets.page,
         children: [
           // ── 今日推荐 ──
-          Row(
-            children: [
-              Text('今日推荐',
-                  style: theme.textTheme.titleSmall
-                      ?.copyWith(fontWeight: FontWeight.w700)),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text('公开内容源 · 无需 API Key',
-                    style: theme.textTheme.bodySmall?.copyWith(color: muted)),
-              ),
-              TextButton(
-                onPressed: _probing ? null : _probeAll,
-                child: Text(_probing ? '检测中…' : '检测可用源'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
+          AppStagger(
+            index: 0,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                for (final s in MaterialSourceService.sources)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 6),
-                    child: _sourceChip(context, theme, s),
+                AppSectionTitle(
+                  title: '今日推荐',
+                  subtitle: '公开内容源 · 无需 API Key',
+                  trailing: TextButton(
+                    onPressed: _probing ? null : _probeAll,
+                    child: Text(_probing ? '检测中…' : '检测可用源'),
                   ),
+                ),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      for (final s in MaterialSourceService.sources)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: _sourceChip(context, theme, s),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: Gap.xs),
+                // 选中源的说明与状态:一行话讲清"这个源是什么 + 在你这儿行不行",
+                // 用户不用点开才知道(旧版只有 chip,失败了才发现不可达)
+                _sourceNote(theme, muted),
+                const SizedBox(height: Gap.sm),
+                if (_loadingItems)
+                  const AppLoading(label: '正在拉取最新条目…')
+                else if (_error != null)
+                  _errorCard(theme, muted)
+                else if (_items.isEmpty)
+                  AppEmpty(
+                    icon: Icons.article_outlined,
+                    title: '这个源暂时没有条目',
+                    hint: '换一个源试试,或让助手「检测可用源」',
+                  )
+                else
+                  for (final item in _items.take(8)) _buildItemCard(theme, item),
               ],
             ),
           ),
-          const SizedBox(height: 6),
-          // 选中源的说明与状态:一行话讲清"这个源是什么 + 在你这儿行不行",
-          // 用户不用点开才知道(旧版只有 chip,失败了才发现不可达)
-          _sourceNote(theme, muted),
-          const SizedBox(height: 4),
-          if (_loadingItems)
-            const Padding(
-              padding: EdgeInsets.all(12),
-              child: Center(child: CircularProgressIndicator()),
-            )
-          else if (_error != null)
-            _errorCard(theme, muted)
-          else if (_items.isEmpty)
-            const EmptyState(title: '这个源暂时没有条目')
-          else
-            for (final item in _items.take(8)) _buildItemCard(theme, item),
-          const Divider(height: 32),
 
           // ── 按你的水平找材料(两个方向:资料原文 / AI 整理)──
-          Row(
-            children: [
-              Text('按你的水平找材料',
-                  style: theme.textTheme.titleSmall
-                      ?.copyWith(fontWeight: FontWeight.w700)),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text('默认找**公开源原文**,AI 整理的内容单独一栏并标注',
-                    style: theme.textTheme.bodySmall?.copyWith(color: muted)),
-              ),
-            ],
+          AppStagger(
+            index: 1,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                AppSectionTitle(
+                  title: '按你的水平找材料',
+                  subtitle: '默认找公开源原文,AI 整理的内容单独一栏并标注',
+                ),
+                _buildAiDiscoverGrid(theme),
+              ],
+            ),
           ),
-          const SizedBox(height: 8),
-          _buildAiDiscoverGrid(theme),
-          const Divider(height: 32),
 
           // ── 材料库 ──
-          Row(
-            children: [
-              Text('材料库',
-                  style: theme.textTheme.titleSmall
-                      ?.copyWith(fontWeight: FontWeight.w700)),
-              const SizedBox(width: 8),
-              Text('按"今天最适合读"排序',
-                  style: theme.textTheme.bodySmall?.copyWith(color: muted)),
-            ],
+          AppStagger(
+            index: 2,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const AppSectionTitle(
+                  title: '材料库',
+                  subtitle: '按「今天最适合读」排序',
+                ),
+                if (_loadingShelf)
+                  const AppLoading()
+                else if (_shelf.isEmpty)
+                  AppEmpty(
+                    icon: Icons.library_books_outlined,
+                    title: '还没有材料',
+                    hint: '从上面挑一份,或粘贴自备材料',
+                  )
+                else
+                  for (final s in _shelf) _buildShelfCard(theme, s),
+              ],
+            ),
           ),
-          const SizedBox(height: 8),
-          if (_loadingShelf)
-            const Padding(
-              padding: EdgeInsets.all(12),
-              child: Center(child: CircularProgressIndicator()),
-            )
-          else if (_shelf.isEmpty)
-            const EmptyState(title: '还没有材料', hint: '从上面挑一份,或粘贴自备材料')
-          else
-            for (final s in _shelf) _buildShelfCard(theme, s),
+          const SizedBox(height: Gap.lg),
         ],
       ),
     );
@@ -454,28 +467,50 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
     );
   }
 
-  /// 选中源的一行说明:它是什么 + 在你这儿最近一次行不行
+  /// 选中源的一行说明:它是什么 + 在你这儿最近一次行不行。
+  /// 状态用**色点 + 一句话**表达,扫一眼就知道该不该点(不靠用户读完整段字)。
   Widget _sourceNote(ThemeData theme, Color muted) {
     final s = MaterialSourceService.sourceOf(_sourceId);
     if (s == null) return const SizedBox.shrink();
     final health = _health[s.id];
+    final ok = health?.ok == true;
+    final dot = health == null
+        ? theme.colorScheme.outlineVariant
+        : (ok ? Colors.green : Colors.orange);
     final now = DateTime.now();
-    return Column(
+    final status = health == null
+        ? (MaterialSourceService.measuredReachable.contains(s.id)
+            ? '实测可用(2026-09 中国大陆):这个源一直比较稳'
+            : '还没试过这个源 —— 拉不到就换一个,不必纠结')
+        : '${health.label(now)}'
+            '${ok ? '' : ' —— ${health.message ?? '未知原因'}'}';
+    return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(s.description,
-            style: theme.textTheme.bodySmall?.copyWith(color: muted)),
-        const SizedBox(height: 2),
-        Text(
-          health == null
-              ? (MaterialSourceService.measuredReachable.contains(s.id)
-                  ? '实测可用(2026-09 中国大陆):这个源一直比较稳'
-                  : '还没试过这个源 —— 拉不到就换一个,不必纠结')
-              : '${health.label(now)}'
-                  '${health.ok ? '' : ' —— ${health.message ?? '未知原因'}'}',
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: health != null && !health.ok ? Colors.orange : muted,
-            fontSize: 11,
+        Padding(
+          padding: const EdgeInsets.only(top: 5),
+          child: Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(color: dot, shape: BoxShape.circle),
+          ),
+        ),
+        const SizedBox(width: Gap.xs),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(s.description,
+                  style: theme.textTheme.bodySmall?.copyWith(color: muted)),
+              const SizedBox(height: 2),
+              Text(
+                status,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: health != null && !ok ? Colors.orange : muted,
+                  fontSize: 11,
+                ),
+              ),
+            ],
           ),
         ),
       ],
@@ -497,51 +532,58 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
         final bh = _health[b.id]?.ok == true ? 0 : 1;
         return ah.compareTo(bh);
       });
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                const Icon(Icons.cloud_off, size: 20),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text('「$label」这次没拉到',
-                      style: theme.textTheme.bodyLarge
-                          ?.copyWith(fontWeight: FontWeight.w600)),
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.cloud_off, size: 18, color: theme.colorScheme.error),
+              const SizedBox(width: Gap.xs),
+              Expanded(
+                child: Text('「$label」这次没拉到',
+                    style: theme.textTheme.titleSmall
+                        ?.copyWith(fontWeight: FontWeight.w600)),
+              ),
+              FilledButton.tonalIcon(
+                onPressed: _loadItems,
+                icon: const Icon(Icons.refresh, size: 16),
+                label: const Text('重试'),
+              ),
+            ],
+          ),
+          const SizedBox(height: Gap.xs),
+          Text(_error!,
+              style: theme.textTheme.bodySmall?.copyWith(color: muted)),
+          const SizedBox(height: Gap.xxs),
+          Text(
+            '内容源都在境外,部分网络(含中国大陆多数宽带/移动网络)会连不上 —— '
+            '这不是 App 坏了。换个源试试,或点右上角「检测可用源」一次问清。',
+            style: theme.textTheme.bodySmall
+                ?.copyWith(color: muted, fontSize: 11, height: 1.5),
+          ),
+          const SizedBox(height: Gap.sm),
+          Text('换到哪个源:',
+              style: theme.textTheme.bodySmall?.copyWith(color: muted)),
+          const SizedBox(height: Gap.xxs),
+          Wrap(
+            spacing: Gap.xs,
+            runSpacing: Gap.xxs,
+            children: [
+              for (final o in others.take(3))
+                ActionChip(
+                  avatar: _health[o.id]?.ok == true
+                      ? const Icon(Icons.check_circle, size: 15)
+                      : null,
+                  label: Text(o.label),
+                  onPressed: () {
+                    setState(() => _sourceId = o.id);
+                    _loadItems();
+                  },
                 ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Text(_error!, style: theme.textTheme.bodySmall?.copyWith(color: muted)),
-            const SizedBox(height: 6),
-            Text(
-              '内容源都在境外,部分网络(含中国大陆多数宽带/移动网络)会连不上 —— '
-              '这不是 App 坏了。换个源试试,或点右上角「检测可用源」一次问清。',
-              style: theme.textTheme.bodySmall?.copyWith(color: muted, fontSize: 11),
-            ),
-            const SizedBox(height: 6),
-            Wrap(
-              spacing: 8,
-              children: [
-                TextButton(
-                  onPressed: _loadItems,
-                  child: const Text('重试'),
-                ),
-                for (final o in others.take(3))
-                  ActionChip(
-                    label: Text('换到 ${o.label}'),
-                    onPressed: () {
-                      setState(() => _sourceId = o.id);
-                      _loadItems();
-                    },
-                  ),
-              ],
-            ),
-          ],
-        ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -560,11 +602,11 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
     for (var i = 0; i < cats.length; i += 2) {
       rows.add(
         Padding(
-          padding: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.only(bottom: Gap.xs),
           child: Row(
             children: [
               Expanded(child: _aiCategoryTile(context, theme, cats[i], icons)),
-              if (i + 1 < cats.length) const SizedBox(width: 8),
+              if (i + 1 < cats.length) const SizedBox(width: Gap.xs),
               if (i + 1 < cats.length)
                 Expanded(
                   child: _aiCategoryTile(context, theme, cats[i + 1], icons),
@@ -584,7 +626,7 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
     Map<String, IconData> icons,
   ) {
     return InkWell(
-      borderRadius: BorderRadius.circular(10),
+      borderRadius: Radii.controlRadius,
       onTap: () => Navigator.push(
         context,
         MaterialPageRoute(
@@ -594,17 +636,25 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
         ),
       ),
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+        padding: const EdgeInsets.symmetric(vertical: Gap.sm, horizontal: Gap.xs),
         decoration: BoxDecoration(
           color: theme.colorScheme.surface,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: Radii.controlRadius,
           border: Border.all(color: theme.colorScheme.outlineVariant),
         ),
         child: Column(
           children: [
-            Icon(icons[category] ?? Icons.folder,
-                size: 24, color: theme.colorScheme.primary),
-            const SizedBox(height: 6),
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: theme.colorScheme.primary.withAlpha(20),
+                borderRadius: BorderRadius.circular(Radii.control),
+              ),
+              child: Icon(icons[category] ?? Icons.folder,
+                  size: 20, color: theme.colorScheme.primary),
+            ),
+            const SizedBox(height: Gap.xs),
             Text(category,
                 style: theme.textTheme.bodyMedium
                     ?.copyWith(fontWeight: FontWeight.w500)),
@@ -616,43 +666,41 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
 
   Widget _buildItemCard(ThemeData theme, FeedItem item) {
     final muted = theme.colorScheme.onSurfaceVariant;
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 10, 6, 10),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(item.title.isEmpty ? '(无标题)' : item.title,
+    return AppCard(
+      onTap: () => _openItem(item),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(item.title.isEmpty ? '(无标题)' : item.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodyLarge
+                        ?.copyWith(fontWeight: FontWeight.w600)),
+                if (item.summary.isNotEmpty) ...[
+                  const SizedBox(height: Gap.xxs),
+                  Text(item.summary,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodyLarge
-                          ?.copyWith(fontWeight: FontWeight.w600)),
-                  if (item.summary.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Text(item.summary,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style:
-                            theme.textTheme.bodySmall?.copyWith(color: muted)),
-                  ],
-                  if (item.published != null) ...[
-                    const SizedBox(height: 4),
-                    Text(item.published!,
-                        style: theme.textTheme.bodySmall
-                            ?.copyWith(color: muted, fontSize: 11)),
-                  ],
+                      style: theme.textTheme.bodySmall?.copyWith(color: muted)),
                 ],
-              ),
+                if (item.published != null) ...[
+                  const SizedBox(height: Gap.xxs),
+                  Text(item.published!,
+                      style: theme.textTheme.bodySmall
+                          ?.copyWith(color: muted, fontSize: 11)),
+                ],
+              ],
             ),
-            TextButton(
-              onPressed: () => _openItem(item),
-              child: const Text('分析并读'),
-            ),
-          ],
-        ),
+          ),
+          const SizedBox(width: Gap.xs),
+          FilledButton.tonal(
+            onPressed: () => _openItem(item),
+            child: const Text('分析并读'),
+          ),
+        ],
       ),
     );
   }
@@ -660,19 +708,34 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
   Widget _buildShelfCard(ThemeData theme, ShelfItem s) {
     final muted = theme.colorScheme.onSurfaceVariant;
     final cov = s.coverage;
-    return Card(
-      child: ListTile(
-        title: Text(s.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-        subtitle: Text(
-          '${MaterialLibrary.kindLabel(s.kind)} · ${s.wordCount} 词'
-          '${s.cefr.isEmpty ? '' : ' · ${s.cefr}'}'
-          '${cov == null ? '' : ' · 覆盖 ${(cov * 100).toStringAsFixed(0)}%'}'
-          ' · ${s.progressLabel}'
-          '${s.pickedWords > 0 ? ' · 已收 ${s.pickedWords} 词' : ''}',
-          style: TextStyle(color: muted, fontSize: 12),
-        ),
-        trailing: const Icon(Icons.chevron_right),
-        onTap: () => _openReader(s.id),
+    final meta = '${MaterialLibrary.kindLabel(s.kind)} · ${s.wordCount} 词'
+        '${s.cefr.isEmpty ? '' : ' · ${s.cefr}'}'
+        '${cov == null ? '' : ' · 覆盖 ${(cov * 100).toStringAsFixed(0)}%'}'
+        ' · ${s.progressLabel}'
+        '${s.pickedWords > 0 ? ' · 已收 ${s.pickedWords} 词' : ''}';
+    return AppCard(
+      onTap: () => _openReader(s.id),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(s.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodyLarge
+                        ?.copyWith(fontWeight: FontWeight.w500)),
+                const SizedBox(height: Gap.xxs),
+                Text(meta,
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(color: muted, fontSize: 12)),
+              ],
+            ),
+          ),
+          Icon(Icons.chevron_right,
+              size: 20, color: theme.colorScheme.outline),
+        ],
       ),
     );
   }

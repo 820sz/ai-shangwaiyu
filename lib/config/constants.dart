@@ -162,6 +162,10 @@ class AppConstants {
   /// 退出提示"一天只问一次"的日期戳(v2.5)
   static const String keyExitPromptDate = 'exit_prompt_date';
 
+  /// 阅读器显示设置(v2.5,U2):字号乘数与行距 —— 材料阅读器与文章阅读器共用
+  static const String keyReaderFontScale = 'reader_font_scale';
+  static const String keyReaderLineHeight = 'reader_line_height';
+
   // ── 生词类型 ──
   static const String wordTypeWord = 'word';
   static const String wordTypePhrase = 'phrase';

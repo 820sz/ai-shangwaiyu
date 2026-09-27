@@ -159,6 +159,31 @@ void main() {
           reason: '浅色下描边太淡会看不出边界(卡片/输入框/标签都会"泛白"):\\n'
               '${failures.join('\\n')}');
     });
+
+    // ── 语义色(v2.5,U2)──────────────────────────────────────────
+    // 写译批改的分数、材料源可用性、任务状态都用这三个色。以前直接用
+    // `Colors.green/orange/red` —— 在白底上只有 2.5~3.1:1,真机上就是"看不清"。
+    // 语义色必须**随明暗切换**(同一档不可能两头都对),这组把两档都量一遍。
+    test('语义色:浅色档对白卡片、深色档对深卡片都达到 4.5:1', () {
+      final lightCard = AppTheme.lightTheme.cardTheme.color!;
+      final darkCard = AppTheme.darkTheme.cardTheme.color!;
+      final cases = <String, List<Color>>{
+        'success(浅)': [AppTheme.lightSuccess, lightCard],
+        'warning(浅)': [AppTheme.lightWarning, lightCard],
+        'danger(浅)': [AppTheme.lightDanger, lightCard],
+        'success(深)': [AppTheme.darkSuccess, darkCard],
+        'warning(深)': [AppTheme.darkWarning, darkCard],
+        'danger(深)': [AppTheme.darkDanger, darkCard],
+      };
+      final failures = <String>[];
+      cases.forEach((label, colors) {
+        final ratio = contrast(colors[0], colors[1]);
+        if (ratio < 4.5) failures.add('$label = ${ratio.toStringAsFixed(2)}:1');
+      });
+      expect(failures, isEmpty,
+          reason: '语义色在真机上会变成看不清的字(且深浅两档都要达标):\\n'
+              '${failures.join('\\n')}');
+    });
   });
 
   group('主题档位解析', () {

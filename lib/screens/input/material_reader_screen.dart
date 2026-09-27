@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
+import '../../config/design_tokens.dart';
 import '../../models/vocabulary.dart';
 import '../../providers/vocab_provider.dart';
 import '../../services/audio_service.dart';
@@ -10,9 +11,11 @@ import '../../services/backup_service.dart';
 import '../../services/database.dart';
 import '../../services/doubao_api.dart';
 import '../../services/material_library.dart';
+import '../../services/reader_settings.dart';
 import '../../services/reading_quiz.dart';
 import '../../services/text_difficulty.dart';
 import '../../services/tts_service.dart';
+import '../../widgets/app_ui.dart';
 import '../../widgets/audio_player_bar.dart';
 import 'dictation_screen.dart';
 import 'reading_quiz_screen.dart';
@@ -53,12 +56,109 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
   final List<String> _pickedWords = [];
   bool _finished = false;
 
+  /// 阅读设置(v2.5):字号乘数与行距,落 Hive,两个阅读器共用
+  double _fontScale = ReaderSettings.defaultFontScale;
+  double _lineHeight = ReaderSettings.defaultLineHeight;
+
   @override
   void initState() {
     super.initState();
+    _fontScale = ReaderSettings.fontScale();
+    _lineHeight = ReaderSettings.lineHeight();
     _stopwatch.start();
     _load();
     _scrollCtrl.addListener(_onScroll);
+  }
+
+  /// 阅读设置面板:字号 / 行距 —— 边调边生效(不用"确定"按钮),退出时已落盘
+  Future<void> _showReaderSettings() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) {
+          final theme = Theme.of(ctx);
+          final muted = theme.colorScheme.onSurfaceVariant;
+          void apply(double scale, double height) {
+            setSheet(() {});
+            setState(() {
+              _fontScale = scale;
+              _lineHeight = height;
+            });
+          }
+
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(
+                  Gap.md, 0, Gap.md, Gap.md),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('阅读设置',
+                      style: theme.textTheme.titleMedium
+                          ?.copyWith(fontWeight: FontWeight.w700)),
+                  const SizedBox(height: Gap.md),
+                  Text('字号', style: theme.textTheme.bodySmall?.copyWith(color: muted)),
+                  const SizedBox(height: Gap.xs),
+                  Wrap(
+                    spacing: Gap.xs,
+                    children: [
+                      for (final s in ReaderSettings.fontScales)
+                        ChoiceChip(
+                          label: Text(ReaderSettings.scaleLabel(s)),
+                          selected: _fontScale == s,
+                          onSelected: (_) {
+                            ReaderSettings.setFontScale(s);
+                            apply(s, _lineHeight);
+                          },
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: Gap.md),
+                  Text('行距', style: theme.textTheme.bodySmall?.copyWith(color: muted)),
+                  const SizedBox(height: Gap.xs),
+                  Wrap(
+                    spacing: Gap.xs,
+                    children: [
+                      for (var i = 0; i < ReaderSettings.lineHeights.length; i++)
+                        ChoiceChip(
+                          label: Text(ReaderSettings.lineHeightLabels[i]),
+                          selected: _lineHeight == ReaderSettings.lineHeights[i],
+                          onSelected: (_) {
+                            final h = ReaderSettings.lineHeights[i];
+                            ReaderSettings.setLineHeight(h);
+                            apply(_fontScale, h);
+                          },
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: Gap.md),
+                  // 预览:调完立刻能看到正文长什么样(不然要退出去才知道)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(Gap.sm),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surfaceContainerHighest,
+                      borderRadius: Radii.controlRadius,
+                    ),
+                    child: Text(
+                      'The quick brown fox jumps over the lazy dog. '
+                      '阅读的样子大致就是这样。',
+                      style: TextStyle(
+                        fontSize: ReaderSettings.baseFontSize * _fontScale,
+                        height: _lineHeight,
+                        color: theme.colorScheme.onSurface,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
   }
 
   @override
@@ -328,6 +428,12 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
       appBar: AppBar(
         title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
         actions: [
+          // 阅读设置(v2.5):字号 / 行距 —— 长时间读英文最需要的两个旋钮
+          IconButton(
+            tooltip: '阅读设置(字号 / 行距)',
+            onPressed: _showReaderSettings,
+            icon: const Icon(Icons.format_size),
+          ),
           // 听写练习(v2.2):用 TTS 按句出题 —— 文字与音频天然对齐,可客观判分
           IconButton(
             tooltip: '听写练习',
@@ -360,12 +466,19 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
         ],
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const AppLoading(label: '正在打开材料…')
           : _error != null
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Text('打不开这份材料:$_error'),
+              ? Padding(
+                  padding: Insets.page,
+                  child: AppErrorCard(
+                    message: '打不开这份材料:$_error',
+                    onRetry: () {
+                      setState(() {
+                        _loading = true;
+                        _error = null;
+                      });
+                      _load();
+                    },
                   ),
                 )
               : Column(
@@ -381,17 +494,20 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
                         width: double.infinity,
                         color: theme.colorScheme.surfaceContainerHighest,
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 8),
+                            horizontal: Gap.md, vertical: Gap.xs),
                         child: Text(
                           '${a.wordCount} 词 · 约 ${a.estMinutes} 分钟 · ${a.cefr} · '
                           '覆盖率 ${(a.knownTokenRatio * 100).toStringAsFixed(1)}% · ${a.hint}',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.bodySmall?.copyWith(color: muted),
                         ),
                       ),
                     Expanded(
                       child: ListView.builder(
                         controller: _scrollCtrl,
-                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 80),
+                        padding: const EdgeInsets.fromLTRB(
+                            Gap.md, Gap.sm, Gap.md, 80),
                         itemCount: _chunks.length,
                         itemBuilder: (_, i) => _buildChunk(theme, i),
                       ),
@@ -416,8 +532,14 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     final row = _chunks[index];
     final chunkTitle = row['title'];
     final text = '${row['text'] ?? ''}';
+    // 正文样式由**阅读设置**决定(字号乘数 × 基准号 + 行距档位),
+    // 系统无障碍字号仍由 MediaQuery 叠加,不在这里覆盖
+    final bodyStyle = (theme.textTheme.bodyLarge ?? const TextStyle()).copyWith(
+      fontSize: ReaderSettings.baseFontSize * _fontScale,
+      height: _lineHeight,
+    );
     return Padding(
-      padding: const EdgeInsets.only(bottom: 18),
+      padding: const EdgeInsets.only(bottom: Gap.lg),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -425,13 +547,12 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
             Text(chunkTitle.trim(),
                 style: theme.textTheme.titleSmall
                     ?.copyWith(fontWeight: FontWeight.w700)),
-            const SizedBox(height: 6),
+            const SizedBox(height: Gap.sm),
           ],
           _TappableText(
             text: text,
             onWordTap: _onWordTap,
-            style: theme.textTheme.bodyLarge?.copyWith(height: 1.7) ??
-                const TextStyle(fontSize: 16, height: 1.7),
+            style: bodyStyle,
           ),
         ],
       ),
@@ -566,93 +687,160 @@ class _WordSheetState extends State<_WordSheet> {
     final theme = Theme.of(context);
     final muted = theme.colorScheme.onSurfaceVariant;
     final info = _info ?? const <String, String>{};
+    final phonetic = info['phonetic'] ?? '';
+    final pos = info['part_of_speech'] ?? '';
+    final translation = info['translation'] ?? '';
+    final example = info['original_sentence'] ?? '';
+    final grammar = info['grammar_note'] ?? '';
     return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+      // 大字号(2× 系统字号)下弹层会变高 —— 可滚动,永不溢出
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(Gap.md, 0, Gap.md, Gap.md),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // ① 词头:词 + 音标 + 朗读(层级最高,一眼定位到"我点的是哪个词")
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
-                  child: Text(widget.word,
-                      style: theme.textTheme.headlineSmall
-                          ?.copyWith(fontWeight: FontWeight.w700)),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(widget.word,
+                          style: theme.textTheme.headlineSmall
+                              ?.copyWith(fontWeight: FontWeight.w700)),
+                      if (phonetic.isNotEmpty) ...[
+                        const SizedBox(height: Gap.xxs),
+                        Text(phonetic,
+                            style: theme.textTheme.bodyMedium
+                                ?.copyWith(color: muted)),
+                      ],
+                    ],
+                  ),
                 ),
-                IconButton(
+                const SizedBox(width: Gap.xs),
+                IconButton.filledTonal(
                   tooltip: '朗读',
                   onPressed: () => widget.onSpeak(widget.word),
                   icon: const Icon(Icons.volume_up_outlined),
                 ),
               ],
             ),
+            const SizedBox(height: Gap.sm),
+            // ② 释义区(按需从 AI 拉,加载时不挡住词头)
             if (_loading)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 12),
-                child: LinearProgressIndicator(),
+              Row(
+                children: [
+                  const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  const SizedBox(width: Gap.xs),
+                  Text('正在查释义…',
+                      style:
+                          theme.textTheme.bodySmall?.copyWith(color: muted)),
+                ],
               )
             else if (_error != null)
-              Text('查询失败:$_error',
-                  style: theme.textTheme.bodySmall?.copyWith(color: Colors.red))
+              AppErrorCard(
+                message: '查询失败:$_error',
+                retryLabel: '重新查',
+                onRetry: () {
+                  setState(() {
+                    _loading = true;
+                    _error = null;
+                  });
+                  _lookup();
+                },
+              )
             else ...[
-              if ((info['phonetic'] ?? '').isNotEmpty)
-                Text(info['phonetic']!,
-                    style: theme.textTheme.bodyMedium?.copyWith(color: muted)),
-              const SizedBox(height: 6),
-              if ((info['part_of_speech'] ?? '').isNotEmpty)
-                Text(info['part_of_speech']!,
-                    style: theme.textTheme.bodySmall?.copyWith(color: muted)),
-              if ((info['translation'] ?? '').isNotEmpty)
-                Text(info['translation']!,
-                    style: theme.textTheme.bodyLarge),
-              if ((info['original_sentence'] ?? '').isNotEmpty) ...[
-                const SizedBox(height: 8),
-                Text(info['original_sentence']!,
-                    style: theme.textTheme.bodySmall?.copyWith(color: muted)),
+              if (pos.isNotEmpty) ...[
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: Gap.xs, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(Radii.control - 4),
+                  ),
+                  child: Text(pos,
+                      style: theme.textTheme.bodySmall?.copyWith(color: muted)),
+                ),
+                const SizedBox(height: Gap.xs),
               ],
-              if ((info['grammar_note'] ?? '').isNotEmpty) ...[
-                const SizedBox(height: 6),
-                Text('语法:${info['grammar_note']}',
-                    style: theme.textTheme.bodySmall?.copyWith(color: muted)),
+              if (translation.isNotEmpty)
+                Text(translation, style: theme.textTheme.bodyLarge),
+              if (example.isNotEmpty) ...[
+                const SizedBox(height: Gap.sm),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(Gap.sm),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerHighest,
+                    borderRadius: Radii.controlRadius,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('例句',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                              color: muted,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600)),
+                      const SizedBox(height: Gap.xxs),
+                      Text(example,
+                          style: theme.textTheme.bodyMedium
+                              ?.copyWith(height: 1.5)),
+                    ],
+                  ),
+                ),
+              ],
+              if (grammar.isNotEmpty) ...[
+                const SizedBox(height: Gap.xs),
+                Text('语法:$grammar',
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(color: muted, height: 1.5)),
               ],
             ],
-            const SizedBox(height: 14),
-            Row(
-              children: [
-                FilledButton.icon(
-                  onPressed: () async {
-                    final v = Vocabulary(
-                      word: widget.word,
-                      translation: info['translation'],
-                      partOfSpeech: info['part_of_speech'],
-                      phonetic: info['phonetic'],
-                      originalSentence: info['original_sentence']?.isNotEmpty == true
-                          ? info['original_sentence']
-                          : (widget.sentence.isEmpty ? null : widget.sentence),
-                      grammarNote: info['grammar_note'],
-                      sourceBook: null,
-                      wordType: 'word',
-                    );
-                    final msg = await widget.onSave(v);
-                    if (!mounted) return;
-                    setState(() => _saveMsg = msg);
-                  },
-                  icon: const Icon(Icons.bookmark_add_outlined),
-                  label: const Text('收进生词本'),
-                ),
-                const SizedBox(width: 12),
-                if (_saveMsg.isNotEmpty)
-                  Expanded(
-                    child: Text(_saveMsg,
-                        style: theme.textTheme.bodySmall
-                            ?.copyWith(color: muted)),
-                  ),
-              ],
+            const SizedBox(height: Gap.md),
+            // ③ 主动作:收进生词本(整行按钮,大字号下也好点)
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: () async {
+                  final v = Vocabulary(
+                    word: widget.word,
+                    translation: info['translation'],
+                    partOfSpeech: info['part_of_speech'],
+                    phonetic: info['phonetic'],
+                    originalSentence: info['original_sentence']?.isNotEmpty == true
+                        ? info['original_sentence']
+                        : (widget.sentence.isEmpty ? null : widget.sentence),
+                    grammarNote: info['grammar_note'],
+                    sourceBook: null,
+                    wordType: 'word',
+                  );
+                  final msg = await widget.onSave(v);
+                  if (!mounted) return;
+                  setState(() => _saveMsg = msg);
+                },
+                icon: const Icon(Icons.bookmark_add_outlined),
+                label: const Text('收进生词本'),
+              ),
             ),
-            const SizedBox(height: 6),
-            Text('收藏后会立刻进入复习队列(下次复习按记忆强度安排)',
-                style: theme.textTheme.bodySmall?.copyWith(color: muted)),
+            const SizedBox(height: Gap.xs),
+            Text(
+              _saveMsg.isNotEmpty
+                  ? _saveMsg
+                  : '收藏后会立刻进入复习队列(下次复习按记忆强度安排)',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: _saveMsg.isNotEmpty
+                    ? theme.colorScheme.primary
+                    : muted,
+              ),
+            ),
           ],
         ),
       ),

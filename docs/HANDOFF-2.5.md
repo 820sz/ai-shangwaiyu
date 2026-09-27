@@ -21,10 +21,10 @@
 | 远端 | https://github.com/820sz/ai-shangwaiyu(**公开**,AGPL-3.0,gh CLI 已登录 `820sz`,默认分支 **master**) |
 | 工具链 | Flutter **3.44.7** stable / Dart 3.12.2 |
 | 已发布 | **v2.4.0+61 = Release Latest**(v2.5 的所有改动**都还没发版**,这是刻意的) |
-| 本地 HEAD | `68d0ad6` — 与远端 master(tree `be552682`)一致,工作区干净 |
-| 绿灯 | analyze **0 error / 0 warning**;测试 **694 全绿 + 1 skip** |
+| 本地 HEAD | 见 §2.2 提交地图(与远端 master 保持一致) |
+| 绿灯 | analyze **0 error / 0 warning**(24 条存量 info);测试 **707 全绿 + 1 skip** |
 | 当前任务 | 排 bug + **前端大升级**(参考「训记」)+ 材料中心三修 + 开屏/退出动画 |
-| **下一步** | **U2**(材料中心 / 阅读器 / 写作)→ **U3**(复习 / 我的 / 设置)→ **P2**(继续排 bug)→ 发 **v2.5.0** |
+| **下一步** | **U3**(复习 / 我的 / 设置)→ **P2**(继续排 bug)→ 发 **v2.5.0** |
 
 **三条命令**(PowerShell,先 `cd D:\readflow`):
 ```powershell
@@ -69,13 +69,19 @@ flutter test                           # 期望 694 全绿 + 1 skip
 ### 2.2 本轮(v2.5)提交地图(都在远端了)
 
 ```
-68d0ad6 docs: 任务板 v2.5 更新(M1/M2/M3/U1 完成记录 + 用户决策)   ← 本地 HEAD
+6473606 feat(U2): 材料中心/方向页/阅读器/写作 排版与层级统一        ← U2 完成
+0f9568e docs: v2.5 交接文档 + 记忆工程 + PLAN 状态区同步
+68d0ad6 docs: 任务板 v2.5 更新(M1/M2/M3/U1 完成记录 + 用户决策)
 ffd6b83 feat(U1): 前端大升级地基 — 设计令牌 + 通用组件 + 页面切换动画 + 两个首页重排
 98e446d feat(M3): 开屏动画 + 退出提示动画(文案可自定义 / 一天只问一次)
 3a37dc5 feat(M2): AI 改写内容补齐"来源/生成信息/思考过程" + 详情页不再简陋
 74620f5 fix(M1): 材料中心找不出原文 — 换掉不可达的检索站 + 每个源如实报告 + 并行检索
 22a9427 chore: v2.4.0 正式版(2.4.0+61)
 ```
+
+> ⚠️ 远端提交的 SHA 与本地**不同**(远端由 API 逐 blob 造提交)。判断"是否同步"要看
+> **tree**,不是 SHA:`git rev-parse 'HEAD^{tree}'` 与
+> `gh api repos/820sz/ai-shangwaiyu/commits/master --jq .commit.tree.sha` 相同即已同步。
 
 ### 2.3 本轮任务状态一览
 
@@ -85,8 +91,8 @@ ffd6b83 feat(U1): 前端大升级地基 — 设计令牌 + 通用组件 + 页面
 | **M2** | AI 改写看不到出处/来源/思考 | ✅ 完成 | `recommendations` 表加 `model`/`reasoning`(**dbVersion 13**);详情页新增 AI 溯源卡 |
 | **M3** | 开屏 + 退出动画 | ✅ 完成 | `splash_screen.dart` / `splash_settings.dart` / `widgets/exit_prompt.dart`;文案在「我的 → 外观」改 |
 | **U1** | 设计系统 + 两个首页 | ✅ 完成 | `lib/config/design_tokens.dart`、`lib/widgets/app_ui.dart`、主题统一、`tutor_home.dart` + `input_home.dart` 重排 |
-| **U2** | 材料中心 / 阅读器 / 写作 | ⬜ **待办(下一步)** | 见 §3.1 |
-| **U3** | 复习 / 我的 / 设置 | ⬜ 待办 | 见 §3.2 |
+| **U2** | 材料中心 / 阅读器 / 写作 | ✅ **已完成**(2026-09-27) | 见 §3.1 开头 |
+| **U3** | 复习 / 我的 / 设置 | ⬜ **待办(下一步)** | 见 §3.2 |
 | **P2** | 继续排 bug | ⬜ 待办 | 见 §3.3 |
 | — | 发版 v2.5.0 | ⬜ 待办 | **U1–U3 全做完再发**(用户明确要求,不分批出 prebuild) |
 
@@ -97,7 +103,14 @@ ffd6b83 feat(U1): 前端大升级地基 — 设计令牌 + 通用组件 + 页面
 > **U1–U3 的边界(用户拍的)**:只做**排版 / 层级 / 组件统一 / 动效**,**不改业务逻辑**。
 > 每批做完必须:analyze 0 error、全量测试绿、**单独 commit**(中文说明,带 `feat(U2):` 前缀)。
 
-### 3.1 U2 — 材料中心 / 阅读器 / 写作
+### 3.1 U2 — 材料中心 / 阅读器 / 写作 ✅ 已完成(2026-09-27)
+
+**交付摘要**(细节见 `docs/TASK-BOARD-2.5.md` 的「U2 实际交付」):
+- 材料中心 / 方向页:全量换成设计系统组件(区块标题、卡片、空态、加载态、错误态);源状态 = 色点 + 一句话;失败卡可一键换源;**顺手修掉界面上漏出来的字面 `**星号**`**。
+- 阅读器:**新增阅读设置**(`lib/services/reader_settings.dart`:字号 5 档 / 行距 3 档 + 实时预览,Hive 持久化,**材料阅读器与文章阅读器共用**);查词面板层级重做(词/音标/朗读 → 词性/释义 → 例句卡 → 整行「收进生词本」);失败可原地重试。
+- 写作页:编辑/结果两态排版统一;新增**语义色** `AppTheme.successColor / warningColor / dangerColor`(随明暗切换、过 WCAG 闸门),替换写死的 `Colors.green/orange/red`;错误分类标签改用调色板角色。
+- 验证:analyze **0 error / 0 warning**;**707 测试全绿 + 1 skip**(新增 `test/reader_settings_test.dart` 12 例 + 语义色对比度闸门)。
+- **下面的 a)–d) 是当时的计划,已全部落地**,保留作背景与后续参考。
 
 **a) 材料中心 `lib/screens/input/material_center_screen.dart`(642 行)**
 - 现状:源 chips 条 + 内容区 + AI 方向卡网格 + 错误卡,间距/圆角/字号各写各的。
@@ -146,6 +159,8 @@ ffd6b83 feat(U1): 前端大升级地基 — 设计令牌 + 通用组件 + 页面
 | `lib/config/design_tokens.dart` | **设计令牌唯一事实源**:`Gap`(4/8/12/16/24/32)、`Radii`(control10/card16/sheet20)、`Motion`(tap120/transition220/enter420 + 曲线)、`Insets`(page/card/tile) |
 | `lib/widgets/app_ui.dart` | **通用组件**:`AppCard` `AppSectionTitle` `AppActionTile` `AppEmpty` `AppLoading` `AppErrorCard` `AppStagger`(错峰入场 40ms/index,上限 240ms)。**只管外观/结构** |
 | `lib/services/original_search.dart` | 原版材料检索:Gutenberg 站内检索页解析 / arXiv / RSS;并行 + 12s 预算;每源 note;跳过已知不可达源 |
+| `lib/services/reader_settings.dart` | **阅读设置**(U2):字号 5 档 / 行距 3 档 + 夹档容错;材料阅读器与文章阅读器共用 |
+| `lib/config/theme.dart` 的 `successColor/warningColor/dangerColor` | **语义色**(U2):随明暗切换的成功/警告/危险,替换写死的 `Colors.green/orange/red`(过 WCAG 闸门) |
 | `lib/services/material_source_status.dart` | 各源健康度(Hive 持久化)+ `preferredSourceId` |
 | `lib/services/vision_guard.dart` | 识图结果的**本地确定性校验**(丢空/太短/非英文/截断/复读;同词不同行合并成 occurrences) |
 | `lib/services/vision_image.dart` | 图片预处理(EXIF 转正 + 长边 ≤2000 + JPEG q88) |
@@ -225,7 +240,9 @@ pwsh tool/push_via_api.ps1
 ```
 成功打印 `PUSH_VIA_API_DONE`;基准猜错会打印 `TREE_MISMATCH_ABORT`(**不会有副作用,换基准重跑即可**)。
 
-> 现成数据(2026-09-27):远端 tree `be552682`,对应本地提交 **`68d0ad6`** —— 下次同步就用它当 `RF_DIFF_BASE`。
+> 现成数据(**每次同步成功后要把这两行更新成新值**):
+> - 2026-09-27(交接文档那次):远端 tree `be552682` ↔ 本地提交 `68d0ad6`
+> - 判断方法同上:比对 `git rev-parse 'HEAD^{tree}'` 与远端 `tree.sha`。
 
 ---
 
@@ -277,13 +294,13 @@ v2.5 还没发版,这些要等发出去后请他验:
 
 ```powershell
 cd D:\readflow
-git log --oneline -6                     # 确认 HEAD 还是 68d0ad6(或它的后继)
+git log --oneline -6                     # 确认 HEAD 是 U2 那个提交或它的后继
 git status --porcelain                   # 期望干净
 $env:FLUTTER_ALREADY_LOCKED='true'
-flutter analyze --no-fatal-infos         # 期望 0 error / 0 warning
-flutter test                             # 期望 694 全绿 + 1 skip
+flutter analyze --no-fatal-infos         # 期望 0 error / 0 warning(24 条 info 是存量)
+flutter test                             # 期望 707 全绿 + 1 skip
 ```
 
-然后按顺序:**U2(§3.1)→ U3(§3.2)→ P2(§3.3)→ 发 v2.5.0(§5.2)→ 同步远端(§5.3)→ 更新 PLAN.md + 本文件**。
+然后按顺序:**U3(§3.2)→ P2(§3.3)→ 发 v2.5.0(§5.2)→ 同步远端(§5.3)→ 更新 PLAN.md + 本文件**。
 
 **每完成一批就 commit + 汇报**,不要攒到最后。

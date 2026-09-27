@@ -78,6 +78,35 @@ class AppTheme {
           ? const Color(0xFFE0A83C)
           : const Color(0xFFB07A1E);
 
+  // ── 语义色(v2.5,U2):成功 / 警告 / 危险 ──────────────────────
+  //
+  // 为什么不能直接用 Colors.green / Colors.orange / Colors.red:
+  // 它们在白底上只有 ~2.5~3.1:1(小字号就是"看不清"),在深底上又偏刺眼;
+  // 同一个值不可能两头都对 —— 与 amber 同理,必须随明暗切换。
+  // 这里的值都过了 WCAG:浅色档对白底 ≥4.5:1,深色档对 #12141A ≥4.5:1
+  // (闸门测试见 test/theme_test.dart 的"语义色"组)。
+  static const Color lightSuccess = Color(0xFF157F35);
+  static const Color lightWarning = Color(0xFFB45309);
+  static const Color lightDanger = Color(0xFFC62828);
+  static const Color darkSuccess = Color(0xFF45C46A);
+  static const Color darkWarning = Color(0xFFE0A83C);
+  static const Color darkDanger = Color(0xFFFF6B6B);
+
+  /// 成功(分数及格、任务完成、源可用)
+  static Color successColor(BuildContext context) =>
+      _semantic(context, lightSuccess, darkSuccess);
+
+  /// 警告(偏难、待注意、源不可用但非错误)
+  static Color warningColor(BuildContext context) =>
+      _semantic(context, lightWarning, darkWarning);
+
+  /// 危险(错误、扣分项、删除)
+  static Color dangerColor(BuildContext context) =>
+      _semantic(context, lightDanger, darkDanger);
+
+  static Color _semantic(BuildContext context, Color light, Color dark) =>
+      Theme.of(context).brightness == Brightness.dark ? dark : light;
+
   /// themeMode → 存储用的语义档位
   static String themeModeId(ThemeMode mode) => switch (mode) {
         ThemeMode.light => 'light',

@@ -3,12 +3,14 @@ import 'package:provider/provider.dart';
 
 import '../../models/learner_model.dart';
 import '../../providers/vocab_provider.dart';
+import '../../config/design_tokens.dart';
+import '../../config/theme.dart';
 import '../../services/learner_model_store.dart';
 import '../../services/learner_context.dart';
 import '../../services/material_library.dart';
 import '../../services/material_source.dart';
 import '../../services/original_search.dart';
-import '../../widgets/empty_state.dart';
+import '../../widgets/app_ui.dart';
 import 'ai_material_search.dart';
 import 'material_reader_screen.dart';
 
@@ -92,7 +94,9 @@ class _CategoryMaterialScreenState extends State<CategoryMaterialScreen> {
     showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => const Center(child: CircularProgressIndicator()),
+      builder: (_) => const Dialog(
+        child: AppLoading(label: '正在抓取并分析原文…'),
+      ),
     );
     try {
       final service = MaterialSourceService.instance;
@@ -151,14 +155,14 @@ class _CategoryMaterialScreenState extends State<CategoryMaterialScreen> {
   // ── 方向一:资料原文(默认) ──
   Widget _buildOriginalTab(ThemeData theme, Color muted) {
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+      padding: Insets.page,
       children: [
         Text(
-          '公开源的**真实原文**:公版书全文、论文、外刊条目 —— '
+          '公开源的真实原文:公版书全文、论文、外刊条目 —— '
           '每条都能点开看原文与来源,不是 AI 改写的内容。',
           style: theme.textTheme.bodySmall?.copyWith(color: muted, height: 1.5),
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: Gap.sm),
         Row(
           children: [
             Expanded(
@@ -171,7 +175,7 @@ class _CategoryMaterialScreenState extends State<CategoryMaterialScreen> {
                 onSubmitted: (_) => _search(),
               ),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: Gap.xs),
             FilledButton(
               onPressed: _loading ? null : _search,
               child: Text(_loading ? '搜索中…' : '搜索'),
@@ -181,125 +185,154 @@ class _CategoryMaterialScreenState extends State<CategoryMaterialScreen> {
         // 每个源的真实情况(v2.5):通了几条 / 为什么没结果 / 上次没连上已跳过 ——
         // 旧版只有"没有结果"四个字,用户只能得出"这功能没用"
         if (_notes.isNotEmpty) ...[
-          const SizedBox(height: 8),
-          for (final n in _notes)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 2),
-              child: Text('· $n',
-                  style: theme.textTheme.bodySmall
-                      ?.copyWith(color: muted, fontSize: 11)),
-            ),
+          const SizedBox(height: Gap.sm),
+          _notesStrip(theme, muted),
         ],
-        const SizedBox(height: 10),
+        const SizedBox(height: Gap.sm),
         if (_loading)
-          const Center(
-            child: Padding(
-              padding: EdgeInsets.all(20),
-              child: CircularProgressIndicator(),
-            ),
-          )
+          const AppLoading(label: '正在检索公开源…')
         else if (_hits.isEmpty && _searched)
-          EmptyState(
+          AppEmpty(
+            icon: Icons.search_off,
             title: '这次没搜到原文',
             hint: _notes.any((n) => n.contains('中文关键词'))
                 ? '换成英文关键词再试(这些源都是英文库)'
                 : '换个更常见的英文词,或到材料中心点「检测可用源」看看哪个源通',
           )
         else
-          for (final h in _hits) _buildHitCard(theme, muted, h),
+          for (var i = 0; i < _hits.length; i++)
+            AppStagger(
+              index: i,
+              child: _buildHitCard(theme, muted, _hits[i]),
+            ),
       ],
+    );
+  }
+
+  /// 各源检索结果说明条:一眼看清"哪个源通/几条/为什么空"
+  Widget _notesStrip(ThemeData theme, Color muted) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+          horizontal: Gap.sm, vertical: Gap.xs),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: Radii.controlRadius,
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.info_outline, size: 15, color: muted),
+          const SizedBox(width: Gap.xs),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (final n in _notes)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 2),
+                    child: Text(n,
+                        style: theme.textTheme.bodySmall
+                            ?.copyWith(color: muted, fontSize: 11, height: 1.4)),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
   Widget _buildHitCard(ThemeData theme, Color muted, OriginalHit hit) {
     final source = MaterialSourceService.sourceOf(hit.sourceId);
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(hit.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodyLarge
-                          ?.copyWith(fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: theme.colorScheme.primary.withAlpha(24),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          '原文 · ${source?.label ?? hit.sourceId}',
-                          style: TextStyle(
-                              fontSize: 10, color: theme.colorScheme.primary),
+    return AppCard(
+      onTap: () => _open(hit),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(hit.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodyLarge
+                        ?.copyWith(fontWeight: FontWeight.w600)),
+                const SizedBox(height: Gap.xs),
+                // 来源徽章:这条是**真实原文**,来自哪个站 —— 用户最关心的信息
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.primary.withAlpha(24),
+                        borderRadius:
+                            BorderRadius.circular(Radii.control - 4),
+                      ),
+                      child: Text(
+                        '原文 · ${source?.label ?? hit.sourceId}',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          color: theme.colorScheme.primary,
                         ),
                       ),
-                    ],
-                  ),
-                  if (hit.note.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Text(hit.note,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodySmall
-                            ?.copyWith(color: muted, fontSize: 11)),
+                    ),
                   ],
+                ),
+                if (hit.note.isNotEmpty) ...[
+                  const SizedBox(height: Gap.xxs),
+                  Text(hit.note,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall
+                          ?.copyWith(color: muted, fontSize: 11)),
                 ],
-              ),
+              ],
             ),
-            TextButton(
-              onPressed: () => _open(hit),
-              child: const Text('打开原文'),
-            ),
-          ],
-        ),
+          ),
+          const SizedBox(width: Gap.xs),
+          FilledButton.tonal(
+            onPressed: () => _open(hit),
+            child: const Text('打开原文'),
+          ),
+        ],
       ),
     );
   }
 
   // ── 方向二:AI 整理编写(明确标注是 AI 产物) ──
   Widget _buildAiTab(ThemeData theme, Color muted) {
+    final amber = AppTheme.amber(context);
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+      padding: Insets.page,
       children: [
-        Card(
-          color: Colors.amber.withAlpha(28),
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(Icons.auto_awesome, size: 16, color: Colors.amber[800]),
-                    const SizedBox(width: 6),
-                    Text('这里的内容是 AI 整理/编写的',
-                        style: theme.textTheme.titleSmall
-                            ?.copyWith(fontWeight: FontWeight.w700)),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  '· AI 会按你的水平改写、整理出一份适合现在学的材料;'
-                  '它不是出版原文,完整度与出处无法像公版书那样考究;\n'
-                  '· 想要**可考证的原文**,请用左边的「资料原文」;',
-                  style: theme.textTheme.bodySmall
-                      ?.copyWith(color: muted, height: 1.5),
-                ),
-              ],
-            ),
+        AppCard(
+          color: amber.withAlpha(26),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.auto_awesome, size: 16, color: amber),
+                  const SizedBox(width: Gap.xxs + 2),
+                  Text('这里的内容是 AI 整理/编写的',
+                      style: theme.textTheme.titleSmall
+                          ?.copyWith(fontWeight: FontWeight.w700)),
+                ],
+              ),
+              const SizedBox(height: Gap.xs),
+              Text(
+                '· AI 会按你的水平改写、整理出一份适合现在学的材料;'
+                '它不是出版原文,完整度与出处无法像公版书那样考究;\n'
+                '· 想要可考证的原文,请用左边的「资料原文」;',
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: muted, height: 1.5),
+              ),
+            ],
           ),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: Gap.sm),
         FilledButton.icon(
           onPressed: () => Navigator.push(
             context,
@@ -310,7 +343,7 @@ class _CategoryMaterialScreenState extends State<CategoryMaterialScreen> {
           icon: const Icon(Icons.auto_awesome, size: 18),
           label: const Text('让 AI 按我的水平整理一份'),
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: Gap.sm),
         Text(
           '当前基线:${LearnerContext.describeBaseline(_model)}',
           style: theme.textTheme.bodySmall?.copyWith(color: muted),

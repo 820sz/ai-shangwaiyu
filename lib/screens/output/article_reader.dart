@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../models/article.dart';
 import '../../providers/article_provider.dart';
+import '../../services/reader_settings.dart';
 import 'exercise_screen.dart';
 
 class ArticleReaderScreen extends StatefulWidget {
@@ -154,6 +155,7 @@ class _ArticleReaderScreenState extends State<ArticleReaderScreen> {
           const SizedBox(height: 20),
 
           // 文章内容(显示翻译时英文段下方对照渲染对应中文段,段落索引对齐)
+          // 正文字号/行距跟随**阅读设置**(v2.5,U2:与材料阅读器共用同一份偏好)
           ...article.paragraphs.asMap().entries.map((e) => Padding(
                 padding: const EdgeInsets.only(bottom: 14),
                 child: Column(
@@ -162,8 +164,9 @@ class _ArticleReaderScreenState extends State<ArticleReaderScreen> {
                     Text(
                       e.value,
                       style: theme.textTheme.bodyLarge?.copyWith(
-                        height: 1.8,
-                        fontSize: 16,
+                        height: ReaderSettings.lineHeight(),
+                        fontSize:
+                            ReaderSettings.baseFontSize * ReaderSettings.fontScale(),
                       ),
                     ),
                     if (_showTranslation &&
@@ -173,8 +176,8 @@ class _ArticleReaderScreenState extends State<ArticleReaderScreen> {
                         child: Text(
                           article.translationParagraphs[e.key],
                           style: TextStyle(
-                            height: 1.8,
-                            fontSize: 14,
+                            height: ReaderSettings.lineHeight(),
+                            fontSize: 14 * ReaderSettings.fontScale(),
                             color: theme.colorScheme.onSurfaceVariant,
                           ),
                         ),
