@@ -1,0 +1,289 @@
+# 交接文档 · AI上外语 v2.5
+
+> **写于 2026-09-27**。这份文档是给「接手的人 / 上下文被压缩后的我」看的:**读完这一份就能零疑问继续干**。
+>
+> 事实源分工(别重复造):
+> | 文档 | 管什么 |
+> |---|---|
+> | **本文件 `docs/HANDOFF-2.5.md`** | 做到哪、还剩什么、怎么做、踩过什么坑(随进度更新) |
+> | `PLAN.md` 顶部「状态」三行 | 版本号 / 阶段的**唯一事实源**,每次发版必须同步 |
+> | `docs/TASK-BOARD-2.5.md` | 本轮用户原话、任务分解、用户决策(做事的边界) |
+> | `C:\Users\xi283\.dsh\memory\readflow-project.md`<br>`C:\Users\xi283\.dsh\memory\readflow-dev-session.md` | 跨会话记忆(压缩后自动带回),只放指针与铁律,细节指向本文件 |
+
+---
+
+## 0. 30 秒上手
+
+| 项 | 值 |
+|---|---|
+| 项目 | **AI上外语**(内部代号 readflow)— Flutter 写的英语学习 App,Android,用户自己 + 几个朋友用 |
+| 目录 | `D:\readflow` |
+| 远端 | https://github.com/820sz/ai-shangwaiyu(**公开**,AGPL-3.0,gh CLI 已登录 `820sz`,默认分支 **master**) |
+| 工具链 | Flutter **3.44.7** stable / Dart 3.12.2 |
+| 已发布 | **v2.4.0+61 = Release Latest**(v2.5 的所有改动**都还没发版**,这是刻意的) |
+| 本地 HEAD | `68d0ad6` — 与远端 master(tree `be552682`)一致,工作区干净 |
+| 绿灯 | analyze **0 error / 0 warning**;测试 **694 全绿 + 1 skip** |
+| 当前任务 | 排 bug + **前端大升级**(参考「训记」)+ 材料中心三修 + 开屏/退出动画 |
+| **下一步** | **U2**(材料中心 / 阅读器 / 写作)→ **U3**(复习 / 我的 / 设置)→ **P2**(继续排 bug)→ 发 **v2.5.0** |
+
+**三条命令**(PowerShell,先 `cd D:\readflow`):
+```powershell
+$env:FLUTTER_ALREADY_LOCKED = 'true'   # 每个新 shell 都要,否则 flutter 卡锁
+flutter analyze --no-fatal-infos       # 期望 0 error / 0 warning(24 条 info 是存量)
+flutter test                           # 期望 694 全绿 + 1 skip
+```
+
+---
+
+## 1. 用户是谁 · 铁律(违反会被骂)
+
+用户 = xi283,中文,Windows 11,手机真机测(Android)。以下是他明确表达过的,按重要性排:
+
+1. **只做他列的事,不要自作主张加功能**。他列过 10 条,我就只做 10 条;多做的(桌面小组件、诊断页、探针脚本)都被点名过。
+2. **不清楚先问,别猜着做**。
+3. **做好规划、优先级、边界,并且要有"留存"**(文档化)。
+4. **不要完成一小个就停住** —— 一批活要连着做完再报。
+5. **但也别把活攒到最后才汇报** —— 每完成一项/一批就报一次进度;他反感长时间静默("一让汇报进度就完成了")。
+6. **遇到 UI 问题先信用户、先查渲染层**。历史上我死磕数据层绕了一整晚,而根因就是一行 `TextOverflow.ellipsis`。
+7. **发布前必须 bump `pubspec.yaml` 版本号**,构建后 `aapt dump badging` 验证 versionName(曾忘 bump 让用户白装两次)。
+8. **禁止任何自杀式操作**:不许 taskkill / Stop-Process / pkill / 杀 node / 动 3080 端口。需要重启服务只能写 `.bat` 放到 `D:\deepseek harness 工作区\` 让用户双击。
+9. **不要用 PowerShell 文本管道改源码**(UTF-8 → GBK 会乱码成 mojibake);改文件只用 read / edit / write 工具。
+10. **表情包**:气氛合适时主动 `send_meme`(先 search 拿候选,`[表情: 描述]` 里的描述必须抄候选原文);谈正事/干活时克制。
+
+---
+
+## 2. 现在做到哪儿了
+
+### 2.1 版本线(最近)
+
+| 版本 | 内容 | 状态 |
+|---|---|---|
+| v2.2.0 | 2.0 阶段三:听说与生产力 | 已发 |
+| v2.3.0 | 桌面小组件 + 材料中心可用性修复 + 结构整理 | 已发 |
+| v2.3.1 | 诊断增强(材料源健康表 + 小组件状态) | 已发 |
+| v2.3.2 | 材料库整链路测试挖出 2 个真 bug(入库未读不显示 / 书架 id 恒 0 点不开) | 已发 |
+| v2.3.3 | 生词去重 + 复习/听写整链路测试 | 已发 |
+| **v2.4.0** | 用户实测 10 条反馈**全部落地**(识图重做、原型备注、出现次数、助理独立窗口、浅色对比度、材料中心原文优先…) | **已发 = Latest** |
+| **v2.5(未发)** | 排 bug + 前端大升级 + 材料中心三修 + 开屏/退出动画 | **做了一半,见下** |
+
+### 2.2 本轮(v2.5)提交地图(都在远端了)
+
+```
+68d0ad6 docs: 任务板 v2.5 更新(M1/M2/M3/U1 完成记录 + 用户决策)   ← 本地 HEAD
+ffd6b83 feat(U1): 前端大升级地基 — 设计令牌 + 通用组件 + 页面切换动画 + 两个首页重排
+98e446d feat(M3): 开屏动画 + 退出提示动画(文案可自定义 / 一天只问一次)
+3a37dc5 feat(M2): AI 改写内容补齐"来源/生成信息/思考过程" + 详情页不再简陋
+74620f5 fix(M1): 材料中心找不出原文 — 换掉不可达的检索站 + 每个源如实报告 + 并行检索
+22a9427 chore: v2.4.0 正式版(2.4.0+61)
+```
+
+### 2.3 本轮任务状态一览
+
+| # | 任务 | 状态 | 关键产物 |
+|---|---|---|---|
+| **M1** | 材料中心「AI 找不出任何原版材料」 | ✅ 完成 | `lib/services/original_search.dart` 重写;Gutenberg 站内检索 + arXiv https + 默认热门书单;并行 12s 预算;每源如实报「通/不通/几条」 |
+| **M2** | AI 改写看不到出处/来源/思考 | ✅ 完成 | `recommendations` 表加 `model`/`reasoning`(**dbVersion 13**);详情页新增 AI 溯源卡 |
+| **M3** | 开屏 + 退出动画 | ✅ 完成 | `splash_screen.dart` / `splash_settings.dart` / `widgets/exit_prompt.dart`;文案在「我的 → 外观」改 |
+| **U1** | 设计系统 + 两个首页 | ✅ 完成 | `lib/config/design_tokens.dart`、`lib/widgets/app_ui.dart`、主题统一、`tutor_home.dart` + `input_home.dart` 重排 |
+| **U2** | 材料中心 / 阅读器 / 写作 | ⬜ **待办(下一步)** | 见 §3.1 |
+| **U3** | 复习 / 我的 / 设置 | ⬜ 待办 | 见 §3.2 |
+| **P2** | 继续排 bug | ⬜ 待办 | 见 §3.3 |
+| — | 发版 v2.5.0 | ⬜ 待办 | **U1–U3 全做完再发**(用户明确要求,不分批出 prebuild) |
+
+---
+
+## 3. 剩余工作(逐条可执行)
+
+> **U1–U3 的边界(用户拍的)**:只做**排版 / 层级 / 组件统一 / 动效**,**不改业务逻辑**。
+> 每批做完必须:analyze 0 error、全量测试绿、**单独 commit**(中文说明,带 `feat(U2):` 前缀)。
+
+### 3.1 U2 — 材料中心 / 阅读器 / 写作
+
+**a) 材料中心 `lib/screens/input/material_center_screen.dart`(642 行)**
+- 现状:源 chips 条 + 内容区 + AI 方向卡网格 + 错误卡,间距/圆角/字号各写各的。
+- 要做:页面改用 `Insets.page`;源状态条用 `AppCard` 包一层,「通/不通」用色点 + 文案一眼可见(不是纯文字堆);错误卡换成 `AppErrorCard` + 换源 chips;AI 方向卡网格统一圆角 16 / 间距 12;空态用 `AppEmpty`;列表入场用 `AppStagger`。
+- 判据:整页只用 `design_tokens.dart` 的间距/圆角常量,不再出现裸 `EdgeInsets.all(13)` 之类;深浅色各看一眼。
+
+**b) 方向页 `lib/screens/input/category_material_screen.dart`(有 TabBar:资料原文 | AI 整理编写)**
+- 要做:Tab 切换后列表排版统一;`_buildHitCard`(原文命中卡)用 `AppCard` + 「原文 · 来源」徽章层级化(标题→作者→来源→动作);`_notes`(每源通/不通)从裸文字改成小字提示条;进页自动搜索的加载态换 `AppLoading`;无结果换 `AppEmpty`(并告诉用户"换英文关键词")。
+
+**c) 阅读器 `lib/screens/input/material_reader_screen.dart`(612 行,含 `_TappableText`/`_WordSheet`)**
+- 要做:①阅读区**字号/行距**设置(阅读设置面板,`_WordSheet` 之外的浮层);②查词面板 `_WordSheet` **层级**:词 + 音标头部大一号 → 释义分组 → 例句 → 底部动作按钮(加入生词本 主按钮);③顶部/底部工具条统一到 `Insets.tile`;④长按选词/点击查词的反馈动效统一 `Motion.tap120`。
+
+**d) 写作 `lib/screens/writing/write_review_screen.dart`(967 行,`_Phase{compose,transcribing,reviewing,result,error}`)**
+- 要做:五个阶段的版式统一(同一套标题层级 + 同一套卡片);错误态用 `AppErrorCard`(带重试);结果态按钮主次分明;阶段切换加 `AnimatedSwitcher`(250ms,`Motion.transition220` 一类)。
+
+### 3.2 U3 — 复习 / 我的 / 设置
+
+**a) 复习页 `lib/screens/review/review_screen.dart`(1465 行,`ReviewCardMode` 枚举)**
+- 要做:**大卡片、大按钮**;进度(第 N / 共 M)与剩余时间/待复习数**醒目**(顶部一行大字 + 细进度条);四个评分按钮(Again/Hard/Good/Easy)尺寸与颜色对比拉开;卡片翻转动效统一;空态(今天复习完)用 `AppEmpty` + 一句激励。
+
+**b) 「我的」`lib/screens/profile/profile_home.dart`(506 行)**
+- 现状:**13 个 `_MenuTile` 平铺**(我的生词本 / 复习模式 / 学习统计 / 本周报告 / 错误档案 / 备份与导出 / 收藏夹 / API 设置 / 学习偏好 / 外观 / 桌面小组件 / 诊断信息 / 检查更新)。
+- 要做:按三组分组,`AppSectionTitle` 做组标题:
+  - **学习**:我的生词本、复习模式、收藏夹
+  - **数据与回顾**:学习统计、本周报告、错误档案、备份与导出
+  - **设置与数据管理**:API 设置、学习偏好、外观、桌面小组件、诊断信息、检查更新
+- 顶部三个统计卡(`总词汇量/连续天数/已完成练习`)统一到 `AppCard`。
+
+**c) 设置类页面表单统一**:`api_settings.dart`(582)、`learner_preferences_screen.dart`(360)、`appearance_screen.dart`、`backup_screen.dart`(354)
+- 要做:统一"分组卡片 + 行内表单"(标签在左/说明在下、输入框描边用 `scheme.outline`)、保存按钮位置一致、保存成功反馈一致(Toast/SnackBar 同一套)。
+
+### 3.3 P2 — 继续排 bug(用户第 1 条:排 bug、打磨每个功能/交互/体验)
+
+- **导出/恢复整链路测试**:照 v2.3.2 的打法(真 SQLite,逐句复刻界面调用序列)给 `backup_service.dart` 补端到端测试 —— 这条路前面靠它换回过 4 个真 bug。
+- **逐页走查**(空态 / 失败态 / 超长文本 / **2× 系统字号** / 深色 / 浅色 各一遍),重点:材料中心、阅读器、复习、我的、设置、写作。
+- **已知待修(低优先)**:备份恢复会丢 `reps`/`lapses`(记忆状态本身不受影响,`backup_service.dart` + `fsrs.dart`)。
+
+---
+
+## 4. 代码地图(接手先看这些)
+
+### 4.1 本轮新增/重写的文件
+
+| 文件 | 作用 |
+|---|---|
+| `lib/config/design_tokens.dart` | **设计令牌唯一事实源**:`Gap`(4/8/12/16/24/32)、`Radii`(control10/card16/sheet20)、`Motion`(tap120/transition220/enter420 + 曲线)、`Insets`(page/card/tile) |
+| `lib/widgets/app_ui.dart` | **通用组件**:`AppCard` `AppSectionTitle` `AppActionTile` `AppEmpty` `AppLoading` `AppErrorCard` `AppStagger`(错峰入场 40ms/index,上限 240ms)。**只管外观/结构** |
+| `lib/services/original_search.dart` | 原版材料检索:Gutenberg 站内检索页解析 / arXiv / RSS;并行 + 12s 预算;每源 note;跳过已知不可达源 |
+| `lib/services/material_source_status.dart` | 各源健康度(Hive 持久化)+ `preferredSourceId` |
+| `lib/services/vision_guard.dart` | 识图结果的**本地确定性校验**(丢空/太短/非英文/截断/复读;同词不同行合并成 occurrences) |
+| `lib/services/vision_image.dart` | 图片预处理(EXIF 转正 + 长边 ≤2000 + JPEG q88) |
+| `lib/services/lemma.dart` | 原型推导(`taming(tame)`),候选必须是词频表里的真词 |
+| `lib/models/vocab_occurrence.dart` | 词汇出现记录(书/页/句),`displayFull` 出 `apple(×2)` |
+| `lib/services/splash_settings.dart` | 开屏文案 + 退出场景台词 + "今天问过没" |
+| `lib/screens/splash_screen.dart` | 开屏动画(logo 淡入放大 700ms + 文案 Interval(0.5,1.0) 淡入上移;可点跳过) |
+| `lib/widgets/exit_prompt.dart` | 退出底部弹层(错峰淡入;一天只问一次;`.show(forceAsk:)`) |
+| `lib/screens/tutor/tutor_chat_screen.dart` | 学习助理**独立对话窗口**(头像/流式/思考折叠/思考强度) |
+| `lib/screens/input/widgets/quick_replies.dart` | 追问快捷回复条(英英词典 / 梳理内容 / 逐句翻译 / 考我一下 / 换个简单说法) |
+
+### 4.2 大文件(改之前先有心理准备)
+
+```
+3092  lib/screens/input/process_chat.dart          ← 识图结果页 + 追问抽屉宿主(待拆二期)
+2378  lib/services/database.dart                   ← 所有 SQL 与迁移(dbVersion 13)
+1465  lib/screens/review/review_screen.dart        ← U3 目标
+1116  lib/services/material_source.dart            ← 各源抓取(长超时 90s)
+1071  lib/services/doubao_api.dart                 ← 识图 + 提示词
+ 983  lib/screens/input/widgets/follow_up_drawer.dart
+ 967  lib/screens/writing/write_review_screen.dart ← U2 目标
+```
+
+### 4.3 数据库
+
+`dbVersion = 13`。迁移在 `lib/services/database.dart`,**每次加列必须**:①`dbVersion++` ②`_onOpen` 自检 ③改 `_vocabularyTableSql`/建表语句 ④更新测试里断言 dbVersion 的地方(`test/widget_test.dart` 等)。
+
+### 4.4 测试
+
+55 个测试文件,694 例 + 1 skip。本轮新增:`vision_guard_test`(16)、`vision_image_test`(7)、`vocab_occurrence_test`(9)、`lemma_test`(11)、`quick_replies_test`(6)、`original_search_test`(8)、`material_group_test`(6)、`splash_settings_test`(5)、`learning_flow_test`(4)、`review_flow_test`(6)、`theme_test`(10,**含浅色对比度闸门 + 硬编码色 lint**)。
+
+> `theme_test.dart` 里有硬编码色 lint:禁止 `Colors.grey[…]`、`Colors.black87`、`Colors.<hue>[50|100|200]`、`onSurface.withAlpha(`。改 UI 时踩到会被测试挡下来 —— 这是故意的。
+
+---
+
+## 5. 运行手册
+
+### 5.1 开发/验证
+
+```powershell
+cd D:\readflow
+$env:FLUTTER_ALREADY_LOCKED = 'true'
+flutter analyze --no-fatal-infos
+flutter test
+flutter test test/vision_guard_test.dart        # 单文件
+flutter run                                      # 真机(USB)
+```
+
+### 5.2 发版流程(顺序不能变)
+
+1. **bump `pubspec.yaml`** `version: 2.5.0+62`(铁律,忘 bump 会被用户发现)
+2. `flutter analyze --no-fatal-infos` → 0 error / 0 warning
+3. `flutter test` → 全绿
+4. `flutter build apk --release --target-platform android-arm64`
+5. `aapt dump badging build\app\outputs\flutter-apk\app-release.apk | Select-String versionName` → 核对
+6. `Get-FileHash ... -Algorithm SHA256` 与 Release 资产 `digest` 逐字核对:
+   `gh api repos/820sz/ai-shangwaiyu/releases/tags/v2.5.0 --jq '.assets[].digest'`
+7. `gh release create v2.5.0 <apk> --title "..." --notes-file docs/release-notes-v2.5.0.md`
+8. **归档 mapping**:`build/app/outputs/flutter_release/mapping` → `tool/symbols/2.5.0/`
+9. 更新 `PLAN.md` 状态三行 + 追加版本记录小节
+10. commit(+ 可选 tag)→ **同步远端**(见下)
+
+### 5.3 同步远端(不走 git push,走 GitHub API 逐 blob)
+
+远端有的提交与我本地的 SHA 不同(远端是 API 造的),所以必须给脚本一个 **diff 基准 = 一个本地提交,它的 tree 等于远端当前 tree**。
+
+```powershell
+cd D:\readflow
+Set-ExecutionPolicy -Scope Process Bypass -Force
+# 1) 查远端当前 tree
+gh api repos/820sz/ai-shangwaiyu/commits/master --jq .commit.tree.sha
+# 2) 找本地哪个提交的 tree 与它相同(通常就是上一次同步后的本地 HEAD)
+git rev-parse 'HEAD^{tree}'
+# 3) 设基准后跑脚本
+$env:RF_DIFF_BASE = '<那个本地提交>'
+pwsh tool/push_via_api.ps1
+```
+成功打印 `PUSH_VIA_API_DONE`;基准猜错会打印 `TREE_MISMATCH_ABORT`(**不会有副作用,换基准重跑即可**)。
+
+> 现成数据(2026-09-27):远端 tree `be552682`,对应本地提交 **`68d0ad6`** —— 下次同步就用它当 `RF_DIFF_BASE`。
+
+---
+
+## 6. 环境与网络事实(大陆网络实测)
+
+| 事实 | 值 |
+|---|---|
+| 可达 | NPR RSS、gutenberg.org(**站内检索 3.1s / 10 条**)、arXiv(**https,6.7s / 10 条**) |
+| **不可达/超时** | ❌ `gutendex.com`(**12.5s 超时** — 上一版挑错的就是它)、bbc_le / voa_le / ted / wikipedia(~20s) |
+| 结论 | 候选源必须**实测**,不能照文档抄;不可达的源要**如实报"不通"**并记住(跳过),不要静默吞掉 |
+
+其他环境事实:
+- 所有 Release **都用 debug keystore 签名**(指纹 `f94a4bec…`)→ 换正式 keystore 会导致老用户**无法覆盖安装**。用户还没拍板,别擅自换。
+- 诊断页(`我的 → 诊断信息`)会显示 API Key(打码 + 长度)、材料源健康表、小组件状态 —— **要用户给设备证据时,让他截图这一页最快**。
+- 构建/测试必须带 `$env:FLUTTER_ALREADY_LOCKED='true'`。
+- 文件策略 danger-full-access;**审批提示已禁用 → 永远不要传 `sandbox_permissions`**。
+
+---
+
+## 7. 坑与教训(踩过的,别再来一次)
+
+1. **PowerShell 文本管道改源码 → 中文乱码**。只用 read/edit/write 工具改源码。
+2. **`git commit` 消息里有 `"` 会被 PowerShell 吃掉** → 写进临时文件用 `git commit -F <file>`。
+3. **`flutter test` 经过 `Select-Object` 管道后 `$LASTEXITCODE` 不可信** → 单独看输出,别只看退出码。
+4. **插入代码时误删方法体**(发生过两次)→ 每次 edit 后 `flutter analyze` 立即验。
+5. **`Utf8Decoder` 子类型崩溃**(v1.9.0 流式全挂)→ 流处理要 `rawStream.cast<List<int>>()`。
+6. **`getRecentMaterials` 用 INNER JOIN** 会藏掉未入库材料,且必须 `m.id AS id`(否则书架条目 id 恒 0 点不开)。
+7. **删除文件的目录不会被重建** → `push_via_api.ps1` 已修(把被删文件的父目录也算进去)。
+8. **Hive 读回的嵌套 Map 是 `_Map<dynamic,dynamic>`** → 必须 `Map<String,dynamic>.from(...)`,直接 `as` 会运行时炸。
+9. **widget 测试坑**:FakeAsync 里等真实磁盘 IO 会挂起(放 setUp);`showModalBottomSheet` 在 widget 测试里不推进(直接 skip 留骨架);`skip:` 只接受 bool。
+10. **测试失败先怀疑自己的断言**,不要急着改产品代码(我多次因为断言写错而"修 bug")。
+11. **别信"代码推断"**:网络可达性、真机行为、安装链路 —— 一律以实测为准。
+
+---
+
+## 8. 等用户真机复测的清单
+
+v2.5 还没发版,这些要等发出去后请他验:
+
+**v2.4.0 的 10 条**(已发,等他复测):
+识图准确率(带「已校验」提示)/ AI 补全不再灰掉 / 追问可复制所选 / `taming(tame)` 原型 / `apple(×2)` 出现次数 / 翻译是否还生硬 / 助理独立窗口 / 「今天做什么」可取消勾选 / 浅色模式是否还泛白 / 材料中心能否找到原文
+
+**v2.5 新增**(发版后):
+每源健康状态是否一眼看懂 / AI 溯源卡能否看到模型+思考过程 / 开屏动画手感 + 文案自定义入口 / 退出提示(一天只问一次)/ 新排版在**小屏 + 2× 字号**下是否还乱
+
+---
+
+## 9. 接手自检(第一步就做这些)
+
+```powershell
+cd D:\readflow
+git log --oneline -6                     # 确认 HEAD 还是 68d0ad6(或它的后继)
+git status --porcelain                   # 期望干净
+$env:FLUTTER_ALREADY_LOCKED='true'
+flutter analyze --no-fatal-infos         # 期望 0 error / 0 warning
+flutter test                             # 期望 694 全绿 + 1 skip
+```
+
+然后按顺序:**U2(§3.1)→ U3(§3.2)→ P2(§3.3)→ 发 v2.5.0(§5.2)→ 同步远端(§5.3)→ 更新 PLAN.md + 本文件**。
+
+**每完成一批就 commit + 汇报**,不要攒到最后。
