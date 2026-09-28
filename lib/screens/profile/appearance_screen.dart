@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../../config/constants.dart';
+import '../../config/design_tokens.dart';
 import '../../config/theme.dart';
 import '../../services/splash_settings.dart';
 import '../../services/theme_controller.dart';
+import '../../widgets/app_ui.dart';
 
 /// 外观设置(v2.2 深色模式)。
 ///
@@ -29,13 +31,13 @@ class _AppearanceScreenState extends State<AppearanceScreen> {
       body: ValueListenableBuilder<ThemeMode>(
         valueListenable: ThemeController.mode,
         builder: (context, mode, _) => ListView(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+          padding: Insets.page,
           children: [
             Text(
               '「跟随系统」会随手机的深色开关自动切换(系统设了夜间自动切换时也生效)。',
               style: theme.textTheme.bodySmall?.copyWith(color: muted),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: Gap.xs),
             // Flutter 3.32+ 用 RadioGroup 统一管理组值(RadioListTile 的
             // groupValue/onChanged 已废弃)
             RadioGroup<ThemeMode>(
@@ -61,34 +63,31 @@ class _AppearanceScreenState extends State<AppearanceScreen> {
                 ],
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: Gap.sm),
             const _ThemePreview(),
-            const SizedBox(height: 16),
+            const SizedBox(height: Gap.md),
 
             // ── 开屏文案(v2.5,M3):用户可自定义 ──
             const _SplashTaglineCard(),
-            const SizedBox(height: 16),
-            Card(
+            const SizedBox(height: Gap.md),
+            AppCard(
               color: theme.colorScheme.surfaceContainerHighest,
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('说明',
-                        style: theme.textTheme.titleSmall
-                            ?.copyWith(fontWeight: FontWeight.w700)),
-                    const SizedBox(height: 6),
-                    Text(
-                      '· 深色模式改的是**全局配色**(页面、卡片、正文、阅读页都跟着变),'
-                      '不是只换个背景色;\n'
-                      '· 彩色标签(生词类型、掌握度、图表)在两种模式下都保留颜色 —— '
-                      '它们承担"区分"的信息,不能变成灰;\n'
-                      '· 主题偏好会记在本机,重装/换机后需要重新选一次。',
-                      style: theme.textTheme.bodySmall?.copyWith(color: muted),
-                    ),
-                  ],
-                ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('说明',
+                      style: theme.textTheme.titleSmall
+                          ?.copyWith(fontWeight: FontWeight.w700)),
+                  const SizedBox(height: Gap.xxs + 2),
+                  Text(
+                    '· 深色模式改的是「全局配色」(页面、卡片、正文、阅读页都跟着变),'
+                    '不是只换个背景色;\n'
+                    '· 彩色标签(生词类型、掌握度、图表)在两种模式下都保留颜色 —— '
+                    '它们承担"区分"的信息,不能变成灰;\n'
+                    '· 主题偏好会记在本机,重装/换机后需要重新选一次。',
+                    style: theme.textTheme.bodySmall?.copyWith(color: muted),
+                  ),
+                ],
               ),
             ),
           ],
@@ -168,7 +167,10 @@ class _SplashTaglineCardState extends State<_SplashTaglineCard> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final muted = theme.colorScheme.onSurfaceVariant;
-    return Card(
+    return AppCard(
+      // ListTile 自带内容边距(水平 16),卡片不再叠加内边距,避免双重缩进
+      padding: EdgeInsets.zero,
+      onTap: _edit,
       child: ListTile(
         leading: Icon(Icons.auto_awesome_motion_outlined,
             color: theme.colorScheme.primary),
@@ -190,45 +192,42 @@ class _ThemePreview extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final muted = theme.colorScheme.onSurfaceVariant;
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    '预览:Prefrontal cortex',
-                    style: theme.textTheme.titleMedium
-                        ?.copyWith(fontWeight: FontWeight.w700),
-                  ),
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '预览:Prefrontal cortex',
+                  style: theme.textTheme.titleMedium
+                      ?.copyWith(fontWeight: FontWeight.w700),
                 ),
-                Icon(Icons.volume_up_outlined,
-                    size: 18, color: theme.colorScheme.primary),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Text(
-              '/ˌpriːˈfrʌntəl ˈkɔːteks/ n. 前额叶皮层',
-              style: theme.textTheme.bodySmall?.copyWith(color: muted),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              'The prefrontal cortex handles planning and self-control.',
-              style: theme.textTheme.bodyMedium,
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                FilledButton(onPressed: () {}, child: const Text('认识')),
-                const SizedBox(width: 8),
-                OutlinedButton(onPressed: () {}, child: const Text('模糊')),
-              ],
-            ),
-          ],
-        ),
+              ),
+              Icon(Icons.volume_up_outlined,
+                  size: 18, color: theme.colorScheme.primary),
+            ],
+          ),
+          const SizedBox(height: Gap.xxs + 2),
+          Text(
+            '/ˌpriːˈfrʌntəl ˈkɔːteks/ n. 前额叶皮层',
+            style: theme.textTheme.bodySmall?.copyWith(color: muted),
+          ),
+          const SizedBox(height: Gap.sm),
+          Text(
+            'The prefrontal cortex handles planning and self-control.',
+            style: theme.textTheme.bodyMedium,
+          ),
+          const SizedBox(height: Gap.sm),
+          Row(
+            children: [
+              FilledButton(onPressed: () {}, child: const Text('认识')),
+              const SizedBox(width: Gap.xs),
+              OutlinedButton(onPressed: () {}, child: const Text('模糊')),
+            ],
+          ),
+        ],
       ),
     );
   }

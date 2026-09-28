@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../config/theme.dart';
 import '../models/vocabulary.dart';
 import '../services/tts_service.dart';
 
@@ -55,7 +56,7 @@ class VocabCard extends StatelessWidget {
                   margin: const EdgeInsets.only(right: 12),
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(2),
-                    color: _masteryColor(vocab.masteryLevel),
+                    color: _masteryColor(context, vocab.masteryLevel),
                   ),
                 ),
               // 内容
@@ -173,18 +174,10 @@ class VocabCard extends StatelessWidget {
     );
   }
 
-  Color _masteryColor(int level) {
-    switch (level) {
-      case 0:
-        return Colors.orange;
-      case 1:
-        return Colors.blue;
-      case 2:
-        return Colors.green;
-      default:
-        return Colors.grey;
-    }
-  }
+  /// 掌握度三色(v2.5,U2):收敛到 [AppTheme.masteryColor] ——
+  /// 以前这里写死 orange/blue/green,浅色下对白底只有 2.2~2.8:1
+  Color _masteryColor(BuildContext context, int level) =>
+      AppTheme.masteryColor(context, level);
 
   Widget _typeChip(String type, ThemeData theme) {
     String label;

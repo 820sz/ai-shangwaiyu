@@ -110,6 +110,11 @@ class AppActionTile extends StatelessWidget {
   final Color? iconColor;
   final bool highlight;
 
+  /// 不可用态(v2.5):置灰 + 不可点。
+  /// 为什么单独给一个开关:调用方常常是"忙碌中"临时禁用(例如备份导出),
+  /// 而 `onTap: null` 只让它点不动、外观照旧 —— 用户会以为点了没反应。
+  final bool enabled;
+
   const AppActionTile({
     super.key,
     required this.icon,
@@ -119,18 +124,22 @@ class AppActionTile extends StatelessWidget {
     this.trailing,
     this.iconColor,
     this.highlight = false,
+    this.enabled = true,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final muted = theme.colorScheme.onSurfaceVariant;
-    return AppCard(
-      onTap: onTap,
+    final dim = !enabled;
+    final card = AppCard(
+      onTap: dim ? null : onTap,
       color: highlight ? theme.colorScheme.primary.withAlpha(12) : null,
       child: Row(
         children: [
-          Icon(icon, size: 22, color: iconColor ?? theme.colorScheme.primary),
+          Icon(icon,
+              size: 22,
+              color: dim ? muted : (iconColor ?? theme.colorScheme.primary)),
           const SizedBox(width: Gap.sm),
           Expanded(
             child: Column(
@@ -138,8 +147,10 @@ class AppActionTile extends StatelessWidget {
               children: [
                 Text(
                   title,
-                  style: theme.textTheme.titleSmall
-                      ?.copyWith(fontWeight: FontWeight.w600),
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: dim ? muted : null,
+                  ),
                 ),
                 if (subtitle != null) ...[
                   const SizedBox(height: 2),
@@ -154,10 +165,13 @@ class AppActionTile extends StatelessWidget {
             ),
           ),
           trailing ??
-              Icon(Icons.chevron_right, size: 20, color: theme.colorScheme.outline),
+              Icon(Icons.chevron_right,
+                  size: 20,
+                  color: dim ? muted : theme.colorScheme.outline),
         ],
       ),
     );
+    return dim ? Opacity(opacity: 0.6, child: card) : card;
   }
 }
 

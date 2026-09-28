@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
+import '../config/theme.dart';
 import '../models/learning_record.dart';
 
 /// 学习曲线图
@@ -35,7 +36,7 @@ class LearningCurveChart extends StatelessWidget {
             drawVerticalLine: false,
             horizontalInterval: maxWords > 0 ? (maxWords / 4).ceilToDouble() : 1,
             getDrawingHorizontalLine: (value) => FlLine(
-              color: Colors.grey.withAlpha(30),
+              color: Theme.of(context).colorScheme.outlineVariant.withAlpha(60),
               strokeWidth: 1,
             ),
           ),
@@ -81,7 +82,11 @@ class LearningCurveChart extends StatelessWidget {
               spots: List.generate(recent.length,
                   (i) => FlSpot(i.toDouble(), recent[i].newWordsCount.toDouble())),
               isCurved: true,
-              color: const Color(0xFF4A90D9),
+              // 系列色(v2.5):用专门的图表色而不是主色 ——
+              // 浅色主色是近黑,曲线会从"蓝色数据线"变成"黑色墨迹";
+              // 写死的 #4A90D9 又是浅色档,深底上偏暗。AppTheme.chartSeries
+              // 两档都过对比度(白底 5.5:1 / 深底 7.2:1)且保留蓝色调。
+              color: AppTheme.chartSeries(context),
               barWidth: 2.5,
               isStrokeCapRound: true,
               dotData: FlDotData(
@@ -89,13 +94,13 @@ class LearningCurveChart extends StatelessWidget {
                 getDotPainter: (spot, percent, bar, index) =>
                     FlDotCirclePainter(
                   radius: 3,
-                  color: const Color(0xFF4A90D9),
+                  color: AppTheme.chartSeries(context),
                   strokeWidth: 0,
                 ),
               ),
               belowBarData: BarAreaData(
                 show: true,
-                color: const Color(0xFF4A90D9).withAlpha(30),
+                color: AppTheme.chartSeries(context).withAlpha(30),
               ),
             ),
           ],
@@ -179,7 +184,7 @@ class StudyCalendar extends StatelessWidget {
               if (date == null) return const _DayCell(color: Colors.transparent);
               final activity = dateMap[date] ?? 0;
               return _DayCell(
-                color: _activityColor(activity),
+                color: _activityColor(context, activity),
                 tooltip: '${date.month}/${date.day}: $activity',
               );
             }).toList(),
@@ -189,11 +194,15 @@ class StudyCalendar extends StatelessWidget {
     );
   }
 
-  Color _activityColor(int activity) {
-    if (activity == 0) return Colors.grey.withAlpha(30);
-    if (activity <= 5) return const Color(0xFF4A90D9).withAlpha(60);
-    if (activity <= 15) return const Color(0xFF4A90D9).withAlpha(120);
-    return const Color(0xFF4A90D9);
+  /// 热力档位(v2.5):色相用**图表系列色**(与曲线同色,不再写死 #4A90D9),
+  /// 空档以前是 Colors.grey.withAlpha(30),深色下比主色档还亮,层次是反的
+  Color _activityColor(BuildContext context, int activity) {
+    final scheme = Theme.of(context).colorScheme;
+    if (activity == 0) return scheme.outlineVariant.withAlpha(60);
+    final series = AppTheme.chartSeries(context);
+    if (activity <= 5) return series.withAlpha(60);
+    if (activity <= 15) return series.withAlpha(120);
+    return series;
   }
 }
 

@@ -192,8 +192,88 @@ void main() {
     );
   });
 
-  test('坏备份不毁数据:解析失败时不落任何改动', () async {
-    await DatabaseService.insertVocabulary(
+  // ── P2 修复:复习次数/遗忘次数 ──────────────────────────────────
+  //
+  // 以前恢复备份时 `upsertWordReview` 写死 `reps = 1`,于是"这个词我复习过
+  // 12 次、忘过 3 次"这类信息在换机后全丢了(调度结果还在,历史没了)。
+  // 备份 JSON 其实一直带着这两个数,只是恢复路径没用上。
+  test('恢复备份时 reps / lapses 按绝对值还原(不再被重置成 1 / 0)', () async {
+    final id = await DatabaseService.insertVocabulary(
+      Vocabulary(word: 'gamma', translation: '第三个'),
+    );
+    final now = DateTime.now();
+    await DatabaseService.upsertWordReview(
+      id,
+      stability: 42,
+      difficulty: 6,
+      dueAt: now.add(const Duration(days: 5)),
+      lastReviewAt: now,
+      lastRating: 3,
+      reps: 12,
+      lapses: 3,
+    );
+    final before = ReviewQueue.cardsFromRows(
+      await DatabaseService.getWordReviews(),
+      now: now,
+    );
+    expect(before.values.single.reps, 12);
+    expect(before.values.single.lapses, 3);
+
+    final vocab = await DatabaseService.getVocabularies(limit: 1000);
+    final backup = ExportService.backupJson(
+      vocab: vocab,
+      cards: before,
+      model: LearnerModelStore.load(),
+      settings: const {},
+    );
+
+    // 换机:清库 → 恢复
+    await DatabaseService.clearWordReviews();
+    final ids = [
+      for (final v in await DatabaseService.getVocabularies(limit: 1000))
+        if (v.id != null) v.id!,
+    ];
+    await DatabaseService.deleteVocabularies(ids);
+    final report = await BackupService.restore(
+      ExportService.parseBackup(backup),
+      replace: false,
+    );
+    expect(report.cardsRestored, 1);
+
+    final after = ReviewQueue.cardsFromRows(
+      await DatabaseService.getWordReviews(),
+      now: now,
+    );
+    expect(after.values.single.reps, 12, reason: '复习次数必须跟着备份回来');
+    expect(after.values.single.lapses, 3, reason: '遗忘次数也必须跟着回来');
+    expect(after.values.single.stability, 42);
+  });
+
+  test('正常复习仍是累加语义:同样调用不带 reps/lapses 时每次 +1', () async {
+    final id = await DatabaseService.insertVocabulary(
+      Vocabulary(word: 'delta', translation: '第四个'),
+    );
+    final now = DateTime.now();
+    for (var i = 0; i < 3; i++) {
+      await DatabaseService.upsertWordReview(
+        id,
+        stability: 1.0 * (i + 1),
+        difficulty: 5,
+        dueAt: now.add(Duration(days: i + 1)),
+        lastReviewAt: now,
+        lastRating: 1,
+        lapse: i == 0, // 第一次按"不认识"
+      );
+    }
+    final cards = ReviewQueue.cardsFromRows(
+      await DatabaseService.getWordReviews(),
+      now: now,
+    );
+    expect(cards.values.single.reps, 3, reason: '三次复习 = reps 3');
+    expect(cards.values.single.lapses, 1, reason: '只有第一次是 lapse');
+  });
+
+  test('坏备份不毁数据:解析失败时不落任何改动', () async {    await DatabaseService.insertVocabulary(
       Vocabulary(word: 'keepme', translation: '必须还在'),
     );
     final bad = ExportService.parseBackup('{"app":"readflow","version":1,"vocab":"not-a-list"}');

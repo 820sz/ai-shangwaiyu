@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../../../config/theme.dart';
 import '../../../models/vocabulary.dart';
 import '../../../services/tts_service.dart';
 import 'example_sentence.dart';
@@ -90,7 +91,7 @@ void showWordDetailSheet({
             Row(
               children: [
                 _tag(item.wordType == 'phrase' ? '短语' : item.wordType == 'sentence' ? '句子' : '单词',
-                    _typeColor(item.wordType)),
+                    _typeColor(ctx, item.wordType)),
                 if (item.partOfSpeech != null && item.partOfSpeech!.isNotEmpty) ...[
                   const SizedBox(width: 8),
                   _tag(item.partOfSpeech!, theme.colorScheme.onSurfaceVariant),
@@ -201,11 +202,8 @@ Future<void> _speak(BuildContext ctx, Vocabulary item) async {
   }
 }
 
-Color _typeColor(String type) {
-  if (type == 'phrase') return Colors.orange;
-  if (type == 'sentence') return Colors.purple;
-  return const Color(0xFF4A90D9);
-}
+Color _typeColor(BuildContext context, String type) =>
+    AppTheme.wordTypeColor(context, type);
 
 Widget _tag(String label, Color color) {
   return Container(
@@ -230,7 +228,11 @@ Widget _actionButton(
       Navigator.pop(ctx);
       onPressed();
     },
-    icon: Icon(icon, size: 18, color: destructive ? Colors.red[400] : null),
-    label: Text(label, style: TextStyle(color: destructive ? Colors.red[400] : null)),
+    icon: Icon(icon,
+        size: 18,
+        color: destructive ? Theme.of(ctx).colorScheme.error : null),
+    label: Text(label,
+        style: TextStyle(
+            color: destructive ? Theme.of(ctx).colorScheme.error : null)),
   );
 }

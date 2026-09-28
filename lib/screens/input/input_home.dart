@@ -7,6 +7,7 @@ import 'package:hive_flutter/hive_flutter.dart';
 import '../../providers/vocab_provider.dart';
 import '../../config/constants.dart';
 import '../../config/design_tokens.dart';
+import '../../config/theme.dart';
 import '../../models/saved_session.dart';
 import '../../services/doubao_api.dart';
 import '../../services/api_endpoint.dart';
@@ -382,7 +383,7 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
                           isSel ? Icons.lightbulb : Icons.lightbulb_outline,
                           size: 12,
                           color: isSel
-                              ? Colors.orange
+                              ? AppTheme.warningColor(context)
                               : theme.colorScheme.onSurfaceVariant,
                         ),
                         const SizedBox(width: 6),
@@ -393,7 +394,9 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
                             fontWeight: isSel
                                 ? FontWeight.w600
                                 : FontWeight.normal,
-                            color: isSel ? Colors.orange : null,
+                            color: isSel
+                                ? AppTheme.warningColor(context)
+                                : null,
                           ),
                         ),
                       ],
@@ -437,13 +440,18 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
             decoration: BoxDecoration(
-              border: Border.all(color: Colors.orange.withAlpha(110)),
+              border: Border.all(
+                color: AppTheme.warningColor(context).withAlpha(110),
+              ),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Text(
               AppConstants.thinkingOptionsFor(_currentModel)[_currentThinking] ??
                   '不思考',
-              style: TextStyle(fontSize: 11, color: Colors.orange[700]),
+              style: TextStyle(
+                fontSize: 11,
+                color: AppTheme.warningColor(context),
+              ),
             ),
           ),
         ],
@@ -583,9 +591,12 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
                       Navigator.pop(ctx);
                       if (mounted) setState(() {});
                     },
-                    child: const Text(
+                    child: Text(
                       '清空全部',
-                      style: TextStyle(fontSize: 12, color: Colors.red),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppTheme.dangerColor(context),
+                      ),
                     ),
                   ),
                 ],

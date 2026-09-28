@@ -369,6 +369,9 @@ class BackupService {
             dueAt: card.due,
             lastReviewAt: card.lastReview ?? DateTime.now(),
             lastRating: card.lastRating?.value,
+            // P2 修复:复习次数与遗忘次数也要还原(以前恢复后被重置成 1 / 0)
+            reps: card.reps,
+            lapses: card.lapses,
           );
           cardsRestored++;
         }

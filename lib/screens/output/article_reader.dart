@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import '../../config/theme.dart';
 import '../../models/article.dart';
 import '../../providers/article_provider.dart';
 import '../../services/reader_settings.dart';
@@ -200,11 +201,11 @@ class _ArticleReaderScreenState extends State<ArticleReaderScreen> {
                   child: ListTile(
                     leading: CircleAvatar(
                       // 成绩徽章的底色也用半透明色相:浅色下≈green[100]/orange[100],
-                      // 深色下不会变成一圈亮白
+                      // 深色下不会变成一圈亮白(v2.5,U2:色相改随明暗切换)
                       backgroundColor: ex.score != null
                           ? (ex.score! >= 60
-                              ? Colors.green.withAlpha(60)
-                              : Colors.orange.withAlpha(60))
+                              ? AppTheme.successColor(context).withAlpha(60)
+                              : AppTheme.warningColor(context).withAlpha(60))
                           : theme.colorScheme.surfaceContainerHighest,
                       child: Text(
                         ex.score != null ? '${ex.score!.toInt()}%' : '—',
@@ -212,7 +213,9 @@ class _ArticleReaderScreenState extends State<ArticleReaderScreen> {
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
                           color: ex.score != null
-                              ? (ex.score! >= 60 ? Colors.green : Colors.orange)
+                              ? (ex.score! >= 60
+                                  ? AppTheme.successColor(context)
+                                  : AppTheme.warningColor(context))
                               : theme.colorScheme.onSurfaceVariant,
                         ),
                       ),

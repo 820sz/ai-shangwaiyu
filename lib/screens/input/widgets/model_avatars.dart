@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../config/theme.dart';
+
 /// 用户头像:主色圆 + 人形图标
 Widget userAvatar({required BuildContext context, double radius = 16}) {
   return CircleAvatar(
@@ -16,10 +18,15 @@ Widget aiAvatar({
   bool error = false,
   double radius = 16,
   required String modelName,
+  required BuildContext context,
 }) {
   final name = modelName;
   final asset = _iconAssetFor(name);
-  final color = error ? Colors.red[400]! : _colorFor(name);
+  // 品牌色是身份标识(不能换成主题色),但深色下有些品牌色太暗
+  // (百度蓝对深卡片只有 2.07:1)→ 交给 AppTheme.readableOn 只提亮度
+  final color = error
+      ? AppTheme.dangerColor(context)
+      : AppTheme.readableOn(context, _colorFor(name));
   final double size = radius * 2;
 
   // 错误状态：红底 + 错误图标
@@ -111,25 +118,39 @@ String? _iconAssetFor(String modelName) {
 
 Color _colorFor(String modelName) {
   final m = modelName.toLowerCase();
-  if (m.contains('doubao') || m.contains('seed') || m.contains('ark'))
+  if (m.contains('doubao') || m.contains('seed') || m.contains('ark')) {
     return const Color(0xFF3D7A5C);
-  if (m.contains('deepseek')) return const Color(0xFF4A6CF7);
-  if (m.contains('gpt') || m.contains('openai'))
+  }
+  if (m.contains('deepseek')) {
+    return const Color(0xFF4A6CF7);
+  }
+  if (m.contains('gpt') || m.contains('openai')) {
     return const Color(0xFF10A37F);
-  if (m.contains('claude') || m.contains('anthropic'))
+  }
+  if (m.contains('claude') || m.contains('anthropic')) {
     return const Color(0xFFD97757);
-  if (m.contains('gemini')) return const Color(0xFF4285F4);
-  if (m.contains('qwen') || m.contains('tongyi'))
+  }
+  if (m.contains('gemini')) {
+    return const Color(0xFF4285F4);
+  }
+  if (m.contains('qwen') || m.contains('tongyi')) {
     return const Color(0xFF6B4CE6);
-  if (m.contains('glm') || m.contains('zhipu'))
+  }
+  if (m.contains('glm') || m.contains('zhipu')) {
     return const Color(0xFF5B8DEF);
-  if (m.contains('moonshot') || m.contains('kimi'))
+  }
+  if (m.contains('moonshot') || m.contains('kimi')) {
     return const Color(0xFF8B5CF6);
-  if (m.contains('baidu') || m.contains('ernie'))
+  }
+  if (m.contains('baidu') || m.contains('ernie')) {
     return const Color(0xFF2932E1);
-  if (m.contains('google')) return const Color(0xFF4285F4);
-  if (m.contains('iflytek') || m.contains('spark'))
+  }
+  if (m.contains('google')) {
+    return const Color(0xFF4285F4);
+  }
+  if (m.contains('iflytek') || m.contains('spark')) {
     return const Color(0xFF1677FF);
+  }
   // 稳定兜底色
   final colors = const [
     Color(0xFFE53935),

@@ -81,6 +81,7 @@ class _VocabListScreenState extends State<VocabListScreen> {
 
   Future<void> _batchDelete() async {
     if (_selectedIds.isEmpty) return;
+    final deleteColor = Theme.of(context).colorScheme.error;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -93,13 +94,13 @@ class _VocabListScreenState extends State<VocabListScreen> {
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            style: FilledButton.styleFrom(backgroundColor: deleteColor),
             child: const Text('删除'),
           ),
         ],
       ),
     );
-    if (ok != true) return;
+    if (ok != true || !mounted) return;
     final provider = context.read<VocabProvider>();
     await Future.wait(_selectedIds.toList().map((id) => provider.deleteVocabulary(id)));
     if (mounted) _exitSelectionMode();

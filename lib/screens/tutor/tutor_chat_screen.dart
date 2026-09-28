@@ -279,7 +279,8 @@ $evidence''';
                   const SizedBox(width: 8),
                   _asking
                       ? IconButton.filled(
-                          style: IconButton.styleFrom(backgroundColor: Colors.red[400]),
+                          style: IconButton.styleFrom(
+                              backgroundColor: theme.colorScheme.error),
                           onPressed: () => setState(() => _asking = false),
                           tooltip: '停止显示',
                           icon: const Icon(Icons.stop, size: 18),
@@ -307,7 +308,7 @@ $evidence''';
           children: [
             Row(
               children: [
-                aiAvatar(radius: 14, modelName: _model),
+                aiAvatar(radius: 14, modelName: _model, context: context),
                 const SizedBox(width: 8),
                 Text('助理知道你现在的全部学习数据',
                     style: theme.textTheme.titleSmall
@@ -340,7 +341,7 @@ $evidence''';
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
-              color: const Color(0xFF4A90D9).withAlpha(20),
+              color: theme.colorScheme.primary.withAlpha(20),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Text(t.text, style: const TextStyle(fontSize: 13, height: 1.4)),
@@ -355,7 +356,7 @@ $evidence''';
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          aiAvatar(radius: 14, modelName: _model),
+          aiAvatar(radius: 14, modelName: _model, context: context),
           const SizedBox(width: 8),
           Expanded(
             child: Container(

@@ -2072,6 +2072,11 @@ class DatabaseService {
   /// `reps` / `lapses` 是**累加**的(复习一次 reps+1,lapse 时 lapses+1);
   /// `stability` / `difficulty` / `due_at` 是调度器算完传进来的**绝对值**。
   /// `lastRating` 传 null = 不覆盖上一次评级(手动改期之类的操作不该抹掉历史)。
+  ///
+  /// **恢复备份**(P2 修复):传 `reps` / `lapses` = 按**绝对值**写入,而不是累加。
+  /// 以前这里写死 `reps = 1`,所以从备份恢复的词全部丢掉复习次数与遗忘次数
+  /// (调度结果还在,但"这个词我复习过 12 次"这类信息没了)。备份 JSON 里
+  /// 一直带着这两个数,只是恢复时没被用上。
   static Future<void> upsertWordReview(
     int vocabId, {
     required double stability,
@@ -2080,23 +2085,30 @@ class DatabaseService {
     int? lastRating,
     required DateTime lastReviewAt,
     bool lapse = false,
+    int? reps,
+    int? lapses,
   }) async {
     try {
       final db = await database;
       final nowIso = DateTime.now().toIso8601String();
+      // 恢复模式:两个计数都按传入值写死;正常复习:按累加语义
+      final conflictReps =
+          reps != null ? 'excluded.reps' : 'word_review.reps + 1';
+      final conflictLapses =
+          lapses != null ? 'excluded.lapses' : 'word_review.lapses + ?';
       await db.rawInsert(
         '''
         INSERT INTO word_review
           (vocab_id, stability, difficulty, due_at, last_review_at,
            reps, lapses, last_rating, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(vocab_id) DO UPDATE SET
           stability = excluded.stability,
           difficulty = excluded.difficulty,
           due_at = excluded.due_at,
           last_review_at = excluded.last_review_at,
-          reps = word_review.reps + 1,
-          lapses = word_review.lapses + ?,
+          reps = $conflictReps,
+          lapses = $conflictLapses,
           last_rating = COALESCE(excluded.last_rating, word_review.last_rating),
           updated_at = excluded.updated_at
       ''',
@@ -2106,11 +2118,13 @@ class DatabaseService {
           difficulty,
           dueAt.toIso8601String(),
           lastReviewAt.toIso8601String(),
-          lapse ? 1 : 0,
+          reps ?? 1,
+          lapses ?? (lapse ? 1 : 0),
           lastRating,
           nowIso,
           nowIso,
-          lapse ? 1 : 0,
+          // 只有走"累加"分支时才有这个占位符
+          if (lapses == null) (lapse ? 1 : 0),
         ],
       );
     } catch (e) {

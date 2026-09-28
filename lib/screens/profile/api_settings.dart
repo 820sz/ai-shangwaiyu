@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:hive/hive.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../../config/constants.dart';
+import '../../config/design_tokens.dart';
 import '../../services/api_endpoint.dart';
 import '../../services/doubao_api.dart';
+import '../../widgets/app_ui.dart';
 
 /// 全屏 API 设置页 — 主/副双槽位:
 /// 主 = 多模态(识图/全文翻译/素材推荐/追问默认)
@@ -267,11 +269,10 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: Insets.page,
         children: [
           // ── 主 API(多模态) ──
-          _SectionHeader(title: '主 API(多模态)'),
-          const SizedBox(height: 4),
+          const AppSectionTitle(title: '主 API(多模态)'),
           Text(
             '拍照识文 / 全文翻译 / 素材推荐 / 追问默认。需支持图片识别的模型。\n'
             '模型列表按视觉能力过滤。Key 填 sk- 开头(DeepSeek 官方)时,'
@@ -281,7 +282,7 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
             style: TextStyle(
                 fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: Gap.sm),
           _ApiField(
             controller: _primaryKeyCtrl,
             label: 'API Key',
@@ -304,17 +305,16 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
             options: AppConstants.thinkingOptionsFor(_primaryModelCtrl.text),
             onChanged: (v) => setState(() => _primaryThinking = v),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: Gap.lg),
 
           // ── 副 API(专项文本) ──
-          _SectionHeader(title: '副 API(专项文本 · 可选)'),
-          const SizedBox(height: 4),
+          const AppSectionTitle(title: '副 API(专项文本 · 可选)'),
           Text(
             '文章生成 / 回译练习 / 个性化建议。未配置时自动使用主 API。',
             style: TextStyle(
                 fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: Gap.sm),
           _ApiField(
             controller: _secondaryKeyCtrl,
             label: 'API Key',
@@ -337,7 +337,7 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
             options: AppConstants.thinkingOptionsFor(_secondaryModelCtrl.text),
             onChanged: (v) => setState(() => _secondaryThinking = v),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: Gap.md),
 
           // ── 提示 ──
           Text(
@@ -353,22 +353,6 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
 }
 
 // ═══════════════ 组件 ═══════════════
-
-class _SectionHeader extends StatelessWidget {
-  final String title;
-  const _SectionHeader({required this.title});
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      title,
-      style: Theme.of(context)
-          .textTheme
-          .titleSmall
-          ?.copyWith(fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.primary),
-    );
-  }
-}
 
 class _ApiField extends StatelessWidget {
   final TextEditingController controller;
@@ -386,7 +370,7 @@ class _ApiField extends StatelessWidget {
     final theme = Theme.of(context);
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.only(bottom: Gap.sm),
       child: TextField(
         controller: controller,
         decoration: InputDecoration(
@@ -424,7 +408,7 @@ class _ModelRow extends StatelessWidget {
     final theme = Theme.of(context);
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.only(bottom: Gap.sm),
       child: Row(
         children: [
           Expanded(
@@ -442,7 +426,7 @@ class _ModelRow extends StatelessWidget {
               style: const TextStyle(fontSize: 14),
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: Gap.xs),
           SizedBox(
             height: 40,
             child: ElevatedButton(
@@ -483,7 +467,7 @@ class _ThinkingDropdown extends StatelessWidget {
     // 当前值必须存在于档位表(模型族切换后旧值可能非法,如 DS→豆包时的高档)
     final validValue = options.containsKey(value) ? value : options.keys.first;
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.only(bottom: Gap.sm),
       child: InputDecorator(
         decoration: const InputDecoration(
           labelText: '思考模式',
@@ -558,7 +542,7 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
             children: [
               // 拖拽条
               Padding(
-                padding: const EdgeInsets.only(top: 8, bottom: 4),
+                padding: const EdgeInsets.only(top: Gap.xs, bottom: Gap.xxs),
                 child: Container(
                   width: 40,
                   height: 4,
@@ -570,7 +554,8 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
               ),
               // 搜索栏
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: Gap.md, vertical: Gap.xs),
                 child: TextField(
                   decoration: InputDecoration(
                     hintText: '搜索模型…',
@@ -590,7 +575,7 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
               ),
               // 底部提示
               Padding(
-                padding: const EdgeInsets.only(bottom: 4),
+                padding: const EdgeInsets.only(bottom: Gap.xxs),
                 child: Text(
                   '未找到需要的模型？手动输入到上方文本框即可',
                   style: TextStyle(

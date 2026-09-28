@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../config/constants.dart';
 import '../../config/design_tokens.dart';
+import '../../config/theme.dart';
 import '../../models/learner_model.dart';
 import '../../providers/vocab_provider.dart';
 import '../../services/feed_parser.dart' show FeedItem;
@@ -195,14 +196,19 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(Icons.warning_amber_rounded,
-                        size: 16, color: Colors.orange),
+                    Icon(
+                      Icons.warning_amber_rounded,
+                      size: 16,
+                      color: AppTheme.warningColor(ctx),
+                    ),
                     const SizedBox(width: Gap.xxs),
                     Expanded(
                       child: Text(
                         '这份材料对你偏难(覆盖率低于 90%)。可以先读,但建议只精读前几段,别硬啃。',
-                        style: theme.textTheme.bodySmall
-                            ?.copyWith(color: Colors.orange, height: 1.5),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: AppTheme.warningColor(ctx),
+                          height: 1.5,
+                        ),
                       ),
                     ),
                   ],
@@ -452,7 +458,9 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
         : (health.ok ? Icons.check_circle : Icons.error_outline);
     final markColor = health == null
         ? theme.colorScheme.onSurfaceVariant
-        : (health.ok ? Colors.green : Colors.orange);
+        : (health.ok
+              ? AppTheme.successColor(context)
+              : AppTheme.warningColor(context));
     return ChoiceChip(
       avatar: mark == null ? null : Icon(mark, size: 15, color: markColor),
       label: Text(s.label),
@@ -476,7 +484,9 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
     final ok = health?.ok == true;
     final dot = health == null
         ? theme.colorScheme.outlineVariant
-        : (ok ? Colors.green : Colors.orange);
+        : (ok
+              ? AppTheme.successColor(context)
+              : AppTheme.warningColor(context));
     final now = DateTime.now();
     final status = health == null
         ? (MaterialSourceService.measuredReachable.contains(s.id)
@@ -506,7 +516,9 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
               Text(
                 status,
                 style: theme.textTheme.bodySmall?.copyWith(
-                  color: health != null && !ok ? Colors.orange : muted,
+                  color: health != null && !ok
+                      ? AppTheme.warningColor(context)
+                      : muted,
                   fontSize: 11,
                 ),
               ),

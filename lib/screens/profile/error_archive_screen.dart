@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
 import '../../config/constants.dart';
+import '../../config/theme.dart';
 import '../../services/database.dart';
 import '../../widgets/empty_state.dart';
 import '../../widgets/error_state.dart';
@@ -255,7 +256,7 @@ class _ErrorArchiveScreenState extends State<ErrorArchiveScreen> {
         Icon(
           _tab == 0 ? Icons.priority_high : Icons.check_circle_outline,
           size: 16,
-          color: _tab == 0 ? theme.colorScheme.error : Colors.green,
+          color: _tab == 0 ? theme.colorScheme.error : AppTheme.successColor(context),
         ),
         const SizedBox(width: 6),
         Expanded(

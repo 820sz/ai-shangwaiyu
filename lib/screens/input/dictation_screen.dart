@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../config/theme.dart';
 import '../../models/vocabulary.dart';
 import '../../models/vocab_occurrence.dart';
 import '../../providers/vocab_provider.dart';
@@ -271,7 +272,9 @@ class _DictationScreenState extends State<DictationScreen> {
               children: [
                 Icon(
                   r.perfect ? Icons.check_circle : Icons.rule,
-                  color: r.perfect ? Colors.green : Colors.orange,
+                  color: r.perfect
+                      ? AppTheme.successColor(context)
+                      : AppTheme.warningColor(context),
                 ),
                 const SizedBox(width: 6),
                 Text('正确率 ${r.scoreLine}',
@@ -329,7 +332,9 @@ class _DictationScreenState extends State<DictationScreen> {
               trailing: Text(_results[i].scoreLine,
                   style: theme.textTheme.bodyMedium?.copyWith(
                     fontWeight: FontWeight.w600,
-                    color: _results[i].perfect ? Colors.green : Colors.orange,
+                    color: _results[i].perfect
+                        ? AppTheme.successColor(context)
+                        : AppTheme.warningColor(context),
                   )),
             ),
           ),
@@ -359,7 +364,7 @@ class _DictationScreenState extends State<DictationScreen> {
         ),
         const SizedBox(height: 8),
         Text(
-          '提示:这一页只对**文字**判分,不评发音。想练发音请用材料音频(如果有)'
+          '提示:这一页只对「文字」判分,不评发音。想练发音请用材料音频(如果有)'
           '跟着念 —— 我们不做没有依据的发音打分。',
           style: theme.textTheme.bodySmall?.copyWith(color: muted),
         ),

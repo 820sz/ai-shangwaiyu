@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../config/theme.dart';
 import '../../services/database.dart';
 import '../../services/reading_quiz.dart';
 
@@ -239,7 +240,10 @@ class _ReadingQuizScreenState extends State<ReadingQuizScreen> {
             Row(
               children: [
                 Icon(ok ? Icons.check_circle : Icons.cancel,
-                    size: 18, color: ok ? Colors.green : Colors.red),
+                    size: 18,
+                    color: ok
+                        ? AppTheme.successColor(context)
+                        : AppTheme.dangerColor(context)),
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
@@ -257,7 +261,7 @@ class _ReadingQuizScreenState extends State<ReadingQuizScreen> {
             Text(
               ok ? '你的答案:${given ?? '(未作答)'}' : '正确答案:${q.answer}',
               style: theme.textTheme.bodySmall?.copyWith(
-                color: ok ? muted : Colors.red,
+                color: ok ? muted : AppTheme.dangerColor(context),
               ),
             ),
             if (q.contextSentence != null) ...[

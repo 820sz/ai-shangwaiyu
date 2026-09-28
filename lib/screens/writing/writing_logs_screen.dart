@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import '../../config/theme.dart';
 import '../../models/writing_log.dart';
 import '../../services/database.dart';
 import '../../widgets/confirm_destructive.dart';
@@ -139,7 +140,7 @@ class _WritingLogsScreenState extends State<WritingLogsScreen> {
                 Icon(
                   Icons.folder,
                   size: 18,
-                  color: Colors.amber[700],
+                  color: AppTheme.amber(context),
                 ),
                 const SizedBox(width: 6),
                 // B3:日期是变长文本,给 Flexible 让它换行而不是把这一行挤爆
@@ -171,13 +172,15 @@ class _WritingLogsScreenState extends State<WritingLogsScreen> {
 
   Widget _logCard(ThemeData theme, WritingLog log) {
     final score = int.tryParse(log.score ?? '');
+    // 语义色随明暗切换(v2.5,U2):以前写死 grey/green/orange/red,
+    // 白底上只有 2.2~3.7:1,深色下又偏刺眼
     final scoreColor = score == null
-        ? Colors.grey
+        ? theme.colorScheme.onSurfaceVariant
         : score >= 80
-        ? Colors.green
+        ? AppTheme.successColor(context)
         : score >= 60
-        ? Colors.orange
-        : Colors.red;
+        ? AppTheme.warningColor(context)
+        : AppTheme.dangerColor(context);
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: ListTile(
@@ -241,12 +244,14 @@ class _WritingLogsScreenState extends State<WritingLogsScreen> {
               ),
               _chip(
                 materialTypeLabel(log.sourceType),
+                // 档位区分色(v2.5,U2):保留原色相语义 ——
+                // 手写档=紫(tertiary)、电子档=中性(onSurfaceVariant)
                 log.sourceType == kMaterialTypeHandwritten
-                    ? Colors.deepPurple
-                    : Colors.blueGrey,
+                    ? theme.colorScheme.tertiary
+                    : theme.colorScheme.onSurfaceVariant,
               ),
               if (log.issueCount > 0)
-                _chip('${log.issueCount} 处问题', Colors.orange),
+                _chip('${log.issueCount} 处问题', AppTheme.amber(context)),
             ],
           ),
         ),
@@ -361,8 +366,8 @@ class _WritingLogsScreenState extends State<WritingLogsScreen> {
                 _chip(
                   materialTypeLabel(log.sourceType),
                   log.sourceType == kMaterialTypeHandwritten
-                      ? Colors.deepPurple
-                      : Colors.blueGrey,
+                      ? theme.colorScheme.tertiary
+                      : theme.colorScheme.onSurfaceVariant,
                 ),
                 const Spacer(),
                 if ((log.score ?? '').isNotEmpty)
@@ -458,7 +463,7 @@ class _WritingLogsScreenState extends State<WritingLogsScreen> {
                           it['original']!,
                           style: TextStyle(
                             fontSize: 13,
-                            color: Colors.red[400],
+                            color: AppTheme.dangerColor(context),
                             decoration: TextDecoration.lineThrough,
                           ),
                         ),
@@ -467,7 +472,7 @@ class _WritingLogsScreenState extends State<WritingLogsScreen> {
                           it['correction']!,
                           style: TextStyle(
                             fontSize: 13,
-                            color: Colors.green[700],
+                            color: AppTheme.successColor(context),
                             fontWeight: FontWeight.w600,
                           ),
                         ),

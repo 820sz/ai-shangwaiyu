@@ -172,7 +172,7 @@ class _WidgetSettingsScreenState extends State<WidgetSettingsScreen> {
                   Text(
                     '· 显示:今天第一件该做的事、待复习词数、今天的新词额度、连续学习天数;'
                     '点整块打开 App。\n'
-                    '· 数据是**打开 App 时推送**的(桌面挂件读不到 App 的数据库),'
+                    '· 数据是「打开 App 时推送」的(桌面挂件读不到 App 的数据库),'
                     '所以超过一天没打开 App,小组件会自己改说「打开 App 刷新今日任务」,'
                     '不会拿旧数字冒充今天。\n'
                     '· 不显示:生词内容、AI 回复 —— 桌面是公开场合,学习内容不该默认摊在外面。',

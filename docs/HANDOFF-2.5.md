@@ -20,17 +20,17 @@
 | 目录 | `D:\readflow` |
 | 远端 | https://github.com/820sz/ai-shangwaiyu(**公开**,AGPL-3.0,gh CLI 已登录 `820sz`,默认分支 **master**) |
 | 工具链 | Flutter **3.44.7** stable / Dart 3.12.2 |
-| 已发布 | **v2.4.0+61 = Release Latest**(v2.5 的所有改动**都还没发版**,这是刻意的) |
-| 本地 HEAD | 见 §2.2 提交地图(与远端 master 保持一致) |
-| 绿灯 | analyze **0 error / 0 warning**(24 条存量 info);测试 **707 全绿 + 1 skip** |
-| 当前任务 | 排 bug + **前端大升级**(参考「训记」)+ 材料中心三修 + 开屏/退出动画 |
-| **下一步** | **U3**(复习 / 我的 / 设置)→ **P2**(继续排 bug)→ 发 **v2.5.0** |
+| 已发布 | **v2.5.0+62 = Release Latest**(2026-09-27 发出;上版 v2.4.0) |
+| 本地 HEAD | 见 §2.2 提交地图(与远端 master 的 tree 保持一致) |
+| 绿灯 | analyze **0 error / 0 warning**(11 条存量 info);测试 **717 全绿 + 1 skip** |
+| 本轮任务 | 排 bug + **前端大升级**(参考「训记」)+ 材料中心三修 + 开屏/退出动画 —— **五件事已全部交付** |
+| **下一步** | **等用户真机复测**(见 §8);反馈回来后按老规矩:只做他列的事、先问清楚、每批量做完再报 |
 
 **三条命令**(PowerShell,先 `cd D:\readflow`):
 ```powershell
 $env:FLUTTER_ALREADY_LOCKED = 'true'   # 每个新 shell 都要,否则 flutter 卡锁
-flutter analyze --no-fatal-infos       # 期望 0 error / 0 warning(24 条 info 是存量)
-flutter test                           # 期望 694 全绿 + 1 skip
+flutter analyze --no-fatal-infos       # 期望 0 error / 0 warning(11 条 info 是存量)
+flutter test                           # 期望 717 全绿 + 1 skip
 ```
 
 ---
@@ -63,13 +63,16 @@ flutter test                           # 期望 694 全绿 + 1 skip
 | v2.3.1 | 诊断增强(材料源健康表 + 小组件状态) | 已发 |
 | v2.3.2 | 材料库整链路测试挖出 2 个真 bug(入库未读不显示 / 书架 id 恒 0 点不开) | 已发 |
 | v2.3.3 | 生词去重 + 复习/听写整链路测试 | 已发 |
-| **v2.4.0** | 用户实测 10 条反馈**全部落地**(识图重做、原型备注、出现次数、助理独立窗口、浅色对比度、材料中心原文优先…) | **已发 = Latest** |
-| **v2.5(未发)** | 排 bug + 前端大升级 + 材料中心三修 + 开屏/退出动画 | **做了一半,见下** |
+| **v2.4.0** | 用户实测 10 条反馈**全部落地**(识图重做、原型备注、出现次数、助理独立窗口、浅色对比度、材料中心原文优先…) | 已发 |
+| **v2.5.0** | 排 bug + 前端大升级(三批)+ 材料中心三修 + 开屏/退出动画 | **已发 = Latest** ✅ |
 
 ### 2.2 本轮(v2.5)提交地图(都在远端了)
 
 ```
-6473606 feat(U2): 材料中心/方向页/阅读器/写作 排版与层级统一        ← U2 完成
+26c5637 feat(U3)+fix(P2): 复习/我的/设置 重排 + 全 App 语义色收敛 + 备份恢复丢 reps/lapses
+96ce16f docs: 交接文档记录新的远端同步基准(851f8e2f / 8c120f7)
+8c120f7 docs: U2 完成记录(任务板/交接文档/PLAN 状态区)+ 707 测试
+6473606 feat(U2): 材料中心/方向页/阅读器/写作 排版与层级统一
 0f9568e docs: v2.5 交接文档 + 记忆工程 + PLAN 状态区同步
 68d0ad6 docs: 任务板 v2.5 更新(M1/M2/M3/U1 完成记录 + 用户决策)
 ffd6b83 feat(U1): 前端大升级地基 — 设计令牌 + 通用组件 + 页面切换动画 + 两个首页重排
@@ -78,6 +81,7 @@ ffd6b83 feat(U1): 前端大升级地基 — 设计令牌 + 通用组件 + 页面
 74620f5 fix(M1): 材料中心找不出原文 — 换掉不可达的检索站 + 每个源如实报告 + 并行检索
 22a9427 chore: v2.4.0 正式版(2.4.0+61)
 ```
+(v2.5.0 的发版提交在 `26c5637` 之后:版本号 bump + PLAN/任务板/交接文档 + `tool/symbols/2.5.0/`)
 
 > ⚠️ 远端提交的 SHA 与本地**不同**(远端由 API 逐 blob 造提交)。判断"是否同步"要看
 > **tree**,不是 SHA:`git rev-parse 'HEAD^{tree}'` 与
@@ -91,17 +95,17 @@ ffd6b83 feat(U1): 前端大升级地基 — 设计令牌 + 通用组件 + 页面
 | **M2** | AI 改写看不到出处/来源/思考 | ✅ 完成 | `recommendations` 表加 `model`/`reasoning`(**dbVersion 13**);详情页新增 AI 溯源卡 |
 | **M3** | 开屏 + 退出动画 | ✅ 完成 | `splash_screen.dart` / `splash_settings.dart` / `widgets/exit_prompt.dart`;文案在「我的 → 外观」改 |
 | **U1** | 设计系统 + 两个首页 | ✅ 完成 | `lib/config/design_tokens.dart`、`lib/widgets/app_ui.dart`、主题统一、`tutor_home.dart` + `input_home.dart` 重排 |
-| **U2** | 材料中心 / 阅读器 / 写作 | ✅ **已完成**(2026-09-27) | 见 §3.1 开头 |
-| **U3** | 复习 / 我的 / 设置 | ⬜ **待办(下一步)** | 见 §3.2 |
-| **P2** | 继续排 bug | ⬜ 待办 | 见 §3.3 |
-| — | 发版 v2.5.0 | ⬜ 待办 | **U1–U3 全做完再发**(用户明确要求,不分批出 prebuild) |
+| **U2** | 材料中心 / 阅读器 / 写作 | ✅ 完成 | 见 §3.1 开头;新增 `lib/services/reader_settings.dart` |
+| **U3** | 复习 / 我的 / 设置 | ✅ 完成 | 见 §3.2 开头 |
+| **P2** | 继续排 bug | ✅ 完成 | 备份恢复丢 `reps`/`lapses`、~90 处写死色收敛、7 处文案星号、analyzer 24→11 |
+| — | 发版 v2.5.0 | ✅ 已发 | Release v2.5.0 = Latest,digest `83e2da66…e81f` 已核对 |
 
 ---
 
-## 3. 剩余工作(逐条可执行)
+## 3. 本轮工作明细(已全部完成,保留作背景)
 
 > **U1–U3 的边界(用户拍的)**:只做**排版 / 层级 / 组件统一 / 动效**,**不改业务逻辑**。
-> 每批做完必须:analyze 0 error、全量测试绿、**单独 commit**(中文说明,带 `feat(U2):` 前缀)。
+> 每批做完必须:analyze 0 error、全量测试绿、**单独 commit**(中文说明)。
 
 ### 3.1 U2 — 材料中心 / 阅读器 / 写作 ✅ 已完成(2026-09-27)
 
@@ -126,7 +130,16 @@ ffd6b83 feat(U1): 前端大升级地基 — 设计令牌 + 通用组件 + 页面
 **d) 写作 `lib/screens/writing/write_review_screen.dart`(967 行,`_Phase{compose,transcribing,reviewing,result,error}`)**
 - 要做:五个阶段的版式统一(同一套标题层级 + 同一套卡片);错误态用 `AppErrorCard`(带重试);结果态按钮主次分明;阶段切换加 `AnimatedSwitcher`(250ms,`Motion.transition220` 一类)。
 
-### 3.2 U3 — 复习 / 我的 / 设置
+### 3.2 U3 — 复习 / 我的 / 设置 ✅ 已完成(2026-09-27)
+
+**交付摘要**(细节见 `docs/TASK-BOARD-2.5.md` 的「U3 实际交付」):
+- 复习页:进度**一眼可读**(大字号当前序号 + 粗进度条 + 「还剩约 N 分钟」);卡片放大且内容垂直居中;评分按钮改**大按钮**(52 高 / FittedBox 防 2× 字号溢出);标记按钮加高到 64;空 / 加载 / 失败态换统一组件(失败可原地重试)。
+- 「我的」:13 个平铺入口按**学习 / 数据与回顾 / 设置与数据管理**三组重排,组标题 `AppSectionTitle`、入口统一 `AppActionTile`;顶部数字卡改用语义色。
+- 设置四页(API / 外观 / 学习偏好 / 备份):`Insets.page` + `AppSectionTitle` + `AppCard` + `Gap` 统一,底部主按钮 48 高;`AppActionTile` 新增 `enabled`(忙碌中置灰可见)。
+- **四个全 App 唯一取色入口**:`AppTheme.masteryColor`(新词/学习中/已掌握)、`wordTypeColor`(单词/短语/句子)、`chartSeries`(图表蓝,明暗两档都达标且保住原色调)、`readableOn`(品牌色在深色下只提亮度到 3:1,不动色相)。
+- 验证:analyze **11 条存量 info(0 error / 0 warning)**;717 测试全绿 + 1 skip;43 文件 +1518/−884。
+
+**下面的 a)–c) 是当时的计划,已全部落地**,保留作背景。
 
 **a) 复习页 `lib/screens/review/review_screen.dart`(1465 行,`ReviewCardMode` 枚举)**
 - 要做:**大卡片、大按钮**;进度(第 N / 共 M)与剩余时间/待复习数**醒目**(顶部一行大字 + 细进度条);四个评分按钮(Again/Hard/Good/Easy)尺寸与颜色对比拉开;卡片翻转动效统一;空态(今天复习完)用 `AppEmpty` + 一句激励。
@@ -142,11 +155,14 @@ ffd6b83 feat(U1): 前端大升级地基 — 设计令牌 + 通用组件 + 页面
 **c) 设置类页面表单统一**:`api_settings.dart`(582)、`learner_preferences_screen.dart`(360)、`appearance_screen.dart`、`backup_screen.dart`(354)
 - 要做:统一"分组卡片 + 行内表单"(标签在左/说明在下、输入框描边用 `scheme.outline`)、保存按钮位置一致、保存成功反馈一致(Toast/SnackBar 同一套)。
 
-### 3.3 P2 — 继续排 bug(用户第 1 条:排 bug、打磨每个功能/交互/体验)
+### 3.3 P2 — 继续排 bug ✅ 已完成(2026-09-27)
 
-- **导出/恢复整链路测试**:照 v2.3.2 的打法(真 SQLite,逐句复刻界面调用序列)给 `backup_service.dart` 补端到端测试 —— 这条路前面靠它换回过 4 个真 bug。
-- **逐页走查**(空态 / 失败态 / 超长文本 / **2× 系统字号** / 深色 / 浅色 各一遍),重点:材料中心、阅读器、复习、我的、设置、写作。
-- **已知待修(低优先)**:备份恢复会丢 `reps`/`lapses`(记忆状态本身不受影响,`backup_service.dart` + `fsrs.dart`)。
+- ✅ **备份恢复丢 `reps`/`lapses`**:`upsertWordReview` 增加恢复模式(传值 = 绝对值写入,不传 = 累加);恢复路径写回复习次数/遗忘次数;新增 2 例测试(含"累加语义没被破坏"的回归)。`test/backup_restore_test.dart` 7 例全绿。
+- ✅ **全 App 语义色收敛(浅色"看不清"根治)**:20+ 文件 / 约 90 处写死 `Colors.orange/green/red/blue/amber`(白底 2.2~2.8:1)换成随明暗切换的语义色。**刻意保留**的写死色及理由都写在代码里:图片角标黑白、Android 裁剪页工具栏常量、AI 厂商品牌色板(改由 `readableOn` 提亮)、桌面小组件仿真预览面板。
+- ✅ **7 处界面文案里的字面 `**星号**`** → 「」;新增 `test/ui_copy_lint_test.dart` 闸门(只扫字符串字面量,不误伤 `///` 文档注释里的 Markdown)。
+- ✅ **analyzer info 24 → 11**(清掉 if 缺大括号 / 多余 import / 插值大括号 / 文档注释 `<...>`);余下 11 条全是存量的 `use_build_context_synchronously`,**刻意不动**(改它容易改出新逻辑)。
+- ✅ 复习页 2× 系统字号防溢出。
+- **还没做/不适合自动化的**:真机上的观感与手感(尤其新排版在小屏 + 2× 字号、深色下的表现)—— 只能等用户复测反馈。
 
 ---
 
@@ -281,13 +297,20 @@ pwsh tool/push_via_api.ps1
 
 ## 8. 等用户真机复测的清单
 
-v2.5 还没发版,这些要等发出去后请他验:
+**v2.5.0 已发出**(Release Latest,digest 已核对),现在等用户真机复测:
 
-**v2.4.0 的 10 条**(已发,等他复测):
+**v2.4.0 的 10 条**(上一版就发了,他还没复测完):
 识图准确率(带「已校验」提示)/ AI 补全不再灰掉 / 追问可复制所选 / `taming(tame)` 原型 / `apple(×2)` 出现次数 / 翻译是否还生硬 / 助理独立窗口 / 「今天做什么」可取消勾选 / 浅色模式是否还泛白 / 材料中心能否找到原文
 
-**v2.5 新增**(发版后):
-每源健康状态是否一眼看懂 / AI 溯源卡能否看到模型+思考过程 / 开屏动画手感 + 文案自定义入口 / 退出提示(一天只问一次)/ 新排版在**小屏 + 2× 字号**下是否还乱
+**v2.5.0 新增**:
+- 材料中心「资料原文」进页面是否**自动出一批原文**、搜 `christmas carol` 有没有结果、各源状态条是否一眼看懂;
+- AI 那一栏详情页能否看到**模型 / 生成时间 / 依据 / 思考过程**;
+- **开屏动画**手感 + 「我的 → 外观」改文案;退出提示是否**一天只问一次**;
+- **阅读器阅读设置**(字号 5 档 / 行距 3 档)读起来是否舒服;
+- 复习页的**大卡片大按钮**与进度;「我的」三组入口是否更好找;
+- 浅色/深色下还有没有"看不清"的字;小屏 + **2× 系统字号**下排版是否还乱。
+
+> 拿到反馈后的规矩不变:**只做他列的事**、不清楚先问、每批量做完再报、发版前 bump 版本号。
 
 ---
 
@@ -295,13 +318,20 @@ v2.5 还没发版,这些要等发出去后请他验:
 
 ```powershell
 cd D:\readflow
-git log --oneline -6                     # 确认 HEAD 是 U2 那个提交或它的后继
+git log --oneline -6                     # 确认 HEAD 是 v2.5.0 发版提交或它的后继
 git status --porcelain                   # 期望干净
 $env:FLUTTER_ALREADY_LOCKED='true'
-flutter analyze --no-fatal-infos         # 期望 0 error / 0 warning(24 条 info 是存量)
-flutter test                             # 期望 707 全绿 + 1 skip
+flutter analyze --no-fatal-infos         # 期望 0 error / 0 warning(11 条 info 是存量)
+flutter test                             # 期望 717 全绿 + 1 skip
+gh release list --limit 3                # 期望 v2.5.0 为 Latest
 ```
 
-然后按顺序:**U3(§3.2)→ P2(§3.3)→ 发 v2.5.0(§5.2)→ 同步远端(§5.3)→ 更新 PLAN.md + 本文件**。
+当前状态:**v2.5 的五件事已全部交付并发版,没有待办开发任务**。
+
+接到用户新反馈/新需求时,按老流程走:
+1. **先问清楚**(不清楚的不要猜),把用户原话逐条抄进一张新的任务板 `docs/TASK-BOARD-<日期>.md`;
+2. 按优先级分批做,**每批做完 analyze + 全量测试 + 单独 commit + 汇报**;
+3. 发版走 §5.2 的步骤(bump → analyze → test → build → aapt 验版本 → release → 核对 digest → 归档 mapping → 更新 PLAN);
+4. 同步远端走 §5.3(`RF_DIFF_BASE` = tree 与远端相同的那个本地提交)。
 
 **每完成一批就 commit + 汇报**,不要攒到最后。

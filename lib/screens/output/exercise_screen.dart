@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../config/theme.dart';
 import '../../models/exercise.dart';
 import '../../providers/article_provider.dart';
 
@@ -65,7 +66,11 @@ class _ExerciseScreenState extends State<ExerciseScreen> {
                   '得分：${_score!.toInt()}%',
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
-                    color: _score! >= 60 ? Colors.green : Colors.orange,
+                    // 语义色随明暗切换(v2.5,U2):以前写死 green/orange,
+                    // 白底上只有 2.2~2.8:1(小字号看不清)
+                    color: _score! >= 60
+                        ? AppTheme.successColor(context)
+                        : AppTheme.warningColor(context),
                   ),
                 ),
               ),

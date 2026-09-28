@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../app.dart';
 import '../../config/design_tokens.dart';
+import '../../config/theme.dart';
 import '../../models/learner_model.dart';
 import '../../models/material_recommendation.dart' show LearnerProfile;
 import '../../providers/stats_provider.dart';
@@ -537,7 +538,7 @@ class _TutorHomeScreenState extends State<TutorHomeScreen> {
               onPressed: () => done ? _reopenTask(row) : _completeTask(row),
               icon: Icon(
                 done ? Icons.check_circle : Icons.radio_button_unchecked,
-                color: done ? Colors.green : muted,
+                color: done ? AppTheme.successColor(context) : muted,
               ),
             ),
             Expanded(
@@ -588,8 +589,14 @@ class _TutorHomeScreenState extends State<TutorHomeScreen> {
   Widget _buildFindingCard(ThemeData theme, TutorFinding f) {
     final muted = theme.colorScheme.onSurfaceVariant;
     final (IconData icon, Color color) = switch (f.severity) {
-      FindingSeverity.action => (Icons.priority_high, Colors.red),
-      FindingSeverity.warn => (Icons.info_outline, Colors.orange),
+      FindingSeverity.action => (
+          Icons.priority_high,
+          AppTheme.dangerColor(context)
+        ),
+      FindingSeverity.warn => (
+          Icons.info_outline,
+          AppTheme.warningColor(context)
+        ),
       FindingSeverity.info => (
           Icons.lightbulb_outline,
           theme.colorScheme.primary

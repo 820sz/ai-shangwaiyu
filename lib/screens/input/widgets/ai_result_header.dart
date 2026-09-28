@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../config/theme.dart';
+
 /// AI 结果摘要头部 — 紧凑版
 class AiResultHeader extends StatelessWidget {
   final int totalCount;
@@ -35,7 +37,7 @@ class AiResultHeader extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: const Color(0xFF4A90D9).withAlpha(12),
+        color: theme.colorScheme.primary.withAlpha(12),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
@@ -51,9 +53,21 @@ class AiResultHeader extends StatelessWidget {
             spacing: 6,
             runSpacing: 4,
             children: [
-              _countBadge('📝', '$wordCount 单词', const Color(0xFF4A90D9)),
-              _countBadge('📐', '$phraseCount 短语', Colors.orange),
-              _countBadge('💬', '$sentenceCount 句子', Colors.purple),
+              _countBadge(
+                '📝',
+                '$wordCount 单词',
+                AppTheme.wordTypeColor(context, 'word'),
+              ),
+              _countBadge(
+                '📐',
+                '$phraseCount 短语',
+                AppTheme.wordTypeColor(context, 'phrase'),
+              ),
+              _countBadge(
+                '💬',
+                '$sentenceCount 句子',
+                AppTheme.wordTypeColor(context, 'sentence'),
+              ),
             ],
           ),
           const SizedBox(height: 6),

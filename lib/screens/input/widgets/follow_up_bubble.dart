@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:provider/provider.dart';
 import '../../../config/constants.dart';
+import '../../../config/theme.dart';
 import '../../../models/bookmark.dart';
 import '../../../providers/bookmark_provider.dart';
 import 'follow_up_models.dart';
@@ -272,7 +273,9 @@ class _AiBookmarkStar extends StatelessWidget {
             child: Icon(
               saved ? Icons.star : Icons.star_border,
               size: 16,
-              color: saved ? Colors.amber[700] : theme.colorScheme.onSurfaceVariant,
+              color: saved
+                  ? AppTheme.amber(context)
+                  : theme.colorScheme.onSurfaceVariant,
             ),
           ),
         );
@@ -301,7 +304,7 @@ class ThinkingBlock extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 6),
       decoration: BoxDecoration(
-        color: Colors.orange.withAlpha(10),
+        color: AppTheme.warningColor(context).withAlpha(10),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Column(
@@ -321,7 +324,7 @@ class ThinkingBlock extends StatelessWidget {
                     streaming ? '思考过程（生成中）' : '思考过程',
                     style: TextStyle(
                       fontSize: 11,
-                      color: Colors.orange[800],
+                      color: AppTheme.warningColor(context),
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -329,7 +332,7 @@ class ThinkingBlock extends StatelessWidget {
                   Icon(
                     expanded ? Icons.expand_less : Icons.expand_more,
                     size: 16,
-                    color: Colors.orange[600],
+                    color: AppTheme.warningColor(context),
                   ),
                 ],
               ),
@@ -344,7 +347,7 @@ class ThinkingBlock extends StatelessWidget {
                   text,
                   style: TextStyle(
                     fontSize: 10,
-                    color: Colors.orange[400],
+                    color: AppTheme.warningColor(context),
                     fontFamily: 'monospace',
                     height: 1.4,
                   ),

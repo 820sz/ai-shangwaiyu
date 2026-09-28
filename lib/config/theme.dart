@@ -107,6 +107,69 @@ class AppTheme {
   static Color _semantic(BuildContext context, Color light, Color dark) =>
       Theme.of(context).brightness == Brightness.dark ? dark : light;
 
+  /// **把任意色点亮到"在深色下看得见"**(v2.5)。
+  ///
+  /// 用在**品牌色/身份色**上(AI 厂商头像、第三方标识):这些色不能换成主题色
+  /// (换了就分不清是哪家),但深色下有些只有 2.07:1(百度蓝 #2932E1)、
+  /// 2.99:1(通义紫 #6B4CE6)—— 低于 WCAG 非文字元素要求的 3:1,圆块会发闷。
+  /// 做法是**只提亮度、不动色相**:向白色插值直到对卡片底达标。
+  /// 浅色主题原样返回(品牌色在白底上都够)。
+  static Color readableOn(
+    BuildContext context,
+    Color color, {
+    double minRatio = 3.0,
+  }) {
+    final theme = Theme.of(context);
+    if (theme.brightness != Brightness.dark) return color;
+    final bg = theme.cardTheme.color ?? theme.colorScheme.surface;
+    var c = color;
+    for (var i = 0; i < 8; i++) {
+      if (contrastRatio(c, bg) >= minRatio) break;
+      c = Color.lerp(c, Colors.white, 0.12)!;
+    }
+    return c;
+  }
+
+  /// WCAG 对比度(公开给测试与调用方复用,避免各写一份)
+  static double contrastRatio(Color a, Color b) {
+    final l1 = a.computeLuminance();
+    final l2 = b.computeLuminance();
+    final hi = l1 > l2 ? l1 : l2;
+    final lo = l1 > l2 ? l2 : l1;
+    return (hi + 0.05) / (lo + 0.05);
+  }
+
+  /// **图表系列色**:曲线 / 圆点 / 面积 / 热力图都用它。
+  ///
+  /// 为什么不直接用主色:浅色主色是近黑 #1A1A2E,图表会从"蓝色数据线"
+  /// 变成"黑色墨迹",丢掉了 v1.x 以来的观感;而写死的 #4A90D9 是浅色档,
+  /// 深底上偏暗。所以给一个**两档都达标**的蓝:
+  /// 浅色 #2C6BB3(白底 5.5:1)、深色 #6BA8E8(深底 7.2:1)。
+  static const Color lightChartSeries = Color(0xFF2C6BB3);
+  static const Color darkChartSeries = Color(0xFF6BA8E8);
+
+  static Color chartSeries(BuildContext context) =>
+      _semantic(context, lightChartSeries, darkChartSeries);
+
+  /// **掌握度色**(0 新词 / 1 学习中 / 2 已掌握)。
+  ///
+  /// 为什么要收敛:同一件事在好几个文件里各写了一份 `Colors.orange/blue/green`
+  /// (词卡、词条详情、词库列表、复习标记、统计),浅色下这些色对白底只有
+  /// 2.2~2.8:1 —— 用户说的"很多地方看不清"就是它们。
+  static Color masteryColor(BuildContext context, int level) => switch (level) {
+        1 => Theme.of(context).colorScheme.primary,
+        2 => successColor(context),
+        _ => warningColor(context),
+      };
+
+  /// **词条类型色**(word / phrase / sentence):同一类词条在全 App 一个颜色
+  static Color wordTypeColor(BuildContext context, String type) =>
+      switch (type) {
+        'phrase' => warningColor(context),
+        'sentence' => Theme.of(context).colorScheme.tertiary,
+        _ => Theme.of(context).colorScheme.primary,
+      };
+
   /// themeMode → 存储用的语义档位
   static String themeModeId(ThemeMode mode) => switch (mode) {
         ThemeMode.light => 'light',

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../config/theme.dart';
 import '../../../models/vocabulary.dart';
 
 /// 紧凑的生词行组件，用于总览/详细两种显示模式。
@@ -30,12 +31,10 @@ class WordListTile extends StatelessWidget {
     this.onSpeak,
   });
 
-  Color _barColor() {
-    final t = item.wordType;
-    if (t == 'phrase') return Colors.orange;
-    if (t == 'sentence') return Colors.purple;
-    return const Color(0xFF4A90D9); // word = blue
-  }
+  /// 词条类型三色(v2.5,U2):收敛到 [AppTheme.wordTypeColor] ——
+  /// 以前这里写死 orange/purple/#4A90D9,浅色下对白底不够 AA
+  Color _barColor(BuildContext context) =>
+      AppTheme.wordTypeColor(context, item.wordType);
 
   String _typeLabel() {
     final t = item.wordType;
@@ -59,8 +58,10 @@ class WordListTile extends StatelessWidget {
           color: isSelected ? cs.primary.withAlpha(10) : Colors.transparent,
           borderRadius: BorderRadius.circular(8),
           border: isSelected
-              ? Border(left: BorderSide(color: _barColor(), width: 3))
-              : Border(left: BorderSide(color: Colors.grey.withAlpha(40), width: 3)),
+              ? Border(left: BorderSide(color: _barColor(context), width: 3))
+              : Border(
+                  left: BorderSide(
+                      color: cs.outlineVariant, width: 3)),
         ),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         child: Column(
@@ -107,7 +108,7 @@ class WordListTile extends StatelessWidget {
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                     decoration: BoxDecoration(
-                      color: _barColor().withAlpha(20),
+                      color: _barColor(context).withAlpha(20),
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
@@ -116,7 +117,7 @@ class WordListTile extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 10,
-                        color: _barColor(),
+                        color: _barColor(context),
                         fontWeight: FontWeight.w500,
                       ),
                     ),
@@ -151,7 +152,7 @@ class WordListTile extends StatelessWidget {
                       child: Icon(
                         bookmarked ? Icons.star : Icons.star_border,
                         size: 16,
-                        color: bookmarked ? Colors.amber[700] : theme.colorScheme.onSurfaceVariant,
+                        color: bookmarked ? AppTheme.amber(context) : theme.colorScheme.onSurfaceVariant,
                       ),
                     ),
                   )

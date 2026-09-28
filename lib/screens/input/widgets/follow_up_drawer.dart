@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../../../config/constants.dart';
+import '../../../config/theme.dart';
 import '../../../services/api_endpoint.dart';
 import '../../../services/base_api.dart';
 import '../../../services/doubao_api.dart';
@@ -453,10 +454,10 @@ class _FollowUpSheet extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
             child: Row(
               children: [
-                const Icon(
+                Icon(
                   Icons.chat_bubble_outline,
                   size: 18,
-                  color: Color(0xFF4A90D9),
+                  color: theme.colorScheme.primary,
                 ),
                 const SizedBox(width: 6),
                 Text(
@@ -480,7 +481,7 @@ class _FollowUpSheet extends StatelessWidget {
                           '新建',
                           style: TextStyle(
                             fontSize: 11,
-                            color: Colors.blue[400],
+                            color: theme.colorScheme.primary,
                           ),
                         ),
                       ),
@@ -615,7 +616,7 @@ class _FollowUpSheet extends StatelessWidget {
                           if (loading) {
                             return IconButton.filled(
                               style: IconButton.styleFrom(
-                                backgroundColor: Colors.red[400],
+                                backgroundColor: theme.colorScheme.error,
                               ),
                               onPressed: controller.stop,
                               tooltip: '停止生成',
@@ -660,7 +661,11 @@ class _FollowUpSheet extends StatelessWidget {
     if (msg.role != 'user') {
       return AiFollowUpBubble(
         message: msg,
-        avatar: aiAvatar(radius: 14, modelName: msg.model ?? controller.model),
+        avatar: aiAvatar(
+          radius: 14,
+          modelName: msg.model ?? controller.model,
+          context: context,
+        ),
       );
     }
     return Padding(
@@ -679,7 +684,9 @@ class _FollowUpSheet extends StatelessWidget {
                 ),
                 padding: const EdgeInsets.fromLTRB(12, 8, 6, 8),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF4A90D9).withAlpha(20),
+                  color: Theme.of(
+                    context,
+                  ).colorScheme.primary.withAlpha(20),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Row(
@@ -797,9 +804,12 @@ class _FollowUpSheet extends StatelessWidget {
                     TextButton(
                       // P2-28:此前这一下就把整库历史追问删光,无确认、无反馈
                       onPressed: () => _confirmClearAll(ctx, controller),
-                      child: const Text(
+                      child: Text(
                         '清空全部',
-                        style: TextStyle(fontSize: 12, color: Colors.red),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: AppTheme.dangerColor(ctx),
+                        ),
                       ),
                     ),
                   ],
@@ -1012,7 +1022,9 @@ class CompactModelPicker extends StatelessWidget {
                 Icon(
                   isSel ? Icons.lightbulb : Icons.lightbulb_outline,
                   size: 12,
-                  color: isSel ? Colors.orange : theme.colorScheme.onSurfaceVariant,
+                  color: isSel
+                      ? AppTheme.warningColor(context)
+                      : theme.colorScheme.onSurfaceVariant,
                 ),
                 const SizedBox(width: 6),
                 Text(
@@ -1020,7 +1032,7 @@ class CompactModelPicker extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: isSel ? FontWeight.w600 : FontWeight.normal,
-                    color: isSel ? Colors.orange : null,
+                    color: isSel ? AppTheme.warningColor(context) : null,
                   ),
                 ),
               ],

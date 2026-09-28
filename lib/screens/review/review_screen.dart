@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:provider/provider.dart';
 import '../../config/constants.dart';
+import '../../config/design_tokens.dart';
+import '../../config/theme.dart';
 import '../../models/vocabulary.dart';
 import '../../providers/vocab_provider.dart';
 import '../../services/database.dart';
@@ -12,6 +14,7 @@ import '../../services/review_queue.dart';
 import '../../services/tts_service.dart';
 import '../../services/tutor_engine.dart' show TutorEngine;
 import '../../utils/review_deck.dart';
+import '../../widgets/app_ui.dart';
 
 /// 复习题型(v2.1 扩展):
 /// - [recognize] 认词:看词回想释义(原来的卡片方式)
@@ -497,19 +500,15 @@ class _ReviewScreenState extends State<ReviewScreen> {
 
   Widget _buildQueueBody(ThemeData theme) {
     if (_queueLoading) {
-      return const Center(child: CircularProgressIndicator());
+      return const AppLoading(label: '正在算今天的复习队列…');
     }
     final plan = _plan;
     if (plan == null) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('队列还没算出来'),
-            const SizedBox(height: 8),
-            FilledButton(onPressed: _loadQueue, child: const Text('重试')),
-          ],
-        ),
+      return AppEmpty(
+        icon: Icons.error_outline,
+        title: '队列还没算出来',
+        hint: '复习队列是按记忆强度本地算的,重试一次通常就好',
+        action: FilledButton(onPressed: _loadQueue, child: const Text('重试')),
       );
     }
     if (_queue.isEmpty) return _buildQueueEmpty(theme, plan);
@@ -518,32 +517,16 @@ class _ReviewScreenState extends State<ReviewScreen> {
   }
 
   Widget _buildQueueEmpty(ThemeData theme, ReviewQueuePlan plan) {
-    final muted = theme.colorScheme.onSurfaceVariant;
     final forecast = plan.forecast.map((e) => '$e').join(' / ');
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.task_alt, size: 56, color: theme.colorScheme.primary),
-            const SizedBox(height: 12),
-            Text('今天没有到期的词', style: theme.textTheme.titleMedium),
-            const SizedBox(height: 6),
-            Text(
-              plan.buckets.total > 0
-                  ? '后面还有 ${plan.buckets.total} 个在排队(未来 7 天:$forecast)'
-                  : '复习队列是空的 —— 去材料里收几个新词,或做一次自由复习',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodySmall?.copyWith(color: muted),
-            ),
-            const SizedBox(height: 16),
-            OutlinedButton(
-              onPressed: () => setState(() => _fsrsMode = false),
-              child: const Text('去自由复习'),
-            ),
-          ],
-        ),
+    return AppEmpty(
+      icon: Icons.task_alt,
+      title: '今天没有到期的词',
+      hint: plan.buckets.total > 0
+          ? '后面还有 ${plan.buckets.total} 个在排队(未来 7 天:$forecast)'
+          : '复习队列是空的 —— 去材料里收几个新词,或做一次自由复习',
+      action: OutlinedButton(
+        onPressed: () => setState(() => _fsrsMode = false),
+        child: const Text('去自由复习'),
       ),
     );
   }
@@ -559,21 +542,46 @@ class _ReviewScreenState extends State<ReviewScreen> {
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          padding: const EdgeInsets.fromLTRB(Gap.md, Gap.xs, Gap.md, 0),
           child: Column(
             children: [
-              LinearProgressIndicator(value: progress, minHeight: 6),
-              const SizedBox(height: 6),
+              // ── 进度:复习时最想知道"还剩几个/多久" ──
+              // 大字号当前序号 + 粗进度条 + 剩余时间,一眼可读
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text('${_qIndex + 1}',
+                      style: theme.textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        height: 1.0,
+                      )),
+                  Text(' / $total',
+                      style: theme.textTheme.titleMedium
+                          ?.copyWith(color: muted, height: 1.2)),
+                  const Spacer(),
+                  // 系统字号 2× 时这行会变长 —— 让它可省略,别撑破 Row
+                  Flexible(
+                    child: Text('还剩约 ${_remainingMinutes(plan)} 分钟',
+                        textAlign: TextAlign.right,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style:
+                            theme.textTheme.bodySmall?.copyWith(color: muted)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: Gap.xs),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(Gap.xxs),
+                child: LinearProgressIndicator(value: progress, minHeight: 8),
+              ),
+              const SizedBox(height: Gap.sm),
               Row(
                 children: [
-                  Text('${_qIndex + 1} / $total',
-                      style: theme.textTheme.bodySmall
-                          ?.copyWith(color: muted, fontWeight: FontWeight.w600)),
-                  const SizedBox(width: 8),
                   // 题型切换:同一批词换一种问法(拼写/听写检验"能产出")
                   for (final m in ReviewCardMode.values)
                     Padding(
-                      padding: const EdgeInsets.only(right: 4),
+                      padding: const EdgeInsets.only(right: Gap.xxs),
                       child: ChoiceChip(
                         label: Text(m.label, style: const TextStyle(fontSize: 11)),
                         selected: _cardMode == m,
@@ -590,10 +598,10 @@ class _ReviewScreenState extends State<ReviewScreen> {
                   if (item.isNew)
                     Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 6, vertical: 2),
+                          horizontal: Gap.xs, vertical: 2),
                       decoration: BoxDecoration(
                         color: theme.colorScheme.primary.withAlpha(20),
-                        borderRadius: BorderRadius.circular(4),
+                        borderRadius: BorderRadius.circular(Radii.control - 4),
                       ),
                       child: Text('新词',
                           style: TextStyle(
@@ -606,24 +614,37 @@ class _ReviewScreenState extends State<ReviewScreen> {
         ),
         Expanded(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            padding: const EdgeInsets.fromLTRB(Gap.md, Gap.sm, Gap.md, Gap.xs),
             child: Card(
               elevation: 3,
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
+                borderRadius: BorderRadius.circular(Radii.sheet),
               ),
               child: SizedBox(
                 width: double.infinity,
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(20),
-                  child: isTyping
-                      ? _buildTypingCard(theme, v)
-                      : GestureDetector(
-                          onTap: () => setState(() => _qFlipped = !_qFlipped),
-                          child: _qFlipped
-                              ? _cardBack(theme, v, null)
-                              : _cardFront(theme, v),
-                        ),
+                // 大卡片:内容在卡内**垂直居中**(短内容不再贴在顶部),
+                // 内容超高时照旧可滚
+                child: LayoutBuilder(
+                  builder: (ctx, box) => SingleChildScrollView(
+                    padding: const EdgeInsets.all(Gap.lg),
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        minHeight: (box.maxHeight - Gap.lg * 2)
+                            .clamp(0.0, double.infinity),
+                      ),
+                      child: Center(
+                        child: isTyping
+                            ? _buildTypingCard(theme, v)
+                            : GestureDetector(
+                                onTap: () =>
+                                    setState(() => _qFlipped = !_qFlipped),
+                                child: _qFlipped
+                                    ? _cardBack(theme, v, null)
+                                    : _cardFront(theme, v),
+                              ),
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -632,28 +653,35 @@ class _ReviewScreenState extends State<ReviewScreen> {
         // ── 底部操作区:按题型给不同动作 ──
         if (isTyping && _spellAnswer == null)
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            padding: const EdgeInsets.fromLTRB(Gap.md, 0, Gap.md, Gap.md),
             child: SizedBox(
               width: double.infinity,
               child: FilledButton(
-                onPressed: _spellCtrl.text.trim().isEmpty ? null : _checkSpelling,
-                child: const Text('检查'),
+                onPressed:
+                    _spellCtrl.text.trim().isEmpty ? null : _checkSpelling,
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: Gap.md),
+                ),
+                child: const Text('检查', style: TextStyle(fontSize: 16)),
               ),
             ),
           )
         else if (!isTyping && !_qFlipped)
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            padding: const EdgeInsets.fromLTRB(Gap.md, 0, Gap.md, Gap.md),
             child: Column(
               children: [
                 Text('先自己回忆,再看答案',
                     style: theme.textTheme.bodySmall?.copyWith(color: muted)),
-                const SizedBox(height: 8),
+                const SizedBox(height: Gap.xs),
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton(
                     onPressed: () => setState(() => _qFlipped = true),
-                    child: const Text('显示答案'),
+                    style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: Gap.md),
+                    ),
+                    child: const Text('显示答案', style: TextStyle(fontSize: 16)),
                   ),
                 ),
               ],
@@ -661,7 +689,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
           )
         else
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            padding: const EdgeInsets.fromLTRB(Gap.md, 0, Gap.md, Gap.md),
             child: Column(
               children: [
                 Text(
@@ -671,42 +699,44 @@ class _ReviewScreenState extends State<ReviewScreen> {
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: _spellAnswer == null
                         ? muted
-                        : (_spellCorrect == true ? Colors.green : Colors.red),
+                        : (_spellCorrect == true
+                            ? AppTheme.successColor(context)
+                            : AppTheme.dangerColor(context)),
                   ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: Gap.xs),
                 Row(
                   children: [
                     Expanded(
                       child: _ratingButton(
                         label: '不认识',
-                        color: Colors.red,
+                        color: AppTheme.dangerColor(context),
                         rating: FsrsRating.again,
                         emphasized: _spellCorrect == false,
                       ),
                     ),
-                    const SizedBox(width: 6),
+                    const SizedBox(width: Gap.xxs + 2),
                     Expanded(
                       child: _ratingButton(
                         label: '模糊',
-                        color: Colors.orange,
+                        color: AppTheme.warningColor(context),
                         rating: FsrsRating.hard,
                       ),
                     ),
-                    const SizedBox(width: 6),
+                    const SizedBox(width: Gap.xxs + 2),
                     Expanded(
                       child: _ratingButton(
                         label: '认识',
-                        color: Colors.blue,
+                        color: theme.colorScheme.primary,
                         rating: FsrsRating.good,
                         emphasized: _spellCorrect == true,
                       ),
                     ),
-                    const SizedBox(width: 6),
+                    const SizedBox(width: Gap.xxs + 2),
                     Expanded(
                       child: _ratingButton(
                         label: '太简单',
-                        color: Colors.green,
+                        color: AppTheme.successColor(context),
                         rating: FsrsRating.easy,
                       ),
                     ),
@@ -717,6 +747,15 @@ class _ReviewScreenState extends State<ReviewScreen> {
           ),
       ],
     );
+  }
+
+  /// 剩余预计分钟(按队列比例折算,至少 1 分钟)
+  int _remainingMinutes(ReviewQueuePlan plan) {
+    final total = _queue.length;
+    if (total == 0) return 0;
+    final left = total - _qIndex;
+    final m = (plan.estimatedMinutes * left / total).ceil();
+    return m < 1 ? 1 : m;
   }
 
   /// 拼写/听写模式的卡面:给提示 + 输入框(听写自动朗读一次)
@@ -737,22 +776,24 @@ class _ReviewScreenState extends State<ReviewScreen> {
           Row(
             children: [
               Icon(_spellCorrect == true ? Icons.check_circle : Icons.cancel,
-                  color: _spellCorrect == true ? Colors.green : Colors.red),
-              const SizedBox(width: 6),
+                  color: _spellCorrect == true
+                      ? AppTheme.successColor(context)
+                      : AppTheme.dangerColor(context)),
+              const SizedBox(width: Gap.xxs + 2),
               Text(
                 _spellCorrect == true ? '拼写正确' : '拼写错误',
                 style: theme.textTheme.titleSmall,
               ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: Gap.sm),
           Text('你的答案:${_spellAnswer!.isEmpty ? '(空)' : _spellAnswer}',
               style: theme.textTheme.bodyMedium),
-          const SizedBox(height: 4),
+          const SizedBox(height: Gap.xxs),
           Text(v.word,
               style: theme.textTheme.headlineSmall
                   ?.copyWith(fontWeight: FontWeight.w700)),
-          const SizedBox(height: 10),
+          const SizedBox(height: Gap.sm),
           _cardBack(theme, v, null),
         ],
       );
@@ -800,21 +841,34 @@ class _ReviewScreenState extends State<ReviewScreen> {
     );
   }
 
+  /// 评分按钮(v2.5,U3:大按钮)。
+  ///
+  /// 复习时是单手盲点,按钮要够大够分明;颜色用**随明暗切换的语义色**
+  /// (以前写死 Colors.red/orange/blue/green,深色下对比度不对)。
   Widget _ratingButton({
     required String label,
     required Color color,
     required FsrsRating rating,
     bool emphasized = false,
   }) {
-    return OutlinedButton(
+    return FilledButton.tonal(
       onPressed: () => _rate(rating),
-      style: OutlinedButton.styleFrom(
+      style: FilledButton.styleFrom(
         foregroundColor: color,
-        side: BorderSide(color: color.withAlpha(emphasized ? 255 : 120)),
-        backgroundColor: emphasized ? color.withAlpha(20) : null,
-        padding: const EdgeInsets.symmetric(vertical: 12),
+        backgroundColor: color.withAlpha(emphasized ? 30 : 16),
+        minimumSize: const Size(0, 52),
+        padding: const EdgeInsets.symmetric(vertical: Gap.sm, horizontal: Gap.xxs),
+        shape: RoundedRectangleBorder(borderRadius: Radii.controlRadius),
       ),
-      child: Text(label, style: const TextStyle(fontSize: 13)),
+      child: FittedBox(
+        // 系统字号放大时"不认识"这类三字标签会宽过按钮 → 缩小填进去,不溢出
+        fit: BoxFit.scaleDown,
+        child: Text(
+          label,
+          maxLines: 1,
+          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+        ),
+      ),
     );
   }
 
@@ -828,65 +882,68 @@ class _ReviewScreenState extends State<ReviewScreen> {
     final learned = _queue.length;
     final forecast = plan.forecast.map((e) => '$e').join(' / ');
     return ListView(
-      padding: const EdgeInsets.all(20),
+      padding: Insets.page,
       children: [
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              children: [
-                Icon(Icons.task_alt, size: 44, color: theme.colorScheme.primary),
-                const SizedBox(height: 10),
-                Text('今天的复习做完了', style: theme.textTheme.titleMedium),
-                const SizedBox(height: 6),
-                Text('本轮 $learned 个词:认识 $good · 太简单 $easy · '
-                    '模糊 $hard · 不认识 $again',
+        AppCard(
+          padding: const EdgeInsets.all(Gap.lg),
+          child: Column(
+            children: [
+              Icon(Icons.task_alt, size: 44, color: theme.colorScheme.primary),
+              const SizedBox(height: Gap.sm),
+              Text('今天的复习做完了', style: theme.textTheme.titleMedium),
+              const SizedBox(height: Gap.xs),
+              Text('本轮 $learned 个词:认识 $good · 太简单 $easy · '
+                  '模糊 $hard · 不认识 $again',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodyMedium),
+              if (again > 0) ...[
+                const SizedBox(height: Gap.sm),
+                Text('$again 个"不认识"已经回到队列(更早再见),并记进错误档案。',
                     textAlign: TextAlign.center,
-                    style: theme.textTheme.bodyMedium),
-                const SizedBox(height: 10),
-                if (again > 0)
-                  Text('$again 个"不认识"已经回到队列(更早再见),并记进错误档案。',
-                      textAlign: TextAlign.center,
-                      style: theme.textTheme.bodySmall?.copyWith(color: muted)),
+                    style: theme.textTheme.bodySmall?.copyWith(color: muted)),
               ],
-            ),
+            ],
           ),
         ),
-        const SizedBox(height: 12),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('未来 7 天负荷(每天要复习的词数)',
-                    style: theme.textTheme.titleSmall),
-                const SizedBox(height: 8),
-                Text(forecast,
-                    style: theme.textTheme.bodyMedium
-                        ?.copyWith(fontWeight: FontWeight.w600)),
-                const SizedBox(height: 6),
-                Text(
-                  _loadAdvice(plan),
-                  style: theme.textTheme.bodySmall?.copyWith(color: muted),
-                ),
-              ],
-            ),
+        const SizedBox(height: Gap.sm),
+        AppCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('未来 7 天负荷(每天要复习的词数)',
+                  style: theme.textTheme.titleSmall
+                      ?.copyWith(fontWeight: FontWeight.w600)),
+              const SizedBox(height: Gap.xs),
+              Text(forecast,
+                  style: theme.textTheme.bodyMedium
+                      ?.copyWith(fontWeight: FontWeight.w600)),
+              const SizedBox(height: Gap.xxs + 2),
+              Text(
+                _loadAdvice(plan),
+                style: theme.textTheme.bodySmall?.copyWith(color: muted),
+              ),
+            ],
           ),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: Gap.md),
         Row(
           children: [
             Expanded(
               child: OutlinedButton(
                 onPressed: _loadQueue,
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(0, 48),
+                ),
                 child: const Text('清下一批'),
               ),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: Gap.xs),
             Expanded(
               child: FilledButton(
                 onPressed: () => Navigator.pop(context),
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size(0, 48),
+                ),
                 child: const Text('完成'),
               ),
             ),
@@ -912,44 +969,44 @@ class _ReviewScreenState extends State<ReviewScreen> {
   /// 自由复习(原有逻辑):筛选 + 整库浏览
   Widget _buildFreeBody(ThemeData theme) {
     return _loading
-        ? const Center(child: CircularProgressIndicator())
+        ? const AppLoading(label: '正在读取生词本…')
         : _error != null
-        ? Center(child: Text(_error!))
+        ? Padding(
+            padding: Insets.page,
+            child: AppErrorCard(
+              message: _error!,
+              onRetry: () {
+                setState(() {
+                  _loading = true;
+                  _error = null;
+                });
+                _load();
+              },
+            ),
+          )
         : _deck.isEmpty
         ? _buildEmpty(theme)
         : _buildBody(theme);
   }
 
   Widget _buildEmpty(ThemeData theme) {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            Icons.style_outlined,
-            size: 56,
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-          const SizedBox(height: 12),
-          Text(
-            _filterLevel >= 0 || _filterDays > 0
-                ? '该筛选条件下暂无带释义的词汇'
-                : '生词本里还没有带释义的词汇',
-            style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
-          ),
-          const SizedBox(height: 16),
-          OutlinedButton(
-            onPressed: () {
-              setState(() {
-                _filterLevel = -1;
-                _filterDays = 0;
-              });
-              _buildDeck();
-            },
-            child: const Text('查看全部'),
-          ),
-        ],
-      ),
+    final filtered = _filterLevel >= 0 || _filterDays > 0;
+    return AppEmpty(
+      icon: Icons.style_outlined,
+      title: filtered ? '该筛选条件下暂无带释义的词汇' : '生词本里还没有带释义的词汇',
+      hint: filtered ? '换个筛选条件,或看全部' : '先去材料里收几个词,它们会自动进复习队列',
+      action: filtered
+          ? OutlinedButton(
+              onPressed: () {
+                setState(() {
+                  _filterLevel = -1;
+                  _filterDays = 0;
+                });
+                _buildDeck();
+              },
+              child: const Text('查看全部'),
+            )
+          : null,
     );
   }
 
@@ -1072,41 +1129,43 @@ class _ReviewScreenState extends State<ReviewScreen> {
     );
   }
 
-  /// 进度条(v1.7.0:深色文字 + 主题色进度)
+  /// 进度条(v2.5,U3:进度要做成"一眼可读")
+  /// 大字号当前张数 + 粗进度条 + 三个状态计数分行,不再挤在一行小字里
   Widget _buildProgressBar(ThemeData theme) {
     final total = _deck.length;
     final current = _finished ? total : _index + 1;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 6, 16, 8),
+      padding: const EdgeInsets.fromLTRB(Gap.md, Gap.xs, Gap.md, Gap.xs),
       child: Column(
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Text(
-                _finished ? '本轮完成' : '第 $current / $total 张',
-                style: TextStyle(
-                  fontSize: 14,
+                _finished ? '本轮完成' : '$current',
+                style: theme.textTheme.headlineSmall?.copyWith(
                   fontWeight: FontWeight.w700,
-                  color: theme.colorScheme.onSurface,
+                  height: 1.0,
                 ),
               ),
+              if (!_finished)
+                Text(' / $total 张',
+                    style: theme.textTheme.titleMedium
+                        ?.copyWith(height: 1.2)),
               const Spacer(),
               Text(
-                '认识/已掌握 $_countMastered · 模糊/学习中 $_countLearning · 不认识/新词 $_countNew',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: theme.colorScheme.onSurface,
-                  fontWeight: FontWeight.w500,
-                ),
+                '认识 $_countMastered · 模糊 $_countLearning · 新词 $_countNew',
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
               ),
             ],
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: Gap.xs),
           ClipRRect(
-            borderRadius: BorderRadius.circular(4),
+            borderRadius: BorderRadius.circular(Gap.xxs),
             child: LinearProgressIndicator(
               value: total == 0 ? 0 : current / total,
-              minHeight: 7,
+              minHeight: 8,
               backgroundColor: theme.colorScheme.surfaceContainerHighest,
               valueColor: AlwaysStoppedAnimation<Color>(
                 theme.colorScheme.primary,
@@ -1122,25 +1181,23 @@ class _ReviewScreenState extends State<ReviewScreen> {
   Widget _buildResumeBanner(ThemeData theme) {
     final p = _resumable!;
     return Container(
-      margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      margin: const EdgeInsets.fromLTRB(Gap.md, 0, Gap.md, Gap.xs),
+      padding: const EdgeInsets.symmetric(
+          horizontal: Gap.sm, vertical: Gap.xs),
       decoration: BoxDecoration(
         color: theme.colorScheme.primary.withAlpha(18),
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: Radii.controlRadius,
         border: Border.all(color: theme.colorScheme.primary.withAlpha(80)),
       ),
       child: Row(
         children: [
           Icon(Icons.history, size: 18, color: theme.colorScheme.primary),
-          const SizedBox(width: 8),
+          const SizedBox(width: Gap.xs),
           Expanded(
             child: Text(
               '上次复习到第 ${p.index + 1} 张',
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: theme.colorScheme.onSurface,
-              ),
+              style: theme.textTheme.bodyMedium
+                  ?.copyWith(fontWeight: FontWeight.w600),
             ),
           ),
           TextButton(
@@ -1151,10 +1208,11 @@ class _ReviewScreenState extends State<ReviewScreen> {
             },
             child: const Text('重新开始', style: TextStyle(fontSize: 12)),
           ),
+          const SizedBox(width: Gap.xxs),
           FilledButton(
             style: FilledButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              minimumSize: const Size(0, 32),
+              padding: const EdgeInsets.symmetric(horizontal: Gap.sm),
+              minimumSize: const Size(0, 36),
             ),
             onPressed: () {
               setState(() => _resumable = null);
@@ -1214,12 +1272,12 @@ class _ReviewScreenState extends State<ReviewScreen> {
                 key: ValueKey('${_index}_$_flipped'),
                 elevation: 3,
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(20),
+                  borderRadius: BorderRadius.circular(Radii.sheet),
                 ),
                 child: SizedBox(
                   width: double.infinity,
                   child: Padding(
-                    padding: const EdgeInsets.all(20),
+                    padding: const EdgeInsets.all(Gap.lg),
                     child: _flipped
                         ? _cardBack(theme, v, markedLevel)
                         : _cardFront(theme, v),
@@ -1229,7 +1287,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
             ),
           ),
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: Gap.xs),
         // 前后翻卡
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -1239,16 +1297,13 @@ class _ReviewScreenState extends State<ReviewScreen> {
               tooltip: '上一张',
               icon: const Icon(Icons.chevron_left),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: Gap.sm),
             Text(
               '${_index + 1} / ${_deck.length}',
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: theme.colorScheme.onSurface,
-              ),
+              style: theme.textTheme.bodyMedium
+                  ?.copyWith(fontWeight: FontWeight.w600),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: Gap.sm),
             IconButton.outlined(
               onPressed: _flipped
                   ? _next
@@ -1258,10 +1313,10 @@ class _ReviewScreenState extends State<ReviewScreen> {
             ),
           ],
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: Gap.xs),
         // 标记按钮(点完自动翻面显示释义,看完点「下一张」)
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+          padding: const EdgeInsets.fromLTRB(Gap.md, 0, Gap.md, Gap.xs),
           child: Row(
             children: [
               Expanded(
@@ -1269,27 +1324,27 @@ class _ReviewScreenState extends State<ReviewScreen> {
                   label: '不认识',
                   statusLabel: '新词',
                   icon: Icons.sentiment_very_dissatisfied,
-                  color: Colors.red,
+                  color: AppTheme.dangerColor(context),
                   level: 0,
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: Gap.xs),
               Expanded(
                 child: _markButton(
                   label: '模糊',
                   statusLabel: '学习中',
                   icon: Icons.sentiment_neutral,
-                  color: Colors.blue,
+                  color: theme.colorScheme.primary,
                   level: 1,
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: Gap.xs),
               Expanded(
                 child: _markButton(
                   label: '认识',
                   statusLabel: '已掌握',
                   icon: Icons.sentiment_very_satisfied,
-                  color: Colors.green,
+                  color: AppTheme.successColor(context),
                   level: 2,
                 ),
               ),
@@ -1298,15 +1353,15 @@ class _ReviewScreenState extends State<ReviewScreen> {
         ),
         if (_flipped)
           Padding(
-            padding: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.only(bottom: Gap.sm),
             child: FilledButton.icon(
               onPressed: _next,
               icon: const Icon(Icons.arrow_forward, size: 18),
               label: Text(_index + 1 >= _deck.length ? '完成本轮' : '下一张'),
               style: FilledButton.styleFrom(
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 28,
-                  vertical: 12,
+                  horizontal: Gap.lg,
+                  vertical: Gap.sm + 2,
                 ),
               ),
             ),
@@ -1443,16 +1498,18 @@ class _ReviewScreenState extends State<ReviewScreen> {
   }
 
   Widget _markBadge(int level) {
-    final (String label, Color color) = switch (level) {
-      2 => ('已标记：认识 · 已掌握', Colors.green),
-      1 => ('已标记：模糊 · 学习中', Colors.blue),
-      _ => ('已标记：不认识 · 新词', Colors.red),
+    // 与词库/词条详情同一套掌握度色(0 新词=琥珀 / 1 学习中=主色 / 2 已掌握=成功)
+    final label = switch (level) {
+      2 => '已标记:认识 · 已掌握',
+      1 => '已标记:模糊 · 学习中',
+      _ => '已标记:不认识 · 新词',
     };
+    final color = AppTheme.masteryColor(context, level);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      padding: const EdgeInsets.symmetric(horizontal: Gap.xs, vertical: 3),
       decoration: BoxDecoration(
         color: color.withAlpha(22),
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(Radii.control - 4),
         border: Border.all(color: color.withAlpha(120)),
       ),
       child: Text(
@@ -1469,24 +1526,26 @@ class _ReviewScreenState extends State<ReviewScreen> {
   Widget _buildSummary(ThemeData theme) {
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: Insets.page,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.celebration, size: 56, color: Colors.amber),
-            const SizedBox(height: 16),
+            const Icon(Icons.celebration,
+                size: 56, color: Colors.amber),
+            const SizedBox(height: Gap.md),
             Text(
-              '本轮复习完成！',
+              '本轮复习完成!',
               style: theme.textTheme.headlineSmall?.copyWith(
                 fontWeight: FontWeight.bold,
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: Gap.sm),
             Text(
               '共 $_countMastered 张认识 · $_countLearning 张模糊 · $_countNew 张不认识',
+              textAlign: TextAlign.center,
               style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: Gap.lg),
             FilledButton.icon(
               onPressed: () {
                 _clearProgress();
@@ -1494,8 +1553,11 @@ class _ReviewScreenState extends State<ReviewScreen> {
               },
               icon: const Icon(Icons.replay, size: 18),
               label: const Text('再来一轮'),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size(180, 48),
+              ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: Gap.xs),
             TextButton(
               onPressed: () => Navigator.pop(context),
               child: const Text('返回'),
@@ -1506,6 +1568,8 @@ class _ReviewScreenState extends State<ReviewScreen> {
     );
   }
 
+  /// 标记按钮(v2.5,U3:大按钮)。
+  /// 复习是单手盲点场景:高度 64、图标 24、动作词 13 —— 手指不用瞄准。
   Widget _markButton({
     required String label,
     required IconData icon,
@@ -1516,16 +1580,19 @@ class _ReviewScreenState extends State<ReviewScreen> {
     return GestureDetector(
       onTap: () => _mark(level),
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12),
+        constraints: const BoxConstraints(minHeight: 64),
+        padding: const EdgeInsets.symmetric(
+            vertical: Gap.sm, horizontal: Gap.xxs),
         decoration: BoxDecoration(
           color: color.withAlpha(14),
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: Radii.controlRadius,
           border: Border.all(color: color.withAlpha(130), width: 1.4),
         ),
         child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, color: color, size: 22),
-            const SizedBox(height: 4),
+            Icon(icon, color: color, size: 24),
+            const SizedBox(height: Gap.xxs),
             Text(
               label,
               style: TextStyle(

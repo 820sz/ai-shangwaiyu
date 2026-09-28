@@ -5,6 +5,8 @@ import '../../providers/stats_provider.dart';
 import '../../providers/vocab_provider.dart';
 import '../../providers/bookmark_provider.dart';
 import '../../config/constants.dart';
+import '../../config/design_tokens.dart';
+import '../../config/theme.dart';
 import '../../models/learner_model.dart';
 import '../../services/api_endpoint.dart';
 import '../../services/database.dart';
@@ -15,6 +17,7 @@ import '../../services/material_source.dart';
 import '../../services/material_source_status.dart';
 import '../../services/widget_service.dart';
 import '../../utils/crash_logger.dart';
+import '../../widgets/app_ui.dart';
 import '../../widgets/stats_chart.dart';
 import '../../widgets/update_dialog.dart';
 import '../../services/update_service.dart';
@@ -85,226 +88,259 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
       body: RefreshIndicator(
         onRefresh: _loadAll,
         child: ListView(
-          padding: const EdgeInsets.all(16),
+          padding: Insets.page,
           children: [
-            // ── 统计卡片 ──
-            Row(
-              children: [
-                _StatCard(
-                    icon: Icons.menu_book,
-                    value: '${stats.totalVocab}',
-                    label: '总词汇量',
-                    color: Colors.blue),
-                const SizedBox(width: 10),
-                _StatCard(
-                    icon: Icons.local_fire_department,
-                    value: '${stats.streakDays}',
-                    label: '连续天数',
-                    color: Colors.orange),
-                const SizedBox(width: 10),
-                _StatCard(
-                    icon: Icons.fitness_center,
-                    value: '${stats.totalExercises}',
-                    label: '已完成练习',
-                    color: Colors.green),
-              ],
-            ),
-            const SizedBox(height: 20),
-
-            // ── 快速入口 ──
-            _MenuTile(
-              icon: Icons.book,
-              title: '我的生词本',
-              subtitle: '按书籍分组',
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const VocabListScreen()),
-              ),
-            ),
-            _MenuTile(
-              icon: Icons.style,
-              title: '复习模式',
-              subtitle: '抽认卡记忆',
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const ReviewScreen()),
-              ),
-            ),
-            _MenuTile(
-              icon: Icons.bar_chart,
-              title: '学习统计',
-              subtitle: '趋势与热力图',
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const StatsPageScreen()),
-              ),
-            ),
-            _MenuTile(
-              icon: Icons.insights,
-              title: '本周报告',
-              subtitle: '这周做了什么、下周改什么(本地算,不调 AI)',
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const WeeklyReportScreen()),
-              ),
-            ),
-            // 错误档案(v2.1):把"我英语不好"变成"我时态错了 7 次"。
-            // 入口紧挨复习模式:这两页是同一个循环(练 → 记错 → 修 → 再练)。
-            _MenuTile(
-              icon: Icons.fact_check_outlined,
-              title: '错误档案',
-              subtitle: _activeErrorKinds > 0
-                  ? '待处理 $_activeErrorKinds 类'
-                  : '写译批改、读后测验与复习里的错题',
-              onTap: () async {
-                await Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => const ErrorArchiveScreen(),
-                  ),
-                );
-                // 回来要刷新副标题:用户刚在里面标了「已改正」
-                if (!mounted) return;
-                final errors =
-                    await DatabaseService.getErrorTags(status: 'active');
-                if (!mounted) return;
-                setState(() => _activeErrorKinds = errors.length);
-              },
-            ),
-            // 备份与导出(v2.2):数据只在这台手机上,这是唯一的迁移/保险出口
-            _MenuTile(
-              icon: Icons.backup_outlined,
-              title: '备份与导出',
-              subtitle: '完整备份(可回导)/ 生词本 CSV / Anki 导入包',
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const BackupScreen()),
-              ),
-            ),
-            _MenuTile(
-              icon: Icons.star_outline,
-              title: '收藏夹',              subtitle: '收藏的洞见与好句',
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const BookmarksScreen()),
-              ),
-            ),
-            _MenuTile(
-              icon: Icons.settings,
-              title: 'API 设置',
-              subtitle: '配置 API Key',
-              onTap: () => _showSettings(),
-            ),
-            // 学习偏好(v2.0):朗读音色 + 不想看的题材/关键词。
-            // 与 API 设置分开放:一个是技术配置,一个是个人偏好,
-            // 混在一起用户找不到"屏蔽题材"这件事。
-            _MenuTile(
-              icon: Icons.tune,
-              title: '学习偏好',
-              // 副标题直接暴露"当前屏蔽了几个/哪些":用户一眼能看出
-              // 黑名单是不是生效了(静默生效等于没生效)
-              subtitle: _preferencesSubtitle(),
-              onTap: () async {
-                await Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => const LearnerPreferencesScreen(),
-                  ),
-                );
-                // 黑名单可能刚改过:回来自刷新,让副标题与磁盘保持一致
-                if (!mounted) return;
-                setState(() => _learnerModel = LearnerModelStore.load());
-              },
-            ),
-            // 外观(v2.2):深浅色。放在"学习偏好"旁边但独立成页 ——
-            // 一个是学习策略,一个是设备/环境选择,混在一起两个都找不着。
-            _MenuTile(
-              icon: Icons.brightness_6_outlined,
-              title: '外观',
-              subtitle: '浅色 / 深色 / 跟随系统',
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const AppearanceScreen()),
-              ),
-            ),
-            // 桌面小组件(v2.2):状态 / 一键添加 / 手动同步并预览
-            _MenuTile(
-              icon: Icons.widgets_outlined,
-              title: '桌面小组件',
-              subtitle: '在桌面看今天的任务与待复习数',
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => const WidgetSettingsScreen(),
-                ),
-              ),
-            ),
-            _MenuTile(
-              icon: Icons.medical_information,
-              title: '诊断信息',
-              subtitle: '崩溃日志与配置',
-              onTap: () => _showDiagnostics(),
-            ),
-            _MenuTile(
-              icon: Icons.system_update_alt,
-              title: '检查更新',
-              subtitle: 'GitHub 最新版',
-              onTap: () async {
-                try {
-                  final info = await UpdateService.checkLatestRelease();
-                  if (!context.mounted) return;
-                  if (info == null || !info.hasUpdate) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('当前已是最新版本')),
-                    );
-                  } else {
-                    showUpdateDialog(context, info);
-                  }
-                } catch (e) {
-                  // F3:检查失败(网络全断)必须明说,不能伪装成"已是最新"
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('检查更新失败:$e')),
-                    );
-                  }
-                }
-              },
-            ),
-            const SizedBox(height: 16),
+            // ── 数据就在手边:三个关键数字 ──
+            _buildStatsRow(theme, stats),
+            const SizedBox(height: Gap.md),
 
             // ── 词汇量基线(v2.0) ──
             // 这一块把"水平"从"生词本收藏数瞎估"变成**测量值 + 区间 + 依据**。
             // 导师与材料推荐都以它为地基,所以入口放在「我的」页显眼处。
-            _buildBaselineCard(theme),
+            AppStagger(index: 0, child: _buildBaselineCard(theme)),
 
-            // ── 学习曲线预览 ──
-            if (stats.dailyLogs.isNotEmpty) ...[
-              Text('学习趋势',
-                  style: theme.textTheme.titleSmall
-                      ?.copyWith(fontWeight: FontWeight.w600)),
-              const SizedBox(height: 8),
-              LearningCurveChart(dailyLogs: stats.dailyLogs),
-            ],
+            // ── 学习(u3 分组):每天真正会点的三个入口 ──
+            const AppSectionTitle(title: '学习'),
+            AppStagger(
+              index: 1,
+              child: Column(
+                children: [
+                  AppActionTile(
+                    icon: Icons.book,
+                    title: '我的生词本',
+                    subtitle: '按书籍分组',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const VocabListScreen()),
+                    ),
+                  ),
+                  AppActionTile(
+                    icon: Icons.style,
+                    title: '复习模式',
+                    subtitle: '抽认卡记忆',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const ReviewScreen()),
+                    ),
+                  ),
+                  AppActionTile(
+                    icon: Icons.star_outline,
+                    title: '收藏夹',
+                    subtitle: '收藏的洞见与好句',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const BookmarksScreen()),
+                    ),
+                  ),
+                ],
+              ),
+            ),
 
-            const SizedBox(height: 20),
+            // ── 数据与回顾 ──
+            const AppSectionTitle(title: '数据与回顾'),
+            AppStagger(
+              index: 2,
+              child: Column(
+                children: [
+                  AppActionTile(
+                    icon: Icons.bar_chart,
+                    title: '学习统计',
+                    subtitle: '趋势与热力图',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const StatsPageScreen()),
+                    ),
+                  ),
+                  AppActionTile(
+                    icon: Icons.insights,
+                    title: '本周报告',
+                    subtitle: '这周做了什么、下周改什么(本地算,不调 AI)',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const WeeklyReportScreen()),
+                    ),
+                  ),
+                  // 错误档案(v2.1):把"我英语不好"变成"我时态错了 7 次"。
+                  // 副标题报出积压量,这个"平时没人点"的页面才有被点开的理由。
+                  AppActionTile(
+                    icon: Icons.fact_check_outlined,
+                    title: '错误档案',
+                    subtitle: _activeErrorKinds > 0
+                        ? '待处理 $_activeErrorKinds 类'
+                        : '写译批改、读后测验与复习里的错题',
+                    onTap: _openErrorArchive,
+                  ),
+                  // 备份与导出(v2.2):数据只在这台手机上,这是唯一的迁移/保险出口
+                  AppActionTile(
+                    icon: Icons.backup_outlined,
+                    title: '备份与导出',
+                    subtitle: '完整备份(可回导)/ 生词本 CSV / Anki 导入包',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const BackupScreen()),
+                    ),
+                  ),
+                  // 学习曲线预览:数据与回顾组里最"一眼看懂"的那张图
+                  if (stats.dailyLogs.isNotEmpty) ...[
+                    const SizedBox(height: Gap.xs),
+                    LearningCurveChart(dailyLogs: stats.dailyLogs),
+                  ],
+                ],
+              ),
+            ),
+
+            // ── 设置与数据管理 ──
+            const AppSectionTitle(title: '设置与数据管理'),
+            AppStagger(
+              index: 3,
+              child: Column(
+                children: [
+                  AppActionTile(
+                    icon: Icons.settings,
+                    title: 'API 设置',
+                    subtitle: '配置 API Key',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const ApiSettingsScreen()),
+                    ),
+                  ),
+                  // 学习偏好(v2.0):朗读音色 + 不想看的题材/关键词。
+                  // 与 API 设置分开放:一个是技术配置,一个是个人偏好,
+                  // 混在一起用户找不到"屏蔽题材"这件事。
+                  AppActionTile(
+                    icon: Icons.tune,
+                    title: '学习偏好',
+                    // 副标题直接暴露"当前屏蔽了几个/哪些":用户一眼能看出
+                    // 黑名单是不是生效了(静默生效等于没生效)
+                    subtitle: _preferencesSubtitle(),
+                    onTap: _openPreferences,
+                  ),
+                  // 外观(v2.2):深浅色 + 开屏文案(v2.5)
+                  AppActionTile(
+                    icon: Icons.brightness_6_outlined,
+                    title: '外观',
+                    subtitle: '浅色 / 深色 / 跟随系统 · 开屏文案',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const AppearanceScreen()),
+                    ),
+                  ),
+                  // 桌面小组件(v2.2):状态 / 一键添加 / 手动同步并预览
+                  AppActionTile(
+                    icon: Icons.widgets_outlined,
+                    title: '桌面小组件',
+                    subtitle: '在桌面看今天的任务与待复习数',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const WidgetSettingsScreen(),
+                      ),
+                    ),
+                  ),
+                  AppActionTile(
+                    icon: Icons.medical_information,
+                    title: '诊断信息',
+                    subtitle: '崩溃日志与配置',
+                    onTap: _showDiagnostics,
+                  ),
+                  AppActionTile(
+                    icon: Icons.system_update_alt,
+                    title: '检查更新',
+                    subtitle: 'GitHub 最新版',
+                    onTap: _checkUpdate,
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: Gap.md),
 
             // ── 这里原本是「AI 学习建议」卡片 ──
             // 已删除(用户 2026-09-24 实测:"完全没用"):它的输入只有"生词本收藏数 +
             // 连续天数 + 按书分布",算不出任何真东西 —— 说"先定小目标、每天 10 分钟"
             // 这种谁都能说的话,还要花一次付费 API 调用。
-            // 现在"今天该做什么"由导师页(即将改名「学习助理」)按本地诊断给出:
-            // 结论带数字依据、可点、可打勾、会随数据变化。两者定位重叠,留一个真的。
+            // 现在"今天该做什么"由学习助理页按本地诊断给出:结论带数字依据、
+            // 可点、可打勾、会随数据变化。两者定位重叠,留一个真的。
           ],
         ),
       ),
     );
   }
 
-  void _showSettings() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const ApiSettingsScreen()),
+  /// 顶部三个关键数字(总词汇量 / 连续天数 / 已完成练习)
+  Widget _buildStatsRow(ThemeData theme, StatsProvider stats) {
+    return Row(
+      children: [
+        _StatCard(
+          icon: Icons.menu_book,
+          value: '${stats.totalVocab}',
+          label: '总词汇量',
+          color: theme.colorScheme.primary,
+        ),
+        const SizedBox(width: Gap.xs),
+        _StatCard(
+          icon: Icons.local_fire_department,
+          value: '${stats.streakDays}',
+          label: '连续天数',
+          color: AppTheme.warningColor(context),
+        ),
+        const SizedBox(width: Gap.xs),
+        _StatCard(
+          icon: Icons.fitness_center,
+          value: '${stats.totalExercises}',
+          label: '已完成练习',
+          color: AppTheme.successColor(context),
+        ),
+      ],
     );
+  }
+
+  /// 错误档案:回来后刷新副标题(用户刚在里面标了「已改正」)
+  Future<void> _openErrorArchive() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const ErrorArchiveScreen()),
+    );
+    if (!mounted) return;
+    final errors = await DatabaseService.getErrorTags(status: 'active');
+    if (!mounted) return;
+    setState(() => _activeErrorKinds = errors.length);
+  }
+
+  /// 学习偏好:黑名单可能刚改过,回来自刷新,让副标题与磁盘保持一致
+  Future<void> _openPreferences() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const LearnerPreferencesScreen()),
+    );
+    if (!mounted) return;
+    setState(() => _learnerModel = LearnerModelStore.load());
+  }
+
+  /// 检查更新:F3 —— 检查失败(网络全断)必须明说,不能伪装成"已是最新"
+  Future<void> _checkUpdate() async {
+    try {
+      final info = await UpdateService.checkLatestRelease();
+      if (!mounted) return;
+      if (info == null || !info.hasUpdate) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('当前已是最新版本')),
+        );
+      } else {
+        showUpdateDialog(context, info);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('检查更新失败:$e')),
+      );
+    }
   }
 
   /// 「学习偏好」副标题:没屏蔽就说清这一页有什么,屏蔽了就报数量和内容
@@ -502,54 +538,25 @@ class _StatCard extends StatelessWidget {
     final theme = Theme.of(context);
 
     return Expanded(
-      child: Card(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
-          child: Column(
-            children: [
-              Icon(icon, color: color, size: 24),
-              const SizedBox(height: 6),
-              Text(
-                value,
-                style: const TextStyle(
-                    fontSize: 22, fontWeight: FontWeight.bold),
-              ),
-              Text(
-                label,
-                // P2-31:次要文字对比度不足 → 用主题的次要文字色(深浅色都达 AA)
-                style: TextStyle(
-                    fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
-              ),
-            ],
-          ),
+      child: AppCard(
+        padding: const EdgeInsets.symmetric(
+            vertical: Gap.md, horizontal: Gap.xs),
+        child: Column(
+          children: [
+            Icon(icon, color: color, size: 24),
+            const SizedBox(height: Gap.xxs + 2),
+            Text(
+              value,
+              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+            ),
+            Text(
+              label,
+              // P2-31:次要文字对比度不足 → 用主题的次要文字色(深浅色都达 AA)
+              style: TextStyle(
+                  fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
+            ),
+          ],
         ),
-      ),
-    );
-  }
-}
-
-class _MenuTile extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  final VoidCallback onTap;
-
-  const _MenuTile({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: ListTile(
-        leading: Icon(icon),
-        title: Text(title),
-        subtitle: Text(subtitle, style: const TextStyle(fontSize: 12)),
-        trailing: const Icon(Icons.chevron_right),
-        onTap: onTap,
       ),
     );
   }

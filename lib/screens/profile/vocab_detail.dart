@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../config/theme.dart';
 import '../../models/vocabulary.dart';
 import '../../providers/vocab_provider.dart';
 import '../../services/tts_service.dart';
@@ -170,7 +171,7 @@ class _VocabDetailScreenState extends State<VocabDetailScreen> {
                 label: '新词',
                 level: 0,
                 current: _vocab.masteryLevel,
-                color: Colors.orange,
+                color: AppTheme.masteryColor(context, 0),
                 onTap: () => _updateMastery(0),
               ),
               const SizedBox(width: 8),
@@ -178,7 +179,7 @@ class _VocabDetailScreenState extends State<VocabDetailScreen> {
                 label: '学习中',
                 level: 1,
                 current: _vocab.masteryLevel,
-                color: Colors.blue,
+                color: AppTheme.masteryColor(context, 1),
                 onTap: () => _updateMastery(1),
               ),
               const SizedBox(width: 8),
@@ -186,7 +187,7 @@ class _VocabDetailScreenState extends State<VocabDetailScreen> {
                 label: '已掌握',
                 level: 2,
                 current: _vocab.masteryLevel,
-                color: Colors.green,
+                color: AppTheme.masteryColor(context, 2),
                 onTap: () => _updateMastery(2),
               ),
             ],

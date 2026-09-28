@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../config/theme.dart';
 import '../../providers/stats_provider.dart';
 import '../../widgets/error_state.dart';
 import '../../widgets/stats_chart.dart';
@@ -64,8 +65,8 @@ class _StatsPageScreenState extends State<StatsPageScreen> {
                 children: [
                   Row(
                     children: [
-                      const Icon(Icons.local_fire_department,
-                          color: Colors.orange),
+                      Icon(Icons.local_fire_department,
+                          color: AppTheme.warningColor(context)),
                       const SizedBox(width: 6),
                       Text(
                         '已连续学习 ${stats.streakDays} 天',
@@ -82,18 +83,23 @@ class _StatsPageScreenState extends State<StatsPageScreen> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      _LegendDot(color: Colors.grey.withAlpha(30), label: '休息'),
+                      // 图例色必须与 StudyCalendar 的格子同色系(那边用
+                      // scheme.primary 三档透明度 + 休息格 surfaceContainerHighest),
+                      // 否则深色下"图例是浅蓝、格子是深蓝"对不上
+                      _LegendDot(
+                          color: theme.colorScheme.surfaceContainerHighest,
+                          label: '休息'),
                       const SizedBox(width: 12),
                       _LegendDot(
-                          color: const Color(0xFF4A90D9).withAlpha(60),
+                          color: theme.colorScheme.primary.withAlpha(60),
                           label: '少量'),
                       const SizedBox(width: 12),
                       _LegendDot(
-                          color: const Color(0xFF4A90D9).withAlpha(120),
+                          color: theme.colorScheme.primary.withAlpha(120),
                           label: '中等'),
                       const SizedBox(width: 12),
                       _LegendDot(
-                          color: const Color(0xFF4A90D9), label: '丰富'),
+                          color: theme.colorScheme.primary, label: '丰富'),
                     ],
                   ),
                 ],

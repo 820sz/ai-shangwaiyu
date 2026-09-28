@@ -82,8 +82,11 @@ class _BookmarkCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isVocab = bookmark.source == AppConstants.bookmarkSourceVocab;
-    final sourceColor =
-        isVocab ? Colors.purple[300]! : const Color(0xFF4A90D9);
+    // 来源两色必须随明暗切换:写死的紫[300]在深色下太扎眼、
+    // 写死的 #4A90D9 在深色底上又偏暗
+    final sourceColor = isVocab
+        ? theme.colorScheme.tertiary
+        : theme.colorScheme.primary;
 
     return Card(
       color: theme.colorScheme.surface,

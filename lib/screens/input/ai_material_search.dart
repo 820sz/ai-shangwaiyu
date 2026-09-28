@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import 'package:provider/provider.dart';
 
+import '../../config/theme.dart';
 import '../../models/material_recommendation.dart';
 import '../../models/learner_model.dart';
 import '../../providers/vocab_provider.dart';
@@ -511,14 +512,14 @@ class _AiMaterialSearchScreenState extends State<AiMaterialSearchScreen> {
               margin: const EdgeInsets.only(left: 4),
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
               decoration: BoxDecoration(
-                color: Colors.amber.withAlpha(34),
+                color: AppTheme.amber(context).withAlpha(34),
                 borderRadius: BorderRadius.circular(4),
               ),
               child: Text(
                 'AI 编写',
                 style: TextStyle(
                   fontSize: 10,
-                  color: Colors.amber[800],
+                  color: AppTheme.amber(context),
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -566,7 +567,7 @@ class _AiMaterialSearchScreenState extends State<AiMaterialSearchScreen> {
                     '已生成学习内容',
                     style: TextStyle(
                       fontSize: 10,
-                      color: Colors.green[700],
+                      color: AppTheme.successColor(context),
                       fontWeight: FontWeight.w600,
                     ),
                   ),

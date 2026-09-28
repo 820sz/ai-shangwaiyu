@@ -126,12 +126,13 @@ class _AudioPlayerBarState extends State<AudioPlayerBar> {
             if (_error != null)
               Row(
                 children: [
-                  const Icon(Icons.error_outline, size: 18, color: Colors.red),
+                  Icon(Icons.error_outline,
+                      size: 18, color: theme.colorScheme.error),
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(_error!,
                         style: theme.textTheme.bodySmall
-                            ?.copyWith(color: Colors.red)),
+                            ?.copyWith(color: theme.colorScheme.error)),
                   ),
                   TextButton(onPressed: _load, child: const Text('重试')),
                 ],

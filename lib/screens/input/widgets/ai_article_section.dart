@@ -171,7 +171,9 @@ class _AiArticleSectionState extends State<AiArticleSection> {
             child: const Text('取消'),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
             onPressed: () {
               context.read<ArticleProvider>().deleteArticle(a.id!);
               Navigator.pop(ctx);

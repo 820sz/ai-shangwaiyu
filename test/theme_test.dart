@@ -186,6 +186,179 @@ void main() {
     });
   });
 
+  // ── 全 App 取色入口(v2.5,U3 收敛)──────────────────────────────
+  // 掌握度色与词条类型色以前在 5 个文件里各写一份 Colors.orange/blue/green;
+  // 现在只允许走这两个入口。这里守住"同一个语义在明暗两套主题下都取到语义色"。
+  group('语义取色入口', () {
+    Future<Map<String, Color>> capture(
+      WidgetTester tester, {
+      required bool dark,
+    }) async {
+      final result = <String, Color>{};
+      await tester.pumpWidget(
+        // 直接用 Theme 而不是 MaterialApp:MaterialApp 会套一层 AnimatedTheme
+        // 做 200ms 明暗过渡,而 brightness 在插值时取的是"过半才切",
+        // 第一帧读到的可能还是旧亮度 —— 这里要的是确定的主题数据
+        Theme(
+          data: dark ? AppTheme.darkTheme : AppTheme.lightTheme,
+          child: Builder(
+            builder: (ctx) {
+              result['mastery0'] = AppTheme.masteryColor(ctx, 0);
+              result['mastery1'] = AppTheme.masteryColor(ctx, 1);
+              result['mastery2'] = AppTheme.masteryColor(ctx, 2);
+              result['word'] = AppTheme.wordTypeColor(ctx, 'word');
+              result['phrase'] = AppTheme.wordTypeColor(ctx, 'phrase');
+              result['sentence'] = AppTheme.wordTypeColor(ctx, 'sentence');
+              result['success'] = AppTheme.successColor(ctx);
+              result['warning'] = AppTheme.warningColor(ctx);
+              result['danger'] = AppTheme.dangerColor(ctx);
+              return const SizedBox.shrink();
+            },
+          ),
+        ),
+      );
+      return result;
+    }
+
+    testWidgets('掌握度:新词=琥珀 / 学习中=主色 / 已掌握=成功', (tester) async {
+      final light = await capture(tester, dark: false);
+      expect(light['mastery0'], AppTheme.lightWarning);
+      expect(light['mastery2'], AppTheme.lightSuccess);
+      expect(light['mastery0'], isNot(light['mastery2']),
+          reason: '新词与已掌握必须能一眼区分');
+      final dark = await capture(tester, dark: true);
+      expect(dark['mastery0'], AppTheme.darkWarning);
+      expect(dark['mastery2'], AppTheme.darkSuccess);
+    });
+
+    testWidgets('词条类型:单词/短语/句子三种颜色互不相同,且随明暗切换', (tester) async {
+      final light = await capture(tester, dark: false);
+      expect(light['word'], isNot(light['phrase']));
+      expect(light['phrase'], isNot(light['sentence']));
+      final dark = await capture(tester, dark: true);
+      expect(dark['phrase'], AppTheme.darkWarning);
+      expect(dark['phrase'], isNot(light['phrase']),
+          reason: '深色下必须换成深色档,否则对比度不够');
+    });
+
+    testWidgets('语义色在深色主题下取的是深色档(不是浅色档)', (tester) async {
+      final dark = await capture(tester, dark: true);
+      expect(dark['success'], AppTheme.darkSuccess);
+      expect(dark['warning'], AppTheme.darkWarning);
+      expect(dark['danger'], AppTheme.darkDanger);
+    });
+  });
+
+  // ── 品牌色点亮(v2.5)──────────────────────────────────────────
+  // AI 厂商头像用品牌色(不能换主题色,换了分不清是谁),但深色下
+  // 百度蓝 #2932E1 对深卡片只有 2.07:1、通义紫 #6B4CE6 2.99:1,
+  // 低于 WCAG 非文字元素的 3:1 —— readableOn 只提亮度让它达标。
+  group('品牌色在深色下可见', () {
+    const brandColors = <String, Color>{
+      'baidu': Color(0xFF2932E1),
+      'qwen': Color(0xFF6B4CE6),
+      'deepseek': Color(0xFF4A6CF7),
+      'doubao': Color(0xFF3D7A5C),
+      'kimi': Color(0xFF8B5CF6),
+    };
+
+    testWidgets('深色:每个品牌色都对卡片底达到 3:1', (tester) async {
+      late Map<String, Color> adjusted;
+      await tester.pumpWidget(
+        Theme(
+          data: AppTheme.darkTheme,
+          child: Builder(builder: (ctx) {
+            adjusted = {
+              for (final e in brandColors.entries)
+                e.key: AppTheme.readableOn(ctx, e.value),
+            };
+            return const SizedBox.shrink();
+          }),
+        ),
+      );
+      final bg = AppTheme.darkTheme.cardTheme.color!;
+      final failures = <String>[];
+      adjusted.forEach((name, color) {
+        final r = AppTheme.contrastRatio(color, bg);
+        if (r < 3.0) {
+          failures.add('$name = ${r.toStringAsFixed(2)}:1');
+        }
+      });
+      expect(failures, isEmpty, reason: '深色下这些品牌色会发闷到看不出边界:\n${failures.join('\n')}');
+    });
+
+    testWidgets('深色:只提亮度不改色相(仍是同一个色系)', (tester) async {
+      late Color changed;
+      await tester.pumpWidget(
+        Theme(
+          data: AppTheme.darkTheme,
+          child: Builder(builder: (ctx) {
+            changed = AppTheme.readableOn(ctx, const Color(0xFF2932E1));
+            return const SizedBox.shrink();
+          }),
+        ),
+      );
+      // 蓝分量应仍是最高的(没被提成灰色)
+      expect(changed.b, greaterThan(changed.r));
+      expect(changed.b, greaterThan(changed.g));
+      expect(changed, isNot(const Color(0xFF2932E1)), reason: '原本不达标就必须被点亮');
+    });
+
+    testWidgets('浅色:原样返回(白底上品牌色本来就够)', (tester) async {
+      late Color same;
+      await tester.pumpWidget(
+        Theme(
+          data: AppTheme.lightTheme,
+          child: Builder(builder: (ctx) {
+            same = AppTheme.readableOn(ctx, const Color(0xFF2932E1));
+            return const SizedBox.shrink();
+          }),
+        ),
+      );
+      expect(same, const Color(0xFF2932E1));
+    });
+  });
+
+  // ── 图表系列色(v2.5)──────────────────────────────────────────
+  group('图表系列色', () {
+    testWidgets('明暗两档都达标,且都还是"蓝"', (tester) async {
+      late Color light;
+      late Color dark;
+      await tester.pumpWidget(
+        Theme(
+          data: AppTheme.lightTheme,
+          child: Builder(builder: (ctx) {
+            light = AppTheme.chartSeries(ctx);
+            return const SizedBox.shrink();
+          }),
+        ),
+      );
+      await tester.pumpWidget(
+        Theme(
+          data: AppTheme.darkTheme,
+          child: Builder(builder: (ctx) {
+            dark = AppTheme.chartSeries(ctx);
+            return const SizedBox.shrink();
+          }),
+        ),
+      );
+      expect(
+        AppTheme.contrastRatio(light, AppTheme.lightTheme.cardTheme.color!),
+        greaterThanOrEqualTo(3.0),
+      );
+      expect(
+        AppTheme.contrastRatio(dark, AppTheme.darkTheme.cardTheme.color!),
+        greaterThanOrEqualTo(3.0),
+      );
+      // 保留蓝色调:蓝分量最高(以前写死 #4A90D9 就是蓝)
+      for (final c in [light, dark]) {
+        expect(c.b, greaterThan(c.r));
+        expect(c.b, greaterThan(c.g));
+      }
+      expect(light, isNot(dark), reason: '两档必须不同,否则总有一档看不清');
+    });
+  });
+
   group('主题档位解析', () {
     test('三种档位互转且可往返', () {
       for (final id in AppConstants.themeModeOptions.keys) {

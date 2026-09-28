@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../config/constants.dart';
+import '../../config/theme.dart';
 import '../../models/article.dart';
 import '../../models/bookmark.dart';
 import '../../models/material_recommendation.dart';
@@ -305,7 +306,7 @@ class _MaterialRecommendationDetailScreenState
           // 所以这里把"谁生成的、什么时候、依据什么、AI 想了什么"全部摊开:
           // 用户自己就能判断这份内容能不能信。
           Card(
-            color: Colors.amber.withAlpha(24),
+            color: AppTheme.amber(context).withAlpha(24),
             child: Padding(
               padding: const EdgeInsets.all(12),
               child: Column(
@@ -313,7 +314,11 @@ class _MaterialRecommendationDetailScreenState
                 children: [
                   Row(
                     children: [
-                      Icon(Icons.auto_awesome, size: 15, color: Colors.amber[800]),
+                      Icon(
+                        Icons.auto_awesome,
+                        size: 15,
+                        color: AppTheme.amber(context),
+                      ),
                       const SizedBox(width: 6),
                       Expanded(
                         child: Text(

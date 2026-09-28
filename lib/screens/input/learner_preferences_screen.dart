@@ -2,10 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:hive/hive.dart';
 
 import '../../config/constants.dart';
+import '../../config/design_tokens.dart';
+import '../../config/theme.dart';
 import '../../models/learner_model.dart';
 import '../../models/material_recommendation.dart';
 import '../../services/learner_model_store.dart';
 import '../../services/tts_accent.dart';
+import '../../widgets/app_ui.dart';
 
 /// 学习偏好(v2.0,「我的 → 学习偏好」进入)
 ///
@@ -116,16 +119,16 @@ class _LearnerPreferencesScreenState extends State<LearnerPreferencesScreen> {
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+        padding: Insets.page,
         children: [
           // ── 朗读音色 ──
-          _sectionTitle(theme, '朗读音色'),
+          const AppSectionTitle(title: '朗读音色'),
           Text(
             '当前:${ttsAccentLabel(_accent)}。词条与小喇叭按钮按这个音色朗读;'
             '词条会同时显示英式/美式音标,想听另一种口音随时切换。',
             style: theme.textTheme.bodySmall?.copyWith(color: muted),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: Gap.xs),
           // Flutter 3.32 起 RadioListTile 的 groupValue/onChanged 已废弃,
           // 用 RadioGroup 祖先统一管选中值(否则 analyze 会报 deprecated)
           RadioGroup<String>(
@@ -151,45 +154,45 @@ class _LearnerPreferencesScreenState extends State<LearnerPreferencesScreen> {
           const Divider(height: 32),
 
           // ── 每日配额(v2.1:复习优先的时间预算) ──
-          _sectionTitle(theme, '每日学习配额'),
+          const AppSectionTitle(title: '每日学习配额'),
           Text(
             '复习优先:到期的词先占用时间预算,剩下的容量才用来加新词。'
             '这两个数字决定学习助理每天给你派多少任务、复习队列放多少个新词。',
             style: theme.textTheme.bodySmall?.copyWith(color: muted),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: Gap.sm),
           Text('每天可投入时间', style: theme.textTheme.bodyMedium),
-          const SizedBox(height: 6),
+          const SizedBox(height: Gap.xxs + 2),
           Wrap(
             spacing: 8,
             runSpacing: 8,
             children: [
               for (final m in const [15, 30, 45, 60, 90])
                 _chip(
-                  theme,
+                  context,
                   label: '$m 分钟',
                   selected: _dailyMinutes == m,
                   onTap: () => setState(() => _dailyMinutes = m),
                 ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: Gap.sm),
           Text('每天最多加几个新词', style: theme.textTheme.bodyMedium),
-          const SizedBox(height: 6),
+          const SizedBox(height: Gap.xxs + 2),
           Wrap(
             spacing: 8,
             runSpacing: 8,
             children: [
               for (final n in const [0, 10, 20, 30, 50])
                 _chip(
-                  theme,
+                  context,
                   label: n == 0 ? '只复习不加新词' : '$n 个',
                   selected: _maxNewWords == n,
                   onTap: () => setState(() => _maxNewWords = n),
                 ),
             ],
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: Gap.xxs + 2),
           Text(
             '当日到期词太多时,新词配额会自动降到 0 —— 先把欠的账还上。',
             style: theme.textTheme.bodySmall?.copyWith(color: muted),
@@ -198,19 +201,19 @@ class _LearnerPreferencesScreenState extends State<LearnerPreferencesScreen> {
           const Divider(height: 32),
 
           // ── 不想看的题材 ──
-          _sectionTitle(theme, '不想看的题材(可多选)'),
+          const AppSectionTitle(title: '不想看的题材(可多选)'),
           Text(
             '选中的题材不会出现在材料推荐里,学习助理选材也会避开。',
             style: theme.textTheme.bodySmall?.copyWith(color: muted),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: Gap.xs),
           Wrap(
             spacing: 8,
             runSpacing: 8,
             children: _topicOptions.map((t) {
               final selected = _model.blockedTopics.contains(t);
               return _chip(
-                theme,
+                context,
                 label: t,
                 selected: selected,
                 onTap: () => _toggleTopic(t),
@@ -218,20 +221,20 @@ class _LearnerPreferencesScreenState extends State<LearnerPreferencesScreen> {
             }).toList(),
           ),
           if (_model.blockedTopics.isNotEmpty) ...[
-            const SizedBox(height: 12),
+            const SizedBox(height: Gap.sm),
             _blockedSummary(theme, '已屏蔽题材', _model.blockedTopics,
                 onRemove: _toggleTopic),
           ],
 
-          const SizedBox(height: 20),
+          const SizedBox(height: Gap.lg),
 
           // ── 屏蔽关键词 ──
-          _sectionTitle(theme, '屏蔽关键词'),
+          const AppSectionTitle(title: '屏蔽关键词'),
           Text(
             '逗号或空格分隔,可一次加多个。命中标题/简介/关键词的材料都会被挡掉。',
             style: theme.textTheme.bodySmall?.copyWith(color: muted),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: Gap.xs),
           Row(
             children: [
               Expanded(
@@ -245,14 +248,14 @@ class _LearnerPreferencesScreenState extends State<LearnerPreferencesScreen> {
                   onSubmitted: _addKeywords,
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: Gap.xs),
               FilledButton(
                 onPressed: () => _addKeywords(_keywordCtrl.text),
                 child: const Text('添加'),
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: Gap.sm),
           if (_model.blockedKeywords.isEmpty)
             Text('还没有屏蔽任何关键词',
                 style: theme.textTheme.bodySmall?.copyWith(color: muted))
@@ -267,20 +270,21 @@ class _LearnerPreferencesScreenState extends State<LearnerPreferencesScreen> {
               },
             ),
 
-          const SizedBox(height: 20),
+          const SizedBox(height: Gap.lg),
           Text(
             '匹配口径是"包含匹配"(忽略大小写与首尾空白):屏蔽「政治」'
             '会连「国际政治」一起挡掉。所以别填太短的常用词(如「AI」'
             '会误伤含这三个字母的标题)。',
             style: theme.textTheme.bodySmall?.copyWith(color: muted),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: Gap.lg),
           SizedBox(
             width: double.infinity,
             child: FilledButton(
               onPressed: _save,
               style: FilledButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 14),
+                minimumSize: const Size(0, 48),
               ),
               child: const Text('保存偏好'),
             ),
@@ -308,7 +312,7 @@ class _LearnerPreferencesScreenState extends State<LearnerPreferencesScreen> {
             color: Theme.of(context).colorScheme.onSurface,
           ),
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: Gap.xxs + 2),
         Wrap(
           spacing: 8,
           runSpacing: 8,
@@ -327,24 +331,14 @@ class _LearnerPreferencesScreenState extends State<LearnerPreferencesScreen> {
     );
   }
 
-  Widget _sectionTitle(ThemeData theme, String text) => Padding(
-        padding: const EdgeInsets.only(bottom: 6),
-        child: Text(
-          text,
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-            color: theme.colorScheme.onSurface,
-          ),
-        ),
-      );
-
   Widget _chip(
-    ThemeData theme, {
+    BuildContext context, {
     required String label,
     required bool selected,
     required VoidCallback onTap,
   }) {
+    final theme = Theme.of(context);
+    final danger = AppTheme.dangerColor(context);
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -354,11 +348,12 @@ class _LearnerPreferencesScreenState extends State<LearnerPreferencesScreen> {
               ? theme.colorScheme.primary.withAlpha(28)
               : theme.colorScheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(16),
-          // 屏蔽项用错误色描边,和"偏好题材"的选中态在视觉上区分开:
-          // 这两个列表语义相反(一个是要看的,一个是不看的)
+          // 屏蔽项走语义危险色(不再写死 Colors.red[...]:深色下才看得清),
+          // 和"偏好题材"的选中态在视觉上区分开 —— 这两个列表语义相反
+          // (一个是要看的,一个是不看的);描边比文字淡一档(0x99≈60%)
           border: Border.all(
             color: selected
-                ? Colors.red[400]!
+                ? danger.withAlpha(0x99)
                 : theme.colorScheme.outlineVariant,
             width: selected ? 1.6 : 1,
           ),
@@ -368,7 +363,7 @@ class _LearnerPreferencesScreenState extends State<LearnerPreferencesScreen> {
           style: TextStyle(
             fontSize: 13,
             fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-            color: selected ? Colors.red[700] : theme.colorScheme.onSurface,
+            color: selected ? danger : theme.colorScheme.onSurface,
           ),
         ),
       ),

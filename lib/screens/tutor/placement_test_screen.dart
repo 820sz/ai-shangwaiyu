@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../config/placement_bank.dart';
+import '../../config/theme.dart';
 import '../../models/learner_model.dart';
 import '../../services/learner_model_store.dart';
 import '../../services/vocab_estimator.dart';
@@ -227,7 +228,8 @@ class _PlacementTestScreenState extends State<PlacementTestScreen> {
             child: const Text('继续测试'),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            style: FilledButton.styleFrom(
+                backgroundColor: Theme.of(ctx).colorScheme.error),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('放弃退出'),
           ),
@@ -525,9 +527,9 @@ class _PlacementTestScreenState extends State<PlacementTestScreen> {
     Color? border;
     if (revealed) {
       if (correct) {
-        border = Colors.green;
+        border = AppTheme.successColor(context);
       } else if (selected) {
-        border = Colors.red;
+        border = AppTheme.dangerColor(context);
       }
     }
     return InkWell(
@@ -546,7 +548,9 @@ class _PlacementTestScreenState extends State<PlacementTestScreen> {
           children: [
             Text('$label. ', style: theme.textTheme.bodyMedium),
             Expanded(child: Text(text, style: theme.textTheme.bodyMedium)),
-            if (revealed && correct) const Icon(Icons.check, size: 18, color: Colors.green),
+            if (revealed && correct)
+              Icon(Icons.check,
+                  size: 18, color: AppTheme.successColor(context)),
           ],
         ),
       ),

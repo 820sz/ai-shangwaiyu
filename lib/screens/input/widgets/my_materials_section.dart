@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../config/constants.dart';
+import '../../../config/theme.dart';
 import '../../../providers/vocab_provider.dart';
 import '../../../services/database.dart';
 import '../../../models/vocabulary.dart';
@@ -385,7 +386,9 @@ class _CategoryVocabSheetState extends State<_CategoryVocabSheet> {
             leading: Icon(
               isUncategorized ? Icons.folder_outlined : Icons.folder,
               size: 20,
-              color: isUncategorized ? theme.colorScheme.onSurfaceVariant : Colors.amber[700],
+              color: isUncategorized
+                  ? theme.colorScheme.onSurfaceVariant
+                  : AppTheme.amber(context),
             ),
             title: Text(
               g.label,
@@ -471,18 +474,17 @@ class _CategoryVocabSheetState extends State<_CategoryVocabSheet> {
                   const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
                 // 词型角标:半透明色相(浅色下≈orange[50]/purple[50],深色下成立)
-                color: v.wordType == 'phrase'
-                    ? Colors.orange.withAlpha(34)
-                    : Colors.purple.withAlpha(34),
+                color: AppTheme.wordTypeColor(
+                  context,
+                  v.wordType,
+                ).withAlpha(34),
                 borderRadius: BorderRadius.circular(4),
               ),
               child: Text(
                 v.wordType == 'phrase' ? '短语' : '句子',
                 style: TextStyle(
                     fontSize: 10,
-                    color: v.wordType == 'phrase'
-                        ? Colors.orange[700]
-                        : Colors.purple[700]),
+                    color: AppTheme.wordTypeColor(context, v.wordType)),
               ),
             ),
     );
