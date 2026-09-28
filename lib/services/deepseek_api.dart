@@ -83,6 +83,151 @@ $vocabText
     return _parseJsonResponse(content);
   }
 
+  // ═══════════════ 材料检索:AI 规划 + 标题中文化 + 逐段翻译(v2.6)═══════════════
+
+  /// **把用户的中文需求变成"能搜到东西"的检索方案**(v2.6,用户第 8 条)。
+  ///
+  /// 用户原话:"还建议我用英文搜?接的是 AI,能不能智能点 —— 用户提需求,AI 找不就行了"。
+  /// 所以这里让 AI 干三件事:
+  /// 1. 把中文需求翻成**公开源认的英文检索词**(Gutenberg / arXiv / NPR 这些只认英文);
+  /// 2. 直接点名它**确实知道**的作品/论文(中英标题 + 作者 + 一句"为什么适合你");
+  /// 3. 给可得的话给出**原文链接**。
+  ///
+  /// ⚠️ 链接纪律:`url` 只允许来自公开且稳定的地址(Gutenberg `/ebooks/<id>`、
+  /// arXiv `/abs/<id>`、期刊/机构官网);**不确定就留空,绝不编造 id** ——
+  /// 假链接比没有链接更糟。
+  Future<Map<String, dynamic>> planMaterialSearch(
+    String userQuery, {
+    String? category,
+    String? levelHint,
+  }) async {
+    if (!config.isConfigured) {
+      throw Exception('请先在设置中配置 API Key');
+    }
+    final categoryHint = (category != null && category.isNotEmpty)
+        ? '用户想要的类别:$category。'
+        : '';
+    final level = (levelHint != null && levelHint.isNotEmpty)
+        ? '用户的英语水平:$levelHint(选材时照顾难度)。'
+        : '';
+    const systemPrompt = '''你是英语学习材料的检索助手。用户会用**中文**描述想找什么,
+你要把它变成"真的能搜到原文"的检索方案。返回 JSON:
+{"queries":["英文检索词1","英文检索词2","英文检索词3"],
+ "picks":[{"title_en":"英文原名","title_cn":"中文译名","author":"作者","why":"一句中文说明为什么适合他","url":"原文链接或空串"}],
+ "note":"一句中文提示(可选)"}
+
+规则:
+1. queries 必须是**英文**关键词(公版书检索站/arXiv/外媒 RSS 都只认英文),
+   3 条以内,越具体越好(如 "stoicism meditations aurelius" 而不是 "philosophy")。
+2. picks 是**你确实知道**的公版书 / 公开论文 / 公开文章,最多 6 条;
+   title_cn 要给通用中文译名(没有通用译名就意译,不要拼音)。
+3. url **只允许**这些稳定地址:Gutenberg 书目页 `https://www.gutenberg.org/ebooks/<数字id>`,
+   arXiv 摘要页 `https://arxiv.org/abs/<id>`,或期刊/大学/机构官网的公开页面。
+   **不确定数字 id 就把 url 写成空串** —— 编一个不存在的 id 会让用户点开 404。
+4. why 用中文,一句话,说清"为什么适合他"(题材/难度/篇幅),不要空话。
+5. 只输出 JSON。''';
+    final userPrompt = '我想找:$userQuery\n$categoryHint$level';
+    final response = await postWithReasoningFallback(
+      '/v1/chat/completions',
+      BaseApiService.buildChatBody(
+        cfg: config,
+        temperature: 0.3,
+        maxTokens: 2048,
+        messages: [
+          {'role': 'system', 'content': systemPrompt},
+          {'role': 'user', 'content': userPrompt},
+        ],
+      ),
+      cfg: config,
+    );
+    final content = BaseApiService.extractContentWithReasoning(response.data);
+    final parsed = _parseJsonResponse(content);
+    return {
+      'queries': (parsed['queries'] as List?)?.map((e) => '$e').toList() ??
+          const <String>[],
+      'picks': (parsed['picks'] as List?)
+              ?.whereType<Map>()
+              .map((e) => {
+                    'title_en': '${e['title_en'] ?? ''}',
+                    'title_cn': '${e['title_cn'] ?? ''}',
+                    'author': '${e['author'] ?? ''}',
+                    'why': '${e['why'] ?? ''}',
+                    'url': '${e['url'] ?? ''}',
+                  })
+              .toList() ??
+          const <Map<String, String>>[],
+      'note': '${parsed['note'] ?? ''}',
+    };
+  }
+
+  /// **把一批英文标题翻成「中文(英文)」**(v2.6,用户第 8(3) 条)。
+  ///
+  /// 用户原话:"材料中心你整全屏英文,谁看得懂?标题都要按照「中文(英文)」的格式"。
+  /// 返回 {英文原标题: 中文译名};某条翻不出来就不出现在结果里(界面回落成纯英文)。
+  Future<Map<String, String>> translateTitles(List<String> titles) async {
+    if (titles.isEmpty || !config.isConfigured) return const {};
+    const systemPrompt = '''你给英语学习材料的标题配中文译名。返回 JSON:{"items":[{"en":"原标题","cn":"中文译名"}]}
+规则:中文用**通用译名**(书用常见中译本名,论文/文章意译);不确定就给直译,不要音译、不要留空;只输出 JSON。''';
+    final response = await postWithReasoningFallback(
+      '/v1/chat/completions',
+      BaseApiService.buildChatBody(
+        cfg: config,
+        temperature: 0.2,
+        maxTokens: 2048,
+        messages: [
+          {'role': 'system', 'content': systemPrompt},
+          {'role': 'user', 'content': titles.take(20).join('\n')},
+        ],
+      ),
+      cfg: config,
+    );
+    final content = BaseApiService.extractContentWithReasoning(response.data);
+    final parsed = _parseJsonResponse(content);
+    final out = <String, String>{};
+    for (final e in (parsed['items'] as List? ?? const [])) {
+      if (e is! Map) continue;
+      final en = '${e['en'] ?? ''}'.trim();
+      final cn = '${e['cn'] ?? ''}'.trim();
+      if (en.isNotEmpty && cn.isNotEmpty) out[en] = cn;
+    }
+    return out;
+  }
+
+  /// **逐段翻译**(v2.6,用户第 8(4) 条:材料阅读器的「翻译」)。
+  ///
+  /// 返回与输入等长的中文数组(段落一一对应);数量对不上就抛错,由调用方
+  /// 决定是否退回整段直译 —— 宁可不显示,也不能把译文错位到别的段落上。
+  Future<List<String>> translateParagraphs(List<String> paragraphs) async {
+    if (paragraphs.isEmpty || !config.isConfigured) return const [];
+    const systemPrompt = '''你是翻译助手。用户给一段英文(可能多段,用空行分隔),
+请逐段翻译成**通顺的中文**。返回 JSON:{"translations":["第一段译文","第二段译文",...]}
+规则:1. 段数必须与输入**完全一致**,顺序对应,不许合并或拆分;
+2. 不要逐词硬译,不要保留英文语序;
+3. 只输出 JSON。''';
+    final response = await postWithReasoningFallback(
+      '/v1/chat/completions',
+      BaseApiService.buildChatBody(
+        cfg: config,
+        temperature: 0.3,
+        maxTokens: 4096,
+        messages: [
+          {'role': 'system', 'content': systemPrompt},
+          {'role': 'user', 'content': paragraphs.join('\n\n')},
+        ],
+      ),
+      cfg: config,
+    );
+    final content = BaseApiService.extractContentWithReasoning(response.data);
+    final parsed = _parseJsonResponse(content);
+    final list = (parsed['translations'] as List? ?? const [])
+        .map((e) => '$e')
+        .toList();
+    if (list.length != paragraphs.length) {
+      throw Exception('翻译段落数对不上(${list.length} ≠ ${paragraphs.length}),已放弃本次翻译');
+    }
+    return list;
+  }
+
   // ═══════════════ 生成回译练习 ═══════════════
 
   /// 根据文章内容生成中→英回译练习

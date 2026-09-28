@@ -1,14 +1,18 @@
+import 'dart:async';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../config/design_tokens.dart';
+import '../../config/theme.dart';
 import '../../models/vocabulary.dart';
 import '../../providers/vocab_provider.dart';
 import '../../services/audio_service.dart';
 import '../../services/backup_service.dart';
 import '../../services/database.dart';
+import '../../services/deepseek_api.dart';
 import '../../services/doubao_api.dart';
 import '../../services/material_library.dart';
 import '../../services/reader_settings.dart';
@@ -60,6 +64,15 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
   double _fontScale = ReaderSettings.defaultFontScale;
   double _lineHeight = ReaderSettings.defaultLineHeight;
 
+  /// 逐段翻译(v2.6,用户第 8(4) 条):"侧边栏提供翻译,点击后按段逐段翻译,
+  /// 按每段英文 + 中文的方式呈现材料"。
+  bool _showTranslation = false;
+  bool _translating = false;
+  String? _translateError;
+
+  /// 块索引 → 中文译文(与 _chunks 一一对应)
+  final Map<int, String> _translations = {};
+
   @override
   void initState() {
     super.initState();
@@ -68,6 +81,46 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     _stopwatch.start();
     _load();
     _scrollCtrl.addListener(_onScroll);
+  }
+
+  /// 开/关逐段翻译。首次打开时按批调用文本 API(每批 8 段),
+  /// 段落数对不上就整批丢弃并说明原因 —— 绝不把译文错位到别的段落上。
+  Future<void> _toggleTranslation() async {
+    if (_showTranslation) {
+      setState(() => _showTranslation = false);
+      return;
+    }
+    setState(() {
+      _showTranslation = true;
+      _translateError = null;
+    });
+    if (_translations.isNotEmpty || _chunks.isEmpty) return;
+
+    setState(() => _translating = true);
+    try {
+      final api = DeepseekApiService();
+      if (!api.isConfigured) {
+        throw Exception('还没有配置 API Key —— 到「我的 → API 设置」填一个就能翻译');
+      }
+      const batchSize = 8;
+      for (var start = 0; start < _chunks.length; start += batchSize) {
+        final end = (start + batchSize).clamp(0, _chunks.length);
+        final slice = <String>[
+          for (var i = start; i < end; i++) '${_chunks[i]['text'] ?? ''}',
+        ];
+        final translated = await api.translateParagraphs(slice);
+        if (!mounted) return;
+        setState(() {
+          for (var i = 0; i < translated.length; i++) {
+            _translations[start + i] = translated[i];
+          }
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _translateError = '$e');
+    } finally {
+      if (mounted) setState(() => _translating = false);
+    }
   }
 
   /// 阅读设置面板:字号 / 行距 —— 边调边生效(不用"确定"按钮),退出时已落盘
@@ -428,6 +481,12 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
       appBar: AppBar(
         title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
         actions: [
+          // 逐段翻译(v2.6):点一下 = 英文原文 + 中文对照(按段)
+          IconButton(
+            tooltip: _showTranslation ? '关闭翻译' : '翻译(逐段英中对照)',
+            onPressed: _chunks.isEmpty ? null : _toggleTranslation,
+            icon: Icon(_showTranslation ? Icons.translate : Icons.translate_outlined),
+          ),
           // 阅读设置(v2.5):字号 / 行距 —— 长时间读英文最需要的两个旋钮
           IconButton(
             tooltip: '阅读设置(字号 / 行距)',
@@ -508,8 +567,23 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
                         controller: _scrollCtrl,
                         padding: const EdgeInsets.fromLTRB(
                             Gap.md, Gap.sm, Gap.md, 80),
-                        itemCount: _chunks.length,
-                        itemBuilder: (_, i) => _buildChunk(theme, i),
+                        itemCount: _chunks.length + (_translateError == null ? 0 : 1),
+                        itemBuilder: (_, i) {
+                          // 第一行留给翻译失败的说明(不挡住正文)
+                          if (_translateError != null && i == 0) {
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: Gap.sm),
+                              child: AppErrorCard(
+                                message: '翻译失败:$_translateError',
+                                onRetry: _toggleTranslation,
+                                retryLabel: '重试翻译',
+                              ),
+                            );
+                          }
+                          final index =
+                              _translateError == null ? i : i - 1;
+                          return _buildChunk(theme, index);
+                        },
                       ),
                     ),
                   ],
@@ -554,6 +628,31 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
             onWordTap: _onWordTap,
             style: bodyStyle,
           ),
+          // 逐段译文(v2.6):紧跟在本段英文下面,浅色区分 + 稍小字号
+          if (_showTranslation) ...[
+            const SizedBox(height: Gap.xs),
+            if (_translating && !_translations.containsKey(index))
+              Text('翻译中…',
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: theme.colorScheme.onSurfaceVariant))
+            else
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(Gap.sm),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.surfaceContainerHighest,
+                  borderRadius: Radii.controlRadius,
+                ),
+                child: Text(
+                  _translations[index] ?? '(这一段还没翻出来)',
+                  style: TextStyle(
+                    fontSize: ReaderSettings.baseFontSize * _fontScale * 0.86,
+                    height: _lineHeight * 0.95,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+          ],
         ],
       ),
     );
@@ -659,10 +758,62 @@ class _WordSheetState extends State<_WordSheet> {
   String? _error;
   String _saveMsg = '';
 
+  /// 「询问 AI」的流式讲解(v2.6)
+  bool _asking = false;
+  String _aiAnswer = '';
+  String? _aiError;
+  StreamSubscription<SseChunk>? _aiSub;
+
   @override
   void initState() {
     super.initState();
     _lookup();
+  }
+
+  @override
+  void dispose() {
+    _aiSub?.cancel();
+    super.dispose();
+  }
+
+  /// 就这一个词问 AI(流式),答案就地显示在面板里 —— 不再跳去别的页面
+  Future<void> _askAi() async {
+    setState(() {
+      _asking = true;
+      _aiError = null;
+      _aiAnswer = '';
+    });
+    try {
+      final stream = _api.explainWord(
+        word: widget.word,
+        sentence: widget.sentence,
+      );
+      _aiSub = stream.listen(
+        (chunk) {
+          if (!mounted || chunk.isReasoning) return;
+          setState(() => _aiAnswer += chunk.text);
+        },
+        onDone: () {
+          if (mounted) setState(() => _asking = false);
+        },
+        onError: (e) {
+          if (mounted) {
+            setState(() {
+              _asking = false;
+              _aiError = '$e';
+            });
+          }
+        },
+        cancelOnError: true,
+      );
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _asking = false;
+          _aiError = '$e';
+        });
+      }
+    }
   }
 
   Future<void> _lookup() async {
@@ -805,30 +956,50 @@ class _WordSheetState extends State<_WordSheet> {
               ],
             ],
             const SizedBox(height: Gap.md),
-            // ③ 主动作:收进生词本(整行按钮,大字号下也好点)
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: () async {
-                  final v = Vocabulary(
-                    word: widget.word,
-                    translation: info['translation'],
-                    partOfSpeech: info['part_of_speech'],
-                    phonetic: info['phonetic'],
-                    originalSentence: info['original_sentence']?.isNotEmpty == true
-                        ? info['original_sentence']
-                        : (widget.sentence.isEmpty ? null : widget.sentence),
-                    grammarNote: info['grammar_note'],
-                    sourceBook: null,
-                    wordType: 'word',
-                  );
-                  final msg = await widget.onSave(v);
-                  if (!mounted) return;
-                  setState(() => _saveMsg = msg);
-                },
-                icon: const Icon(Icons.bookmark_add_outlined),
-                label: const Text('收进生词本'),
-              ),
+            // ③ 两个动作(用户第 8(4) 条:点词/选词后底部给两个小选项)
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _asking ? null : _askAi,
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(0, 46),
+                    ),
+                    icon: const Icon(Icons.help_outline, size: 18),
+                    label: Text(_asking ? 'AI 正在讲…' : '询问 AI'),
+                  ),
+                ),
+                const SizedBox(width: Gap.xs),
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: () async {
+                      final v = Vocabulary(
+                        word: widget.word,
+                        translation: info['translation'],
+                        partOfSpeech: info['part_of_speech'],
+                        phonetic: info['phonetic'],
+                        originalSentence:
+                            info['original_sentence']?.isNotEmpty == true
+                                ? info['original_sentence']
+                                : (widget.sentence.isEmpty
+                                    ? null
+                                    : widget.sentence),
+                        grammarNote: info['grammar_note'],
+                        sourceBook: null,
+                        wordType: 'word',
+                      );
+                      final msg = await widget.onSave(v);
+                      if (!mounted) return;
+                      setState(() => _saveMsg = msg);
+                    },
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size(0, 46),
+                    ),
+                    icon: const Icon(Icons.bookmark_add_outlined, size: 18),
+                    label: const Text('收藏进单词本'),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: Gap.xs),
             Text(
@@ -841,6 +1012,46 @@ class _WordSheetState extends State<_WordSheet> {
                     : muted,
               ),
             ),
+            // AI 讲解区(流式)
+            if (_aiAnswer.isNotEmpty || _aiError != null || _asking) ...[
+              const SizedBox(height: Gap.sm),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(Gap.sm),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.primary.withAlpha(12),
+                  borderRadius: Radii.controlRadius,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.auto_awesome,
+                            size: 14, color: theme.colorScheme.primary),
+                        const SizedBox(width: Gap.xxs + 2),
+                        Text('AI 讲解',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.primary,
+                              fontWeight: FontWeight.w600,
+                            )),
+                      ],
+                    ),
+                    const SizedBox(height: Gap.xxs + 2),
+                    if (_aiError != null)
+                      Text('讲解失败:$_aiError',
+                          style: theme.textTheme.bodySmall
+                              ?.copyWith(color: AppTheme.dangerColor(context)))
+                    else
+                      Text(
+                        _aiAnswer.isEmpty ? '正在想…' : _aiAnswer,
+                        style: theme.textTheme.bodyMedium
+                            ?.copyWith(height: 1.5),
+                      ),
+                  ],
+                ),
+              ),
+            ],
           ],
         ),
       ),

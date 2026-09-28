@@ -8,20 +8,26 @@ class AppConstants {
       'https://ark.cn-beijing.volces.com/api/v3';
   static const String doubaoVisionModel = 'doubao-seed-2-1-turbo-260628';
 
-  /// DeepSeek 文本模型(2026-07-24 起 deepseek-chat/reasoner 已停用,仅剩 v4 系列)
+  /// DeepSeek 文本模型。
+  /// **2026-09-10 官方发布 DeepSeek-V4.1-Flash,模型名 `deepseek-flash`,原生多模态**
+  /// (文本与视觉同一个模型);旧名 `deepseek-v4-flash` / `deepseek-v4-flash-vision-exp`
+  /// 已退役,官方只做兼容路由 —— 本 App 直接用新名。
   static const String deepseekBaseUrl = 'https://api.deepseek.com';
-  static const String deepseekChatModel = 'deepseek-v4-flash';
-  /// DeepSeek 多模态(视觉)模型 — 2026-08-21 官方上线,OpenAI 兼容 /chat/completions
-  static const String deepseekVisionModel = 'deepseek-v4-flash-vision-exp';
+  static const String deepseekChatModel = 'deepseek-flash';
+
+  /// DeepSeek 视觉入口:V4.1 起与文本同款(V4.1-Flash 原生支持图片输入),
+  /// 不再有单独的 vision 实验模型。保留该常量作为旧配置的迁移锚点。
+  static const String deepseekVisionModel = 'deepseek-flash';
 
   /// 副槽位(专项文本)内置模型清单 — 拉取 /models 失败时的兜底
   static const List<String> deepseekFallbackModels = [
-    'deepseek-v4-flash', // 快速通用,默认
-    'deepseek-v4-pro',   // 高能力,思考模式
+    'deepseek-flash', // V4.1-Flash:多模态 + 快,默认
+    'deepseek-v4-pro', // 高能力(官方 2026-09-14 后继续提供)
   ];
 
   /// 主槽位(多模态)内置模型清单 — 拉取 /models 失败时的兜底。
-  /// 2026-08-21:主槽位不再绑死豆包——加入 DeepSeek 视觉模型(用户可配 DS key 走识图)。
+  /// 2026-09-10:主槽位加入 `deepseek-flash`(DS 的 V4.1-Flash 原生多模态),
+  /// 旧的 `deepseek-v4-flash-vision-exp` 已退役,不再出现在菜单里。
   static const List<String> primaryFallbackModels = [
     'doubao-seed-2-0-mini-260715',   // 最快：速度和成本优先
     'doubao-seed-1-6-flash-250615',  // 闪推：上一代极速
@@ -32,7 +38,7 @@ class AppConstants {
     'doubao-seed-1-6-vision-250815',
     'doubao-seed-1-6-250615',
     'doubao-seed-evolving',
-    'deepseek-v4-flash-vision-exp',  // DeepSeek 视觉(2026-08-21 上线)
+    'deepseek-flash',                // DeepSeek V4.1-Flash(原生多模态)
   ];
 
   // ── 本地存储 Key ──

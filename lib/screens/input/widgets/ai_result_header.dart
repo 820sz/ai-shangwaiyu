@@ -18,6 +18,17 @@ class AiResultHeader extends StatelessWidget {
   /// 点"校验"时的明细(被丢弃条目的原因),为空则不可点
   final List<String>? guardDetails;
 
+  /// 模型自报的扫描对账(v2.6):"扫描 42 行 · 找到 18 处标记"。
+  /// 为什么要显示:用户判断"它到底有没有认真看"就靠这两个数 ——
+  /// 标记数远小于肉眼可见时,用户会知道该点"重新识别"。
+  final String? scanNote;
+
+  /// 第二遍高清分块复查的状态/战果(v2.6)
+  final String? missedNote;
+
+  /// "待确认"条数(模型拿不准算不算标记,但仍收进来的)
+  final int uncertainCount;
+
   const AiResultHeader({
     super.key,
     required this.totalCount,
@@ -28,6 +39,9 @@ class AiResultHeader extends StatelessWidget {
     required this.thinkingLabel,
     this.guardNote,
     this.guardDetails,
+    this.scanNote,
+    this.missedNote,
+    this.uncertainCount = 0,
   });
 
   @override
@@ -76,6 +90,41 @@ class AiResultHeader extends StatelessWidget {
             // P2-31:次要文字对比度不足 → 用主题的次要文字色(深浅色都达 AA)
             style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurfaceVariant),
           ),
+          // v2.6:扫描对账 + 复查状态(一行,不占地方但很关键 —— 用户据此判断漏没漏)
+          if (scanNote != null || missedNote != null) ...[
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Icon(Icons.manage_search,
+                    size: 13, color: theme.colorScheme.onSurfaceVariant),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    [?scanNote, ?missedNote].join(' · '),
+                    style: TextStyle(
+                        fontSize: 10, color: theme.colorScheme.onSurfaceVariant),
+                  ),
+                ),
+              ],
+            ),
+          ],
+          // v2.6:待确认提示(模型拿不准 → 收进来了,用户可取消)
+          if (uncertainCount > 0) ...[
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Icon(Icons.help_outline, size: 13, color: AppTheme.warningColor(context)),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    '$uncertainCount 条「待确认」:模型拿不准算不算标记,仍收进来了 —— 不要的取消勾选即可',
+                    style: TextStyle(
+                        fontSize: 10, color: AppTheme.warningColor(context)),
+                  ),
+                ),
+              ],
+            ),
+          ],
           if (guardNote != null) ...[
             const SizedBox(height: 4),
             // 把"盲盒"打开:告诉用户本地校验动过什么,并允许看明细

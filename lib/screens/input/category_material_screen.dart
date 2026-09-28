@@ -5,6 +5,8 @@ import '../../models/learner_model.dart';
 import '../../providers/vocab_provider.dart';
 import '../../config/design_tokens.dart';
 import '../../config/theme.dart';
+import '../../services/deepseek_api.dart';
+import '../../services/external_link.dart';
 import '../../services/learner_model_store.dart';
 import '../../services/learner_context.dart';
 import '../../services/material_library.dart';
@@ -36,7 +38,13 @@ class CategoryMaterialScreen extends StatefulWidget {
 
 class _CategoryMaterialScreenState extends State<CategoryMaterialScreen> {
   final _queryCtrl = TextEditingController();
+  final _ai = DeepseekApiService();
   List<OriginalHit> _hits = const [];
+  /// 命中标题的中文译名(「中文(英文)」显示用),AI 翻不出来就回落纯英文
+  Map<String, String> _titleCn = const {};
+  /// AI 直接点名的作品(带 why 与原文链接)
+  List<Map<String, String>> _picks = const [];
+  String _aiNote = '';
   bool _loading = false;
   bool _searched = false;
   List<String> _notes = const [];
@@ -67,21 +75,73 @@ class _CategoryMaterialScreenState extends State<CategoryMaterialScreen> {
     super.dispose();
   }
 
+  /// 是不是"中文需求"(v2.6):是的话先让 AI 把它变成能搜的东西,
+  /// 而不是像以前那样弹一句"请用英文关键词"再把用户顶回去。
+  bool get _looksChinese => RegExp(r'[\u4e00-\u9fa5]').hasMatch(_queryCtrl.text);
+
   Future<void> _search() async {
+    final raw = _queryCtrl.text.trim();
     setState(() {
       _loading = true;
       _searched = true;
+      _aiNote = '';
     });
-    final result = await OriginalSearch.search(
-      _queryCtrl.text,
-      category: widget.category,
-    );
+
+    // ── ① AI 规划:中文需求 → 英文检索词 + 直接点名作品(带原文链接)──
+    var query = raw;
+    var picks = const <Map<String, String>>[];
+    var aiNote = '';
+    if (_ai.isConfigured && (raw.isEmpty || _looksChinese)) {
+      try {
+        final plan = await _ai.planMaterialSearch(
+          raw.isEmpty ? '${widget.category} 入门 经典' : raw,
+          category: widget.category,
+          levelHint: LearnerContext.describeBaseline(_model),
+        );
+        final queries = (plan['queries'] as List?)?.cast<String>() ?? const [];
+        picks = (plan['picks'] as List?)
+                ?.whereType<Map>()
+                .map((e) => e.map((k, v) => MapEntry('$k', '$v')))
+                .toList() ??
+            const <Map<String, String>>[];
+        aiNote = '${plan['note'] ?? ''}';
+        if (queries.isNotEmpty) query = queries.first;
+      } catch (e) {
+        debugPrint('ReadFlow 材料检索规划失败(退回关键词直搜): $e');
+      }
+    }
+
+    // ── ② 真实检索:拿 AI 给的英文词去公开源里搜真东西 ──
+    final result = await OriginalSearch.search(query, category: widget.category);
+
+    // ── ③ 标题中文化:整屏英文没人看得懂(用户第 8(3) 条)──
+    var titleCn = const <String, String>{};
+    if (_ai.isConfigured && result.hits.isNotEmpty) {
+      try {
+        titleCn = await _ai.translateTitles(
+          result.hits.take(12).map((h) => h.title).toList(),
+        );
+      } catch (e) {
+        debugPrint('ReadFlow 标题中文化失败(保持英文): $e');
+      }
+    }
+
     if (!mounted) return;
     setState(() {
       _hits = result.hits;
       _notes = result.notes;
+      _titleCn = titleCn;
+      _picks = picks;
+      _aiNote = aiNote;
       _loading = false;
     });
+  }
+
+  /// 「中文(英文)」标题(v2.6):有译名就中英并列,没有就原样英文
+  String _displayTitle(String en) {
+    final cn = _titleCn[en]?.trim() ?? '';
+    if (cn.isEmpty || cn == en) return en;
+    return '$cn（$en）';
   }
 
   /// 打开一条原文:抓正文 → 本地分析 → 入库 → 读前卡 → 阅读器
@@ -169,7 +229,8 @@ class _CategoryMaterialScreenState extends State<CategoryMaterialScreen> {
               child: TextField(
                 controller: _queryCtrl,
                 decoration: const InputDecoration(
-                  hintText: '英文关键词(书名 / 作者 / 主题);留空看经典书单',
+                  // v2.6:不再要求用户"用英文搜" —— 中文说需求,AI 去想办法
+                  hintText: '想找什么?中文说就行(例:适合入门的哲学公版书)',
                   isDense: true,
                 ),
                 onSubmitted: (_) => _search(),
@@ -182,6 +243,11 @@ class _CategoryMaterialScreenState extends State<CategoryMaterialScreen> {
             ),
           ],
         ),
+        // AI 规划说明 + AI 直接点名的作品(带「中文(英文)」标题与原文链接)
+        if (_aiNote.isNotEmpty || _picks.isNotEmpty) ...[
+          const SizedBox(height: Gap.sm),
+          _aiPicksSection(theme, muted),
+        ],
         // 每个源的真实情况(v2.5):通了几条 / 为什么没结果 / 上次没连上已跳过 ——
         // 旧版只有"没有结果"四个字,用户只能得出"这功能没用"
         if (_notes.isNotEmpty) ...[
@@ -191,22 +257,126 @@ class _CategoryMaterialScreenState extends State<CategoryMaterialScreen> {
         const SizedBox(height: Gap.sm),
         if (_loading)
           const AppLoading(label: '正在检索公开源…')
-        else if (_hits.isEmpty && _searched)
+        else if (_hits.isEmpty && _searched && _picks.isEmpty)
           AppEmpty(
             icon: Icons.search_off,
-            title: '这次没搜到原文',
-            hint: _notes.any((n) => n.contains('中文关键词'))
-                ? '换成英文关键词再试(这些源都是英文库)'
-                : '换个更常见的英文词,或到材料中心点「检测可用源」看看哪个源通',
+            title: '这次没找到原文',
+            hint: '换个说法再试(中文描述需求也行);或到材料中心点「检测可用源」看看哪个源通',
           )
-        else
+        else ...[
+          if (_hits.isNotEmpty) const AppSectionTitle(title: '公开源检索结果'),
           for (var i = 0; i < _hits.length; i++)
             AppStagger(
               index: i,
               child: _buildHitCard(theme, muted, _hits[i]),
             ),
+        ],
       ],
     );
+  }
+
+  /// AI 规划区(v2.6):一句话说明 + 它点名的作品(中文(英文) + 为什么 + 原文链接)
+  Widget _aiPicksSection(ThemeData theme, Color muted) {
+    final amber = AppTheme.amber(context);
+    return AppCard(
+      color: amber.withAlpha(18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.auto_awesome, size: 15, color: amber),
+              const SizedBox(width: Gap.xxs + 2),
+              Expanded(
+                child: Text(
+                  'AI 按你的需求找的',
+                  style: theme.textTheme.titleSmall
+                      ?.copyWith(fontWeight: FontWeight.w700),
+                ),
+              ),
+            ],
+          ),
+          if (_aiNote.isNotEmpty) ...[
+            const SizedBox(height: Gap.xxs),
+            Text(_aiNote,
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: muted, height: 1.5)),
+          ],
+          for (final p in _picks) ...[
+            const SizedBox(height: Gap.xs),
+            InkWell(
+              // 有原文链接就点开浏览器/Gutenberg 原文;没有链接则不可点
+              onTap: (p['url'] ?? '').isEmpty
+                  ? null
+                  : () => _openExternalUrl(p['url']!),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _displayTitle(p['title_en'] ?? ''),
+                    style: theme.textTheme.bodyMedium
+                        ?.copyWith(fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    [
+                      if ((p['author'] ?? '').isNotEmpty) p['author']!,
+                      if ((p['why'] ?? '').isNotEmpty) p['why']!,
+                    ].join(' · '),
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(color: muted, height: 1.4),
+                  ),
+                  if ((p['url'] ?? '').isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Row(
+                      children: [
+                        Icon(Icons.link, size: 13, color: theme.colorScheme.primary),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(
+                            p['url']!,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.primary,
+                              fontSize: 11,
+                              decoration: TextDecoration.underline,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+          const SizedBox(height: Gap.xxs + 2),
+          Text(
+            '注:链接来自公开源的书目/摘要页;AI 点名的作品若没有把握给准链接,就只给标题。',
+            style: theme.textTheme.bodySmall
+                ?.copyWith(color: muted, fontSize: 10, height: 1.4),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 用系统浏览器打开外部链接(材料原文的"原文出处")
+  Future<void> _openExternalUrl(String url) async {
+    try {
+      final ok = await launchExternalUrl(url);
+      if (!ok && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('打不开这个链接:$url')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('打开链接失败:$e')),
+      );
+    }
   }
 
   /// 各源检索结果说明条:一眼看清"哪个源通/几条/为什么空"
@@ -252,7 +422,7 @@ class _CategoryMaterialScreenState extends State<CategoryMaterialScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(hit.title,
+                Text(_displayTitle(hit.title),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodyLarge

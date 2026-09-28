@@ -19,6 +19,7 @@ import '../../services/base_api.dart';
 import '../../services/doubao_api.dart';
 import '../../services/tts_service.dart';
 import '../../services/vision_guard.dart';
+import '../../services/vision_image.dart';
 import '../profile/api_settings.dart';
 import '../../utils/follow_up_context.dart';
 import 'widgets/word_list_tile.dart';
@@ -123,6 +124,13 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
   /// 最近一次识图的本地校验结果(v2.4):界面据此显示"忽略了什么/纠正了什么",
   /// 让识别不再是黑盒(用户原话:"每次识别简直是开盲盒")
   VisionGuardResult? _guardResult;
+
+  /// 第二遍"只找漏"复查(v2.6)是否在跑 / 补到了几条
+  bool _missedPassRunning = false;
+  int _missedFound = 0;
+
+  /// 首轮识别时模型自报的扫描对账(v2.6):"扫了 42 行 · 自报找到 18 处标记"
+  String? _scanNote;
 
   /// 流内空闲看门狗(v1.9.0,审查 P1-3)。
   /// dio 的 receiveTimeout 只覆盖"等响应头"阶段,拿不到流式 body 的看护;
@@ -568,6 +576,117 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     return 0;
   }
 
+  /// 一条识别结果 → Vocabulary(首轮与"只找漏"复查遍共用同一套映射,
+  /// 避免两遍给出不一致的字段)。
+  Vocabulary _vocabFromMap(Map<String, dynamic> r, int imgIdx) {
+    // 越界(模型幻觉组号)回退第一张而非最后一张:
+    // 识别从第一张开始,0 更可能是"模型忘标"而非"标到最后一本",
+    // 避免把词悄悄绑到最后一本书上
+    final photoPath = imgIdx >= 0 && imgIdx < _images.length
+        ? _images[imgIdx].path
+        : _images[0].path;
+    return Vocabulary(
+      word: r['word'] as String,
+      translation: r['translation'] as String?,
+      sourceBook: widget.sourceBook,
+      sourcePage: widget.sourcePage,
+      originalSentence: r['original_sentence'] as String?,
+      photoPath: photoPath,
+      wordType: (r['word_type'] as String?) ?? 'word',
+      partOfSpeech: r['part_of_speech'] as String?,
+      phonetic: r['phonetic'] as String?,
+      // v2.0:识别侧现在会同时给英/美两套音标;老返回只有 phonetic 时
+      // 由 Vocabulary.fromMap 的同款回退规则兜底(两边都可读)
+      phoneticUk:
+          (r['phonetic_uk'] as String?) ?? (r['phonetic'] as String?),
+      phoneticUs:
+          (r['phonetic_us'] as String?) ?? (r['phonetic'] as String?),
+      grammarNote: r['grammar_note'] as String?,
+      // v2.6:模型"拿不准算不算标记"但仍然收进来的条目 → 界面打「待确认」标
+      needsReview: r['uncertain'] == true || r['needs_review'] == true,
+      sentenceMissing: r['sentence_missing'] == true,
+      // v2.4(B4):同一个词在两处被标 → 记两次出现(vi 校验层已合并出
+      // occurrences 列表),词汇本里就能显示 apple(×2) 并列出每处原文行
+      occurrences: [
+        for (final line in (r['occurrences'] as List? ?? const []))
+          VocabOccurrence(
+            book: widget.sourceBook ?? '',
+            page: widget.sourcePage ?? '',
+            sentence: '$line',
+            at: DateTime.now(),
+          ),
+      ],
+    );
+  }
+
+  /// **第二遍"只找漏"复查**(v2.6)。
+  ///
+  /// 第一遍送整页,模型受"图片被压到 ~1300×1300"所限,淡色划线/半截线/页边批注
+  /// 最容易漏(用户实测"一页只出 5 条")。这一遍把每页切成 2×2 高清小块重看,
+  /// 把第一遍已找到的词面交给它当"别重复"清单,要求只找剩下的。
+  /// **结果只追加不替换**,失败也不影响第一遍(静默降级)。
+  Future<void> _startMissedPass() async {
+    if (_missedPassRunning || _images.isEmpty || !mounted) return;
+    if (widget.analysisMode != AppConstants.analysisModeMarked) return;
+    _missedPassRunning = true;
+    final known = {for (final v in _results) v.word.toLowerCase()};
+    var added = 0;
+    try {
+      // 只复检最近两页:时间与流量可控(每页 4 块,4 张图一次请求)
+      final targets = _images.length <= 2
+          ? List<int>.generate(_images.length, (i) => i)
+          : <int>[0, _images.length - 1];
+      for (final imgIdx in targets) {
+        if (!mounted) break;
+        final bytes = await _images[imgIdx].readAsBytes();
+        final tiles = VisionImagePrep.tiles(bytes);
+        final buf = StringBuffer();
+        await for (final chunk in _api.extractMissedStream(
+          tiles,
+          excludeWords: known.toList(),
+          sourceBook: widget.sourceBook,
+          sourcePage: widget.sourcePage,
+        )) {
+          if (!chunk.isReasoning) buf.write(chunk.text);
+        }
+        final maps = DoubaoApiService.parseResponse(
+          buf.toString(),
+          analysisMode: AppConstants.analysisModeMarked,
+        );
+        final guard = VisionGuard.apply(maps);
+        final fresh = <Vocabulary>[];
+        for (final r in guard.kept) {
+          final w = (r['word'] as String? ?? '').trim();
+          if (w.isEmpty) continue;
+          final key = w.toLowerCase();
+          if (known.contains(key)) continue;
+          known.add(key);
+          fresh.add(_vocabFromMap(r, imgIdx));
+        }
+        if (fresh.isNotEmpty && mounted) {
+          setState(() => _results = [..._results, ...fresh]);
+          added += fresh.length;
+        }
+      }
+    } catch (e) {
+      // 复查是"加分项":失败绝不打扰用户(第一遍结果照常可用)
+      debugPrint('ReadFlow 复查漏识失败(不影响首轮): $e');
+    } finally {
+      _missedPassRunning = false;
+    }
+    if (!mounted || added == 0) return;
+    setState(() => _missedFound += added);
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text('高清分块复查:又补上 $added 条'),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+  }
+
   void _onStreamDone() {
     _firstByteTimer?.cancel();
     _idleTimer?.cancel();
@@ -645,7 +764,13 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
           ? null
           : VisionGuard.apply(parsedMaps);
       final rawMaps = guard?.kept ?? parsedMaps;
-      if (mounted) setState(() => _guardResult = guard);
+      if (mounted) {
+        setState(() {
+          _guardResult = guard;
+          // v2.6:把"扫了几行/自报几处标记"记下来给结果头显示
+          _scanNote = DoubaoApiService.lastScanNote;
+        });
+      }
       if (rawMaps.isEmpty) {
         if (_recalibrateMode) {
           // 校准重识别没识别到标注 → 保留原结果,明确告知(不丢用户数据)
@@ -709,44 +834,10 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
       } else {
         // 圈画模式结果 — 多图时按 image_index 映射正确的 photoPath。
         // 追加模式:AI 对"本轮新图"从 0 编号,加 _streamStartIndex 映射回全局
-        final results = rawMaps.map((r) {
-          final imgIdx = _safeImageIndex(r['image_index']) + _streamStartIndex;
-          // 越界(模型幻觉组号)回退第一张而非最后一张:
-          // 识别从第一张开始,0 更可能是"模型忘标"而非"标到最后一本",
-          // 避免把词悄悄绑到最后一本书上
-          final photoPath = imgIdx >= 0 && imgIdx < _images.length
-              ? _images[imgIdx].path
-              : _images[0].path;
-          return Vocabulary(
-            word: r['word'] as String,
-            translation: r['translation'] as String?,
-            sourceBook: widget.sourceBook,
-            sourcePage: widget.sourcePage,
-            originalSentence: r['original_sentence'] as String?,
-            photoPath: photoPath,
-            wordType: (r['word_type'] as String?) ?? 'word',
-            partOfSpeech: r['part_of_speech'] as String?,
-            phonetic: r['phonetic'] as String?,
-            // v2.0:识别侧现在会同时给英/美两套音标;老返回只有 phonetic 时
-            // 由 Vocabulary.fromMap 的同款回退规则兜底(两边都可读)
-            phoneticUk: (r['phonetic_uk'] as String?) ??
-                (r['phonetic'] as String?),
-            phoneticUs: (r['phonetic_us'] as String?) ??
-                (r['phonetic'] as String?),
-            grammarNote: r['grammar_note'] as String?,
-            // v2.4(B4):同一个词在两处被标 → 记两次出现(vi 校验层已合并出
-            // occurrences 列表),词汇本里就能显示 apple(×2) 并列出每处原文行
-            occurrences: [
-              for (final line in (r['occurrences'] as List? ?? const []))
-                VocabOccurrence(
-                  book: widget.sourceBook ?? '',
-                  page: widget.sourcePage ?? '',
-                  sentence: '$line',
-                  at: DateTime.now(),
-                ),
-            ],
-          );
-        }).toList();
+        final results = rawMaps
+            .map((r) =>
+                _vocabFromMap(r, _safeImageIndex(r['image_index']) + _streamStartIndex))
+            .toList();
 
         setState(() {
           _phase = _StreamPhase.results;
@@ -784,6 +875,11 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
       }
       // 滚动到 AI 结果区域顶部
       _scrollToAiSection();
+      // v2.6:首轮结果先给用户看,随后**后台跑第二遍"只找漏"复查**
+      // (高清分块 + 已找到的清单),补到的条目追加在末尾。
+      if (!_missedPassRunning) {
+        unawaited(_startMissedPass());
+      }
     } catch (e) {
       if (!mounted) return;
       // 校准/补充标记复位:失败后重试按普通重试处理(否则会带着旧模式重跑)
@@ -2382,6 +2478,14 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                   '不思考',
           // v2.4:本地校验做了什么(忽略/纠正/存疑),点开可看明细
           guardNote: _guardResult?.note,
+          // v2.6:模型自报的"扫了几行 / 找到几处标记"——用户可据此判断它有没有漏看
+          scanNote: _scanNote,
+          // v2.6:第二遍高清分块复查的状态与战果
+          missedNote: _missedPassRunning
+              ? '正在高清分块复查漏识…'
+              : (_missedFound > 0 ? '高清复查已补 $_missedFound 条' : null),
+          // v2.6:"待确认"条数(模型拿不准算不算标记 → 已收进来,由用户取消)
+          uncertainCount: _results.where((v) => v.needsReview).length,
           guardDetails: _guardResult == null
               ? null
               : [
@@ -2390,6 +2494,14 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                     '纠正类型 ${_guardResult!.typeFixed} 条(按本地规则重判 word/phrase/sentence)',
                   if (_guardResult!.truncationFixed > 0)
                     '补全截断 ${_guardResult!.truncationFixed} 条(用完整句替换省略号残片)',
+                  if (_guardResult!.mergedOccurrences > 0)
+                    '同一词多次出现 ${_guardResult!.mergedOccurrences} 处(合并成 ×N)',
+                  if (_guardResult!.sentenceFilled > 0)
+                    '补上例句 ${_guardResult!.sentenceFilled} 条(用证据行兜底)',
+                  if (_guardResult!.containedIn > 0)
+                    '疑似重复 ${_guardResult!.containedIn} 条(可能是"单词 + 含它的短语",都保留了)',
+                  if (_guardResult!.sentenceMissing > 0)
+                    '缺例句 ${_guardResult!.sentenceMissing} 条(模型没给原句,已标记出来)',
                   if (_guardResult!.unverified > 0)
                     '存疑 ${_guardResult!.unverified} 条(所在行里没找到该词条,已保留并标记)',
                 ],

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../config/design_tokens.dart';
 import '../../services/widget_payload.dart';
 import '../../services/widget_service.dart';
 
@@ -80,7 +81,7 @@ class _WidgetSettingsScreenState extends State<WidgetSettingsScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('桌面小组件')),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+        padding: Insets.page,
         children: [
           Card(
             child: Padding(
@@ -100,21 +101,32 @@ class _WidgetSettingsScreenState extends State<WidgetSettingsScreen> {
                             : '桌面上还没有小组件'),
                     style: theme.textTheme.bodyMedium,
                   ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      FilledButton.icon(
-                        onPressed: _busy ? null : _pin,
-                        icon: const Icon(Icons.add_to_home_screen, size: 18),
-                        label: const Text('一键添加到桌面'),
+                  const SizedBox(height: Gap.sm),
+                  // v2.6:两个按钮原来挤在同一个 Row 里 —— 窄屏 + 中文按钮长
+                  // ("一键添加到桌面" / "同步并预览")会被右边缘切掉。
+                  // 改成**整行竖排**(每个按钮独占一行,宽度 48 高),任何屏幕都完整。
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: _busy ? null : _pin,
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size(0, 48),
                       ),
-                      const SizedBox(width: 10),
-                      OutlinedButton.icon(
-                        onPressed: _busy ? null : _sync,
-                        icon: const Icon(Icons.refresh, size: 18),
-                        label: const Text('同步并预览'),
+                      icon: const Icon(Icons.add_to_home_screen, size: 18),
+                      label: const Text('一键添加到桌面'),
+                    ),
+                  ),
+                  const SizedBox(height: Gap.xs),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: _busy ? null : _sync,
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(0, 48),
                       ),
-                    ],
+                      icon: const Icon(Icons.refresh, size: 18),
+                      label: const Text('同步并预览'),
+                    ),
                   ),
                   if (_busy) ...[
                     const SizedBox(height: 12),

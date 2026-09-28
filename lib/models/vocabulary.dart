@@ -28,6 +28,15 @@ class Vocabulary {
   /// 而是往这里追加一次出现记录 —— 词汇本显示 `apple(×2)` 并列出每处出处。
   final List<VocabOccurrence> occurrences;
 
+  /// **待确认**(v2.6):识图时模型"拿不准算不算标记"但仍然收进来的条目。
+  /// 新提示词要求"宁可多收、不确定就标 uncertain",界面给它打一个「待确认」标,
+  /// 用户一眼就知道哪几条是边缘情况,可以取消勾选 —— 而不是被静静丢掉。
+  /// 只在识别结果页的内存里生效,不入库(入库的语义是"用户确认要收")。
+  final bool needsReview;
+
+  /// 例句缺失(v2.6):模型没给 original_sentence,界面提示"这条没有出处原句"
+  final bool sentenceMissing;
+
   final DateTime createdAt;
   final DateTime? updatedAt;
 
@@ -49,6 +58,8 @@ class Vocabulary {
     this.category,
     this.materialPath,
     this.occurrences = const [],
+    this.needsReview = false,
+    this.sentenceMissing = false,
     DateTime? createdAt,
     this.updatedAt,
   }) : createdAt = createdAt ?? DateTime.now();
@@ -155,6 +166,8 @@ class Vocabulary {
     Object? category = _sentinel,
     Object? materialPath = _sentinel,
     List<VocabOccurrence>? occurrences,
+    bool? needsReview,
+    bool? sentenceMissing,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) {
@@ -176,6 +189,8 @@ class Vocabulary {
       category: _unwrap(category, this.category) as String?,
       materialPath: _unwrap(materialPath, this.materialPath) as String?,
       occurrences: occurrences ?? this.occurrences,
+      needsReview: needsReview ?? this.needsReview,
+      sentenceMissing: sentenceMissing ?? this.sentenceMissing,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );

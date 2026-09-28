@@ -24,8 +24,19 @@ bool isVisionCandidate(String id) {
   final m = id.toLowerCase();
   if (m.contains('vision')) return true;
   if (m.startsWith('doubao-seed')) return true;
+  // DeepSeek 官方多模态:V4.1 的 `deepseek-flash`(旧名 `deepseek-v4-flash` 被
+  // 官方路由到它)。注意**不能用 contains('flash')** —— 方舟转售的
+  // `deepseek-v4-flash-ga-260731` 是纯文本,那样会把它放回菜单(v1.3.0 的坑)。
+  if (_deepseekOfficialMultimodal.contains(m)) return true;
   return false;
 }
+
+/// DeepSeek 官方"能吃图"的模型名(精确匹配,避免把方舟转售的文本模型算进来)
+const Set<String> _deepseekOfficialMultimodal = {
+  'deepseek-flash', // V4.1-Flash(2026-09-10 起,原生多模态)
+  'deepseek-v4-flash', // 旧名,官方兼容路由到 V4.1-Flash
+  'deepseek-v4-flash-vision-exp', // 旧视觉实验名,同样被路由
+};
 
 /// 主槽位模型菜单清单(v1.4.3 用户实测"配了 DS 还显示豆包待选"):
 /// 1. 优先最近一次 /models 拉取的真实列表([DoubaoApiService.lastModels]);
@@ -49,22 +60,48 @@ List<String> primaryModelChoices() {
   }.toList();
 }
 
-/// 是否发送 image_url 的 detail 字段 — 豆包/Ark 系支持,DeepSeek 视觉模型
-/// 不认此字段(未知参数可能 400),只发 url。纯函数,可单测。
+/// 是否发送 image_url 的 detail 字段(纯函数,可单测)。
+///
+/// **v2.6 修正**:以前只对豆包/Ark 发、对 DeepSeek 一律不发 —— 依据是
+/// "DS 视觉模型不认未知字段"。但 2026-09-10 DeepSeek-V4.1-Flash 上线后,
+/// 官方文档明确 `image_url.detail` 支持 `low/high/original/auto` 四个取值,
+/// 而 `low` 会把图**压到 512×512** —— 书页上的小字与浅色划线直接消失。
+/// 所以现在:认识 detail 的厂商一律发,并且识别场景发 `high`(保留原图)。
 bool shouldSendDetailFlag(String model) {
   final m = model.toLowerCase();
-  return m.contains('doubao') || m.contains('seed') || m.contains('ark');
+  if (m.contains('doubao') || m.contains('seed') || m.contains('ark')) return true;
+  // DeepSeek:V4.1(2026-09-10)起官方文档明确支持 image_url.detail
+  // (low = 压到 512×512;high/original = 保留原图)
+  if (_deepseekOfficialMultimodal.contains(m)) return true;
+  return false;
 }
 
-/// 模型是否支持图片输入 — 判断追问能否附带识别图片:
-/// 豆包/Ark 系全支持;DeepSeek 只有 vision 系列支持(纯文本模型发图必 400);
-/// 未知厂商默认不带图(稳妥,避免每次追问 400→降级重试的双倍耗时)。
+/// 识别场景应该请求的细节级别。
+///
+/// - 豆包/Ark:`high`(方舟只认 low/high);
+/// - DeepSeek:`high`(官方等价于 `original`,保留原图不给服务端压缩);
+/// - 其余:不发这个字段(返回 null)。
+String? recognitionDetailLevel(String model, {required bool calibrate}) {
+  if (!shouldSendDetailFlag(model)) return null;
+  // 日常识别也用 high:识别"哪一笔是划线"是低对比度细节任务,
+  // 省下的那点流量换不来准确率(2026-09-28 用户实测"开盲盒"的机器侧主因之一)
+  return 'high';
+}
+
+/// 模型是否支持图片输入 — 判断追问/识别能否带图:
+/// 豆包/Ark 系全支持;DeepSeek 只有**多模态那几款**支持
+/// (V4.1 起是 `deepseek-flash` 与旧名 `*-vision*`;`deepseek-v4-pro` 是纯文本,
+/// 发图必 400);未知厂商默认不带图(稳妥,避免每次 400→降级重试的双倍耗时)。
 bool modelSupportsImages(String model) {
   final m = model.toLowerCase();
   if (m.contains('doubao') || m.contains('seed') || m.contains('ark')) {
     return true;
   }
-  if (m.contains('deepseek')) return m.contains('vision');
+  if (m.contains('deepseek')) {
+    // 精确匹配官方多模态名单:纯文本的 `deepseek-v4-pro`(以及方舟转售的
+    // `deepseek-v4-flash-ga-*`)发图必 400
+    return _deepseekOfficialMultimodal.contains(m);
+  }
   return false;
 }
 
@@ -152,14 +189,15 @@ class DoubaoApiService extends BaseApiService {
     final countHint = imageUris.length > 1
         ? '（共${imageUris.length}张图片）'
         : '';
-    // 补充识别模式(v1.4.4 加固):已识别清单 + "绝不重复/只找标记/宁少勿错"
+    // 补充识别模式(v2.6 修正):以前这里写着"宁可漏掉也不要输出" ——
+    // 正是漏识的帮凶。改成"只补不重复,但要尽量找全":不确定的照样输出并标 uncertain。
     final excludeHint = excludeWords.isEmpty
         ? ''
-        : '\n补充识别模式：以下内容已经识别过了，绝对不要重复输出任何一条：\n'
+        : '\n【补充识别】以下内容**上一次已经识别过了**,不要重复输出:\n'
             '${excludeWords.take(200).join(' | ')}\n'
-            '只输出这次新发现的、且在照片上有明确手写标记痕迹的内容。\n'
-            '如果你无法确定某个内容是否有标记，宁可漏掉也不要输出。\n'
-            '如果本页没有新的标记内容，直接返回 {"items": []}。';
+            '这次只做一件事:**把上一遍漏掉的标记内容找出来**(淡线、半截线、圈画、页边批注最容易漏)。\n'
+            '不确定算不算标记的,**照样输出**并在条目里写 "uncertain": true —— 不要因为不确定就丢掉。\n'
+            '如果确实没有新的标记内容,返回 {"items": []}。';
 
     final (String systemPrompt, String userPrompt) = switch (analysisMode) {
       AppConstants.analysisModeFullText => (
@@ -168,56 +206,72 @@ class DoubaoApiService extends BaseApiService {
 要求：保持原文段落结构，翻译准确流畅。只返回JSON。''',
         '请翻译这些阅读材料照片中的全文内容$bookHint$pageHint$countHint'
       ),
-      // 校准重识别(v1.7.0):用户对首次识别不满意时的"认真重做一遍"。
-      // 与首次识别的差别:①逐行扫描的作业流程 ②标记类型清单+排除干扰物
-      // ③输出前自检 ④高清图(detail=high,提升小字/浅色笔迹可辨识度)
+      // 校准重识别(v1.7.0;v2.6 重写):用户对上次识别不满意时的"认真重做一遍"。
+      // v2.6 关键改动:去掉"宁可少,不可错"——它正是漏识的元凶;
+      // 改成"标记优先,宁可多收"(不确定的条目带 uncertain 标记交给用户取消)。
       _ when calibrate => (
-        '''你是严谨的英语学习助手，正在做一次"校准重识别"：用户认为上一次识别有漏识或误识，请重新完整检查图片。
-输出JSON，格式：
-{"items":[{"word":"完整原文","translation":"中文释义","word_type":"word|phrase|sentence","part_of_speech":"词性(可选)","phonetic_uk":"英式IPA音标(仅单词可选)","phonetic_us":"美式IPA音标(仅单词可选)","original_sentence":"完整句子(短语/句子必填)"}]}
+        '''你是严谨的英语学习助手,正在做一次"校准重识别":用户认为上一次**漏掉了不少该识别的内容**,请把整页重新完整地找一遍。
+输出JSON,格式：
+{"lines_scanned":扫描的正文行数,"mark_count":找到的标记处数,"items":[{"word":"完整原文","translation":"中文释义","word_type":"word|phrase|sentence","part_of_speech":"词性(可选)","phonetic_uk":"英式IPA音标(仅单词可选)","phonetic_us":"美式IPA音标(仅单词可选)","original_sentence":"该词条所在的完整句子(照抄图上英文,必填)","line":"该词条所在整行原文(照抄,必填)","uncertain":true|false}]}
 
-作业流程(必须按此顺序)：
-1. 先整体扫一遍图片，找出所有人工标记的位置，再逐个读取被标记的文字。
-2. 标记类型包括：圈画、下划线、双下划线、波浪线、荧光笔(黄/绿/粉等彩色底纹)、方框、星号、箭头、书签贴/便签、页边中文批注旁对应的英文。
-3. 把标点符号、连字符、缩写、专有名词原样保留；看不清的字母按上下文补全，但不要编造不存在的词。
-4. 同一处内容重复标记只输出一次。
+作业流程(严格按顺序做,不要跳步)：
+1. **先把图转正**(横拍/竖拍/倒置都可能),再从正文第一行到最后一行**逐行**读过去。
+2. 每读一行,就问自己"这一行有没有被笔或荧光笔碰过";有就记下来,继续往下。
+3. 标记类型包括:下划线(含很淡的铅笔线)、双下划线、波浪线、圈画、荧光笔(黄/绿/粉底纹)、方框、星号、箭头、书签贴/便签、页边手写批注、手写中文批注旁对应的英文。
+4. 标点、连字符、缩写、专有名词原样保留;看不清的字母按上下文补全,但不要编造不存在的词。
+5. 同一处内容重复标记只输出一次;同一个词在两处被标则输出两条。
+6. **输出前对账**:mark_count 必须与实际带标记的条目数一致;对不上就回去再扫一遍再输出。
 
-识别纪律：
-1. 只输出有明确标记痕迹的内容；未标记的正文一律不输出。
-2. word 必须与图上文字完全一致，禁止截断、禁止省略号。
-3. 短语/句子必须在 original_sentence 给出其所在完整句子。
-4. 输出前自检：逐条确认"这个词在图上确实有标记痕迹"，无法确认的删掉——宁可少，不可错。
-${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,"items":[...]},...]}' : ''}
-无任何标记返回{"items":[]}。只输出JSON。''',
+识别纪律:
+1. **该找出来的必须找出来**:上一次漏掉的那些(淡线、半截线、圈在词上的圈、页边批注)这次都要收进来。
+2. 判断不了"这算不算标记"时**照样输出**,并把 uncertain 写 true —— 用户会自己取消,但漏掉的内容用户无从补回。
+3. word 必须与图上文字完全一致,禁止截断、禁止省略号;跨行的标记接完整。
+4. **original_sentence 必填(单词也要)**,line 也必填(照抄整行原文)。
+5. 中文批注单独成条,且为**中文 → 英文**结构:word=中文批注原文,translation=它对应的英文(**不要写中文**),original_sentence=被批注的英文原句。
+6. 不要输出完全没有标记的正文(大标题、页码、没被划到的句子)。
+${imageUris.length > 1 ? '7. 多图格式：{"items_by_image":[{"image_index":0,"items":[...]},...]}' : ''}
+无任何标记返回 {"lines_scanned":N,"mark_count":0,"items":[]}。只输出JSON。''',
         '请校准重识别这些照片中被标记(批注/圈画/划线/荧光笔等)的英语内容$bookHint$pageHint$countHint'
       ),
       _ => (
-        '''你是英语学习助手。识别照片中"被标注"的英语内容。输出JSON，格式：
-{"items":[{"word":"完整原文","translation":"中文释义","word_type":"word|phrase|sentence","part_of_speech":"词性(可选)","phonetic_uk":"英式IPA音标(仅单词可选,如 /ˈleɪzi/)","phonetic_us":"美式IPA音标(仅单词可选)","original_sentence":"完整句子(短语/句子必填,单词可选)","line":"该词条所在的整行原文(照抄,用于核对)"}]}
-标记定义：手写笔迹圈画、下划线、波浪线、荧光笔、方框、星号、书签贴、页边批注对应的英文等读者标注痕迹。
-识别纪律(v1.4.4；v2.4 加固)：
-1. **照片可能是任何方向**(横拍/竖拍/倒置)。先按文字方向在心里把它转正,再逐行读;
-   不确定方向时,以能读出通顺英文的方向为准。
-2. **只输出有明确标记痕迹的内容**;正文中未作任何标记的文字一律不要输出。
-3. **页边手写的中文批注也要输出**(用户会自己挑要不要收):它照原样写进 word,
-   同时把旁边的英文(如果有)单独作为一条输出。
-4. 如果不能确定某个内容是否被标记,宁可漏掉,也不要输出。
-5. word 必须与照片中的文本完全一致——单词、短语、句子一律**完整**输出,禁止截断,
+        '''你是英语学习助手。任务:**把照片里所有被人手标注过的英语内容一条不漏地找出来**。输出JSON，格式：
+{"lines_scanned":扫描的正文行数,"mark_count":找到的标记处数,"items":[{"word":"完整原文","translation":"中文释义","word_type":"word|phrase|sentence","part_of_speech":"词性(可选)","phonetic_uk":"英式IPA音标(仅单词可选,如 /ˈleɪzi/)","phonetic_us":"美式IPA音标(仅单词可选)","original_sentence":"该词条所在的完整句子(照抄图上英文,必填)","line":"该词条所在整行原文(照抄,必填)","uncertain":true|false}]}
+
+**第一步:转正 + 逐行扫**
+照片可能是任何方向(横拍/竖拍/倒置)。先按文字方向把它转正,然后从正文第一行读到最后一行,
+**边读边记录每一行有没有被标记过** —— 这一步不要省,漏识几乎都发生在"没逐行看"。
+
+**第二步:什么算标记(看到就算)**
+下划线(包括很淡的铅笔线、只画了一半的线)、双下划线、波浪线、圈画、荧光笔(黄/绿/粉底纹)、
+方框、星号、箭头、书签贴/便签、页边手写批注、以及手写的中文批注本身。
+⚠️ 淡色、断续、不规则的线**也算** —— 判断不了时**照样输出**,不要因为"不太确定"就丢掉。
+
+**第三步:输出前对账**
+mark_count 要等于带标记的条目数;两个数对不上,回去再扫一遍再输出。
+
+识别纪律(v2.6 重写):
+1. **该收的必须收**:凡是有标记痕迹的内容都要输出;拿不准的也输出,并把 uncertain 写 true
+   (界面会给它打"待确认"标,用户自己取消 —— 漏掉的内容用户无从补回)。
+2. **但不要把整页正文抄下来**:完全没有标记的正文、大标题、页码、没被划到的句子都不要输出。
+3. word 必须与照片中的文本完全一致——单词、短语、句子一律**完整**输出,禁止截断,
    禁止用省略号(…)代替后半部分;跨行的标记要把整段文字接起来写完整。
-6. word_type 按长度与结构自己判断:**一个词就是 word**(不要因为页面上有长句就都写成 phrase);
-   两三个词的固定搭配是 phrase;带主谓/句末标点的整句是 sentence。
-   中文批注的 word_type 写 word。
-7. 短语/句子必须在 original_sentence 中给出其所在的完整句子(必填,不可省略)。
-8. **translation 要结合语境**(用户实测过"生硬翻译"):
+4. word_type 按长度与结构自己判断:**一个词就是 word**;两三个词的固定搭配是 phrase;
+   带主谓/句末标点的整句是 sentence。
+5. **original_sentence 必填(单词也要给)**:照抄该词/短语所在的完整句子。
+   **line 必填**:照抄它所在的那一整行原文(用于核对,不要改写、不要翻译)。
+6. **中文批注单独成条,且必须是"中文 → 英文"结构**(用户实测过"中文——中文"的废话条目):
+   - word = 中文批注原文(照抄,如「苏格拉底」);
+   - translation = 它对应的**英文**(如 Socrates;整句批注就给整句英文),**不要写中文**;
+   - original_sentence = 被批注的那句英文原文(照抄);
+   - word_type:批注一个词写 word,批注整句写 sentence。
+7. **translation 要结合语境**(用户实测过"生硬翻译"):
    - 单词:先看它在这句话里的词性与含义再给中文(bank 河岸/银行、issue 问题/发行),
      不要给词典第一个义项;
    - 短语/句子:给整句通顺的中文,不要逐词硬译、不要保留英文语序。
-9. 单词给词性,并同时给 phonetic_uk(英式)与 phonetic_us(美式)音标;
-   两者一致时照原样各写一遍,拿不准的音标宁可留空。
-10. line 必须是**照抄**图上那一行的原文(判分/核对用,不要改写、不要翻译)。
-11. 先扫一遍找出所有标记位置,再逐个读取。**同一个词在不同位置被标了两次就输出两次**
-    (各自带自己的 line,系统会合并成"出现过 ×2");同一处重复标记只输出一次。${imageUris.length > 1 ? '多图格式：{"items_by_image":[{"image_index":0,"items":[...]},...]}' : ''}
-无任何标记返回{"items":[]}。只输出JSON。简洁思考。''',
+8. 单词给词性,并同时给 phonetic_uk(英式)与 phonetic_us(美式)音标;拿不准的音标宁可留空。
+9. 同一个词在不同位置被标了两次就输出两次(各自带自己的 line,系统会合并成"出现过 ×2");
+   同一处重复标记只输出一次。${imageUris.length > 1 ? '多图格式：{"items_by_image":[{"image_index":0,"items":[...]},...]}' : ''}
+无任何标记返回 {"lines_scanned":N,"mark_count":0,"items":[]}。只输出JSON。''',
         '识别标记的英语内容$bookHint$pageHint$countHint$excludeHint'
       ),
     };
@@ -225,6 +279,7 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
     // 请求体统一走 BaseApiService.buildChatBody(v1.9.0):
     // DS 官方省略 max_tokens(思考与正文共享总预算)/temperature、补 stream_options;
     // 方舟等端点显式给 max_tokens 与 temperature,且不发 stream_options。
+    final detail = recognitionDetailLevel(modelName, calibrate: calibrate);
     return BaseApiService.buildChatBody(
       cfg: config,
       stream: stream,
@@ -242,12 +297,11 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
             for (final uri in imageUris)
               {
                 'type': 'image_url',
-                // detail 仅豆包系发:DeepSeek 视觉模型不认未知字段(400)。
-                // 校准重识别用 high(小字/浅色笔迹更可辨),日常识别用 low 省流量
+                // v2.6:识别场景一律要高清(detail 支持与否由厂商能力决定)。
+                // 以前日常识别发 low —— 服务端把整页压到 512×512,浅色划线直接没了。
                 'image_url': {
                   'url': uri,
-                  if (shouldSendDetailFlag(modelName))
-                    'detail': calibrate ? 'high' : 'low',
+                  'detail': ?detail,
                 },
               },
             {'type': 'text', 'text': userPrompt},
@@ -255,6 +309,55 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
         },
       ],
     );
+  }
+
+  /// **单词语境讲解**(v2.6,阅读器点词/选词后的「询问 AI」)。
+  ///
+  /// 为什么单独给一个方法:用户要的是"点一下就知道这个词在这句里什么意思",
+  /// 而不是把整个追问抽屉(带材料上下文)搬过来。这里只给词 + 所在句,
+  /// 让模型**就这一处**讲清楚,150 字以内,流式吐字。
+  Stream<SseChunk> explainWord({
+    required String word,
+    String? sentence,
+    String? sourceBook,
+  }) async* {
+    if (!config.isConfigured) {
+      throw Exception('请先在设置中配置 API Key');
+    }
+    final context = (sentence != null && sentence.trim().isNotEmpty)
+        ? '\n它所在的句子:${sentence.trim()}'
+        : '';
+    final book = (sourceBook != null && sourceBook.trim().isNotEmpty)
+        ? '\n出处:${sourceBook.trim()}'
+        : '';
+    final body = BaseApiService.buildChatBody(
+      cfg: config,
+      stream: true,
+      temperature: 0.3,
+      maxTokens: 1024,
+      thinkingLevel: 'disabled',
+      messages: [
+        {
+          'role': 'system',
+          'content': '你是英语老师。用户点了一个词/短语,请**就这一处**讲清楚:'
+              '①它在这里的意思(先判词性,不要给词典第一个义项)'
+              '②常见搭配或用法 ③一个同类例句(英文 + 中文)。'
+              '中文讲解,总长 150 字以内,不要客套话,不要复述题目。',
+        },
+        {
+          'role': 'user',
+          'content': '词:$word$context$book',
+        },
+      ],
+    );
+    final response = await postWithReasoningFallback(
+      '/chat/completions', body,
+      cfg: config, responseType: ResponseType.stream);
+    final data = response.data;
+    if (data is! ResponseBody) {
+      throw Exception('API 未返回流式响应：${data is Map ? data['error'] ?? data : data}');
+    }
+    yield* _parseSseStream(data.stream);
   }
 
   // ── 同步版（保留向下兼容） ──
@@ -296,6 +399,45 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
       '/chat/completions', body, cfg: config,
       responseType: ResponseType.stream);
 
+    final data = response.data;
+    if (data is! ResponseBody) {
+      throw Exception('API 未返回流式响应：${data is Map ? data['error'] ?? data : data}');
+    }
+    yield* _parseSseStream(data.stream);
+  }
+
+  /// **第二遍"只找漏"复查**(v2.6 新增)。
+  ///
+  /// 为什么要有这一遍:第一遍送整页,模型受"图片被压到 ~1300×1300"所限,
+  /// 淡色划线/半截线/页边批注最容易漏(用户实测"一页只出 5 条")。
+  /// 这一遍把同一页**切成 2×2 高清小块**再送,每块的等效分辨率翻倍,
+  /// 并把第一遍已找到的词面列进"补充识别"清单,要求它只找剩下的。
+  ///
+  /// 结果由调用方**追加**(不是替换):第一遍永远保留。
+  Stream<SseChunk> extractMissedStream(
+    List<Uint8List> tileBytes, {
+    required List<String> excludeWords,
+    String? sourceBook,
+    String? sourcePage,
+  }) async* {
+    if (tileBytes.isEmpty) throw Exception('没有可复检的图片块');
+    if (!config.isConfigured) {
+      throw Exception('请先在设置中配置主 API Key');
+    }
+    final uris = tileBytes
+        .map((b) => 'data:image/jpeg;base64,${base64Encode(b)}')
+        .toList();
+    final body = _buildRequestBody(
+      uris,
+      sourceBook: sourceBook,
+      sourcePage: sourcePage,
+      stream: true,
+      // 走圈画模式 + 补充识别清单(提示词里已改成"宁可多收,不确定就标 uncertain")
+      excludeWords: excludeWords,
+    );
+    final response = await postWithReasoningFallback(
+      '/chat/completions', body,
+      cfg: config, responseType: ResponseType.stream);
     final data = response.data;
     if (data is! ResponseBody) {
       throw Exception('API 未返回流式响应：${data is Map ? data['error'] ?? data : data}');
@@ -547,7 +689,8 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
                 'type': 'image_url',
                 'image_url': {
                   'url': uri,
-                  if (shouldSendDetailFlag(cfg.model)) 'detail': 'low',
+                  // v2.6:手写转写同样要高清 —— 连笔字在 512×512 下基本认不出
+                  if (shouldSendDetailFlag(cfg.model)) 'detail': 'high',
                 },
               },
             {
@@ -819,7 +962,9 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
           'type': 'image_url',
           'image_url': {
             'url': uri,
-            if (shouldSendDetailFlag(model)) 'detail': 'low',
+            // v2.6:追问也走高清 —— 问的往往就是"这一页那句话什么意思",
+            // low(512×512)连正文都糊了
+            if (shouldSendDetailFlag(model)) 'detail': 'high',
           },
         },
       {'type': 'text', 'text': '用户提问：$question'},
@@ -913,6 +1058,9 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
       throw FormatException('无法解析 AI 返回的 JSON(共 ${content.length} 字)');
     }
 
+    // v2.6:记录模型自报的扫描对账(界面显示"扫了 N 行 · 自报找到 M 处标记")
+    lastScanNote = scanNoteFrom(parsed);
+
     // 全文翻译模式
     if (analysisMode == AppConstants.analysisModeFullText) {
       final paragraphs = parsed['paragraphs'] as List<dynamic>?;
@@ -957,6 +1105,9 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
             'phonetic_uk': e['phonetic_uk']?.toString(),
             'phonetic_us': e['phonetic_us']?.toString(),
             'grammar_note': e['grammar_note']?.toString(),
+            // v2.6:多图路径以前**把证据行丢了** → 出现次数合并、证据核对全失效
+            'line': e['line']?.toString(),
+            'uncertain': e['uncertain'] == true,
             'image_index': imgIdx,
           });
         }
@@ -972,7 +1123,7 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
           final word = e['word']?.toString() ?? '';
           final type = e['word_type']?.toString() ?? 'word';
           final os = e['original_sentence']?.toString() ?? '';
-          return {
+          return <String, dynamic>{
             'word': cleanTruncatedWord(word, type, os),
             'translation': e['translation']?.toString() ?? '',
             'word_type': type,
@@ -983,10 +1134,31 @@ ${imageUris.length > 1 ? '5. 多图格式：{"items_by_image":[{"image_index":0,
             'phonetic_uk': e['phonetic_uk']?.toString(),
             'phonetic_us': e['phonetic_us']?.toString(),
             'grammar_note': e['grammar_note']?.toString(),
+            // v2.6:证据行与"待确认"标记都要保留
+            'line': e['line']?.toString(),
+            'uncertain': e['uncertain'] == true,
           };
         })
         .where((m) => m['word']!.isNotEmpty)
         .toList();
+  }
+
+  /// 最近一次识图的"扫描对账"(v2.6):模型自报的 lines_scanned / mark_count。
+  /// 显示在结果头部,让用户能判断"它到底认真看了没有"(数字明显偏小 → 该重识别)。
+  static String? lastScanNote;
+
+  /// 从解析结果里取扫描对账(纯函数,可单测)
+  static String? scanNoteFrom(Map<String, dynamic> parsed) {
+    final lines = parsed['lines_scanned'];
+    final marks = parsed['mark_count'];
+    final l = lines is num ? lines.toInt() : int.tryParse('$lines');
+    final m = marks is num ? marks.toInt() : int.tryParse('$marks');
+    if (l == null && m == null) return null;
+    final parts = <String>[
+      if (l != null) '扫了 $l 行',
+      if (m != null) '自报找到 $m 处标记',
+    ];
+    return parts.join(' · ');
   }
 
   /// 去掉整篇被 ``` 包裹的外壳(v1.8.0):学习内容按 Markdown 展示,

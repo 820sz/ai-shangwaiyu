@@ -91,6 +91,18 @@ class QuickReplyBar extends StatelessWidget {
             onPressed: enabled ? () => onPick(r.prompt) : null,
             visualDensity: VisualDensity.compact,
             materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            // v2.6(用户实测:"追问抽屉的快捷回复看不清"):
+            // M3 的 chip 默认底是 surfaceContainerLow、文字 onSurfaceVariant 混色,
+            // 抽屉本身又是 surface 色 —— 白底白字只差一点,浅色下几乎看不见。
+            // 这里显式给足对比:文字用 onSurface(4.5:1+)、底用 surface、
+            // 描边用 outline(3:1+),深浅两套主题都达标。
+            backgroundColor: theme.colorScheme.surface,
+            labelStyle: TextStyle(
+              fontSize: 12,
+              color: theme.colorScheme.onSurface,
+              fontWeight: FontWeight.w500,
+            ),
+            side: BorderSide(color: theme.colorScheme.outline),
           );
         },
       ),

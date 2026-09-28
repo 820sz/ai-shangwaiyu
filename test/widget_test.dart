@@ -12,7 +12,12 @@ void main() {
     expect(AppConstants.bookmarkSourceVocab, 'vocab');
   });
 
-  test('DeepSeek 默认模型为 v4 系列(chat/reasoner 已停用)', () {
-    expect(AppConstants.deepseekChatModel, 'deepseek-v4-flash');
+  test('DeepSeek 默认模型跟官方最新(V4.1-Flash = deepseek-flash)', () {
+    // 2026-09-10 官方发布 V4.1-Flash:模型名 deepseek-flash,原生多模态;
+    // 旧名 deepseek-v4-flash / -vision-exp 已退役(仅兼容路由)
+    expect(AppConstants.deepseekChatModel, 'deepseek-flash');
+    expect(AppConstants.deepseekVisionModel, 'deepseek-flash');
+    expect(AppConstants.deepseekFallbackModels, contains('deepseek-flash'));
+    expect(AppConstants.deepseekFallbackModels, contains('deepseek-v4-pro'));
   });
 }

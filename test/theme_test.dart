@@ -133,8 +133,32 @@ void main() {
               '${failures.join('\\n')}');
     });
 
-    test('浅色:描边/分隔线对底色的对比 ≥3:1(WCAG 非文字元素标准)', () {
-      final t = AppTheme.lightTheme;
+    // ── chip 文字对比(v2.6:用户实测"快捷回复/文件名看不清")──────────
+    // M3 默认给未选中 chip 的 label 用 onSurfaceVariant 混色,浅色下糊在底上。
+    // 现在主题层钉死 labelStyle=onSurface、side=outline,这组守住它。
+    test('chip 标签文字对 chip 底 ≥4.5:1,描边 ≥3:1(明暗都要)', () {
+      final failures = <String>[];
+      for (final entry in {
+        'light': AppTheme.lightTheme,
+        'dark': AppTheme.darkTheme,
+      }.entries) {
+        final t = entry.value;
+        final chip = t.chipTheme;
+        final bg = chip.backgroundColor!;
+        final label = chip.labelStyle!.color!;
+        final r1 = contrast(label, bg);
+        if (r1 < 4.5) {
+          failures.add('${entry.key}:chip 文字/底 = ${r1.toStringAsFixed(2)}:1');
+        }
+        final r2 = contrast(chip.side!.color, bg);
+        if (r2 < 3.0) {
+          failures.add('${entry.key}:chip 描边/底 = ${r2.toStringAsFixed(2)}:1');
+        }
+      }
+      expect(failures, isEmpty, reason: 'chip 是快捷回复/筛选/历史分类的主要控件:\n${failures.join('\n')}');
+    });
+
+    test('浅色:描边/分隔线对底色的对比 ≥3:1(WCAG 非文字元素标准)', () {      final t = AppTheme.lightTheme;
       final cs = t.colorScheme;
       final fill = t.inputDecorationTheme.fillColor!;
       final card = t.cardTheme.color!;

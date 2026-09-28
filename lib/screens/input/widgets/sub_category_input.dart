@@ -234,7 +234,16 @@ class _SubCategoryInputSheetState extends State<_SubCategoryInputSheet> {
                     selected: false,
                     onSelected: (_) => _applyHistory(p),
                     visualDensity: VisualDensity.compact,
-                    side: BorderSide(color: theme.colorScheme.outlineVariant),
+                    // v2.6(用户实测:"识图返回保存时的文件名看不清"):
+                    // 这里只有描边、没有显式文字色 —— 浅色下 M3 的未选中 chip
+                    // 文字会跟底色糊在一起(截图里几乎白字白底)。
+                    backgroundColor: theme.colorScheme.surface,
+                    labelStyle: TextStyle(
+                      fontSize: 12,
+                      color: theme.colorScheme.onSurface,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    side: BorderSide(color: theme.colorScheme.outline),
                   );
                 }).toList(),
               ),

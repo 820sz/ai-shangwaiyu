@@ -82,5 +82,32 @@ class MainActivity : FlutterActivity() {
                 result.error("SHARE_FAILED", "打开分享面板失败: ${e.message}", null)
             }
         }
+
+        // 打开外部链接通道(ACTION_VIEW):材料中心的"原文链接🔗"用。
+        // v2.6 用户要求 —— 搜索结果既要软件内转述、也要能点开原文出处。
+        // 同样零新依赖(不引 url_launcher),交给系统浏览器/对应 App 处理。
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "app/open_url",
+        ).setMethodCallHandler { call, result ->
+            if (call.method != "openUrl") {
+                result.notImplemented()
+                return@setMethodCallHandler
+            }
+            val url = call.argument<String>("url")
+            if (url.isNullOrEmpty()) {
+                result.error("BAD_ARGS", "链接为空", null)
+                return@setMethodCallHandler
+            }
+            try {
+                val view = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                startActivity(view)
+                result.success("ok")
+            } catch (e: Exception) {
+                result.error("OPEN_URL_FAILED", "打不开这个链接: ${e.message}", null)
+            }
+        }
     }
 }

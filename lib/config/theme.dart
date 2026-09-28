@@ -303,12 +303,32 @@ class AppTheme {
 
       // 标签Chip:补上描边 —— 浅色下 chip 底(background)与卡片底(白)几乎同色,
       // 没有描边时整排 chip 看着"糊在一起"
+      //
+      // v2.6 再加一条(用户实测"追问抽屉的快捷回复看不清""保存弹窗的文件名看不清"):
+      // **显式指定未选中 chip 的文字色**。M3 默认会把 label 用 onSurfaceVariant
+      // 混色压在半透明底上,浅色下就是"白底浅灰字"。这里统一钉成 onSurface
+      // (对 surface 4.5:1+),并把描边从 outlineVariant 提到 outline(3:1+)。
       chipTheme: ChipThemeData(
-        backgroundColor: dark ? darkSurfaceVariant : background,
+        backgroundColor: dark ? darkSurfaceVariant : surface,
         selectedColor: accentColor.withAlpha(dark ? 60 : 30),
-        labelStyle: const TextStyle(fontSize: 13),
+        secondarySelectedColor: accentColor.withAlpha(dark ? 60 : 30),
+        labelStyle: TextStyle(
+          fontSize: 13,
+          color: dark ? darkTextPrimary : textPrimary,
+          fontWeight: FontWeight.w500,
+        ),
+        secondaryLabelStyle: TextStyle(
+          fontSize: 13,
+          color: dark ? darkTextPrimary : textPrimary,
+        ),
+        iconTheme: IconThemeData(color: dark ? darkTextPrimary : textPrimary),
+        checkmarkColor: dark ? darkTextPrimary : textPrimary,
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        side: BorderSide(color: scheme.outlineVariant),
+        // 深色下 chip 底比页面亮一档(#262B35),原来的 outline(#5A6270)
+        // 对只有 2.31:1 —— 描边等于看不见。换成更亮一档的 #767E8D(3.45:1)。
+        side: BorderSide(
+          color: dark ? const Color(0xFF767E8D) : scheme.outline,
+        ),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(8),
         ),

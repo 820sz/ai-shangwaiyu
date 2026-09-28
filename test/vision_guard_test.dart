@@ -101,7 +101,9 @@ void main() {
       expect(r.note, contains('合并重复出现 1 处'));
     });
 
-    test('被更长条目按词边界包含 → 丢短的("art" 不在 "artist" 里被判重复)', () {
+    test('被更长条目包含 → **v2.6 起不再丢**(只记一笔"疑似重复")', () {
+      // 旧行为:blur 被 began to blur 包含 → 直接删掉。
+      // 这正是"用户划了却不见了"的来源之一,所以改成保留 + 折叠提示。
       final r = VisionGuard.apply([
         item('began to blur'),
         item('blur'),
@@ -112,22 +114,27 @@ void main() {
       expect(kept, contains('began to blur'));
       expect(kept, contains('artist'));
       expect(kept, contains('art'), reason: 'art 是独立单词,不是 artist 的一部分');
-      expect(r.dropped.map((d) => d.text), contains('blur'));
+      expect(kept, contains('blur'), reason: 'v2.6:包含关系不再丢条目');
+      expect(r.containedIn, 1);
+      expect(r.kept.firstWhere((k) => k['word'] == 'blur')['duplicate_of'],
+          'began to blur');
+      expect(r.dropped, isEmpty);
     });
 
-    test('截断词条:有完整句就替换,没有就丢掉(不留半句进生词本)', () {
+    test('截断词条:有完整句就替换;没有则去省略号保留并标待复核(v2.6)', () {
       final r = VisionGuard.apply([
         item('Inventorying memory is the first…',
             sentence:
                 'Inventorying memory is the first and most fundamental form of research.'),
         item('The dynamic of punishment…'),
       ]);
-      expect(r.kept, hasLength(1));
+      expect(r.kept, hasLength(2), reason: 'v2.6:没得替换也不丢,保留但去掉省略号');
       expect(r.kept.first['word'],
           'Inventorying memory is the first and most fundamental form of research.');
-      expect(r.truncationFixed, 1);
-      expect(r.dropped.single.reason, '截断/省略号');
-      expect(r.note, contains('补全截断 1 条'));
+      expect(r.kept.last['word'], 'The dynamic of punishment');
+      expect(r.kept.last['needs_review'], isTrue);
+      expect(r.truncationFixed, 2);
+      expect(r.note, contains('补全截断'));
     });
 
     test('空条目/太短/带数字的伪词都丢掉,且原因分得清', () {
@@ -171,7 +178,19 @@ void main() {
     test('没给行信息的条目不算存疑(模型没义务给)', () {
       final r = VisionGuard.apply([item('blur')]);
       expect(r.unverified, 0);
-      expect(r.note, isNull, reason: '没有任何问题时不显示校验行');
+      // v2.6:没给例句会被记一笔"缺例句"(界面提示),但不算"存疑"
+      expect(r.note, '已校验:缺例句 1 条');
+      expect(r.kept.single['sentence_missing'], isTrue);
+    });
+
+    test('例句缺失时用证据行兜底补上,并记账(v2.6 用户实测"例句丢失")', () {
+      final r = VisionGuard.apply([
+        item('blur', line: 'These sources begin to blur because memory stores them'),
+      ]);
+      expect(r.sentenceFilled, 1);
+      expect(r.kept.single['original_sentence'],
+          'These sources begin to blur because memory stores them');
+      expect(r.note, contains('补上例句 1 条'));
     });
   });
 
@@ -186,11 +205,16 @@ void main() {
 
     test('全部正常时不显示校验行(note == null)', () {
       final r = VisionGuard.apply([
-        item('blur', line: 'began to blur'),
-        item('vault', line: 'mental vault'),
+        item('blur',
+            line: 'began to blur',
+            sentence: 'These sources begin to blur.'),
+        item('vault',
+            line: 'mental vault',
+            sentence: 'Memory keeps them in the same mental vault.'),
       ]);
       expect(r.dropped, isEmpty);
       expect(r.typeFixed, 0);
+      expect(r.sentenceMissing, 0);
       expect(r.note, isNull);
     });
   });

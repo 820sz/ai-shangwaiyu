@@ -40,6 +40,15 @@ class VisionGuardResult {
   /// 被合并成"同一词多次出现"的条数(用户要求:同一个词标了两次要记成 ×2)
   final int mergedOccurrences;
 
+  /// 疑似"被更长条目包含"的条数(v2.6:**只记不删**)—— 界面折叠提示用
+  final int containedIn;
+
+  /// 例句缺失但用证据行补上的条数
+  final int sentenceFilled;
+
+  /// 例句彻底缺失的条数(界面上标出来,不再静默)
+  final int sentenceMissing;
+
   const VisionGuardResult({
     required this.kept,
     required this.dropped,
@@ -47,6 +56,9 @@ class VisionGuardResult {
     this.truncationFixed = 0,
     this.unverified = 0,
     this.mergedOccurrences = 0,
+    this.containedIn = 0,
+    this.sentenceFilled = 0,
+    this.sentenceMissing = 0,
   });
 
   int get keptCount => kept.length;
@@ -60,10 +72,20 @@ class VisionGuardResult {
     if (mergedOccurrences > 0) parts.add('合并重复出现 $mergedOccurrences 处');
     if (typeFixed > 0) parts.add('纠正类型 $typeFixed 条');
     if (truncationFixed > 0) parts.add('补全截断 $truncationFixed 条');
+    if (sentenceFilled > 0) parts.add('补上例句 $sentenceFilled 条');
+    if (containedIn > 0) parts.add('疑似重复 $containedIn 条');
     if (unverified > 0) parts.add('存疑 $unverified 条');
+    if (sentenceMissing > 0) parts.add('缺例句 $sentenceMissing 条');
     if (parts.isEmpty) return null;
     return '已校验:${parts.join(' · ')}';
   }
+
+  /// 需要用户看一眼的条目数(待确认 / 存疑 / 缺例句)—— 界面用它决定是否提示
+  int get needsAttentionCount => kept.where((k) {
+        return k['uncertain'] == true ||
+            k['needs_review'] == true ||
+            k['sentence_missing'] == true;
+      }).length;
 }
 
 /// 识图结果校验器(纯函数)
@@ -101,6 +123,9 @@ class VisionGuard {
     var truncationFixed = 0;
     var unverified = 0;
     var mergedOccurrences = 0;
+    var containedIn = 0;
+    var sentenceFilledCount = 0;
+    var sentenceMissingCount = 0;
 
     for (final item in raw) {
       final rawText = (item['word'] ?? item['text'] ?? '').toString().trim();
@@ -112,9 +137,9 @@ class VisionGuard {
       //    用户有时要靠它补录 —— 所以这里不做任何丢弃,只把它当普通条目,
       //    并在本地类型判定里单独处理(中文不按英文词法判类型)。
 
-      // ② 截断:模型把长句写成"开头…省略号"。有更长的完整句就用它替换,
-      //    否则丢掉 —— 截断的词条对学习毫无价值,还会污染生词本。
-      //    (放在字母检查之前:省略号本身会让"非英文字符"判断误杀整条)
+      // ② 截断:模型把长句写成"开头…省略号"。有更长的完整句就用它替换;
+      //    **v2.6 起没得替换时不再丢掉** —— 改成去掉省略号保留、并标 needs_review。
+      //    理由:用户划了它,丢掉等于凭空消失(2026-09-28"只出 5 条"的教训)。
       var text = rawText;
       if (looksTruncated(text)) {
         final sentence = (item['original_sentence'] ?? '').toString().trim();
@@ -122,8 +147,15 @@ class VisionGuard {
           text = sentence;
           truncationFixed++;
         } else {
-          dropped.add(VisionDrop(text: _short(text), reason: '截断/省略号'));
-          continue;
+          final stripped = text.replaceAll(RegExp(r'[…⋯]|\.{2,}'), '').trim();
+          if (stripped.length >= minWordLength) {
+            text = stripped;
+            truncationFixed++;
+            item['needs_review'] = true;
+          } else {
+            dropped.add(VisionDrop(text: _short(text), reason: '截断/省略号'));
+            continue;
+          }
         }
       }
 
@@ -172,16 +204,20 @@ class VisionGuard {
         continue;
       }
 
-      // ⑥ 被更长条目包含(按词边界判断:"blur" 是 "began to blur" 的一部分,
-      //    但 "art" 不算 "artist" 的一部分 —— 后者是独立单词,不该被丢)
+      // ⑥ 被更长条目包含 —— **v2.6 起不再丢弃**。
+      //
+      // 旧实现把"被更长条目包含"的条目直接删掉(按词边界:`blur` 遇上
+      // `began to blur` 就删 `blur`)。理由听起来合理,实际是**漏识的帮凶**:
+      // 用户在一页里可能既划了单词又划了含它的短语,两个标记是两回事,
+      // 删掉就等于用户划的东西凭空消失(2026-09-28 用户实测"只出 5 条"。
+      // 校验层允许保留冗余,但绝不允许**悄悄丢掉用户划过的内容**。
+      // 只记一笔"疑似重复",交给界面折叠展示,由用户决定。
       final container = kept.firstWhere(
-        (k) => _containsAsWord(normalize((k['word'] ?? k['text'] ?? '').toString()), key),
+        (k) =>
+            _containsAsWord(normalize((k['word'] ?? k['text'] ?? '').toString()), key),
         orElse: () => const <String, dynamic>{},
       );
-      if (container.isNotEmpty) {
-        dropped.add(VisionDrop(text: _short(text), reason: '已包含在更长条目里'));
-        continue;
-      }
+      if (container.isNotEmpty) containedIn++;
 
       // ⑦ 类型本地判定(不再全信模型):用户实测过"一整页单词全被标成短语"
       final modelType = (item['word_type'] ?? '').toString().trim();
@@ -195,10 +231,30 @@ class VisionGuard {
       final verified = line.isEmpty || normalize(line).contains(key);
       if (!verified) unverified++;
 
+      // ⑨ 例句缺失(v2.6 用户实测"例句丢失"):以前静默放过,现在**补 + 记账**。
+      //    能补的用证据行兜底;补不了的标出来让用户知道这条没有出处原句。
+      var sentence = (item['original_sentence'] ?? '').toString().trim();
+      var sentenceFilled = false;
+      var sentenceMissing = false;
+      if (sentence.isEmpty) {
+        if (line.isNotEmpty && !looksTruncated(line) && line.length > text.length) {
+          sentence = line;
+          sentenceFilled = true;
+          sentenceFilledCount++;
+        } else {
+          sentenceMissing = true;
+          sentenceMissingCount++;
+        }
+      }
+
       kept.add({
         ...item,
         'word': text,
         'word_type': localType,
+        if (sentence.isNotEmpty) 'original_sentence': sentence,
+        if (container.isNotEmpty) 'duplicate_of': container['word'],
+        if (sentenceFilled) 'sentence_filled': true,
+        if (sentenceMissing) 'sentence_missing': true,
         if (line.isNotEmpty) 'occurrences': [line],
         if (line.isNotEmpty) 'occurrence_count': 1,
         if (!verified) 'needs_review': true,
@@ -213,6 +269,9 @@ class VisionGuard {
       truncationFixed: truncationFixed,
       unverified: unverified,
       mergedOccurrences: mergedOccurrences,
+      containedIn: containedIn,
+      sentenceFilled: sentenceFilledCount,
+      sentenceMissing: sentenceMissingCount,
     );
   }
 

@@ -1025,67 +1025,63 @@ class _ReviewScreenState extends State<ReviewScreen> {
     );
   }
 
-  /// 筛选栏(v1.7.0:对比度提高 + 日期筛选)
-  Widget _buildFilterBar(ThemeData theme) {
-    return Container(
+  /// 筛选栏(v2.6:两行并一行)。
+  ///
+  /// 用户实测:"自由板块里的词汇板块被挤压,其他 UI 喧宾夺主,页面又密又挤"。
+  /// 根因就是筛选栏占了两行(掌握度一行 + 日期一行),加上进度条与续看提示,
+  /// 真正放卡片的垂直空间被吃掉一大截。现在两组合并成**一行横向滚动**
+  /// (中间加一条细分割线),省下约 34px 全部留给卡片。
+  Widget _buildFilterBar(ThemeData theme) {    return Container(
       color: theme.colorScheme.surface,
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                _filterChip(
-                  theme,
-                  label: '全部',
-                  selected: _filterLevel == -1,
-                  onTap: () {
-                    setState(() => _filterLevel = -1);
-                    _buildDeck();
-                  },
-                ),
-                for (final e in const {'新词': 0, '学习中': 1, '已掌握': 2}.entries)
-                  _filterChip(
-                    theme,
-                    label: e.key,
-                    selected: _filterLevel == e.value,
-                    onTap: () {
-                      setState(() => _filterLevel = e.value);
-                      _buildDeck();
-                    },
-                  ),
-              ],
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 2),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            _filterChip(
+              theme,
+              label: '全部',
+              selected: _filterLevel == -1,
+              onTap: () {
+                setState(() => _filterLevel = -1);
+                _buildDeck();
+              },
             ),
-          ),
-          const SizedBox(height: 6),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.only(right: 6),
-                  child: Icon(
-                    Icons.event_outlined,
-                    size: 16,
-                    color: theme.colorScheme.onSurface,
-                  ),
-                ),
-                for (final f in ReviewDateFilter.options)
-                  _filterChip(
-                    theme,
-                    label: f.label,
-                    selected: _filterDays == f.days,
-                    onTap: () {
-                      setState(() => _filterDays = f.days);
-                      _buildDeck();
-                    },
-                  ),
-              ],
+            for (final e in const {'新词': 0, '学习中': 1, '已掌握': 2}.entries)
+              _filterChip(
+                theme,
+                label: e.key,
+                selected: _filterLevel == e.value,
+                onTap: () {
+                  setState(() => _filterLevel = e.value);
+                  _buildDeck();
+                },
+              ),
+            // 掌握度 / 时间两组之间的细分割
+            Container(
+              width: 1,
+              height: 18,
+              margin: const EdgeInsets.only(left: 2, right: 8),
+              color: theme.colorScheme.outlineVariant,
             ),
-          ),
-        ],
+            Icon(
+              Icons.event_outlined,
+              size: 15,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(width: 6),
+            for (final f in ReviewDateFilter.options)
+              _filterChip(
+                theme,
+                label: f.label,
+                selected: _filterDays == f.days,
+                onTap: () {
+                  setState(() => _filterDays = f.days);
+                  _buildDeck();
+                },
+              ),
+          ],
+        ),
       ),
     );
   }

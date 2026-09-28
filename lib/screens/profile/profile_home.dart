@@ -94,17 +94,16 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
             _buildStatsRow(theme, stats),
             const SizedBox(height: Gap.md),
 
-            // ── 词汇量基线(v2.0) ──
-            // 这一块把"水平"从"生词本收藏数瞎估"变成**测量值 + 区间 + 依据**。
-            // 导师与材料推荐都以它为地基,所以入口放在「我的」页显眼处。
-            AppStagger(index: 0, child: _buildBaselineCard(theme)),
-
-            // ── 学习(u3 分组):每天真正会点的三个入口 ──
+            // ── 词汇量基线(v2.0;v2.6 收成一行入口)──
+            // 用户实测:"词汇量测试占据这么大个 UI,把它合并进「学习」里的一项就行"。
+            // 于是从"占半屏的大卡片 + 两个按钮"改成**学习组里的一行**:
+            // 副标题直接报当前基线(不点也能看到),点开才让你选速测/完整版。
             const AppSectionTitle(title: '学习'),
             AppStagger(
               index: 1,
               child: Column(
                 children: [
+                  _buildBaselineTile(),
                   AppActionTile(
                     icon: Icons.book,
                     title: '我的生词本',
@@ -343,6 +342,99 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
     }
   }
 
+  /// 词汇量基线行(v2.6):原先是占半屏的大卡片,现收成学习组里的一行。
+  /// 副标题直接报"约 X 词 · CEFR(区间)"——不点也能看到当前基线。
+  Widget _buildBaselineTile() {
+    final model = _learnerModel;
+    final f = model.vocabEstimate;
+    final hasBaseline = (f?.value ?? 0) > 0;
+    final String subtitle;
+    if (!hasBaseline) {
+      subtitle = '尚未测量 · 约 5 分钟,给出词汇量与 CEFR 区间';
+    } else {
+      final range = (model.vocabLow != null && model.vocabHigh != null)
+          ? '(${model.vocabLow}-${model.vocabHigh})'
+          : '';
+      final cefr = (model.cefr != null && model.cefr!.value.isNotEmpty)
+          ? ' · ${model.cefr!.value}'
+          : '';
+      subtitle = '约 ${f!.value} 词$range$cefr · 点击可重测';
+    }
+    return AppActionTile(
+      icon: Icons.straighten,
+      title: '词汇量测试',
+      subtitle: subtitle,
+      onTap: () => _pickPlacement(hasBaseline: hasBaseline),
+    );
+  }
+
+  /// 选速测(5 分钟)/ 完整版(10 分钟)—— 原来这两个按钮常驻在「我的」页,
+  /// 现在收进弹层:需要时才出现,不占首页空间。
+  Future<void> _pickPlacement({required bool hasBaseline}) async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) {
+        final theme = Theme.of(ctx);
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(Gap.md, 0, Gap.md, Gap.md),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('词汇量测试',
+                    style: theme.textTheme.titleMedium
+                        ?.copyWith(fontWeight: FontWeight.w700)),
+                const SizedBox(height: Gap.xxs),
+                Text(
+                  '测试给出的是区间而不是单一数字;隔一段时间可以重测,基线会更新。',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                    height: 1.5,
+                  ),
+                ),
+                if (hasBaseline) ...[
+                  const SizedBox(height: Gap.xs),
+                  Text(
+                    '当前基线:${_baselineDetail()}',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: Gap.md),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: () => Navigator.pop(ctx, 'quick'),
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size(0, 48),
+                    ),
+                    child: const Text('速测(约 5 分钟)'),
+                  ),
+                ),
+                const SizedBox(height: Gap.xs),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(ctx, 'full'),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(0, 48),
+                    ),
+                    child: const Text('完整版(约 10 分钟)'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+    if (choice == null || !mounted) return;
+    await _startPlacement(full: choice == 'full');
+  }
+
   /// 「学习偏好」副标题:没屏蔽就说清这一页有什么,屏蔽了就报数量和内容
   String _preferencesSubtitle() {
     final topics = _learnerModel.blockedTopics;
@@ -354,73 +446,8 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
     return '已屏蔽:$shown$more';
   }
 
-  /// 词汇量基线卡片(v2.0):显示测量值/区间/来源,并提供两个测试入口
-  Widget _buildBaselineCard(ThemeData theme) {
-    final model = _learnerModel;
-    final muted = theme.colorScheme.onSurfaceVariant;
-    final f = model.vocabEstimate;
-    final hasBaseline = (f?.value ?? 0) > 0;
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.straighten, size: 18, color: theme.colorScheme.primary),
-                const SizedBox(width: 8),
-                Text('词汇量基线',
-                    style: theme.textTheme.titleSmall
-                        ?.copyWith(fontWeight: FontWeight.w600)),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(
-              hasBaseline
-                  ? '约 ${f!.value} 词'
-                      '${model.vocabLow != null && model.vocabHigh != null ? '(${model.vocabLow}-${model.vocabHigh})' : ''}'
-                      '${model.cefr != null && model.cefr!.value.isNotEmpty ? ' · ${model.cefr!.value}' : ''}'
-                  : '尚未测量',
-              style: theme.textTheme.headlineSmall
-                  ?.copyWith(fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              // 依据必须摆出来:这行的存在就是为了让用户知道数字是怎么来的
-              LearnerContext.describeBaseline(model),
-              style: theme.textTheme.bodySmall?.copyWith(color: muted),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: FilledButton(
-                    onPressed: () => _startPlacement(full: false),
-                    child: const Text('速测(5 分钟)'),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () => _startPlacement(full: true),
-                    child: const Text('完整版(10 分钟)'),
-                  ),
-                ),
-              ],
-            ),
-            if (hasBaseline) ...[
-              const SizedBox(height: 6),
-              Text(
-                '测试会给出区间而不是单一数字;隔一段时间可以重测,基线会更新。',
-                style: theme.textTheme.bodySmall?.copyWith(color: muted),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
+  /// 词汇量基线的**依据**一句话(收成入口行后,详情放进弹层/测试完成后看)
+  String _baselineDetail() => LearnerContext.describeBaseline(_learnerModel);
 
   Future<void> _startPlacement({required bool full}) async {
     await Navigator.push(

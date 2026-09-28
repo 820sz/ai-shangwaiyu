@@ -23,18 +23,20 @@ void main() {
     return Uint8List.fromList(img.encodeJpg(image, quality: 95));
   }
 
-  test('长边超过上限 → 等比压到 2000px(不放大、不变形)', () {
+  test('长边超过上限 → 等比压到上限(不放大、不变形)', () {
     final out = VisionImagePrep.prepare(jpegOf(3000, 1500));
     final decoded = img.decodeImage(out)!;
     expect(decoded.width, VisionImagePrep.maxLongEdge);
-    expect(decoded.height, 1000, reason: '等比缩放:3000x1500 → 2000x1000');
+    // v2.6 上限从 2000 提到 2600:小字与浅色划线在 2000 下会被压糊
+    expect(VisionImagePrep.maxLongEdge, 2600);
+    expect(decoded.height, 1300, reason: '等比缩放:3000x1500 → 2600x1300');
   });
 
   test('竖图同样按长边压(高度方向)', () {
     final out = VisionImagePrep.prepare(jpegOf(1500, 3000));
     final decoded = img.decodeImage(out)!;
     expect(decoded.height, VisionImagePrep.maxLongEdge);
-    expect(decoded.width, 1000);
+    expect(decoded.width, 1300);
   });
 
   test('小图不放大,但会被统一重编码成 JPEG(方向已被烘焙进像素)', () {
@@ -49,12 +51,43 @@ void main() {
 
   test('PNG 输入也能处理(翻拍/截图混用)', () {
     final png = Uint8List.fromList(
-      img.encodePng(img.Image(width: 2400, height: 1200)),
+      img.encodePng(img.Image(width: 3000, height: 1200)),
     );
     final out = VisionImagePrep.prepare(png);
     final decoded = img.decodeImage(out)!;
-    expect(decoded.width, 2000);
+    expect(decoded.width, VisionImagePrep.maxLongEdge);
     expect(out[1], 0xD8, reason: '输出统一为 JPEG');
+  });
+
+  group('高清分块(v2.6 "只找漏"复查用)', () {
+    test('切成 2×2 小块,每块都有内容且解得出图', () {
+      final tiles = VisionImagePrep.tiles(jpegOf(1600, 2400));
+      expect(tiles, hasLength(4));
+      for (final t in tiles) {
+        final d = img.decodeImage(t);
+        expect(d, isNotNull, reason: '每块都必须是合法 JPEG');
+        expect(d!.width, greaterThan(100));
+        expect(d.height, greaterThan(100));
+      }
+    });
+
+    test('小块带重叠:相邻块的宽度之和大于原图宽(不切断跨界的标记)', () {
+      final tiles = VisionImagePrep.tiles(jpegOf(2000, 2000),
+          rows: 2, cols: 2, overlap: 0.08);
+      final a = img.decodeImage(tiles.first)!;
+      final b = img.decodeImage(tiles[1])!;
+      expect(a.width + b.width, greaterThan(2000),
+          reason: '两块宽度之和超过原图 → 说明中间有重叠区');
+    });
+
+    test('data URI 列表与块数一致,且都能直接发给 API', () {
+      final uris = VisionImagePrep.tileDataUris(jpegOf(1200, 1600));
+      expect(uris, hasLength(4));
+      for (final u in uris) {
+        expect(u.startsWith('data:image/jpeg;base64,'), isTrue);
+        expect(img.decodeImage(base64Decode(u.split(',').last)), isNotNull);
+      }
+    });
   });
 
   test('解不开的字节 → 原样返回(绝不能因为预处理失败就不给识别)', () {

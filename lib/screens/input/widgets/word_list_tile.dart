@@ -100,11 +100,37 @@ class WordListTile extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
+                // 待确认标(v2.6):模型"拿不准算不算标记"但仍然收进来的条目。
+                // 放在类型标签左边、用警示色 —— 用户扫一眼就知道哪几条是边缘情况。
+                if (item.needsReview) ...[
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: AppTheme.warningColor(context).withAlpha(24),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      '待确认',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: AppTheme.warningColor(context),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                ],
                 // 词性/类型标签
-                // P2-32 附带修:2× 系统字号下标签+右侧图标会把整行撑爆
-                // (实测 Row overflowed by 25 pixels)。标签改为可压缩
-                // (Flexible + 已有 ellipsis),长词条与图标优先保留完整。
-                Flexible(
+                //
+                // ⚠️ v2.6 修一个真实排版 bug:这里原来写的是 `Flexible(...)`,
+                // 而 **Flexible 默认 flex:1** —— 它和上面的 `Expanded(词条)`
+                // 各分走一半剩余宽度!短单词看不出来,长句子就被挤成 ~140px 的
+                // 窄列(用户实测:"句子显示成很长的一竖列,单词还从中间断开")。
+                // 现在改成"不参与 flex 的定宽盒"(最多 96,超出省略),
+                // 词条拿满剩余宽度。
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 96),
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                     decoration: BoxDecoration(

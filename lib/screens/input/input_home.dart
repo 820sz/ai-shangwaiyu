@@ -101,205 +101,208 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
     );
   }
 
+  /// 拍照识文卡片(v2.6 重做)。
+  ///
+  /// 用户原话:"把首页输入界面的拍照识文功能的 UI 也美化提升一下,我忍它很久了";
+  /// 以及第 1 条"首页材料中心 UI 大小不统一"。
+  ///
+  /// 旧版的问题:①"拍照识文"四个字出现了**三遍**(标题/大圆里/圆下面)
+  /// ②80px 大黑圆 + 阴影占了半屏,却只是个"点这里"的按钮
+  /// ③模型选择、从相册、继续会话、标注出处全都平铺,视觉上没有主次。
+  /// 现在:一个**主按钮(整行 52 高)**承担"拍照",其余按重要性依次排开,
+  /// 与「材料中心」那张入口卡同一套圆角/内边距(尺寸也就统一了)。
   Widget _buildCaptureSectionCard(ThemeData theme) {
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      elevation: 1,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            // 标题行
-            Row(
-              children: [
-                Icon(
-                  Icons.camera_alt,
-                  size: 20,
-                  color: theme.colorScheme.primary,
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  '拍照识文',
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            // 大拍照按钮
-            GestureDetector(
-              onTap: () => _takePhoto(),
-              child: Container(
-                width: 80,
-                height: 80,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: theme.colorScheme.primary,
-                  boxShadow: [
-                    BoxShadow(
-                      color: theme.colorScheme.primary.withAlpha(60),
-                      blurRadius: 16,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: const Icon(
-                  Icons.camera_alt,
-                  color: Colors.white,
-                  size: 36,
-                ),
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // 标题行(带模型/思考档位的快捷入口,不占额外一行)
+          Row(
+            children: [
+              Icon(Icons.camera_alt, size: 18, color: theme.colorScheme.primary),
+              const SizedBox(width: Gap.xs),
+              Text(
+                '拍照识文',
+                style: theme.textTheme.titleSmall
+                    ?.copyWith(fontWeight: FontWeight.w600),
               ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              '拍照识文',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              '拍摄阅读材料，识别标记内容',
-              style: theme.textTheme.bodySmall
-                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-            ),
-            const SizedBox(height: 12),
-            // 从相册选择
-            TextButton.icon(
-              onPressed: () => _pickFromGallery(),
-              icon: const Icon(Icons.photo_library_outlined, size: 18),
-              label: const Text('从相册选择（可多选）'),
-            ),
-
-            const SizedBox(height: 4),
-            // ── AI 模型 & 思考模式选择（识图前即可切换） ──
-            _buildModelThinkingRow(theme),
-
-            // ── 待提交图片缩略图 ──
-            if (_pendingImages.isNotEmpty) ...[
-              const SizedBox(height: 10),
-              SizedBox(
-                height: 72,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  itemCount: _pendingImages.length,
-                  separatorBuilder: (_, _) => const SizedBox(width: 6),
-                  itemBuilder: (_, i) => GestureDetector(
-                    onTap: () => _showImagePreview(i),
-                    child: Stack(
-                      children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: Image.file(
-                            _pendingImages[i],
-                            width: 64,
-                            height: 72,
-                            // P3:64×72 的缩略图按 128px 解码即可,
-                            // 原图直解是低端机 OOM 的主因
-                            cacheWidth: 128,
-                            fit: BoxFit.cover,
-                          ),
-                        ),
-                        // 删除按钮（右上角）
-                        Positioned(
-                          top: 2,
-                          right: 2,
-                          child: GestureDetector(
-                            onTap: () => _removePendingImage(i),
-                            child: Container(
-                              width: 18,
-                              height: 18,
-                              decoration: const BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: Colors.black54,
-                              ),
-                              child: const Icon(
-                                Icons.close,
-                                size: 12,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ),
-                        ),
-                        // 裁剪按钮（右下角）
-                        Positioned(
-                          bottom: 2,
-                          right: 2,
-                          child: GestureDetector(
-                            onTap: () async {
-                              final cropped = await _cropImage(
-                                _pendingImages[i],
-                              );
-                              if (cropped != null && mounted) {
-                                setState(() => _pendingImages[i] = cropped);
-                              }
-                            },
-                            child: Container(
-                              width: 18,
-                              height: 18,
-                              decoration: const BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: Colors.black54,
-                              ),
-                              child: const Icon(
-                                Icons.crop,
-                                size: 11,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+              const SizedBox(width: Gap.xs),
+              Expanded(
+                child: Text(
+                  '拍摄阅读材料,识别标记内容',
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
-              ),
-              const SizedBox(height: 8),
-              FilledButton.icon(
-                onPressed: _submitImages,
-                icon: const Icon(Icons.auto_awesome, size: 18),
-                label: Text('开始识别 (${_pendingImages.length}张)'),
               ),
             ],
+          ),
+          const SizedBox(height: Gap.sm),
 
-            // ── 继续上次暂存的会话 ──
-            if (_savedSessions.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              OutlinedButton.icon(
+          // ① 主行动:拍照(整行大按钮,比一个圆圈更好点、也更好看)
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: _takePhoto,
+              style: FilledButton.styleFrom(
+                minimumSize: const Size(0, 52),
+              ),
+              icon: const Icon(Icons.photo_camera_outlined, size: 20),
+              label: const Text('拍照识文', style: TextStyle(fontSize: 15)),
+            ),
+          ),
+          const SizedBox(height: Gap.xs),
+
+          // ② 次要行动:从相册选择
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _pickFromGallery,
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size(0, 44),
+              ),
+              icon: const Icon(Icons.photo_library_outlined, size: 18),
+              label: const Text('从相册选择(可多选)'),
+            ),
+          ),
+
+          const SizedBox(height: Gap.xs),
+          // ③ 参数行:模型 / 思考档(识图前即可切换)
+          _buildModelThinkingRow(theme),
+
+          // ④ 待提交图片缩略图 + 开始识别
+          if (_pendingImages.isNotEmpty) ...[
+            const SizedBox(height: Gap.sm),
+            SizedBox(
+              height: 72,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding: EdgeInsets.zero,
+                itemCount: _pendingImages.length,
+                separatorBuilder: (_, _) => const SizedBox(width: Gap.xs),
+                itemBuilder: (_, i) => GestureDetector(
+                  onTap: () => _showImagePreview(i),
+                  child: Stack(
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(Radii.control - 2),
+                        child: Image.file(
+                          _pendingImages[i],
+                          width: 64,
+                          height: 72,
+                          // P3:64×72 的缩略图按 128px 解码即可,
+                          // 原图直解是低端机 OOM 的主因
+                          cacheWidth: 128,
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                      // 删除按钮（右上角）
+                      Positioned(
+                        top: 2,
+                        right: 2,
+                        child: GestureDetector(
+                          onTap: () => _removePendingImage(i),
+                          child: Container(
+                            width: 18,
+                            height: 18,
+                            decoration: const BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: Colors.black54,
+                            ),
+                            child: const Icon(
+                              Icons.close,
+                              size: 12,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ),
+                      // 裁剪按钮（右下角）
+                      Positioned(
+                        bottom: 2,
+                        right: 2,
+                        child: GestureDetector(
+                          onTap: () async {
+                            final cropped = await _cropImage(
+                              _pendingImages[i],
+                            );
+                            if (cropped != null && mounted) {
+                              setState(() => _pendingImages[i] = cropped);
+                            }
+                          },
+                          child: Container(
+                            width: 18,
+                            height: 18,
+                            decoration: const BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: Colors.black54,
+                            ),
+                            child: const Icon(
+                              Icons.crop,
+                              size: 11,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: Gap.xs),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _submitImages,
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size(0, 48),
+                ),
+                icon: const Icon(Icons.auto_awesome, size: 18),
+                label: Text('开始识别(${_pendingImages.length} 张)'),
+              ),
+            ),
+          ],
+
+          // ⑤ 继续上次暂存的会话
+          if (_savedSessions.isNotEmpty) ...[
+            const SizedBox(height: Gap.xs),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
                 onPressed: _showSavedSessions,
                 icon: const Icon(Icons.history, size: 16),
                 label: Text(
-                  '继续上次会话（${_savedSessions.length} 条）',
+                  '继续上次会话(${_savedSessions.length} 条)',
                   style: const TextStyle(fontSize: 12),
                 ),
               ),
-            ],
+            ),
+          ],
 
-            const SizedBox(height: 8),
-            // 标注来源
-            TextButton.icon(
-              onPressed: () => setState(() => _showBookInput = !_showBookInput),
+          // ⑥ 出处(可折叠,收起来时不占视觉)
+          const SizedBox(height: Gap.xxs),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: () =>
+                  setState(() => _showBookInput = !_showBookInput),
               icon: Icon(
                 _showBookInput ? Icons.expand_less : Icons.expand_more,
                 size: 18,
               ),
               label: Text(
                 _sourceBook.isEmpty
-                    ? '标注出处（可选）'
+                    ? '标注出处(可选)'
                     : '《$_sourceBook》p$_sourcePage',
               ),
             ),
-
-            // 来源信息
-            if (_showBookInput) _buildBookInput(theme),
-          ],
-        ),
-      ), // Padding
-    ); // Card
+          ),
+          if (_showBookInput) _buildBookInput(theme),
+        ],
+      ),
+    );
   }
 
   Widget _buildBookInput(ThemeData theme) {
@@ -665,6 +668,21 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
       if (f.existsSync() && !files.any((x) => x.path == p)) {
         files.add(f);
       }
+    }
+    // v2.6 修复(用户实测:"选不保存对话后,拍照识文下还是保留残留对话"):
+    // 暂存会话是**一次性的草稿** —— 恢复后必须从暂存列表里删掉,否则它会一直
+    // 挂在那里:用户明明在退出时选了「不保存」,回到输入页却还是看到同一条旧会话,
+    // 点进去又把它整个恢复出来。想再留一份的话,重新「暂时离开」即可。
+    try {
+      final box = Hive.box(AppConstants.hiveBoxSettings);
+      final rest = _savedSessions.where((x) => x.id != s.id).toList();
+      box.put(
+        AppConstants.keySavedSessions,
+        rest.map((x) => x.toJson()).toList(),
+      );
+      setState(() {});
+    } catch (e) {
+      debugPrint('ReadFlow 消费暂存会话失败(不影响恢复): $e');
     }
     Navigator.push(
       context,

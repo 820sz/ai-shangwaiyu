@@ -81,6 +81,14 @@ class FollowUpController {
   /// 外部预设上下文(如「询问 AI 详解」),优先级高于 [buildContext]
   String? contextOverride;
 
+  /// 上次退出抽屉时停留在哪个位置(v2.6,用户实测"收起再点开又回到顶部")。
+  /// 抽屉是 modal 路由,每次打开都是全新的列表 —— 不记位置就永远从第一条开始,
+  /// 而追问往往是接着上一条看的。
+  double lastScrollOffset = 0;
+
+  /// 打开抽屉后是否要把位置还原到 [lastScrollOffset](消费一次即清)
+  bool scrollRestorePending = false;
+
   List<FollowUpSavedConversation> savedConversations = [];
 
   // ── 槽位 / 模型 / 思考(全部走 Hive,与识图页共享设置) ──
@@ -403,6 +411,8 @@ void showFollowUpDrawer({
   controller.inputCtrl.clear();
   if (prefillQuestion != null) controller.inputCtrl.text = prefillQuestion;
   controller.contextOverride = contextOverride;
+  // v2.6:标记"这次打开要还原上次的滚动位置"
+  controller.scrollRestorePending = true;
   final bottomSafe = MediaQuery.of(context).padding.bottom;
   showModalBottomSheet(
     context: context,
@@ -525,6 +535,20 @@ class _FollowUpSheet extends StatelessWidget {
                     controller.scrollScheduled = false;
                     if (!scrollCtrl.hasClients) return;
                     final pos = scrollCtrl.position;
+                    // v2.6:刚打开抽屉 → 先还原到上次的位置
+                    // (读完上面的对话收起抽屉,再点开不该被拽回顶部)
+                    if (controller.scrollRestorePending) {
+                      controller.scrollRestorePending = false;
+                      final target =
+                          controller.lastScrollOffset.clamp(0.0, pos.maxScrollExtent);
+                      if (target > 0) {
+                        scrollCtrl.jumpTo(target);
+                        controller.lastScrollOffset = target;
+                        return;
+                      }
+                    }
+                    // 随手记住当前位置,供下次打开还原
+                    controller.lastScrollOffset = pos.pixels;
                     final nearBottom = pos.maxScrollExtent - pos.pixels < 150;
                     if (controller.pendingScroll || nearBottom) {
                       controller.pendingScroll = false;
