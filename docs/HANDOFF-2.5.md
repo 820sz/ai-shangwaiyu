@@ -20,17 +20,20 @@
 | 目录 | `D:\readflow` |
 | 远端 | https://github.com/820sz/ai-shangwaiyu(**公开**,AGPL-3.0,gh CLI 已登录 `820sz`,默认分支 **master**) |
 | 工具链 | Flutter **3.44.7** stable / Dart 3.12.2 |
-| 已发布 | **v2.5.0+62 = Release Latest**(2026-09-27 发出;上版 v2.4.0) |
+| 已发布 | **v2.6.0+63 = Release Latest**(2026-09-28;上版 v2.5.0) |
 | 本地 HEAD | 见 §2.2 提交地图(与远端 master 的 tree 保持一致) |
-| 绿灯 | analyze **0 error / 0 warning**(11 条存量 info);测试 **717 全绿 + 1 skip** |
-| 本轮任务 | 排 bug + **前端大升级**(参考「训记」)+ 材料中心三修 + 开屏/退出动画 —— **五件事已全部交付** |
+| 绿灯 | analyze **0 error / 0 warning**(11 条存量 info);测试 **729 全绿 + 1 skip** |
+| 本轮任务 | 排 bug + **前端大升级** + 材料中心三修 + 开屏/退出动画(v2.5)+ **用户 9/28 实测 11 条**(v2.6)—— 全部交付 |
 | **下一步** | **等用户真机复测**(见 §8);反馈回来后按老规矩:只做他列的事、先问清楚、每批量做完再报 |
+
+> 📌 **v2.6.0 的任务板在 `docs/TASK-BOARD-2026-09-28.md`**(用户 11 条原话 + 逐条交付记录);
+> 识图那条的**提示词原文与分析**抄在那份任务的 §二/§三 —— 用户明确要求"先摊开实现再改",这条经验也进了记忆库。
 
 **三条命令**(PowerShell,先 `cd D:\readflow`):
 ```powershell
 $env:FLUTTER_ALREADY_LOCKED = 'true'   # 每个新 shell 都要,否则 flutter 卡锁
 flutter analyze --no-fatal-infos       # 期望 0 error / 0 warning(11 条 info 是存量)
-flutter test                           # 期望 717 全绿 + 1 skip
+flutter test                           # 期望 729 全绿 + 1 skip
 ```
 
 ---
