@@ -266,9 +266,11 @@ $env:RF_DIFF_BASE = '<那个本地提交>'
 成功打印 `PUSH_VIA_API_DONE`;基准猜错会打印 `TREE_MISMATCH_ABORT`(**不会有副作用,换基准重跑即可**)。
 
 > 现成数据(**每次同步成功后要把这几行更新成新值**):
-> - 2026-09-27(交接文档那次):远端 tree `be552682` ↔ 本地提交 `68d0ad6`
-> - 2026-09-27(U2 完成这次):远端 tree `851f8e2f` ↔ 本地提交 `8c120f7`
-> - 2026-09-27(**v2.5.0 发版这次**):远端 tree `16c8768a` ↔ 本地提交 `e4eb535` ← **当前**
+> - 2026-09-27(U2 完成那次):远端 tree `851f8e2f` ↔ 本地提交 `8c120f7`
+> - 2026-09-27(v2.5.0 发版):远端 tree `16c8768a` ↔ 本地提交 `e4eb535`
+> - 2026-09-28(v2.6.0 发版):远端 tree `c4ef0e1e` ↔ 本地提交 `aa0d0dc`;随后 tree `2b72efbd` ↔ `01175d0`
+> - 2026-09-28(v2.6 文档同步):远端 tree `10b0e3d4` ↔ 本地提交 `98ec112`
+> - 2026-09-29(**v2.7.0 发版这次**):远端 tree `176c1626` ↔ 本地提交 `66ddd04` ← **当前**
 > - 判断方法同上:比对 `git rev-parse 'HEAD^{tree}'` 与远端 `tree.sha`。
 > - 同步脚本:`Set-ExecutionPolicy -Scope Process Bypass -Force` 后 `& .\tool\push_via_api.ps1`
 >   (本机是 **Windows PowerShell 5.1**,没有 `pwsh` 命令,别写 `pwsh tool/...`)。
