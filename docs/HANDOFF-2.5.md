@@ -270,7 +270,8 @@ $env:RF_DIFF_BASE = '<那个本地提交>'
 > - 2026-09-27(v2.5.0 发版):远端 tree `16c8768a` ↔ 本地提交 `e4eb535`
 > - 2026-09-28(v2.6.0 发版):远端 tree `c4ef0e1e` ↔ 本地提交 `aa0d0dc`;随后 tree `2b72efbd` ↔ `01175d0`
 > - 2026-09-28(v2.6 文档同步):远端 tree `10b0e3d4` ↔ 本地提交 `98ec112`
-> - 2026-09-29(**v2.7.0 发版这次**):远端 tree `176c1626` ↔ 本地提交 `66ddd04` ← **当前**
+> - 2026-09-29(**v2.7.0 发版这次**):远端 tree `176c1626` ↔ 本地提交 `66ddd04`
+> - 2026-09-29(发版后文档收尾):远端 tree `7499c8f6` ↔ 本地提交 `5cce23d`(之后再改文档会产生一次新的推进,**照上面的方法比 tree 找基准即可**)
 > - 判断方法同上:比对 `git rev-parse 'HEAD^{tree}'` 与远端 `tree.sha`。
 > - 同步脚本:`Set-ExecutionPolicy -Scope Process Bypass -Force` 后 `& .\tool\push_via_api.ps1`
 >   (本机是 **Windows PowerShell 5.1**,没有 `pwsh` 命令,别写 `pwsh tool/...`)。
