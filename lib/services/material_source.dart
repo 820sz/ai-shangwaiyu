@@ -537,6 +537,141 @@ class MaterialSourceService {
     }
   }
 
+  // ─────────────────────── 用户自选外部链接(v2.7) ───────────────────────
+
+  /// "外部链接"这个虚拟源的元信息(v2.7,用户第 3 条:上传分析材料 → 外部链接导入)。
+  ///
+  /// 它不属于任何一个固定内容源,但抓取/报错/许可说明要与固定源走**同一套**逻辑,
+  /// 否则"链接导入"会变成第二套实现(第二套实现 = 第二套 bug)。
+  static const MaterialSource externalLinkSource = MaterialSource(
+    id: 'link',
+    label: '外部链接',
+    kind: 'article',
+    description: '你自己贴进来的公开网页链接(论文页、期刊文章、新闻、博客…)',
+    license: '链接内容的版权归原站与原作者所有,仅限个人学习阅读;原文链接请保留',
+    hasAudio: false,
+  );
+
+  /// 抓**任意公开网页正文**(v2.7:第 3 条「外部链接导入」)。
+  ///
+  /// 与内部 [_fetchWebArticle] 的唯一区别是"源"由用户给定,因此这里多做三件事:
+  /// 1. **只放行 http/https**:其它协议(file://、content://、自定义 scheme)一律拒绝 ——
+  ///    这类输入不是"公开网页",放进抓取层会变成任意文件读取面;
+  /// 2. **非 HTML 也能读**:纯文本/`.txt` 直接当正文;PDF 之类二进制明确报错,
+  ///    并告诉用户"下载后走文件导入",而不是抛一个看不懂的解析错误;
+  /// 3. **抽不到正文时说清原因**:需要 JS 渲染 / 反爬 / 登录墙 都会给出不同文案,
+  ///    界面同时提供「用浏览器打开」的原文链接按钮(用户第 2(1) 条要的就是这个退路)。
+  Future<MaterialDoc> fetchAnyUrl(String rawUrl, {String? titleHint}) async {
+    const label = '外部链接';
+    final url = normalizeExternalUrl(rawUrl);
+    if (url.isEmpty) {
+      throw const MaterialSourceException(
+        sourceLabel: label,
+        message: '这不像一个网址 —— 请以 http:// 或 https:// 开头(例:'
+            'https://arxiv.org/abs/1706.03762)',
+      );
+    }
+    final body = await _getText(url, externalLinkSource);
+    final head = body.substring(0, body.length < 8 ? body.length : 8);
+    if (head.startsWith('%PDF')) {
+      throw const MaterialSourceException(
+        sourceLabel: label,
+        message: '这是一个 PDF 文件链接,网页正文抓取读不了它 —— '
+            '请先下载到手机,再用「上传分析材料 → 文件」导入',
+      );
+    }
+    final isHtml = body.contains('<');
+    var title = (titleHint ?? '').trim();
+    if (title.isEmpty && isHtml) {
+      title = stripSiteSuffix(HtmlText.titleOf(body), url);
+    }
+    if (title.isEmpty) title = _firstHeadingOf(body);
+    if (title.isEmpty) title = _hostOf(url);
+    final text = _cleanArticleText(
+      isHtml ? HtmlText.readableText(body) : body,
+    );
+    if (text.length < 120) {
+      throw MaterialSourceException(
+        sourceLabel: label,
+        message: '这个页面的正文没抽出来(只拿到 ${text.length} 个字符)。'
+            '常见原因:①正文由 JavaScript 动态渲染 ②站点有反爬/需要登录 '
+            '③这是一个列表页而不是文章页 —— 可以点「用浏览器打开」看原文',
+      );
+    }
+    final chunks = chunkByWords(text, wordsPerChunk: 2500);
+    return MaterialDoc(
+      sourceId: externalLinkSource.id,
+      sourceId2: url,
+      kind: externalLinkSource.kind,
+      title: title,
+      author: '',
+      url: url,
+      license: externalLinkSource.license,
+      language: 'en',
+      chunks: chunks,
+      plainText: chunks.map((c) => c.text).join('\n\n'),
+    );
+  }
+
+  /// 把用户输入的链接规整成可抓的 http(s) 地址(纯函数,可单测)。
+  ///
+  /// 用户是**从别处粘**链接进来的(Markdown `<...>`、微信/Word 的中文引号、
+  /// 末尾带句号),所以这里做的是"从这串文本里把链接抠出来",不是简单 trim:
+  /// 1. 先找 `https?://` 开头的那一段(遇到空白/引号/中文标点即止);
+  /// 2. 没有协议时,把输入当作**裸域名**处理(必须含点号,否则判定"不是网址");
+  /// 3. 只接受 http/https —— `file://`、`content://`、`javascript:` 一律拒绝
+  ///    (放行等于给抓取层开一个任意文件读取的口子);
+  /// 4. 去掉尾部残留的标点。
+  /// 不合格返回空串(调用方负责给出人话提示)。
+  static String normalizeExternalUrl(String raw) {
+    var s = raw.trim();
+    if (s.isEmpty) return '';
+    final withScheme = RegExp(r'https?://\S+', caseSensitive: false).firstMatch(s);
+    if (withScheme != null) {
+      s = withScheme.group(0)!;
+    } else {
+      // 裸域名:必须有一个点,且点两侧都是合法域名片段(后面可带路径/查询)
+      final bare = RegExp(
+        r'[a-zA-Z0-9][-a-zA-Z0-9]*(?:\.[a-zA-Z0-9][-a-zA-Z0-9]*)+(?:/\S*)?',
+      ).firstMatch(s);
+      if (bare == null) return '';
+      s = 'https://${bare.group(0)!}';
+    }
+    // 去掉尾部可能粘上的标点(Markdown/中文引号/句号)
+    s = s.replaceAll(RegExp(r'''[<>"'()\[\]{}。，、；：！？）】」》”’]+$'''), '');
+    s = s.trim();
+    if (s.isEmpty) return '';
+    final scheme = RegExp(r'^([a-zA-Z][a-zA-Z0-9+.\-]*):').firstMatch(s);
+    if (scheme == null) return '';
+    final p = scheme.group(1)!.toLowerCase();
+    if (p != 'http' && p != 'https') return '';
+    final m = RegExp(r'^https?://([^/?#\s]+)').firstMatch(s);
+    if (m == null) return '';
+    final host = m.group(1)!;
+    // 域名至少要有一个点(或就是 localhost)—— 挡住"https://随便一句话"
+    if (!host.contains('.') && host != 'localhost') return '';
+    if (host.startsWith('.') || host.endsWith('.')) return '';
+    return s;
+  }
+
+  /// 取第一个 `<h1>`(纯函数):`<title>` 缺失或只有站点名时的兜底标题
+  static String _firstHeadingOf(String html) {
+    final m = RegExp(r'<h1[^>]*>([\s\S]*?)</h1>', caseSensitive: false)
+        .firstMatch(html);
+    if (m == null) return '';
+    final t = HtmlText.stripTags(m.group(1) ?? '').trim();
+    return t.length > 200 ? '' : t;
+  }
+
+  /// 从链接里取域名(标题兜底:宁可显示 `example.com`,也不要空标题)
+  static String _hostOf(String url) {
+    final m = RegExp(r'^https?://([^/?#]+)').firstMatch(url.trim());
+    if (m == null) return '';
+    var host = m.group(1)!.toLowerCase();
+    if (host.startsWith('www.')) host = host.substring(4);
+    return host;
+  }
+
   // ─────────────────────── Project Gutenberg ───────────────────────
 
   /// 按书籍 id 抓全文并按章节切块。

@@ -6,27 +6,39 @@ import '../../config/design_tokens.dart';
 import '../../config/theme.dart';
 import '../../models/learner_model.dart';
 import '../../providers/vocab_provider.dart';
+import '../../services/external_link.dart';
 import '../../services/feed_parser.dart' show FeedItem;
 import '../../services/learner_model_store.dart';
 import '../../services/material_library.dart';
+import '../../services/material_prefs.dart';
 import '../../services/material_source.dart';
 import '../../services/material_source_status.dart';
 import '../../services/word_frequency.dart';
 import '../../widgets/app_ui.dart';
 import 'category_material_screen.dart';
+import 'material_import_flow.dart';
 import 'material_reader_screen.dart';
+import 'widgets/material_preview_dialog.dart';
 
-/// 材料中心(v2.0)。
+/// 材料中心(v2.0;v2.7 大改)。
 ///
 /// 定位(用户明确要求):**材料由软件提供渠道,不是让用户上传**。
-/// 所以这一页的主入口是"从公开内容源拉真实材料",而不是一个上传框;
-/// 粘贴文本只是补充入口(自备材料)。
+/// 所以这一页的主入口是"从公开内容源拉真实材料",而不是一个上传框。
+///
+/// v2.7 按用户第 2/4/5 条重做:
+/// - **顶部个性化找资源**(第 5 条):难度档 + 内容类型 + 题材倾向 + 补充需求,
+///   全部只影响"给 AI 的检索方案",不动用户已有的数据;
+/// - **难度自选**(第 4 条):i+1 / i+10 / i+100 既可快速切换,也参与材料库排序与标注,
+///   并作为约束交给 AI(`MaterialBand`);
+/// - **每条材料都有两条路**(第 2(1) 条):「软件内阅读」+「原文链接」——
+///   反爬/需要登录的页面至少还能点开看;
+/// - **导入三通道**(第 2(4) 条):粘贴文本 / 文件 / 图片(AI 提取)/ 链接,
+///   不再是"只能填标题和正文"。
 ///
 /// 三段:
-/// 1. **今日推荐** —— 选源 → 拉该源最新条目 → 逐条"分析并打开"
-///    (打开时才抓正文并本地算覆盖率,避免为了排序把整站抓一遍);
-/// 2. **材料库** —— 已入库材料(带覆盖率/进度),按 i+1 排序,直接续读;
-/// 3. **粘贴导入** —— 自备文本(论文、字幕稿、教材段落)进同一条分析管线。
+/// 1. **个性化找资源** → 偏好摘要(点开改);
+/// 2. **今日推荐** → 选源 → 拉该源最新条目 → 逐条"分析并打开"(打开时才抓正文);
+/// 3. **材料库** → 已入库材料(带覆盖率/进度),按当前难度档排序,直接续读。
 class MaterialCenterScreen extends StatefulWidget {
   const MaterialCenterScreen({super.key});
 
@@ -39,8 +51,6 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
   final _service = MaterialSourceService.instance;
 
   /// 默认源:**上次成功过的源** → 没有就用实测可达的 NPR。
-  /// (旧实现取 `sources.first` = BBC,在中国大陆必然超时,见
-  /// `MaterialSourceService.defaultSourceId` 的说明)
   String _sourceId = MaterialSourceService.defaultSourceId;
   List<FeedItem> _items = const [];
   List<ShelfItem> _shelf = const [];
@@ -49,6 +59,12 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
   String? _error;
   LearnerModel _model = LearnerModel();
 
+  /// 用户偏好(第 4/5 条)
+  MaterialPrefs _prefs = MaterialPrefs.empty;
+
+  /// 材料库是否只显示"符合当前难度档"的材料(第 4 条:筛选)
+  bool _onlyFit = false;
+
   /// 各源最近一次可用性(界面据此标注"上次失败",不让用户一个个试)
   Map<String, SourceHealth> _health = const {};
   bool _probing = false;
@@ -56,6 +72,7 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
   @override
   void initState() {
     super.initState();
+    _prefs = MaterialPrefs.load();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _model = LearnerModelStore.load();
@@ -75,7 +92,8 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
       final items = await MaterialLibrary.shelf(limit: 50);
       if (!mounted) return;
       setState(() {
-        _shelf = MaterialLibrary.rankForToday(items);
+        // 排序与筛选都按用户选的难度档(v2.7,第 4 条)
+        _shelf = MaterialLibrary.rankForBand(items, _prefs.band);
         _loadingShelf = false;
       });
     } catch (e) {
@@ -112,9 +130,6 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
   }
 
   /// 挨个探测所有源,把"哪个能用"一次性问清楚。
-  ///
-  /// 为什么值得做:不可达的源每个要等 9~20 秒才失败,用户手动试一圈要一两分钟,
-  /// 还未必记得住哪个行。一次探测(串行、逐个记账)之后,chip 上会直接标出结论。
   Future<void> _probeAll() async {
     setState(() => _probing = true);
     for (final s in MaterialSourceService.sources) {
@@ -142,19 +157,22 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
     );
   }
 
-  /// 打开一篇源材料:抓正文 → 本地分析 → 入库 → 读前卡 → 阅读器
+  /// 打开一篇源材料:抓正文 → 标题中文化 → 本地分析 → 入库 → 读前卡 → 阅读器
   Future<void> _openItem(FeedItem item) async {
     showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => const Center(child: CircularProgressIndicator()),
+      builder: (_) => const Dialog(child: AppLoading(label: '正在抓取并分析原文…')),
     );
     try {
       final doc = await _service.fetchDocument(_sourceId, url: item.link);
       if (!mounted) return;
       final vocab = context.read<VocabProvider>().vocabularies;
+      // 标题补成「中文(英文)」(第 2(2) 条):入库前就定好,书架/阅读器/材料文件夹
+      // 三处显示的是同一个标题,不会一处中文一处英文
+      final title = await MaterialImportFlow.localizedTitle(doc.title);
       final ingested = await MaterialLibrary.ingestDoc(
-        doc,
+        _retitled(doc, title),
         model: _model,
         vocab: vocab,
       );
@@ -171,92 +189,29 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
     }
   }
 
-  /// 读前卡:告诉用户"这份材料对你是什么难度",再决定读不读
-  Future<void> _showPreview(IngestedMaterial ingested) async {
-    final a = ingested.analysis;
-    final theme = Theme.of(context);
-    final go = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(ingested.title, maxLines: 2, overflow: TextOverflow.ellipsis),
-        content: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _kv('篇幅', '${a.wordCount} 词 · 约 ${a.estMinutes} 分钟'),
-              _kv('难度估计', '${a.cefr} · ${a.hint}'),
-              _kv('已知词覆盖率',
-                  '${(a.knownTokenRatio * 100).toStringAsFixed(1)}%（词形 ${(a.coverage * 100).toStringAsFixed(0)}%）'),
-              _kv('生词密度', '每 100 词约 ${a.newWordDensity.toStringAsFixed(1)} 个'),
-              if (a.topNewWords.isNotEmpty)
-                _kv('先认这几个词', a.topNewWords.take(8).join('、')),
-              if (a.tooHard) ...[
-                const SizedBox(height: Gap.xs),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(
-                      Icons.warning_amber_rounded,
-                      size: 16,
-                      color: AppTheme.warningColor(ctx),
-                    ),
-                    const SizedBox(width: Gap.xxs),
-                    Expanded(
-                      child: Text(
-                        '这份材料对你偏难(覆盖率低于 90%)。可以先读,但建议只精读前几段,别硬啃。',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: AppTheme.warningColor(ctx),
-                          height: 1.5,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('先不读'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('开始读'),
-          ),
-        ],
-      ),
+  /// 只换标题(正文与元信息原样)
+  MaterialDoc _retitled(MaterialDoc doc, String title) {
+    if (title.trim().isEmpty || title.trim() == doc.title.trim()) return doc;
+    return MaterialDoc(
+      sourceId: doc.sourceId,
+      sourceId2: doc.sourceId2,
+      kind: doc.kind,
+      title: title.trim(),
+      author: doc.author,
+      url: doc.url,
+      license: doc.license,
+      language: doc.language,
+      audioUrl: doc.audioUrl,
+      chunks: doc.chunks,
+      plainText: doc.plainText,
     );
-    if (go == true && mounted) {
-      await _openReader(ingested.materialId);
-    }
   }
 
-  Widget _kv(String k, String v) => Padding(
-        padding: const EdgeInsets.only(bottom: Gap.xs),
-        child: RichText(
-          text: TextSpan(
-            style: TextStyle(
-              fontSize: 13,
-              color: Theme.of(context).colorScheme.onSurface,
-            ),
-            children: [
-              TextSpan(
-                text: '$k：',
-                style: const TextStyle(fontWeight: FontWeight.w600),
-              ),
-              TextSpan(
-                text: v,
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
+  /// 读前卡:告诉用户"这份材料对你是什么难度",再决定读不读(v2.7 抽到公共件)
+  Future<void> _showPreview(IngestedMaterial ingested) async {
+    final go = await showMaterialPreview(context, ingested);
+    if (go && mounted) await _openReader(ingested.materialId);
+  }
 
   Future<void> _openReader(int materialId) async {
     await Navigator.push(
@@ -270,95 +225,253 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
     await _loadShelf();
   }
 
-  /// 粘贴导入(自备材料)
-  Future<void> _importText() async {
-    final titleCtrl = TextEditingController();
-    final textCtrl = TextEditingController();
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('粘贴材料'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: titleCtrl,
-                decoration: const InputDecoration(labelText: '标题'),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: textCtrl,
-                maxLines: 8,
-                decoration: const InputDecoration(
-                  labelText: '英文正文',
-                  hintText: '论文段落、字幕稿、教材内容都可以',
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('分析并入库'),
-          ),
-        ],
-      ),
+  /// 导入材料(v2.7,第 2(4) 条):粘贴文本 / 文件 / 图片(AI 提取)/ 链接
+  Future<void> _import() async {
+    final ingested = await MaterialImportFlow.run(
+      context,
+      model: _model,
+      dialogTitle: '导入材料',
     );
-    if (ok != true || !mounted) return;
-    final title = titleCtrl.text.trim();
-    final text = textCtrl.text.trim();
-    if (title.isEmpty || text.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('标题和正文都要填')),
-      );
-      return;
-    }
+    if (ingested == null || !mounted) return;
+    await _showPreview(ingested);
+    await _loadShelf();
+  }
+
+  /// 用系统浏览器打开原文链接(第 2(1) 条:反爬/付费页面的退路)
+  Future<void> _openExternal(String url) async {
     try {
-      final vocab = context.read<VocabProvider>().vocabularies;
-      final ingested = await MaterialLibrary.ingestText(
-        title: title,
-        text: text,
-        model: _model,
-        vocab: vocab,
-      );
-      if (!mounted) return;
-      await _showPreview(ingested);
-      await _loadShelf();
+      final ok = await launchExternalUrl(url);
+      if (!ok && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('打不开这个链接:$url')),
+        );
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('导入失败:$e')),
+        SnackBar(content: Text('打开链接失败:$e')),
       );
     }
+  }
+
+  Future<void> _setBand(MaterialBand band) async {
+    setState(() => _prefs = _prefs.copyWith(band: band));
+    await _prefs.save();
+    if (!mounted) return;
+    await _loadShelf();
+  }
+
+  /// 个性化找资源面板(第 5 条):难度 / 类型 / 题材倾向 / 补充需求
+  Future<void> _showPrefsSheet() async {
+    var draft = _prefs;
+    final genresCtrl = TextEditingController(text: _prefs.genres);
+    final extraCtrl = TextEditingController(text: _prefs.extra);
+    final saved = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) {
+          final theme = Theme.of(ctx);
+          final muted = theme.colorScheme.onSurfaceVariant;
+          void apply(MaterialPrefs p) => setSheet(() => draft = p);
+          return SafeArea(
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(
+                Gap.md,
+                0,
+                Gap.md,
+                Gap.md + MediaQuery.of(ctx).viewInsets.bottom,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('个性化找资源',
+                        style: theme.textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w700)),
+                    const SizedBox(height: Gap.xxs),
+                    Text(
+                      '这些只影响"让 AI 去找什么样的材料",不会改动你已有的生词与材料。',
+                      style: theme.textTheme.bodySmall
+                          ?.copyWith(color: muted, height: 1.4),
+                    ),
+                    const SizedBox(height: Gap.md),
+
+                    // ① 难度
+                    Text('难度(i+1 / i+10 / i+100)',
+                        style: theme.textTheme.bodySmall?.copyWith(color: muted)),
+                    const SizedBox(height: Gap.xs),
+                    Wrap(
+                      spacing: Gap.xs,
+                      runSpacing: Gap.xs,
+                      children: [
+                        for (final b in MaterialBand.values)
+                          ChoiceChip(
+                            label: Text(b.label),
+                            selected: draft.band == b,
+                            onSelected: (_) =>
+                                apply(draft.copyWith(band: b)),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: Gap.xxs),
+                    Text(draft.band.description,
+                        style: theme.textTheme.bodySmall
+                            ?.copyWith(color: muted, fontSize: 11)),
+
+                    // ② 内容类型
+                    const SizedBox(height: Gap.md),
+                    Text('内容类型',
+                        style: theme.textTheme.bodySmall?.copyWith(color: muted)),
+                    const SizedBox(height: Gap.xs),
+                    Wrap(
+                      spacing: Gap.xs,
+                      runSpacing: Gap.xs,
+                      children: [
+                        for (final e in MaterialPrefs.kindLabels.entries)
+                          FilterChip(
+                            label: Text(e.value),
+                            selected: draft.kinds.contains(e.key),
+                            onSelected: (on) {
+                              final next = {...draft.kinds};
+                              if (on) {
+                                next.add(e.key);
+                              } else {
+                                next.remove(e.key);
+                              }
+                              apply(draft.copyWith(kinds: next));
+                            },
+                          ),
+                      ],
+                    ),
+
+                    // ③ 题材倾向
+                    const SizedBox(height: Gap.md),
+                    TextField(
+                      controller: genresCtrl,
+                      decoration: const InputDecoration(
+                        labelText: '题材倾向(可留空)',
+                        hintText: '如:哲学散文、英式幽默、科技新闻',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      onChanged: (v) => apply(draft.copyWith(genres: v)),
+                    ),
+
+                    // ④ 补充需求
+                    const SizedBox(height: Gap.sm),
+                    TextField(
+                      controller: extraCtrl,
+                      maxLines: 3,
+                      minLines: 2,
+                      decoration: const InputDecoration(
+                        labelText: '补充 / 调整需求(可留空)',
+                        hintText: '如:不要学术腔,每篇 10 分钟以内读完',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      onChanged: (v) => apply(draft.copyWith(extra: v)),
+                    ),
+
+                    const SizedBox(height: Gap.md),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () => apply(MaterialPrefs.empty),
+                            child: const Text('清空偏好'),
+                          ),
+                        ),
+                        const SizedBox(width: Gap.xs),
+                        Expanded(
+                          child: FilledButton(
+                            onPressed: () => Navigator.pop(ctx, true),
+                            child: const Text('保存'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+    genresCtrl.dispose();
+    extraCtrl.dispose();
+    if (saved != true || !mounted) return;
+    setState(() => _prefs = draft);
+    await _prefs.save();
+    if (!mounted) return;
+    await _loadShelf();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('偏好已保存 —— 下次找材料会按它来'),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  /// 材料库里符合当前档位的条数(摘要行用)
+  int get _fitCount {
+    if (_prefs.band.isAny) return _shelf.length;
+    return _shelf.where((s) {
+      final c = s.coverage;
+      return c != null && _prefs.band.contains(c);
+    }).length;
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final muted = theme.colorScheme.onSurfaceVariant;
+    // 只显示符合档位的(第 4 条:筛选);不限档时不过滤
+    final shelf = (_onlyFit && !_prefs.band.isAny)
+        ? _shelf.where((s) {
+            final c = s.coverage;
+            return c == null || _prefs.band.contains(c);
+          }).toList()
+        : _shelf;
     return Scaffold(
       appBar: AppBar(
         title: const Text('材料中心'),
         actions: [
           IconButton(
-            tooltip: '粘贴材料',
-            onPressed: _importText,
-            icon: const Icon(Icons.content_paste_go),
+            tooltip: '导入材料(文件 / 图片 / 链接 / 粘贴)',
+            onPressed: _import,
+            icon: const Icon(Icons.add_circle_outline),
           ),
         ],
       ),
       body: ListView(
         padding: Insets.page,
         children: [
-          // ── 今日推荐 ──
+          // ── ⓪ 个性化找资源(v2.7,第 5 条 + 第 4 条)──
+          AppStagger(index: 0, child: _buildPrefsCard(theme, muted)),
+
+          // ── ① 按你的水平找材料(两个方向:资料原文 / AI 整理)──
           AppStagger(
-            index: 0,
+            index: 1,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const AppSectionTitle(
+                  title: '按你的水平找材料',
+                  subtitle: '中文说需求,AI 去公开源找原文;AI 整理的内容单独一栏',
+                ),
+                _buildAiDiscoverGrid(theme),
+              ],
+            ),
+          ),
+
+          // ── ② 今日推荐 ──
+          AppStagger(
+            index: 2,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -383,8 +496,6 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
                   ),
                 ),
                 const SizedBox(height: Gap.xs),
-                // 选中源的说明与状态:一行话讲清"这个源是什么 + 在你这儿行不行",
-                // 用户不用点开才知道(旧版只有 chip,失败了才发现不可达)
                 _sourceNote(theme, muted),
                 const SizedBox(height: Gap.sm),
                 if (_loadingItems)
@@ -392,7 +503,7 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
                 else if (_error != null)
                   _errorCard(theme, muted)
                 else if (_items.isEmpty)
-                  AppEmpty(
+                  const AppEmpty(
                     icon: Icons.article_outlined,
                     title: '这个源暂时没有条目',
                     hint: '换一个源试试,或让助手「检测可用源」',
@@ -403,41 +514,37 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
             ),
           ),
 
-          // ── 按你的水平找材料(两个方向:资料原文 / AI 整理)──
+          // ── ③ 材料库 ──
           AppStagger(
-            index: 1,
+            index: 3,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 AppSectionTitle(
-                  title: '按你的水平找材料',
-                  subtitle: '默认找公开源原文,AI 整理的内容单独一栏并标注',
-                ),
-                _buildAiDiscoverGrid(theme),
-              ],
-            ),
-          ),
-
-          // ── 材料库 ──
-          AppStagger(
-            index: 2,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const AppSectionTitle(
                   title: '材料库',
-                  subtitle: '按「今天最适合读」排序',
+                  subtitle: _prefs.band.isAny
+                      ? '按「今天最适合读」排序'
+                      : '按 ${_prefs.band.label} 排序 · 符合 $_fitCount 篇',
+                  trailing: _prefs.band.isAny || _shelf.isEmpty
+                      ? null
+                      : FilterChip(
+                          label: const Text('只看符合'),
+                          selected: _onlyFit,
+                          onSelected: (v) => setState(() => _onlyFit = v),
+                        ),
                 ),
                 if (_loadingShelf)
                   const AppLoading()
-                else if (_shelf.isEmpty)
+                else if (shelf.isEmpty)
                   AppEmpty(
                     icon: Icons.library_books_outlined,
-                    title: '还没有材料',
-                    hint: '从上面挑一份,或粘贴自备材料',
+                    title: _onlyFit ? '没有符合 ${_prefs.band.label} 的材料' : '还没有材料',
+                    hint: _onlyFit
+                        ? '把上面的「只看符合」取消,或换一个难度档'
+                        : '从上面挑一份,或点右上角「+」导入自己的材料',
                   )
                 else
-                  for (final s in _shelf) _buildShelfCard(theme, s),
+                  for (final s in shelf) _buildShelfCard(theme, s),
               ],
             ),
           ),
@@ -447,9 +554,80 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
     );
   }
 
+  /// 个性化找资源卡(第 5 条):摘要 + 难度档快捷切换
+  Widget _buildPrefsCard(ThemeData theme, Color muted) {
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.tune, size: 18, color: theme.colorScheme.primary),
+              const SizedBox(width: Gap.xs),
+              Expanded(
+                child: Text('个性化找资源',
+                    style: theme.textTheme.titleSmall
+                        ?.copyWith(fontWeight: FontWeight.w600)),
+              ),
+              if (_prefs.activeCount > 0)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.primary.withAlpha(20),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    '${_prefs.activeCount} 项偏好',
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: theme.colorScheme.primary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              TextButton(
+                onPressed: _showPrefsSheet,
+                child: const Text('调整'),
+              ),
+            ],
+          ),
+          const SizedBox(height: Gap.xxs),
+          Text(
+            _prefs.summary,
+            style: theme.textTheme.bodySmall
+                ?.copyWith(color: muted, height: 1.4),
+          ),
+          const SizedBox(height: Gap.sm),
+          // 难度自选(第 4 条):常用档位直接露在外面,点一下立刻影响排序/检索
+          Text('难度', style: theme.textTheme.bodySmall?.copyWith(color: muted)),
+          const SizedBox(height: Gap.xxs),
+          Wrap(
+            spacing: Gap.xs,
+            runSpacing: Gap.xs,
+            children: [
+              for (final b in MaterialBand.values)
+                ChoiceChip(
+                  label: Text(b.label),
+                  selected: _prefs.band == b,
+                  onSelected: (_) => _setBand(b),
+                ),
+            ],
+          ),
+          if (!_prefs.band.isAny) ...[
+            const SizedBox(height: Gap.xxs),
+            Text(
+              _prefs.band.description,
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: muted, fontSize: 11),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   /// 源 chip:选中态 + **可用性标记**(✔ 最近可用 / ⚠ 上次失败 / 未测)。
-  /// 标记直接写在 chip 上,因为"哪个源在你这儿能用"是这个页面最贵的信息
-  /// (试错一次要等 9~20 秒)。
   Widget _sourceChip(BuildContext context, ThemeData theme, MaterialSource s) {
     final health = _health[s.id];
     final measured = MaterialSourceService.measuredReachable.contains(s.id);
@@ -461,9 +639,11 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
         : (health.ok
               ? AppTheme.successColor(context)
               : AppTheme.warningColor(context));
+    // 偏好里选了类型 → 对应的源排在前面(用户第 5 条:类型偏好要真的起作用)
+    final preferred = _prefs.kinds.isEmpty || _prefs.kinds.contains(s.kind);
     return ChoiceChip(
       avatar: mark == null ? null : Icon(mark, size: 15, color: markColor),
-      label: Text(s.label),
+      label: Text(preferred ? s.label : '${s.label}(非偏好)'),
       labelStyle: health != null && !health.ok
           ? TextStyle(color: theme.colorScheme.onSurfaceVariant)
           : null,
@@ -476,7 +656,6 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
   }
 
   /// 选中源的一行说明:它是什么 + 在你这儿最近一次行不行。
-  /// 状态用**色点 + 一句话**表达,扫一眼就知道该不该点(不靠用户读完整段字)。
   Widget _sourceNote(ThemeData theme, Color muted) {
     final s = MaterialSourceService.sourceOf(_sourceId);
     if (s == null) return const SizedBox.shrink();
@@ -530,9 +709,6 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
   }
 
   /// 失败卡片:说清"哪个源、为什么、下一步点哪"
-  ///
-  /// 旧版只有一句"这个源暂时拉不到 + 重试",用户不知道该怪网络还是怪 App,
-  /// 也不知道该换哪个源 —— 结果就是"材料中心没法用"。
   Widget _errorCard(ThemeData theme, Color muted) {
     final s = MaterialSourceService.sourceOf(_sourceId);
     final label = s?.label ?? _sourceId;
@@ -600,7 +776,7 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
     );
   }
 
-  /// 「按你的水平找材料」入口网格(原「其他输入材料」的分类入口并到这里)
+  /// 「按你的水平找材料」入口网格
   Widget _buildAiDiscoverGrid(ThemeData theme) {
     final cats = AppConstants.learningCategories;
     const icons = <String, IconData>{
@@ -642,8 +818,6 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
       onTap: () => Navigator.push(
         context,
         MaterialPageRoute(
-          // v2.4(D1 用户要求):先让用户选**方向** —— 默认「资料原文」
-          // (公开源真实原文,可考究),AI 整理内容单独一栏并明确标注
           builder: (_) => CategoryMaterialScreen(category: category),
         ),
       ),
@@ -676,50 +850,59 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
     );
   }
 
+  /// 今日推荐条目卡(v2.7):「分析并读」+「原文链接」两条路
   Widget _buildItemCard(ThemeData theme, FeedItem item) {
     final muted = theme.colorScheme.onSurfaceVariant;
+    final link = item.link.trim();
     return AppCard(
       onTap: () => _openItem(item),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(item.title.isEmpty ? '(无标题)' : item.title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodyLarge
-                        ?.copyWith(fontWeight: FontWeight.w600)),
-                if (item.summary.isNotEmpty) ...[
-                  const SizedBox(height: Gap.xxs),
-                  Text(item.summary,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodySmall?.copyWith(color: muted)),
-                ],
-                if (item.published != null) ...[
-                  const SizedBox(height: Gap.xxs),
-                  Text(item.published!,
-                      style: theme.textTheme.bodySmall
-                          ?.copyWith(color: muted, fontSize: 11)),
-                ],
-              ],
-            ),
-          ),
-          const SizedBox(width: Gap.xs),
-          FilledButton.tonal(
-            onPressed: () => _openItem(item),
-            child: const Text('分析并读'),
+          Text(item.title.isEmpty ? '(无标题)' : item.title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodyLarge
+                  ?.copyWith(fontWeight: FontWeight.w600)),
+          if (item.summary.isNotEmpty) ...[
+            const SizedBox(height: Gap.xxs),
+            Text(item.summary,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(color: muted)),
+          ],
+          if (item.published != null) ...[
+            const SizedBox(height: Gap.xxs),
+            Text(item.published!,
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: muted, fontSize: 11)),
+          ],
+          const SizedBox(height: Gap.xs),
+          Row(
+            children: [
+              FilledButton.tonal(
+                onPressed: () => _openItem(item),
+                child: const Text('分析并读'),
+              ),
+              const SizedBox(width: Gap.xs),
+              if (link.isNotEmpty)
+                TextButton.icon(
+                  onPressed: () => _openExternal(link),
+                  icon: const Icon(Icons.link, size: 16),
+                  label: const Text('原文链接'),
+                ),
+            ],
           ),
         ],
       ),
     );
   }
 
+  /// 书架卡(v2.7):难度档适配标注 + 原文链接入口
   Widget _buildShelfCard(ThemeData theme, ShelfItem s) {
     final muted = theme.colorScheme.onSurfaceVariant;
     final cov = s.coverage;
+    final fit = cov == null ? '' : _prefs.band.fitLabel(cov);
     final meta = '${MaterialLibrary.kindLabel(s.kind)} · ${s.wordCount} 词'
         '${s.cefr.isEmpty ? '' : ' · ${s.cefr}'}'
         '${cov == null ? '' : ' · 覆盖 ${(cov * 100).toStringAsFixed(0)}%'}'
@@ -727,26 +910,65 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
         '${s.pickedWords > 0 ? ' · 已收 ${s.pickedWords} 词' : ''}';
     return AppCard(
       onTap: () => _openReader(s.id),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(s.title,
-                    maxLines: 1,
+          Row(
+            children: [
+              Expanded(
+                child: Text(s.title,
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodyLarge
                         ?.copyWith(fontWeight: FontWeight.w500)),
-                const SizedBox(height: Gap.xxs),
-                Text(meta,
-                    style: theme.textTheme.bodySmall
-                        ?.copyWith(color: muted, fontSize: 12)),
+              ),
+              if (fit.isNotEmpty) ...[
+                const SizedBox(width: Gap.xxs),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: (fit.startsWith('符合')
+                            ? AppTheme.successColor(context)
+                            : muted)
+                        .withAlpha(26),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    fit,
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: fit.startsWith('符合')
+                          ? AppTheme.successColor(context)
+                          : muted,
+                    ),
+                  ),
+                ),
               ],
-            ),
+            ],
           ),
-          Icon(Icons.chevron_right,
-              size: 20, color: theme.colorScheme.outline),
+          const SizedBox(height: Gap.xxs),
+          Text(meta,
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: muted, fontSize: 12)),
+          const SizedBox(height: Gap.xs),
+          Row(
+            children: [
+              FilledButton.tonal(
+                onPressed: () => _openReader(s.id),
+                child: const Text('继续读'),
+              ),
+              const SizedBox(width: Gap.xs),
+              // 第 2(1) 条:软件内读与原文链接**都给**,让用户灵活切换
+              if (s.url.trim().isNotEmpty)
+                TextButton.icon(
+                  onPressed: () => _openExternal(s.url),
+                  icon: const Icon(Icons.link, size: 16),
+                  label: const Text('原文链接'),
+                ),
+            ],
+          ),
         ],
       ),
     );

@@ -100,6 +100,8 @@ $vocabText
     String userQuery, {
     String? category,
     String? levelHint,
+    String? prefsHint,
+    String? bandHint,
   }) async {
     if (!config.isConfigured) {
       throw Exception('请先在设置中配置 API Key');
@@ -109,6 +111,14 @@ $vocabText
         : '';
     final level = (levelHint != null && levelHint.isNotEmpty)
         ? '用户的英语水平:$levelHint(选材时照顾难度)。'
+        : '';
+    // v2.7(用户第 4/5 条):个性化偏好(类型/题材/补充需求)与难度档要**真的**
+    // 进提示词 —— 否则界面上的开关只是装饰,用户一眼就能看出来没生效。
+    final prefs = (prefsHint != null && prefsHint.trim().isNotEmpty)
+        ? '用户的找材料偏好:${prefsHint.trim()}。这些偏好优先于你的默认口味。'
+        : '';
+    final band = (bandHint != null && bandHint.trim().isNotEmpty)
+        ? '${bandHint.trim()}。按这个难度挑:太难的不要推,太简单的也别凑数。'
         : '';
     const systemPrompt = '''你是英语学习材料的检索助手。用户会用**中文**描述想找什么,
 你要把它变成"真的能搜到原文"的检索方案。返回 JSON:
@@ -126,7 +136,7 @@ $vocabText
    **不确定数字 id 就把 url 写成空串** —— 编一个不存在的 id 会让用户点开 404。
 4. why 用中文,一句话,说清"为什么适合他"(题材/难度/篇幅),不要空话。
 5. 只输出 JSON。''';
-    final userPrompt = '我想找:$userQuery\n$categoryHint$level';
+    final userPrompt = '我想找:$userQuery\n$categoryHint$level$prefs$band';
     final response = await postWithReasoningFallback(
       '/v1/chat/completions',
       BaseApiService.buildChatBody(

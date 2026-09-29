@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../config/constants.dart';
+import '../../../config/design_tokens.dart';
 import '../../../config/theme.dart';
 import '../../../providers/vocab_provider.dart';
 import '../../../services/database.dart';
 import '../../../models/vocabulary.dart';
 import '../../../utils/material_group.dart';
+import '../../../utils/page_label.dart';
+import '../../../widgets/app_ui.dart';
 import '../../profile/vocab_list.dart';
 
 /// 板块2：我的学习材料 — 按分类浏览用户已保存的材料
@@ -29,15 +32,15 @@ class MyMaterialsSection extends StatelessWidget {
     // 统计总数
     final totalVocab = vocab.vocabularies.length;
 
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      elevation: 1,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    return AppCard(
+      // v2.7(第 1 条):与同页其他卡片统一几何(旧写法 Card(margin: h16)+ 圆角 12 +
+      // tilePadding 16 → 左边缘比别的卡片多缩进 16px)
+      padding: EdgeInsets.zero,
       child: ExpansionTile(
         initiallyExpanded: true,
-        tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        tilePadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
         childrenPadding:
-            const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            const EdgeInsets.fromLTRB(14, 0, 14, 12),
         leading: Icon(Icons.folder_open, color: theme.colorScheme.primary),
         title: Text(
           '我的学习材料',
@@ -249,8 +252,26 @@ class _CategoryVocabSheetState extends State<_CategoryVocabSheet> {
     await _load();
   }
 
-  /// 改页码/章节标签(v1.8.0):整组一起改,输入会被智能归一
-  Future<void> _editPageLabel(String label, List<Vocabulary> items) async {
+  /// 改出处(v2.7,用户第 6(2) 条)。
+  ///
+  /// 「未归类」里的词 `material_path` 是空的,而这里以前**只能改页码**
+  /// (`updateSourcePageByIds` 只写 `source_page`)—— 于是用户给未归类的内容
+  /// 编辑了"出处"(页码),它依然待在「未归类」,看起来就是"归类没生效"。
+  /// 现在:未归类走 [needMaterial] 分支,弹「材料名 + 页码」两个字段,填了材料名
+  /// 就真的离开未归类;其余分组的页码编辑保持原样(整组一起改,输入自动归一)。
+  Future<void> _editSource(
+    String label,
+    List<Vocabulary> items, {
+    bool needMaterial = false,
+  }) async {
+    if (needMaterial) {
+      await _assignMaterial(
+        label: label.isEmpty ? '未标页码' : label,
+        items: items,
+        page: label,
+      );
+      return;
+    }
     final ctrl = TextEditingController(
       text: label == '未标页码' ? '' : label,
     );
@@ -285,6 +306,188 @@ class _CategoryVocabSheetState extends State<_CategoryVocabSheet> {
     await DatabaseService.updateSourcePageByIds(ids, newLabel);
     if (!mounted) return;
     await _load();
+  }
+
+  /// 归入材料 / 改出处(v2.7,用户第 6(2) 条):写 `material_path` + `source_book`
+  /// (+ 可选页码)。这是"未归类"唯一的出口 —— 填了材料名,这一组就移到
+  /// 「分类 / 材料名」下面。
+  Future<void> _assignMaterial({
+    required String label,
+    required List<Vocabulary> items,
+    String? book,
+    String? page,
+  }) async {
+    final ids = items.map((v) => v.id).whereType<int>().toList();
+    if (ids.isEmpty) return;
+    final nameCtrl = TextEditingController(text: book ?? '');
+    final pageCtrl = TextEditingController(
+      text: (page ?? '') == '未标页码' ? '' : (page ?? ''),
+    );
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('编辑出处'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '共 ${ids.length} 个生词。材料名决定它们挂在哪个材料下面 —— '
+                '「未归类」里的词只有填了材料名才会移出去。',
+                style: const TextStyle(fontSize: 12, height: 1.5),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: nameCtrl,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  labelText: '材料名 / 书名',
+                  hintText: '如:哈利波特与魔法石',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: pageCtrl,
+                decoration: const InputDecoration(
+                  labelText: '页码 / 章节(可选)',
+                  hintText: '如 p33-35 或 第2章',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    final name = nameCtrl.text.trim();
+    final pageText = pageCtrl.text.trim();
+    nameCtrl.dispose();
+    pageCtrl.dispose();
+    if (saved != true || !mounted) return;
+    if (name.isEmpty) {
+      // 空材料名 = 依旧未归类。与其"保存成功但什么都没变",不如当场说清。
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('材料名没填 —— 没有材料名它就还是「未归类」'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+    final normalized = normalizePageLabel(pageText);
+    await context.read<VocabProvider>().moveVocabularies(
+          ids,
+          category: widget.category,
+          materialPath: buildMaterialPath(
+            category: widget.category,
+            name: name,
+          ),
+          sourceBook: name,
+          sourcePage: normalized.isEmpty ? null : normalized,
+        );
+    if (!mounted) return;
+    await _load();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('已把 ${ids.length} 个生词归入「$name」'),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  /// 解散分组(v2.7,用户第 6(1) 条):词**保留**,只把材料出处清空 → 回到「未归类」。
+  Future<void> _detachGroup(String label, List<Vocabulary> items) async {
+    final ids = items.map((v) => v.id).whereType<int>().toList();
+    if (ids.isEmpty) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('解散「$label」?'),
+        content: Text(
+          '${ids.length} 个生词都会保留,只是不再挂在任何材料下面'
+          '(移到「未归类」)。生词与复习记录不受影响。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('解散'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    await context.read<VocabProvider>().detachMaterial(ids);
+    if (!mounted) return;
+    await _load();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('已解散分组,${ids.length} 个生词移到「未归类」'),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  /// 删除整组(v2.7,用户第 6(1) 条:"没法直接选中子分类进行删除,
+  /// 只能进生词本一个一个删")。走批量删除:单事务 + 单次刷新,不是 N 次单删。
+  Future<void> _deleteGroup(String label, List<Vocabulary> items) async {
+    final ids = items.map((v) => v.id).whereType<int>().toList();
+    if (ids.isEmpty) return;
+    final danger = AppTheme.dangerColor(context);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('删除「$label」?'),
+        content: Text(
+          '这一组共 ${ids.length} 个生词,删除后不可恢复'
+          '(连同它们的复习记录一起移除)。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(ctx).colorScheme.error,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text('删除 ${ids.length} 个'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final n = await context.read<VocabProvider>().deleteVocabularies(ids);
+    if (!mounted) return;
+    await _load();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('已删除 $n 个生词'),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: danger,
+      ),
+    );
   }
 
   /// 分组(v1.6.0):书籍 = 一本书一个文件夹,页/章为子分类;
@@ -399,29 +602,85 @@ class _CategoryVocabSheetState extends State<_CategoryVocabSheet> {
               '${hasSubgroups ? ' · ${subs.length} 个${widget.category == '书籍' ? '页码/章节' : '子分类'}' : ''}',
               style: TextStyle(fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
             ),
-            // 重命名(v1.8.0):书名/材料名可手动改
-            trailing: isUncategorized
-                ? null
-                : IconButton(
-                    tooltip: '重命名',
-                    icon: const Icon(Icons.edit_outlined, size: 16),
-                    onPressed: () => _renameGroup(g),
+            // v2.7(第 6(1) 条):右上角改回**默认展开箭头** —— ExpansionTile 的
+            // trailing 一旦被占用,箭头就没了,用户看不出这一行能展开;
+            // 重命名/改出处/解散/删除整组统一放到展开区底部一行(带文字标签,更好找)。
+            children: [
+              if (hasSubgroups)
+                ...subs.entries.map(
+                  (e) => _buildSubgroupTile(
+                    e.key,
+                    e.value,
+                    needMaterial: isUncategorized,
                   ),
-            children: hasSubgroups
-                ? subs.entries
-                    .map((e) => _buildSubgroupTile(e.key, e.value))
-                    .toList()
-                : _buildVocabList(
+                )
+              else
+                ..._buildVocabList(
                     subs.isEmpty ? <Vocabulary>[] : subs.values.first),
+              _groupActions(g, [
+                for (final list in subs.values) ...list,
+              ], isUncategorized),
+            ],
           ),
         );
       },
     );
   }
 
+  /// 分组操作条(v2.7,用户第 6(1)(2) 条)
+  Widget _groupActions(
+    MaterialGroup g,
+    List<Vocabulary> items,
+    bool isUncategorized,
+  ) {
+    final danger = AppTheme.dangerColor(context);
+    final ids = items.map((v) => v.id).whereType<int>().toList();
+    if (ids.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: Gap.xs),
+      child: Wrap(
+        spacing: Gap.xs,
+        runSpacing: Gap.xs,
+        children: [
+          if (!isUncategorized)
+            ActionChip(
+              avatar: const Icon(Icons.drive_file_rename_outline, size: 15),
+              label: const Text('重命名'),
+              onPressed: () => _renameGroup(g),
+            ),
+          ActionChip(
+            avatar: const Icon(Icons.drive_file_move_outline, size: 15),
+            label: Text(isUncategorized ? '归入材料…' : '改出处…'),
+            onPressed: () => _assignMaterial(label: g.label, items: items),
+          ),
+          if (!isUncategorized)
+            ActionChip(
+              avatar: const Icon(Icons.folder_off_outlined, size: 15),
+              label: const Text('解散分组'),
+              onPressed: () => _detachGroup(g.label, items),
+            ),
+          ActionChip(
+            avatar: Icon(Icons.delete_outline, size: 15, color: danger),
+            label: Text('删除整组(${ids.length})',
+                style: TextStyle(color: danger)),
+            onPressed: () => _deleteGroup(g.label, items),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// 二级:页码/章节(书籍)或子分类
-  Widget _buildSubgroupTile(String label, List<Vocabulary> items) {
+  ///
+  /// [needMaterial] = 这个二级挂在「未归类」下面(第 6(2) 条):这时铅笔不能只改页码,
+  /// 必须同时能填材料名,否则改完还在未归类。
+  Widget _buildSubgroupTile(
+    String label,
+    List<Vocabulary> items, {
+    bool needMaterial = false,
+  }) {
     final theme = Theme.of(context);
+    final danger = AppTheme.dangerColor(context);
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
       elevation: 0,
@@ -446,11 +705,27 @@ class _CategoryVocabSheetState extends State<_CategoryVocabSheet> {
           '${items.length} 个生词',
           style: TextStyle(fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
         ),
-        // 改页码/章节(v1.8.0):整组一起改,输入自动归一
-        trailing: IconButton(
-          tooltip: '修改页码/章节',
-          icon: const Icon(Icons.edit_outlined, size: 15),
-          onPressed: () => _editPageLabel(label, items),
+        // 改页码/章节(v1.8.0)+ 删除这一组(v2.7,第 6(1) 条):
+        // 二级也能直接删,不必进生词本一个个删
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              tooltip: needMaterial ? '编辑出处(材料名 / 页码)' : '修改页码/章节',
+              icon: const Icon(Icons.edit_outlined, size: 15),
+              onPressed: () => _editSource(
+                label,
+                items,
+                needMaterial: needMaterial,
+              ),
+            ),
+            IconButton(
+              tooltip: '删除这一组(${items.length} 个生词)',
+              icon: Icon(Icons.delete_outline, size: 15, color: danger),
+              onPressed: () =>
+                  _deleteGroup(label.isEmpty ? '未标页码' : label, items),
+            ),
+          ],
         ),
         children: _buildVocabList(items),
       ),

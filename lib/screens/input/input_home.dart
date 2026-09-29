@@ -11,11 +11,15 @@ import '../../config/theme.dart';
 import '../../models/saved_session.dart';
 import '../../services/doubao_api.dart';
 import '../../services/api_endpoint.dart';
+import '../../services/learner_model_store.dart';
 import '../../widgets/app_ui.dart';
+import 'material_import_flow.dart';
+import 'material_reader_screen.dart';
 import 'process_chat.dart';
 import 'widgets/ai_article_section.dart';
 import 'material_center_screen.dart';
 import 'widgets/analysis_mode_picker.dart';
+import 'widgets/material_preview_dialog.dart';
 import 'widgets/my_materials_section.dart';
 
 class InputHomeScreen extends StatefulWidget {
@@ -63,7 +67,12 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('输入')),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.only(bottom: Gap.lg),
+        // v2.7(第 1 条):这里以前是 `EdgeInsets.only(bottom: Gap.lg)` —— **没有左右边距**,
+        // 于是上面的 AppCard 是通栏的,而下面 AI 文章 / 我的学习材料各自硬写
+        // `Card(margin: horizontal 16)`,同一页出现两套卡片几何(外边距 0/16、
+        // 圆角 16/12、左内容边距 14/32)。用户说的"ui 大小不统一"就是这个。
+        // 现在统一走页面标准边距,四张卡同一套几何。
+        padding: Insets.page,
         child: Column(
           children: [
             // ── 主行动:拍照识文(v2.5,U1)──
@@ -101,16 +110,17 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
     );
   }
 
-  /// 拍照识文卡片(v2.6 重做)。
+  /// 拍照识文卡片(v2.6 重做;v2.7 升级为「上传分析材料」,用户第 3 条)。
   ///
-  /// 用户原话:"把首页输入界面的拍照识文功能的 UI 也美化提升一下,我忍它很久了";
-  /// 以及第 1 条"首页材料中心 UI 大小不统一"。
+  /// 用户原话:'"拍照识文"功能也要优化,现在的使用场景只能用于手写或者照片 ——
+  /// 因此,该功能升级为"上传分析材料",然后子功能 ——"拍照识别"和"外部链接导入"
+  /// (也就是兼容各种网站链接,包括但不限于论文、期刊等等这些)'。
   ///
-  /// 旧版的问题:①"拍照识文"四个字出现了**三遍**(标题/大圆里/圆下面)
-  /// ②80px 大黑圆 + 阴影占了半屏,却只是个"点这里"的按钮
-  /// ③模型选择、从相册、继续会话、标注出处全都平铺,视觉上没有主次。
-  /// 现在:一个**主按钮(整行 52 高)**承担"拍照",其余按重要性依次排开,
-  /// 与「材料中心」那张入口卡同一套圆角/内边距(尺寸也就统一了)。
+  /// 所以这一张卡现在有**两个子功能**:
+  /// 1. **拍照识别** = 原来的拍照/相册取词(识图结果页的模型/保存/追问原样保留);
+  /// 2. **外部链接导入** = 贴一个公开链接 → 抓正文 → 在软件内的阅读器里读
+  ///    (逐段翻译 / 点词 / 收藏 / 追问 / 底部动作栏,与材料中心同一套)。
+  /// 两个入口都放在卡片顶部一行,平级、一眼能看出这是"两条路"。
   Widget _buildCaptureSectionCard(ThemeData theme) {
     return AppCard(
       child: Column(
@@ -119,17 +129,17 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
           // 标题行(带模型/思考档位的快捷入口,不占额外一行)
           Row(
             children: [
-              Icon(Icons.camera_alt, size: 18, color: theme.colorScheme.primary),
+              Icon(Icons.upload_file, size: 18, color: theme.colorScheme.primary),
               const SizedBox(width: Gap.xs),
               Text(
-                '拍照识文',
+                '上传分析材料',
                 style: theme.textTheme.titleSmall
                     ?.copyWith(fontWeight: FontWeight.w600),
               ),
               const SizedBox(width: Gap.xs),
               Expanded(
                 child: Text(
-                  '拍摄阅读材料,识别标记内容',
+                  '拍照识词,或导入链接让 AI 帮你分析',
                   style: theme.textTheme.bodySmall
                       ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                   maxLines: 1,
@@ -140,21 +150,36 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
           ),
           const SizedBox(height: Gap.sm),
 
-          // ① 主行动:拍照(整行大按钮,比一个圆圈更好点、也更好看)
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              onPressed: _takePhoto,
-              style: FilledButton.styleFrom(
-                minimumSize: const Size(0, 52),
+          // ① 两个子功能平级并排:拍照识别 / 外部链接导入(第 3 条)
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: _takePhoto,
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(0, 52),
+                  ),
+                  icon: const Icon(Icons.photo_camera_outlined, size: 18),
+                  label: const Text('拍照识别', style: TextStyle(fontSize: 14)),
+                ),
               ),
-              icon: const Icon(Icons.photo_camera_outlined, size: 20),
-              label: const Text('拍照识文', style: TextStyle(fontSize: 15)),
-            ),
+              const SizedBox(width: Gap.xs),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _importFromLink,
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(0, 52),
+                  ),
+                  icon: const Icon(Icons.link, size: 18),
+                  label: const Text('外部链接导入',
+                      style: TextStyle(fontSize: 14)),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: Gap.xs),
 
-          // ② 次要行动:从相册选择
+          // ② 次要行动:从相册选择(属于"拍照识别"这条路)
           SizedBox(
             width: double.infinity,
             child: OutlinedButton.icon(
@@ -460,6 +485,31 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
         ],
       ),
     );
+  }
+
+  /// 外部链接导入(v2.7,用户第 3 条):贴公开链接 → 抓正文 → 入库 → 阅读器。
+  ///
+  /// 与材料中心的导入走**同一个** [MaterialImportFlow]:抓取方式(Gutenberg/arXiv
+  /// 用专用抓取、其它走通用网页正文)、失败原因、标题中文化、入库全都共用一份实现。
+  Future<void> _importFromLink() async {
+    final ingested = await MaterialImportFlow.run(
+      context,
+      model: LearnerModelStore.load(),
+      only: ImportChannel.link,
+      dialogTitle: '外部链接导入',
+    );
+    if (ingested == null || !mounted) return;
+    final go = await showMaterialPreview(context, ingested);
+    if (!mounted) return;
+    if (go) {
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => MaterialReaderScreen(materialId: ingested.materialId),
+        ),
+      );
+      if (mounted) await context.read<VocabProvider>().loadVocabularies();
+    }
   }
 
   Future<void> _takePhoto() async {

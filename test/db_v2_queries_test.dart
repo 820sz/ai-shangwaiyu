@@ -810,8 +810,88 @@ void main() {
     expect(await DatabaseService.deleteTutorMemory(id2), 0);
   });
 
-  // ── 9. 快照聚合 ──
+  // ── 8b. 材料分组:归入材料 / 解散分组 / 整组删除(v2.7 用户第 6(1)(2) 条)──
+  //
+  // 用户实测:"即使给「未分类」里的内容编辑了出处(比如页码),它仍然处于「未归类」"。
+  // 根因是 UI 只能改 source_page,而「未归类」的判定看的是 material_path ——
+  // 所以这两条 SQL 的语义必须钉死:归入材料写 path,解散分组把 path 清成 NULL。
 
+  test('归入材料:写 material_path + source_book + 页码 → 离开「未归类」', () async {
+    await DatabaseService.insertVocabularies([
+      Vocabulary(word: 'alpha', category: '书籍'),
+      Vocabulary(word: 'beta', category: '书籍'),
+    ]);
+    final all = await DatabaseService.getVocabulariesByCategory('书籍');
+    final ids = all.map((v) => v.id!).toList();
+
+    final n = await DatabaseService.updateVocabulariesCategory(
+      ids,
+      category: '书籍',
+      materialPath: '书籍/《红楼梦》',
+      sourceBook: '《红楼梦》',
+      sourcePage: 'p33-35',
+    );
+    expect(n, 2);
+
+    final after = await DatabaseService.getVocabulariesByCategory('书籍');
+    expect(after.every((v) => v.materialPath == '书籍/《红楼梦》'), isTrue);
+    expect(after.every((v) => v.sourceBook == '《红楼梦》'), isTrue);
+    expect(after.every((v) => v.sourcePage == 'p33-35'), isTrue);
+  });
+
+  test('解散分组:词保留、material_path 与 source_book 置空(回到「未归类」)', () async {
+    await DatabaseService.insertVocabularies([
+      Vocabulary(
+        word: 'gamma',
+        category: '书籍',
+        materialPath: '书籍/《红楼梦》',
+        sourceBook: '《红楼梦》',
+      ),
+    ]);
+
+    final books = await DatabaseService.getVocabulariesByCategory('书籍');
+    expect(books.length, 1);
+
+    final n = await DatabaseService.detachMaterialPath(
+      books.map((v) => v.id!).toList(),
+    );
+    expect(n, 1);
+
+    final after = await DatabaseService.getVocabulariesByCategory('书籍');
+    expect(after.length, 1, reason: '解散分组不能删词');
+    expect(after.single.word, 'gamma');
+    expect(after.single.materialPath, isNull);
+    expect(after.single.sourceBook, isNull);
+  });
+
+  test('解散分组:空 id 列表是安全的空操作(不抛、不改任何行)', () async {
+    await DatabaseService.insertVocabularies([
+      Vocabulary(word: 'delta', category: '书籍', materialPath: '书籍/《X》'),
+    ]);
+    expect(await DatabaseService.detachMaterialPath(const []), 0);
+    final after = await DatabaseService.getVocabulariesByCategory('书籍');
+    expect(after.single.materialPath, '书籍/《X》');
+  });
+
+  test('整组删除:按 id 批量删,词与复习状态一起走', () async {
+    await DatabaseService.insertVocabularies([
+      Vocabulary(word: 'e1', category: '书籍', materialPath: '书籍/《Y》'),
+      Vocabulary(word: 'e2', category: '书籍', materialPath: '书籍/《Y》'),
+      Vocabulary(word: 'keep', category: '书籍', materialPath: '书籍/《Z》'),
+    ]);
+
+    final target = (await DatabaseService.getVocabulariesByCategory('书籍'))
+        .where((v) => v.materialPath == '书籍/《Y》')
+        .map((v) => v.id!)
+        .toList();
+    expect(target.length, 2);
+
+    expect(await DatabaseService.deleteVocabularies(target), 2);
+    final after = await DatabaseService.getVocabulariesByCategory('书籍');
+    expect(after.map((v) => v.word).toList(), ['keep']);
+  });
+
+  // ── 9. 快照聚合 ──
   test('聚合:mastery 分布、近 N 天生词、按 word_type 计数', () async {
     await DatabaseService.insertVocabularies([
       Vocabulary(word: 'alpha', masteryLevel: 0),

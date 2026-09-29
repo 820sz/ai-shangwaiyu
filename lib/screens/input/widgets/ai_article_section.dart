@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../../models/article.dart';
 import '../../../providers/article_provider.dart';
 import '../../../providers/vocab_provider.dart';
+import '../../../widgets/app_ui.dart';
 import '../../output/article_reader.dart';
 
 /// 特色功能 · AI 生词定制文章(v1.8.0:从「输出」页迁到「输入」页)。
@@ -77,14 +78,15 @@ class _AiArticleSectionState extends State<AiArticleSection> {
     final articleProv = context.watch<ArticleProvider>();
     final articles = articleProv.articles;
 
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      elevation: 1,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    // v2.7(第 1 条):改用统一的 AppCard —— 与「材料中心」「上传分析材料」同一套
+    // 圆角/内边距/外边距。旧写法是 `Card(margin: h16, radius 12)` + `tilePadding 16`,
+    // 与同页其他卡片的左边缘差 16px、圆角差 4px,用户看到的就是"大小不统一"。
+    return AppCard(
+      padding: EdgeInsets.zero,
       child: ExpansionTile(
         initiallyExpanded: false,
-        tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+        tilePadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+        childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
         leading: Icon(Icons.auto_stories, color: theme.colorScheme.primary),
         title: Text(
           '特色功能 · AI 生词定制文章',

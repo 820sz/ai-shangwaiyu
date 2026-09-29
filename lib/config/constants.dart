@@ -133,7 +133,14 @@ class AppConstants {
   static const String dbCategoryDefault = '其他';
 
   // ── Hive 额外 Key ──
+  /// 找材料的搜索框记忆(v2.7,用户第 2(3) 条):{分类: 上次搜索词} 的 JSON。
+  /// v2.6 之前这个 key 声明了却没人用,而搜索框显示的是**学习画像里的兴趣词** ——
+  /// 用户以为"上次搜的东西没清掉",其实是拿画像词冒充搜索历史。
   static const String keyMaterialSearchHistory = 'material_search_history';
+
+  /// 材料中心的个性化找资源偏好(v2.7,用户第 5 条):
+  /// 难度档(i+1/i+10/i+100/不限)+ 内容类型 + 题材倾向 + 补充需求,JSON 存。
+  static const String keyMaterialPrefs = 'material_prefs';
 
   /// 内容源可用性记忆(v2.2):{sourceId: {ok, at, msg}} 的 JSON。
   /// 为什么存:公开源在不同网络下可达性差别极大(BBC/VOA/TED/Wikipedia 在

@@ -1,8 +1,10 @@
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:readflow/config/constants.dart';
 import 'package:readflow/models/learner_model.dart';
 import 'package:readflow/services/learner_context.dart';
 import 'package:readflow/services/material_library.dart';
+import 'package:readflow/services/material_prefs.dart';
 import 'package:readflow/services/word_frequency.dart';
 
 /// 材料中心核心逻辑测试:难度分析 + i+1 排序 + 书架标签。
@@ -205,6 +207,87 @@ void main() {
       expect(MaterialLibrary.kindLabel('wiki'), '百科');
       expect(MaterialLibrary.kindLabel('paper'), '论文');
       expect(MaterialLibrary.kindLabel('whatever'), '文章');
+    });
+
+    test('材料种类 → 存词分类映射齐全(阅读器收词不再掉进「未归类」)', () {
+      // 用户第 6(2) 条抱怨的"改了出处还在未归类"同源问题:从材料收词时
+      // 分类/材料名必须写全,否则词会落到「未归类」
+      expect(MaterialLibrary.categoryOfKind('book'), '书籍');
+      expect(MaterialLibrary.categoryOfKind('news'), '外刊');
+      expect(MaterialLibrary.categoryOfKind('podcast'), '外刊');
+      expect(MaterialLibrary.categoryOfKind('paper'), '碎片文章');
+      expect(MaterialLibrary.categoryOfKind('article'), '碎片文章');
+      expect(MaterialLibrary.categoryOfKind('wiki'), '其他');
+      expect(MaterialLibrary.categoryOfKind('未知'), '其他');
+      // 每个映射结果都必须是合法的学习分类(否则存进去的分类是野的)
+      for (final k in ['book', 'news', 'podcast', 'paper', 'article', 'wiki', 'x']) {
+        expect(AppConstants.learningCategories,
+            contains(MaterialLibrary.categoryOfKind(k)));
+      }
+    });
+  });
+
+  group('按用户自选难度档排序(rankForBand,v2.7 用户第 4 条)', () {
+    ShelfItem item({
+      required int id,
+      double? coverage,
+      double percent = 0,
+      bool finished = false,
+    }) =>
+        ShelfItem(
+          id: id,
+          title: 'M$id',
+          kind: 'news',
+          source: 'npr',
+          cefr: 'B1',
+          wordCount: 500,
+          coverage: coverage,
+          estMinutes: 5,
+          percent: percent,
+          minutesRead: 0,
+          pickedWords: 0,
+          url: 'https://x/$id',
+          finished: finished,
+        );
+
+    test('不限档 = 沿用原来的 i+1 排序(不改变老行为)', () {
+      final items = [
+        item(id: 1, coverage: 0.96, percent: 40),
+        item(id: 2, coverage: 0.85),
+      ];
+      expect(
+        MaterialLibrary.rankForBand(items, MaterialBand.any).map((e) => e.id),
+        MaterialLibrary.rankForToday(items).map((e) => e.id),
+      );
+    });
+
+    test('i+10:符合档位的排前面,偏易/偏难靠后(而不是隐藏)', () {
+      final ranked = MaterialLibrary.rankForBand([
+        item(id: 1, coverage: 0.995), // 偏易
+        item(id: 2, coverage: 0.85), // 偏难
+        item(id: 3, coverage: 0.95), // 符合 i+10
+      ], MaterialBand.i10);
+      expect(ranked.first.id, 3);
+      // 三条都还在(只是顺序变了)—— 用户可能就是想读那本难书
+      expect(ranked.length, 3);
+    });
+
+    test('i+1:≥98% 才算符合;在读材料仍然加权,不会因为换档沉底', () {
+      final ranked = MaterialLibrary.rankForBand([
+        item(id: 1, coverage: 0.99, percent: 30), // 符合 + 在读
+        item(id: 2, coverage: 0.99), // 符合
+        item(id: 3, coverage: 0.96), // 不符合 i+1
+      ], MaterialBand.i1);
+      expect(ranked.first.id, 1);
+      expect(ranked.last.id, 3);
+    });
+
+    test('没有覆盖率的材料不会被挤掉(数据缺失不该判成"偏难")', () {
+      final ranked = MaterialLibrary.rankForBand([
+        item(id: 1, coverage: 0.96),
+        item(id: 2), // 没有覆盖率
+      ], MaterialBand.i1);
+      expect(ranked.length, 2);
     });
   });
 }

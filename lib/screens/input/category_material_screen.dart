@@ -9,7 +9,9 @@ import '../../services/deepseek_api.dart';
 import '../../services/external_link.dart';
 import '../../services/learner_model_store.dart';
 import '../../services/learner_context.dart';
+import '../../services/material_import.dart';
 import '../../services/material_library.dart';
+import '../../services/material_prefs.dart';
 import '../../services/material_source.dart';
 import '../../services/original_search.dart';
 import '../../widgets/app_ui.dart';
@@ -50,22 +52,32 @@ class _CategoryMaterialScreenState extends State<CategoryMaterialScreen> {
   List<String> _notes = const [];
   LearnerModel _model = LearnerModel();
 
+  /// 材料偏好(v2.7,第 4/5 条):难度档 + 类型 + 题材 + 补充需求,一并交给 AI
+  MaterialPrefs _prefs = MaterialPrefs.empty;
+
+  /// 正在抓取的 AI 点名作品(按引用比较,用来只禁用那一行)
+  Map<String, String>? _openingPick;
+
   @override
   void initState() {
     super.initState();
     _model = LearnerModelStore.load();
-    _queryCtrl.text = _defaultQuery();
-    // v2.5:进来就自动搜一次 —— "打开即行动"(训记的本质):
-    // 不再要求用户先想关键词、再点按钮。书籍类不填关键词时取"最受欢迎书单"。
+    _prefs = MaterialPrefs.load();
+    // v2.7(用户第 2(3) 条):搜索框只回填**上次在这个分类里真搜过的词**。
+    // 旧实现填的是学习画像里的第一个兴趣词 —— 用户每次进来都看到同一个词挂着,
+    // 以为"上次搜的东西没清掉",其实是拿画像词冒充搜索历史。
+    _queryCtrl.text = MaterialPrefs.lastQueryFor(widget.category);
+    // v2.5 起进来就自动搜一次("打开即行动");自动那一次用内部默认词,
+    // **不写进搜索框**(搜索框留白 + hint 提示可以中文说需求)。
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _search();
+      if (mounted) _search(auto: true);
     });
   }
 
-  /// 默认关键词:用户感兴趣的第一个题材;没有就用该分类的默认检索
-  String _defaultQuery() {
-    final interest = _model.interests?.value;
-    if (interest != null && interest.isNotEmpty) return interest.first;
+  /// 自动首搜时的内部默认词:用户上次搜过就用上次的,否则按分类给一个默认。
+  String _autoQuery() {
+    final last = MaterialPrefs.lastQueryFor(widget.category);
+    if (last.isNotEmpty) return last;
     return OriginalSearch.defaultQueryFor(widget.category);
   }
 
@@ -75,12 +87,15 @@ class _CategoryMaterialScreenState extends State<CategoryMaterialScreen> {
     super.dispose();
   }
 
-  /// 是不是"中文需求"(v2.6):是的话先让 AI 把它变成能搜的东西,
-  /// 而不是像以前那样弹一句"请用英文关键词"再把用户顶回去。
+  /// 是不是"中文需求"(v2.6):是的话先让 AI 把它变成能搜的东西。
   bool get _looksChinese => RegExp(r'[\u4e00-\u9fa5]').hasMatch(_queryCtrl.text);
 
-  Future<void> _search() async {
-    final raw = _queryCtrl.text.trim();
+  Future<void> _search({bool auto = false}) async {
+    final raw = auto ? _autoQuery() : _queryCtrl.text.trim();
+    // 记住用户真正搜过的东西(自动首搜不记,免得把默认词写成"历史")
+    if (!auto && raw.isNotEmpty) {
+      await MaterialPrefs.rememberQuery(widget.category, raw);
+    }
     setState(() {
       _loading = true;
       _searched = true;
@@ -91,12 +106,14 @@ class _CategoryMaterialScreenState extends State<CategoryMaterialScreen> {
     var query = raw;
     var picks = const <Map<String, String>>[];
     var aiNote = '';
-    if (_ai.isConfigured && (raw.isEmpty || _looksChinese)) {
+    if (_ai.isConfigured && (raw.isEmpty || _looksChinese || !_prefs.isEmpty)) {
       try {
         final plan = await _ai.planMaterialSearch(
           raw.isEmpty ? '${widget.category} 入门 经典' : raw,
           category: widget.category,
           levelHint: LearnerContext.describeBaseline(_model),
+          prefsHint: _prefs.hintForAi,
+          bandHint: _prefs.band.isAny ? '' : _prefs.band.hintForAi,
         );
         final queries = (plan['queries'] as List?)?.cast<String>() ?? const [];
         picks = (plan['picks'] as List?)
@@ -111,18 +128,30 @@ class _CategoryMaterialScreenState extends State<CategoryMaterialScreen> {
       }
     }
 
-    // ── ② 真实检索:拿 AI 给的英文词去公开源里搜真东西 ──
-    final result = await OriginalSearch.search(query, category: widget.category);
+    // ── ② 真实检索:拿 AI 给的英文词去公开源里搜真东西(按偏好挑源)──
+    final result = await OriginalSearch.search(
+      query,
+      category: widget.category,
+      sourceIds: _prefs.kinds.isEmpty
+          ? null
+          : [for (final s in _prefs.preferredSources) s.id],
+    );
 
-    // ── ③ 标题中文化:整屏英文没人看得懂(用户第 8(3) 条)──
+    // ── ③ 标题中文化:整屏英文没人看得懂(用户第 8(3)/2(2) 条)──
+    //     AI 点名的作品也要翻 —— 它们同样显示「中文(英文)」
     var titleCn = const <String, String>{};
-    if (_ai.isConfigured && result.hits.isNotEmpty) {
-      try {
-        titleCn = await _ai.translateTitles(
-          result.hits.take(12).map((h) => h.title).toList(),
-        );
-      } catch (e) {
-        debugPrint('ReadFlow 标题中文化失败(保持英文): $e');
+    if (_ai.isConfigured) {
+      final titles = <String>[
+        ...result.hits.take(12).map((h) => h.title),
+        for (final p in picks)
+          if ((p['title_en'] ?? '').trim().isNotEmpty) p['title_en']!.trim(),
+      ];
+      if (titles.isNotEmpty) {
+        try {
+          titleCn = await _ai.translateTitles(titles);
+        } catch (e) {
+          debugPrint('ReadFlow 标题中文化失败(保持英文): $e');
+        }
       }
     }
 
@@ -144,7 +173,7 @@ class _CategoryMaterialScreenState extends State<CategoryMaterialScreen> {
     return '$cn（$en）';
   }
 
-  /// 打开一条原文:抓正文 → 本地分析 → 入库 → 读前卡 → 阅读器
+  /// 打开一条原文:抓正文 → 本地分析 → 入库 → 阅读器
   Future<void> _open(OriginalHit hit) async {
     final source = MaterialSourceService.sourceOf(hit.sourceId);
     if (source == null) return;
@@ -165,8 +194,11 @@ class _CategoryMaterialScreenState extends State<CategoryMaterialScreen> {
         'arxiv' => await service.fetchArxiv(hit.sourceId2),
         _ => await service.fetchDocument(hit.sourceId, url: hit.url),
       };
+      // 标题补成「中文(英文)」再入库(用户第 2(2) 条):书架/阅读器/材料文件夹
+      // 三处显示同一个标题,不会一处中文一处英文
+      final title = await MaterialImport.localizedTitle(doc.title);
       final ingested = await MaterialLibrary.ingestDoc(
-        doc,
+        _retitled(doc, title),
         model: _model,
         vocab: vocab,
       );
@@ -184,6 +216,80 @@ class _CategoryMaterialScreenState extends State<CategoryMaterialScreen> {
         SnackBar(content: Text('打不开这条原文:$e')),
       );
     }
+  }
+
+  /// AI 点名的作品 → 在软件内抓取并打开(v2.7,第 2(1) 条:不能只有外链)
+  Future<void> _openPick(Map<String, String> p) async {
+    final url = (p['url'] ?? '').trim();
+    if (url.isEmpty) return;
+    setState(() => _openingPick = p);
+    final nav = Navigator.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    final vocab = context.read<VocabProvider>().vocabularies;
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Dialog(
+        child: AppLoading(label: '正在抓取这份材料…'),
+      ),
+    );
+    try {
+      // Gutenberg 书号 / arXiv 编号走专用抓取(能拿到全文或摘要)
+      final doc = await MaterialImport.fromAnyUrl(
+        url,
+        title: p['title_en'] ?? '',
+      );
+      final title = await MaterialImport.localizedTitle(
+        (p['title_en'] ?? '').trim().isEmpty ? doc.title : p['title_en']!,
+      );
+      final ingested = await MaterialLibrary.ingestDoc(
+        _retitled(doc, title),
+        model: _model,
+        vocab: vocab,
+      );
+      if (!mounted) return;
+      nav.pop();
+      await nav.push(
+        MaterialPageRoute(
+          builder: (_) => MaterialReaderScreen(materialId: ingested.materialId),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      nav.pop();
+      // 抓不到就给"用浏览器打开"的退路 —— 这正是用户要"链接+软件内呈现"两条路的原因
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('这份材料在软件内抓不到:$e'),
+          action: SnackBarAction(
+            label: '用浏览器打开',
+            onPressed: () => _openExternalUrl(url),
+          ),
+          duration: const Duration(seconds: 8),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _openingPick = null);
+    }
+  }
+
+  /// 只换标题(正文与元信息原样)
+  MaterialDoc _retitled(MaterialDoc doc, String title) {
+    final t = title.trim();
+    if (t.isEmpty || t == doc.title.trim()) return doc;
+    return MaterialDoc(
+      sourceId: doc.sourceId,
+      sourceId2: doc.sourceId2,
+      kind: doc.kind,
+      title: t,
+      author: doc.author,
+      url: doc.url,
+      license: doc.license,
+      language: doc.language,
+      audioUrl: doc.audioUrl,
+      chunks: doc.chunks,
+      plainText: doc.plainText,
+    );
   }
 
   @override
@@ -222,6 +328,37 @@ class _CategoryMaterialScreenState extends State<CategoryMaterialScreen> {
           '每条都能点开看原文与来源,不是 AI 改写的内容。',
           style: theme.textTheme.bodySmall?.copyWith(color: muted, height: 1.5),
         ),
+        // 当前生效的偏好(v2.7,第 4/5 条):难度档与偏好摘要直接摊在这里,
+        // 用户不用回材料中心也知道"这次是按什么找的"
+        if (!_prefs.isEmpty) ...[
+          const SizedBox(height: Gap.xs),
+          Container(
+            padding: const EdgeInsets.symmetric(
+                horizontal: Gap.sm, vertical: Gap.xs),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.primary.withAlpha(10),
+              borderRadius: Radii.controlRadius,
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.tune, size: 14, color: theme.colorScheme.primary),
+                const SizedBox(width: Gap.xxs + 2),
+                Expanded(
+                  child: Text(
+                    '按你的偏好找:${_prefs.summary}',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.primary,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+                Text('在材料中心可改',
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(color: muted, fontSize: 10)),
+              ],
+            ),
+          ),
+        ],
         const SizedBox(height: Gap.sm),
         Row(
           children: [
@@ -229,7 +366,8 @@ class _CategoryMaterialScreenState extends State<CategoryMaterialScreen> {
               child: TextField(
                 controller: _queryCtrl,
                 decoration: const InputDecoration(
-                  // v2.6:不再要求用户"用英文搜" —— 中文说需求,AI 去想办法
+                  // v2.6:不再要求用户"用英文搜" —— 中文说需求,AI 去想办法。
+                  // v2.7:框里只回填"上次真搜过的词",没有就留空(不再挂画像词)。
                   hintText: '想找什么?中文说就行(例:适合入门的哲学公版书)',
                   isDense: true,
                 ),
@@ -238,7 +376,7 @@ class _CategoryMaterialScreenState extends State<CategoryMaterialScreen> {
             ),
             const SizedBox(width: Gap.xs),
             FilledButton(
-              onPressed: _loading ? null : _search,
+              onPressed: _loading ? null : () => _search(),
               child: Text(_loading ? '搜索中…' : '搜索'),
             ),
           ],
@@ -304,51 +442,65 @@ class _CategoryMaterialScreenState extends State<CategoryMaterialScreen> {
           ],
           for (final p in _picks) ...[
             const SizedBox(height: Gap.xs),
-            InkWell(
-              // 有原文链接就点开浏览器/Gutenberg 原文;没有链接则不可点
-              onTap: (p['url'] ?? '').isEmpty
-                  ? null
-                  : () => _openExternalUrl(p['url']!),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    _displayTitle(p['title_en'] ?? ''),
-                    style: theme.textTheme.bodyMedium
-                        ?.copyWith(fontWeight: FontWeight.w600),
-                  ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _displayTitle(p['title_en'] ?? ''),
+                  style: theme.textTheme.bodyMedium
+                      ?.copyWith(fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  [
+                    if ((p['author'] ?? '').isNotEmpty) p['author']!,
+                    if ((p['why'] ?? '').isNotEmpty) p['why']!,
+                  ].join(' · '),
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: muted, height: 1.4),
+                ),
+                if ((p['url'] ?? '').isNotEmpty) ...[
                   const SizedBox(height: 2),
-                  Text(
-                    [
-                      if ((p['author'] ?? '').isNotEmpty) p['author']!,
-                      if ((p['why'] ?? '').isNotEmpty) p['why']!,
-                    ].join(' · '),
-                    style: theme.textTheme.bodySmall
-                        ?.copyWith(color: muted, height: 1.4),
-                  ),
-                  if ((p['url'] ?? '').isNotEmpty) ...[
-                    const SizedBox(height: 2),
-                    Row(
-                      children: [
-                        Icon(Icons.link, size: 13, color: theme.colorScheme.primary),
-                        const SizedBox(width: 4),
-                        Expanded(
-                          child: Text(
-                            p['url']!,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.primary,
-                              fontSize: 11,
-                              decoration: TextDecoration.underline,
-                            ),
+                  Row(
+                    children: [
+                      Icon(Icons.link, size: 13, color: theme.colorScheme.primary),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          p['url']!,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.primary,
+                            fontSize: 11,
+                            decoration: TextDecoration.underline,
                           ),
                         ),
-                      ],
-                    ),
-                  ],
+                      ),
+                    ],
+                  ),
                 ],
-              ),
+                // 第 2(1) 条:AI 点名的作品也要能**在软件内读**,不能只给个链接
+                if ((p['url'] ?? '').isNotEmpty) ...[
+                  const SizedBox(height: Gap.xxs),
+                  Row(
+                    children: [
+                      FilledButton.tonal(
+                        onPressed: _openingPick == p
+                            ? null
+                            : () => _openPick(p),
+                        child: Text(_openingPick == p ? '抓取中…' : '软件内阅读'),
+                      ),
+                      const SizedBox(width: Gap.xs),
+                      TextButton.icon(
+                        onPressed: () => _openExternalUrl(p['url']!),
+                        icon: const Icon(Icons.open_in_new, size: 16),
+                        label: const Text('原文链接'),
+                      ),
+                    ],
+                  ),
+                ],
+              ],
             ),
           ],
           const SizedBox(height: Gap.xxs + 2),
@@ -416,55 +568,59 @@ class _CategoryMaterialScreenState extends State<CategoryMaterialScreen> {
     final source = MaterialSourceService.sourceOf(hit.sourceId);
     return AppCard(
       onTap: () => _open(hit),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(_displayTitle(hit.title),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodyLarge
-                        ?.copyWith(fontWeight: FontWeight.w600)),
-                const SizedBox(height: Gap.xs),
-                // 来源徽章:这条是**真实原文**,来自哪个站 —— 用户最关心的信息
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.primary.withAlpha(24),
-                        borderRadius:
-                            BorderRadius.circular(Radii.control - 4),
-                      ),
-                      child: Text(
-                        '原文 · ${source?.label ?? hit.sourceId}',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                          color: theme.colorScheme.primary,
-                        ),
-                      ),
-                    ),
-                  ],
+          Text(_displayTitle(hit.title),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodyLarge
+                  ?.copyWith(fontWeight: FontWeight.w600)),
+          const SizedBox(height: Gap.xs),
+          // 来源徽章:这条是**真实原文**,来自哪个站 —— 用户最关心的信息
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.primary.withAlpha(24),
+                  borderRadius: BorderRadius.circular(Radii.control - 4),
                 ),
-                if (hit.note.isNotEmpty) ...[
-                  const SizedBox(height: Gap.xxs),
-                  Text(hit.note,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodySmall
-                          ?.copyWith(color: muted, fontSize: 11)),
-                ],
-              ],
-            ),
+                child: Text(
+                  '原文 · ${source?.label ?? hit.sourceId}',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    color: theme.colorScheme.primary,
+                  ),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: Gap.xs),
-          FilledButton.tonal(
-            onPressed: () => _open(hit),
-            child: const Text('打开原文'),
+          if (hit.note.isNotEmpty) ...[
+            const SizedBox(height: Gap.xxs),
+            Text(hit.note,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: muted, fontSize: 11)),
+          ],
+          const SizedBox(height: Gap.xs),
+          // 第 2(1) 条:软件内读 + 原文链接**两条路都给**
+          Row(
+            children: [
+              FilledButton.tonal(
+                onPressed: () => _open(hit),
+                child: const Text('软件内阅读'),
+              ),
+              const SizedBox(width: Gap.xs),
+              if (hit.url.trim().isNotEmpty)
+                TextButton.icon(
+                  onPressed: () => _openExternalUrl(hit.url),
+                  icon: const Icon(Icons.link, size: 16),
+                  label: const Text('原文链接'),
+                ),
+            ],
           ),
         ],
       ),

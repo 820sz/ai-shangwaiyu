@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../config/constants.dart';
+import '../../config/design_tokens.dart';
 import '../../config/theme.dart';
 import '../../models/article.dart';
 import '../../models/bookmark.dart';
@@ -12,8 +13,12 @@ import '../../providers/bookmark_provider.dart';
 import '../../providers/vocab_provider.dart';
 import '../../services/base_api.dart';
 import '../../services/database.dart';
+import '../../services/deepseek_api.dart';
 import '../../services/doubao_api.dart';
 import '../../services/material_recommend_service.dart';
+import '../../widgets/app_ui.dart';
+import '../../widgets/reader_text.dart';
+import '../../widgets/word_action_sheet.dart';
 import 'widgets/follow_up_drawer.dart';
 
 /// 推荐材料详情(v1.8.0):真正能"用起来"的一页。
@@ -51,6 +56,95 @@ class _MaterialRecommendationDetailScreenState
   bool _savedAsArticle = false;
   StreamSubscription<SseChunk>? _sub;
   late final FollowUpController _followUp;
+
+  // ── v2.7(用户第 2(2) 条):AI 改写的材料也要能**逐段英中对照 + 点词/选词** ──
+  bool _showTranslation = false;
+  bool _translating = false;
+  String? _translateError;
+
+  /// 段索引 → 中文译文
+  final Map<int, String> _translations = {};
+
+  /// 收词保存位置(默认落在「碎片文章 / 材料标题」下)
+  WordSaveTarget get _saveTarget => WordSaveTarget(
+        category: '碎片文章',
+        materialName: _rec.title.trim(),
+      );
+
+  /// 正文分段(与译文一一对应;译文数量对不上时整批丢弃,绝不串段)
+  List<String> get _paragraphs => _content
+      .split(RegExp(r'\n\s*\n'))
+      .map((p) => p.trim())
+      .where((p) => p.isNotEmpty)
+      .toList();
+
+  /// 逐段翻译(与材料阅读器同一套做法:每批 8 段,段数对不上就整批丢)
+  Future<void> _toggleTranslation() async {
+    if (_showTranslation) {
+      setState(() => _showTranslation = false);
+      return;
+    }
+    setState(() {
+      _showTranslation = true;
+      _translateError = null;
+    });
+    final paras = _paragraphs;
+    if (_translations.isNotEmpty || paras.isEmpty) return;
+    setState(() => _translating = true);
+    try {
+      final api = DeepseekApiService();
+      if (!api.isConfigured) {
+        throw Exception('还没有配置 API Key —— 到「我的 → API 设置」填一个就能翻译');
+      }
+      const batchSize = 8;
+      for (var start = 0; start < paras.length; start += batchSize) {
+        final end = (start + batchSize).clamp(0, paras.length);
+        final translated = await api.translateParagraphs(paras.sublist(start, end));
+        if (!mounted) return;
+        setState(() {
+          for (var i = 0; i < translated.length; i++) {
+            _translations[start + i] = translated[i];
+          }
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _translateError = '$e');
+    } finally {
+      if (mounted) setState(() => _translating = false);
+    }
+  }
+
+  /// 点词 / 长按选词 → 询问 AI 与收藏(与另外两个阅读器共用公共件)
+  Future<void> _onWordTap(String rawWord, {bool askAi = false}) async {
+    final word = rawWord.trim();
+    if (word.isEmpty) return;
+    await showWordActionSheet(
+      context,
+      word: word,
+      sentence: _sentenceAround(word),
+      target: _saveTarget,
+      autoAsk: askAi,
+      sourceTitle: _rec.title,
+    );
+  }
+
+  void _onSelectionAction(String selection, ReaderTextAction action) {
+    _onWordTap(selection, askAi: action == ReaderTextAction.askAi);
+  }
+
+  String _sentenceAround(String word) {
+    for (final p in _paragraphs) {
+      final idx = p.toLowerCase().indexOf(word.toLowerCase());
+      if (idx < 0) continue;
+      final start = p.lastIndexOf(RegExp(r'[.!?\n]'), idx);
+      final end = p.indexOf(RegExp(r'[.!?\n]'), idx + word.length);
+      final s =
+          p.substring(start < 0 ? 0 : start + 1, end < 0 ? p.length : end + 1)
+              .trim();
+      return s.length > 240 ? s.substring(0, 240) : s;
+    }
+    return '';
+  }
 
   @override
   void initState() {
@@ -423,17 +517,62 @@ class _MaterialRecommendationDetailScreenState
             ),
           ],
 
-          // 学习内容(流式写入)
-          if (_content.trim().isNotEmpty)
-            SelectableText(
-              _content,
-              style: const TextStyle(fontSize: 14, height: 1.7),
-            ),
+          // 学习内容(流式写入;v2.7:逐段可点词 + 可逐段英中对照)
+          if (_content.trim().isNotEmpty) ...[
+            if (_translateError != null)
+              AppErrorCard(
+                message: '翻译失败:$_translateError',
+                retryLabel: '重试翻译',
+                onRetry: _toggleTranslation,
+              ),
+            for (var i = 0; i < _paragraphs.length; i++) ...[
+              TappablePassage(
+                text: _paragraphs[i],
+                style: const TextStyle(fontSize: 14, height: 1.7),
+                onWordTap: _onWordTap,
+                onSelectionAction: _onSelectionAction,
+              ),
+              if (_showTranslation)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(Gap.sm),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surfaceContainerHighest,
+                      borderRadius: Radii.controlRadius,
+                    ),
+                    child: Text(
+                      _translating && !_translations.containsKey(i)
+                          ? '翻译中…'
+                          : (_translations[i] ?? '(这一段还没翻出来)'),
+                      style: TextStyle(
+                        fontSize: 13,
+                        height: 1.6,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                ),
+              const SizedBox(height: Gap.sm),
+            ],
+          ],
 
           if (_content.trim().isNotEmpty) ...[
-            const SizedBox(height: 16),
+            const SizedBox(height: Gap.xs),
             Row(
               children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _toggleTranslation,
+                    icon: Icon(
+                      _showTranslation ? Icons.translate : Icons.translate_outlined,
+                      size: 16,
+                    ),
+                    label: Text(_showTranslation ? '隐藏翻译' : '翻译'),
+                  ),
+                ),
+                const SizedBox(width: Gap.xs),
                 Expanded(
                   child: FilledButton.tonalIcon(
                     onPressed: _savedAsArticle ? null : _saveAsArticle,
@@ -444,7 +583,7 @@ class _MaterialRecommendationDetailScreenState
                     label: Text(_savedAsArticle ? '已存为文章' : '保存为文章'),
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: Gap.xs),
                 Expanded(
                   child: OutlinedButton.icon(
                     onPressed: () {

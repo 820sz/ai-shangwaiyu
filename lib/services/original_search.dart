@@ -84,15 +84,30 @@ class OriginalSearch {
 
   /// 检索。[query] 为空时会退回该分类的默认检索(见 [defaultQueryFor]);
   /// 仍然为空则取"最受欢迎"书单(总有结果)。
+  ///
+  /// [sourceIds] 非空时**只查这些源**(v2.7:材料中心的"内容类型偏好"选了论文就
+  /// 只去 arXiv 找,省掉三个必然超时的外刊源)。
   static Future<OriginalSearchResult> search(
     String query, {
     String category = '其他',
     Dio? dio,
+    List<String>? sourceIds,
   }) async {
     final client = dio ?? MaterialSourceService.dio;
     var q = query.trim();
     if (q.isEmpty) q = defaultQueryFor(category);
-    final wanted = sourcesForCategory(category);
+    final categorySources = sourcesForCategory(category);
+    var wanted = categorySources;
+    if (sourceIds != null && sourceIds.isNotEmpty) {
+      // 偏好源 ∩ 分类源:偏好只用来**收窄**这次查哪些源
+      final inter = [
+        for (final id in categorySources)
+          if (sourceIds.contains(id)) id,
+      ];
+      // 偏好与分类完全不搭(比如在"论文"里只勾了"公版书")→ 回落分类默认源,
+      // 不要让用户面对一个永远空白的页面
+      if (inter.isNotEmpty) wanted = inter;
+    }
     final hits = <OriginalHit>[];
     final notes = <String>[];
 

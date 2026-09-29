@@ -945,6 +945,35 @@ class DatabaseService {
     return affected;
   }
 
+  /// 把一批词从当前材料分组里"摘出来"(v2.7,用户第 6(1) 条):
+  /// `material_path` 与 `source_book` 置空、词本身保留 —— 用在「解散分组」上
+  /// (分组没了,词还在,回到「未归类」)。
+  ///
+  /// 为什么不复用 [updateVocabulariesCategory]:那个方法的 null 语义是
+  /// **"这一列不改"**,表达不了"清空";这里必须显式写 NULL,所以单独一个方法,
+  /// 免得将来有人顺手把 null 传进去结果什么都没发生。
+  static Future<int> detachMaterialPath(List<int> ids) async {
+    if (ids.isEmpty) return 0;
+    final db = await database;
+    var affected = 0;
+    await db.transaction((txn) async {
+      for (final chunk in _chunkIds(ids)) {
+        final placeholders = List.filled(chunk.length, '?').join(',');
+        affected += await txn.update(
+          'vocabulary',
+          {
+            'material_path': null,
+            'source_book': null,
+            'updated_at': DateTime.now().toIso8601String(),
+          },
+          where: 'id IN ($placeholders)',
+          whereArgs: chunk,
+        );
+      }
+    });
+    return affected;
+  }
+
   /// 批量移动分类/出处(v1.9.0,审查 P1-7):单事务 + 分片(避免
   /// `SQLITE_MAX_VARIABLE_NUMBER` 上限,旧版 sqlite 只有 999)。
   static Future<int> updateVocabulariesCategory(

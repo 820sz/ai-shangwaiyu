@@ -4,6 +4,7 @@ import '../models/learner_model.dart';
 import '../models/vocabulary.dart';
 import 'database.dart';
 import 'learner_context.dart';
+import 'material_prefs.dart';
 import 'material_source.dart';
 import 'text_difficulty.dart';
 import 'word_frequency.dart';
@@ -305,6 +306,52 @@ class MaterialLibrary {
         'paper' => '论文',
         _ => '文章',
       };
+
+  /// 材料种类 → 学习分类(存生词时的默认分类,v2.7)。
+  ///
+  /// 为什么需要:阅读器收藏生词时必须带上"分类 + 材料名",否则词会掉进
+  /// 「未归类」(用户第 6(2) 条抱怨的就是这个现象)。这里给一个合理默认,
+  /// 用户在阅读器里可以随时改「保存位置」。
+  static String categoryOfKind(String kind) => switch (kind) {
+        'book' => '书籍',
+        'news' => '外刊',
+        'podcast' => '外刊',
+        'paper' => '碎片文章',
+        'article' => '碎片文章',
+        'wiki' => '其他',
+        _ => '其他',
+      };
+
+  /// 按**用户自选的难度档**排序(v2.7,用户第 4 条)。
+  ///
+  /// 与 [rankForToday] 的区别:那个按"通用 i+1 舒适区"打分,这个把用户选的档位
+  /// 当第一优先级 —— 符合档位的排最前,偏易/偏难靠后(而不是隐藏:用户可能
+  /// 就是想读那本难书)。读了一半的材料仍然加权,避免"换档位后进度材料沉底"。
+  static List<ShelfItem> rankForBand(
+    List<ShelfItem> items,
+    MaterialBand band,
+  ) {
+    if (band.isAny) return rankForToday(items);
+    final score = <ShelfItem, int>{};
+    for (final it in items) {
+      var s = 0;
+      final c = it.coverage;
+      if (c != null) s += band.contains(c) ? 100 : -20;
+      if (it.finished) {
+        s -= 40;
+      } else if (it.percent > 0) {
+        s += 20;
+      }
+      score[it] = s;
+    }
+    final sorted = List<ShelfItem>.from(items);
+    sorted.sort((a, b) {
+      final byScore = (score[b] ?? 0).compareTo(score[a] ?? 0);
+      if (byScore != 0) return byScore;
+      return b.id.compareTo(a.id);
+    });
+    return sorted;
+  }
 
   /// 按 i+1 给书架排序:优先"正好合适且未读完"的材料
   /// (纯函数,便于单测:列表顺序直接影响用户先读什么)

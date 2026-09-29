@@ -8,6 +8,17 @@ import io.flutter.plugin.common.MethodChannel
 import java.io.File
 
 class MainActivity : FlutterActivity() {
+    /// 「从文件导入」的选择器回调结果(v2.7)。同一时刻只允许一个请求在飞。
+    private var pendingFileResult: MethodChannel.Result? = null
+
+    companion object {
+        private const val PICK_FILE_REQUEST = 4711
+
+        /// 单个文件上限 8MB:纯文本超过这个量级基本不是学习材料,
+        /// 而且整包塞进内存再跨通道传回 Dart 会把低端机拖死。
+        private const val MAX_FILE_BYTES = 8 * 1024 * 1024
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         // 自写安装通道:替代 open_filex(它部分路径下不回调 result,
@@ -109,5 +120,105 @@ class MainActivity : FlutterActivity() {
                 result.error("OPEN_URL_FAILED", "打不开这个链接: ${e.message}", null)
             }
         }
+
+        // 文件选择通道(v2.7,用户第 2(4) 条:材料导入要支持"文件")。
+        //
+        // 为什么自写而不用 file_picker:实测它的 11.0.3 在 AGP 9 下**不 apply Kotlin
+        // 插件**(源码是 .kt)—— Kotlin 源根本不编译,构建直接报"找不到符号
+        // FilePickerPlugin";退回 10.0.0 又因为它的 compileSdk 写死 34,与
+        // flutter_plugin_android_lifecycle 要求的 36 冲突。两个版本都构建不过,
+        // 而这段原生代码只需要 SAF 一个 Intent —— 与 app/open_url 同一套写法,零依赖。
+        //
+        // 走 ACTION_OPEN_DOCUMENT(**不需要任何存储权限**,用户通过系统选择器授权单个文件),
+        // 名字取 OpenableColumns.DISPLAY_NAME,内容读成字节回传(Dart 侧收到 Uint8List)。
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "app/pick_file",
+        ).setMethodCallHandler { call, result ->
+            if (call.method != "pickFile") {
+                result.notImplemented()
+                return@setMethodCallHandler
+            }
+            if (pendingFileResult != null) {
+                result.error("BUSY", "上一次选择还没结束,请稍候", null)
+                return@setMethodCallHandler
+            }
+            pendingFileResult = result
+            try {
+                // type 用 */* 而不是 text/*:手机上 .md/.srt/.csv 常被标成
+                // application/octet-stream,按 MIME 过滤会让用户"看不到自己的文件"。
+                // 扩展名与大小在 Dart 侧校验并给出人话提示。
+                val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = "*/*"
+                }
+                startActivityForResult(intent, PICK_FILE_REQUEST)
+            } catch (e: Exception) {
+                pendingFileResult = null
+                result.error("NO_PICKER", "打不开系统文件选择器: ${e.message}", null)
+            }
+        }
+    }
+
+    @Deprecated("ACTION_OPEN_DOCUMENT 的传统回调写法,兼容所有 Android 版本")
+    @Suppress("DEPRECATION")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode != PICK_FILE_REQUEST) {
+            super.onActivityResult(requestCode, resultCode, data)
+            return
+        }
+        val result = pendingFileResult ?: return
+        pendingFileResult = null
+        val uri = data?.data
+        if (resultCode != RESULT_OK || uri == null) {
+            // 用户取消:回 null,Dart 侧按"没选"处理(不是错误)
+            result.success(null)
+            return
+        }
+        try {
+            val name = displayNameOf(uri) ?: uri.lastPathSegment ?: "未命名文件"
+            val bytes = readCapped(uri)
+            if (bytes == null) {
+                result.error(
+                    "TOO_LARGE",
+                    "文件超过 ${MAX_FILE_BYTES / 1024 / 1024}MB,建议切成几份再导入",
+                    null,
+                )
+                return
+            }
+            result.success(mapOf("name" to name, "bytes" to bytes))
+        } catch (e: Exception) {
+            result.error("READ_FAILED", "读不到这个文件的内容: ${e.message}", null)
+        }
+    }
+
+    /// 取用户可见的文件名(SAF 的 display name;拿不到返回 null)
+    private fun displayNameOf(uri: android.net.Uri): String? {
+        return try {
+            contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                val idx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                if (idx >= 0 && cursor.moveToFirst()) cursor.getString(idx) else null
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /// 读文件内容;超过 [MAX_FILE_BYTES] 返回 null(不抛,由调用方给提示)
+    private fun readCapped(uri: android.net.Uri): ByteArray? {
+        contentResolver.openInputStream(uri)?.use { input ->
+            val out = java.io.ByteArrayOutputStream()
+            val chunk = ByteArray(64 * 1024)
+            var total = 0
+            while (true) {
+                val n = input.read(chunk)
+                if (n <= 0) break
+                total += n
+                if (total > MAX_FILE_BYTES) return null
+                out.write(chunk, 0, n)
+            }
+            return out.toByteArray()
+        }
+        return null
     }
 }

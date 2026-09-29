@@ -143,6 +143,14 @@ class VocabProvider extends ChangeNotifier {
     return n;
   }
 
+  /// 解散材料分组(v2.7,用户第 6(1) 条):词保留,出处清空 → 回到「未归类」。
+  Future<int> detachMaterial(List<int> ids) async {
+    if (ids.isEmpty) return 0;
+    final n = await DatabaseService.detachMaterialPath(ids);
+    await _refresh();
+    return n;
+  }
+
   /// 搜索生词
   List<Vocabulary> search(String query) {
     if (query.isEmpty) return _vocabularies;

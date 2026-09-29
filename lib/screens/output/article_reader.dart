@@ -5,6 +5,8 @@ import '../../config/theme.dart';
 import '../../models/article.dart';
 import '../../providers/article_provider.dart';
 import '../../services/reader_settings.dart';
+import '../../widgets/reader_text.dart';
+import '../../widgets/word_action_sheet.dart';
 import 'exercise_screen.dart';
 
 class ArticleReaderScreen extends StatefulWidget {
@@ -18,6 +20,47 @@ class ArticleReaderScreen extends StatefulWidget {
 
 class _ArticleReaderScreenState extends State<ArticleReaderScreen> {
   bool _showTranslation = false;
+
+  /// 收词保存位置(v2.7,用户第 3 条):默认落在「碎片文章 / 文章标题」下 ——
+  /// 从文章里收的词不再掉进「未归类」(用户第 6(2) 条抱怨的现象)
+  WordSaveTarget get _saveTarget => WordSaveTarget(
+        category: '碎片文章',
+        materialName: widget.article.title.trim(),
+      );
+
+  /// 点词 / 长按选词 → 询问 AI 与收藏(v2.7,用户第 2(2) 条:
+  /// "这点在 AI 改写的材料和特色功能生词成文中也要有")
+  Future<void> _onWordTap(String rawWord, {bool askAi = false}) async {
+    final word = rawWord.trim();
+    if (word.isEmpty) return;
+    await showWordActionSheet(
+      context,
+      word: word,
+      sentence: _sentenceAround(word),
+      target: _saveTarget,
+      autoAsk: askAi,
+      sourceTitle: widget.article.title,
+    );
+  }
+
+  void _onSelectionAction(String selection, ReaderTextAction action) {
+    _onWordTap(selection, askAi: action == ReaderTextAction.askAi);
+  }
+
+  /// 取包含该词的句子(给 AI 更准的释义;找不到就给空)
+  String _sentenceAround(String word) {
+    for (final p in widget.article.paragraphs) {
+      final idx = p.toLowerCase().indexOf(word.toLowerCase());
+      if (idx < 0) continue;
+      final start = p.lastIndexOf(RegExp(r'[.!?\n]'), idx);
+      final end = p.indexOf(RegExp(r'[.!?\n]'), idx + word.length);
+      final s = p.substring(start < 0 ? 0 : start + 1,
+              end < 0 ? p.length : end + 1)
+          .trim();
+      return s.length > 240 ? s.substring(0, 240) : s;
+    }
+    return '';
+  }
 
   /// 分享通道:与 MainActivity.kt 的 app/share_text 对应
   static const MethodChannel _shareChannel = MethodChannel('app/share_text');
@@ -162,13 +205,18 @@ class _ArticleReaderScreenState extends State<ArticleReaderScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      e.value,
-                      style: theme.textTheme.bodyLarge?.copyWith(
+                    // v2.7:正文从"死文本"改成**可点词 / 可长按选词**的段落
+                    // (用户第 2(2) 条:生词成文也要能点词问 AI、收藏)
+                    TappablePassage(
+                      text: e.value,
+                      style: (theme.textTheme.bodyLarge ?? const TextStyle())
+                          .copyWith(
                         height: ReaderSettings.lineHeight(),
                         fontSize:
                             ReaderSettings.baseFontSize * ReaderSettings.fontScale(),
                       ),
+                      onWordTap: _onWordTap,
+                      onSelectionAction: _onSelectionAction,
                     ),
                     if (_showTranslation &&
                         e.key < article.translationParagraphs.length)

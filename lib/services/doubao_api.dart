@@ -311,6 +311,74 @@ mark_count 要等于带标记的条目数;两个数对不上,回去再扫一遍�
     );
   }
 
+  /// **整页全文提取**(v2.7,用户第 2(4)/3 条:图片导入"就走一次 AI 提取")。
+  ///
+  /// 与 [extractVocabularyStream] 的区别:那个只找**被标记**的内容(拍照取词);
+  /// 这个要的是**图上全部正文** —— 把照片/截图变成一份可读、可分析的材料。
+  ///
+  /// 提示词纪律(每一条都对应一个会毁掉材料的坑):
+  /// - 不翻译、不总结、不改写(否则"材料"就变成 AI 的二手货,难度统计也失真);
+  /// - 保留段落与小标题(段落结构是阅读器分块与逐段翻译的基础);
+  /// - 丢掉页码/页眉页脚/水印(它们会混进正文,把词数抬高);
+  /// - **只输出正文**:开场白、代码块围栏一旦被抄进去,会污染第一段。
+  Stream<SseChunk> extractFullTextStream(
+    List<File> imageFiles, {
+    String? hint,
+  }) async* {
+    if (imageFiles.isEmpty) throw Exception('没有可提取的图片');
+    if (!config.isConfigured) {
+      throw Exception('请先在设置中配置主 API Key');
+    }
+    final imageUris = await Future.wait(
+      imageFiles.map((f) => _imageToDataUri(f)),
+      eagerError: true,
+    );
+    const systemPrompt = '''你是 OCR 文字提取工具。用户给你阅读材料的照片或截图,
+请把**图上的全部正文**提取成纯文本。输出纪律:
+1. **逐行照抄**:不翻译、不总结、不改写、不补写原文没有的内容;
+2. **保持段落结构**:一个自然段写成一段,段与段之间空一行;小标题单独占一行;
+3. **丢掉**页码、页眉页脚、水印、扫描噪点、旁边的按钮/菜单文字;
+4. 看不清的词按上下文补全;整个词完全无法辨认时写 [看不清],不要编造;
+5. 多张图按顺序拼成一份文档(第 1 张的正文在最前),图片之间用一个空行分隔;
+6. **只输出正文本身**:不要开场白(如"好的,以下是提取的正文")、不要解释、
+   不要代码块围栏、不要 Markdown 标记;
+7. 保留原文语言(英文就写英文,不要顺手翻译成中文)。''';
+    final userPrompt = (hint != null && hint.trim().isNotEmpty)
+        ? '请提取这些材料照片中的全部正文。已知信息:${hint.trim()}'
+        : '请提取这些材料照片中的全部正文。';
+    final detail = recognitionDetailLevel(modelName, calibrate: true);
+    final body = BaseApiService.buildChatBody(
+      cfg: config,
+      stream: true,
+      temperature: 0,
+      maxTokens: 8192,
+      // 转录是"照抄"任务:低思考档即可(高思考会挤占正文预算,长文还容易跑偏)
+      thinkingLevel: 'low',
+      messages: [
+        {'role': 'system', 'content': systemPrompt},
+        {
+          'role': 'user',
+          'content': [
+            for (final uri in imageUris)
+              {
+                'type': 'image_url',
+                'image_url': {'url': uri, 'detail': ?detail},
+              },
+            {'type': 'text', 'text': userPrompt},
+          ],
+        },
+      ],
+    );
+    final response = await postWithReasoningFallback(
+      '/chat/completions', body,
+      cfg: config, responseType: ResponseType.stream);
+    final data = response.data;
+    if (data is! ResponseBody) {
+      throw Exception('API 未返回流式响应：${data is Map ? data['error'] ?? data : data}');
+    }
+    yield* _parseSseStream(data.stream);
+  }
+
   /// **单词语境讲解**(v2.6,阅读器点词/选词后的「询问 AI」)。
   ///
   /// 为什么单独给一个方法:用户要的是"点一下就知道这个词在这句里什么意思",

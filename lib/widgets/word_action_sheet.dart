@@ -1,0 +1,498 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+import '../config/design_tokens.dart';
+import '../config/theme.dart';
+import '../models/vocabulary.dart';
+import '../providers/vocab_provider.dart';
+import '../services/doubao_api.dart';
+import '../services/tts_service.dart';
+import '../screens/input/widgets/category_picker.dart';
+import '../screens/input/widgets/sub_category_input.dart';
+import 'app_ui.dart';
+
+/// 词条要存到哪儿(v2.7,用户第 3 条:"选择保存位置")。
+///
+/// 为什么必须有它:阅读器以前收藏生词时 `sourceBook: null`、分类也不写 ——
+/// 结果是"从材料里收的词全掉进「未归类」"(用户第 6(2) 条抱怨的正是这个现象)。
+/// 现在:默认位置由材料带出来(分类 + 材料名 + 页码),用户随时可以改。
+class WordSaveTarget {
+  /// 学习分类(教材/书籍/外刊/碎片文章/其他)
+  final String category;
+
+  /// 材料名 / 书名
+  final String materialName;
+
+  /// 页码 / 章节(可空)
+  final String page;
+
+  const WordSaveTarget({
+    this.category = '其他',
+    this.materialName = '',
+    this.page = '',
+  });
+
+  String get label {
+    final parts = <String>[
+      if (materialName.trim().isNotEmpty) materialName.trim(),
+      if (page.trim().isNotEmpty) page.trim(),
+    ];
+    final tail = parts.isEmpty ? '未指定材料' : parts.join(' · ');
+    return '$category / $tail';
+  }
+
+  /// 生成要入库的词条(出处字段一次写全,不再各调用点各拼一份)
+  Vocabulary toVocabulary({
+    required String word,
+    String? translation,
+    String? partOfSpeech,
+    String? phonetic,
+    String? sentence,
+    String? grammarNote,
+    String wordType = 'word',
+  }) {
+    final name = materialName.trim();
+    return Vocabulary(
+      word: word,
+      translation: translation,
+      partOfSpeech: partOfSpeech,
+      phonetic: phonetic,
+      originalSentence: sentence,
+      grammarNote: grammarNote,
+      wordType: wordType,
+      category: category,
+      sourceBook: name.isEmpty ? null : name,
+      materialPath:
+          name.isEmpty ? null : '$category/$name',
+    );
+  }
+}
+
+/// 点词 / 长按选词后的底部弹层(v2.7 抽成公共件,三个阅读器共用)。
+///
+/// 两个动作与用户第 2(2) 条的要求一一对应:
+/// 1. **询问 AI** —— 就这一处流式讲清楚(不跳页);
+/// 2. **收藏进单词本** —— 入库并建立复习状态,同时显示/可改「保存位置」。
+///
+/// [autoAsk] = 由「询问 AI」入口进来时直接开始讲解(用户不用再点一次)。
+Future<void> showWordActionSheet(
+  BuildContext context, {
+  required String word,
+  String sentence = '',
+  WordSaveTarget? target,
+  bool autoAsk = false,
+  String sourceTitle = '',
+  Future<String> Function(Vocabulary v)? onSave,
+}) {
+  return showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    showDragHandle: true,
+    builder: (ctx) => _WordActionSheet(
+      word: word,
+      sentence: sentence,
+      target: target ?? const WordSaveTarget(),
+      autoAsk: autoAsk,
+      sourceTitle: sourceTitle,
+      onSave: onSave,
+    ),
+  );
+}
+
+class _WordActionSheet extends StatefulWidget {
+  final String word;
+  final String sentence;
+  final WordSaveTarget target;
+  final bool autoAsk;
+  final String sourceTitle;
+  final Future<String> Function(Vocabulary v)? onSave;
+
+  const _WordActionSheet({
+    required this.word,
+    required this.sentence,
+    required this.target,
+    required this.autoAsk,
+    required this.sourceTitle,
+    this.onSave,
+  });
+
+  @override
+  State<_WordActionSheet> createState() => _WordActionSheetState();
+}
+
+class _WordActionSheetState extends State<_WordActionSheet> {
+  final _api = DoubaoApiService();
+  Map<String, String>? _info;
+  bool _loading = true;
+  String? _error;
+  String _saveMsg = '';
+  late WordSaveTarget _target = widget.target;
+
+  /// 「询问 AI」的流式讲解
+  bool _asking = false;
+  String _aiAnswer = '';
+  String? _aiError;
+  StreamSubscription<SseChunk>? _aiSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _lookup();
+    if (widget.autoAsk) {
+      // 用户是从「询问 AI」进来的:直接开始讲
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _askAi();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _aiSub?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _askAi() async {
+    setState(() {
+      _asking = true;
+      _aiError = null;
+      _aiAnswer = '';
+    });
+    try {
+      final stream = _api.explainWord(
+        word: widget.word,
+        sentence: widget.sentence,
+        sourceBook: widget.sourceTitle.isEmpty ? null : widget.sourceTitle,
+      );
+      _aiSub = stream.listen(
+        (chunk) {
+          if (!mounted || chunk.isReasoning) return;
+          setState(() => _aiAnswer += chunk.text);
+        },
+        onDone: () {
+          if (mounted) setState(() => _asking = false);
+        },
+        onError: (Object e) {
+          if (mounted) {
+            setState(() {
+              _asking = false;
+              _aiError = '$e';
+            });
+          }
+        },
+        cancelOnError: true,
+      );
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _asking = false;
+          _aiError = '$e';
+        });
+      }
+    }
+  }
+
+  Future<void> _lookup() async {
+    try {
+      final info = await _api.completeWordInfo(widget.word);
+      if (!mounted) return;
+      setState(() {
+        _info = info;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = '$e';
+      });
+    }
+  }
+
+  /// 改「保存位置」(第 3 条):分类 → 材料名/页码,复用生词本里那两个选择器,
+  /// 不另造一套交互。
+  Future<void> _changeTarget() async {
+    final category = await showCategoryPicker(context);
+    if (category == null || !mounted) return;
+    final sub = await showSubCategoryInput(
+      context,
+      category: category,
+      prefill: _target.materialName,
+    );
+    if (sub == null || !mounted) return;
+    setState(() {
+      _target = WordSaveTarget(
+        category: category,
+        materialName: sub.materialName,
+        page: sub.sourcePage ?? '',
+      );
+    });
+  }
+
+  Future<void> _save() async {
+    final info = _info ?? const <String, String>{};
+    final v = _target.toVocabulary(
+      word: widget.word,
+      translation: info['translation'],
+      partOfSpeech: info['part_of_speech'],
+      phonetic: info['phonetic'],
+      sentence: (info['original_sentence']?.isNotEmpty == true)
+          ? info['original_sentence']
+          : (widget.sentence.isEmpty ? null : widget.sentence),
+      grammarNote: info['grammar_note'],
+      wordType: widget.word.contains(' ') ? 'phrase' : 'word',
+    );
+    String msg;
+    if (widget.onSave != null) {
+      msg = await widget.onSave!(v);
+    } else {
+      try {
+        await context.read<VocabProvider>().saveVocabularies([v]);
+        msg = '已收进生词本(会出现在复习里)';
+      } catch (e) {
+        msg = '保存失败:$e';
+      }
+    }
+    if (!mounted) return;
+    setState(() => _saveMsg = msg);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant;
+    final info = _info ?? const <String, String>{};
+    final phonetic = info['phonetic'] ?? '';
+    final pos = info['part_of_speech'] ?? '';
+    final translation = info['translation'] ?? '';
+    final example = info['original_sentence'] ?? '';
+    final grammar = info['grammar_note'] ?? '';
+    return SafeArea(
+      // 大字号(2× 系统字号)下弹层会变高 —— 可滚动,永不溢出
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(Gap.md, 0, Gap.md, Gap.md),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ① 词头:词 + 音标 + 朗读
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(widget.word,
+                          style: theme.textTheme.headlineSmall
+                              ?.copyWith(fontWeight: FontWeight.w700)),
+                      if (phonetic.isNotEmpty) ...[
+                        const SizedBox(height: Gap.xxs),
+                        Text(phonetic,
+                            style: theme.textTheme.bodyMedium
+                                ?.copyWith(color: muted)),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(width: Gap.xs),
+                IconButton.filledTonal(
+                  tooltip: '朗读',
+                  onPressed: () => TtsService.instance.speak(widget.word),
+                  icon: const Icon(Icons.volume_up_outlined),
+                ),
+              ],
+            ),
+            const SizedBox(height: Gap.sm),
+
+            // ② 释义区(按需从 AI 拉)
+            if (_loading)
+              Row(
+                children: [
+                  const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  const SizedBox(width: Gap.xs),
+                  Text('正在查释义…',
+                      style: theme.textTheme.bodySmall?.copyWith(color: muted)),
+                ],
+              )
+            else if (_error != null)
+              AppErrorCard(
+                message: '查询失败:$_error',
+                retryLabel: '重新查',
+                onRetry: () {
+                  setState(() {
+                    _loading = true;
+                    _error = null;
+                  });
+                  _lookup();
+                },
+              )
+            else ...[
+              if (pos.isNotEmpty) ...[
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: Gap.xs, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(Radii.control - 4),
+                  ),
+                  child: Text(pos,
+                      style: theme.textTheme.bodySmall?.copyWith(color: muted)),
+                ),
+                const SizedBox(height: Gap.xs),
+              ],
+              if (translation.isNotEmpty)
+                Text(translation, style: theme.textTheme.bodyLarge),
+              if (example.isNotEmpty) ...[
+                const SizedBox(height: Gap.sm),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(Gap.sm),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerHighest,
+                    borderRadius: Radii.controlRadius,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('例句',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                              color: muted,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600)),
+                      const SizedBox(height: Gap.xxs),
+                      Text(example,
+                          style: theme.textTheme.bodyMedium
+                              ?.copyWith(height: 1.5)),
+                    ],
+                  ),
+                ),
+              ],
+              if (grammar.isNotEmpty) ...[
+                const SizedBox(height: Gap.xs),
+                Text('语法:$grammar',
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(color: muted, height: 1.5)),
+              ],
+            ],
+
+            // ③ 保存位置(第 3 条):默认跟着材料走,可改 —— 不改也不会掉进「未归类」
+            const SizedBox(height: Gap.sm),
+            Container(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: Gap.sm, vertical: Gap.xxs + 2),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.primary.withAlpha(10),
+                borderRadius: Radii.controlRadius,
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.folder_outlined,
+                      size: 15, color: theme.colorScheme.primary),
+                  const SizedBox(width: Gap.xxs + 2),
+                  Expanded(
+                    child: Text(
+                      '保存到:${_target.label}',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.primary,
+                        height: 1.3,
+                      ),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: _changeTarget,
+                    child: const Text('改'),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: Gap.xs),
+
+            // ④ 两个动作(用户第 2(2) 条)
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _asking ? null : _askAi,
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(0, 46),
+                    ),
+                    icon: const Icon(Icons.help_outline, size: 18),
+                    label: Text(_asking ? 'AI 正在讲…' : '询问 AI'),
+                  ),
+                ),
+                const SizedBox(width: Gap.xs),
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: _save,
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size(0, 46),
+                    ),
+                    icon: const Icon(Icons.bookmark_add_outlined, size: 18),
+                    label: const Text('收藏进单词本'),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: Gap.xs),
+            Text(
+              _saveMsg.isNotEmpty
+                  ? _saveMsg
+                  : '收藏后会立刻进入复习队列(下次复习按记忆强度安排)',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: _saveMsg.isNotEmpty ? theme.colorScheme.primary : muted,
+              ),
+            ),
+
+            // ⑤ AI 讲解区(流式)
+            if (_aiAnswer.isNotEmpty || _aiError != null || _asking) ...[
+              const SizedBox(height: Gap.sm),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(Gap.sm),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.primary.withAlpha(12),
+                  borderRadius: Radii.controlRadius,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.auto_awesome,
+                            size: 14, color: theme.colorScheme.primary),
+                        const SizedBox(width: Gap.xxs + 2),
+                        Text('AI 讲解',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.primary,
+                              fontWeight: FontWeight.w600,
+                            )),
+                      ],
+                    ),
+                    const SizedBox(height: Gap.xxs + 2),
+                    if (_aiError != null)
+                      Text('讲解失败:$_aiError',
+                          style: theme.textTheme.bodySmall
+                              ?.copyWith(color: AppTheme.dangerColor(context)))
+                    else
+                      Text(
+                        _aiAnswer.isEmpty ? '正在想…' : _aiAnswer,
+                        style:
+                            theme.textTheme.bodyMedium?.copyWith(height: 1.5),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}

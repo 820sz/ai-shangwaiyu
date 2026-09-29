@@ -1,7 +1,7 @@
 name: readflow
 description: "AI英语阅读学习助手 - 拍照取词、生词归档、AI文章生成、回译练习"
 publish_to: 'none'
-version: 2.6.0+63
+version: 2.7.0+64
 
 environment:
   # 下限跟本机 Flutter stable SDK 走(审查 P2-23 顺手补约束说明);
@@ -49,7 +49,13 @@ dependencies:
   # 这个包只负责"把数据写进 SharedPreferences 并通知刷新"这一段 —— 也正是最容易
   # 各写一份、写歪的那段。
   home_widget: ^0.10.0
-
+  # v2.7 材料导入的"从文件导入"**没有引入任何依赖**:走自写的原生通道
+  # `app/pick_file`(ACTION_OPEN_DOCUMENT,SAF,不需要存储权限),见
+  # `lib/services/file_pick.dart` 与 MainActivity.kt。
+  # ⚠️ 教训(2026-09-29):曾引入 file_picker,两版都构建不过 ——
+  # 11.0.3 在 AGP 9+ 时不 apply Kotlin 插件而源码是 .kt(报"找不到符号 FilePickerPlugin");
+  # 10.0.0 的 compileSdk 写死 34,与 flutter_plugin_android_lifecycle 要求的 36 冲突。
+  # **加插件依赖后必须真的跑一次 `flutter build apk`**,analyze/test 过了不代表能构建。
 dev_dependencies:
   flutter_test:
     sdk: flutter
