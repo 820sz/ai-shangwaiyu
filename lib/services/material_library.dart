@@ -96,6 +96,12 @@ class ShelfItem {
   final String title;
   final String kind;
   final String source;
+
+  /// 用户自定义分类名(v2.9:材料导入的分组,如「新视野教材」)
+  final String? group;
+
+  /// 材料来路(v2.9:import 导入 / gutenberg 等公开源 / ai 生成)
+  final String origin;
   final String cefr;
   final int wordCount;
   final double? coverage;
@@ -112,6 +118,8 @@ class ShelfItem {
     required this.title,
     required this.kind,
     required this.source,
+    this.group,
+    this.origin = '',
     required this.cefr,
     required this.wordCount,
     required this.coverage,
@@ -277,6 +285,10 @@ class MaterialLibrary {
       title: '${r['title'] ?? '(未命名材料)'}',
       kind: '${r['kind'] ?? 'article'}',
       source: '${r['source'] ?? ''}',
+      group: (r['group_name'] as String?)?.trim().isEmpty ?? true
+          ? null
+          : '${r['group_name']}'.trim(),
+      origin: '${r['origin'] ?? ''}',
       cefr: '${r['cefr'] ?? ''}',
       wordCount: _asInt(r['word_count']),
       coverage: cov,

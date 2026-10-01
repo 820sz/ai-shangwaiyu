@@ -106,6 +106,12 @@ class LearnerModel {
   /// 学习目的(应试/工作/原版书/口语/兴趣…)
   final ProfileField<String>? goal;
 
+  /// 目标需求**多选**(v2.9,用户 10/2 第 2 条):
+  /// "目标需求:四六级/雅思/托福/出国/学术工作/其他,支持多选"。
+  /// [goal] 是主目标(兼容旧数据与旧界面),这里是全部勾选的目标;
+  /// 练习系统按它挑材料(备考类 → 高频词与长难句,生活类 → 口语与场景句)。
+  final List<String> goals;
+
   /// 每日可投入分钟数
   final ProfileField<int>? dailyMinutes;
 
@@ -133,6 +139,7 @@ class LearnerModel {
     this.lastPlacementAt,
     this.falseAlarmRate,
     this.goal,
+    this.goals = const [],
     this.dailyMinutes,
     this.maxNewWords,
     this.interests,
@@ -149,6 +156,7 @@ class LearnerModel {
     DateTime? lastPlacementAt,
     double? falseAlarmRate,
     ProfileField<String>? goal,
+    List<String>? goals,
     ProfileField<int>? dailyMinutes,
     ProfileField<int>? maxNewWords,
     ProfileField<List<String>>? interests,
@@ -176,6 +184,7 @@ class LearnerModel {
         falseAlarmRate:
             clearVocabBaseline ? null : (falseAlarmRate ?? this.falseAlarmRate),
         goal: clearGoal ? null : (goal ?? this.goal),
+        goals: goals ?? this.goals,
         dailyMinutes:
             clearDailyMinutes ? null : (dailyMinutes ?? this.dailyMinutes),
         maxNewWords:
@@ -235,6 +244,7 @@ class LearnerModel {
           'last_placement_at': lastPlacementAt!.toIso8601String(),
         if (falseAlarmRate != null) 'false_alarm_rate': falseAlarmRate,
         if (goal != null) 'goal': goal!.toJson(),
+        if (goals.isNotEmpty) 'goals': goals,
         if (dailyMinutes != null) 'daily_minutes': dailyMinutes!.toJson(),
     if (maxNewWords != null) 'max_new_words': maxNewWords!.toJson(),
         if (interests != null) 'interests': interests!.toJson(),
@@ -260,6 +270,7 @@ class LearnerModel {
           json['goal'],
           (v) => v is String && v.isNotEmpty ? v : null,
         ),
+        goals: ((json['goals'] as List?) ?? const []).map((e) => '$e').toList(),
         dailyMinutes: ProfileField.fromJson<int>(
           json['daily_minutes'],
           (v) => v is int ? v : int.tryParse('$v'),

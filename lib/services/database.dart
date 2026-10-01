@@ -332,6 +332,57 @@ class DatabaseService {
     )
   ''';
 
+  /// 练习计划(v2.9,用户第 2 条:练习要有"系统规划")
+  ///
+  /// 一个模式(spelling/translation)同时只保留一个"进行中"的计划;
+  /// goals 是**多选**的目标需求(四六级/雅思/学术…),JSON 数组存字符串。
+  static const String _drillPlansTableSql = '''
+    CREATE TABLE IF NOT EXISTS drill_plans (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      mode TEXT NOT NULL,
+      goals TEXT,
+      level_note TEXT,
+      weeks INTEGER DEFAULT 4,
+      per_day INTEGER DEFAULT 10,
+      start_date TEXT,
+      status TEXT DEFAULT 'active',
+      created_at TEXT,
+      updated_at TEXT
+    )
+  ''';
+
+  /// 每次练习的记录(v2.9:进度追踪与正确率趋势的原始数据)
+  static const String _drillLogsTableSql = '''
+    CREATE TABLE IF NOT EXISTS drill_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      mode TEXT NOT NULL,
+      plan_id INTEGER,
+      goals TEXT,
+      total INTEGER DEFAULT 0,
+      correct INTEGER DEFAULT 0,
+      seconds INTEGER DEFAULT 0,
+      wrong_words TEXT,
+      created_at TEXT
+    )
+  ''';
+
+  /// 材料里的 AI 内容块(v2.9,用户第 3(5) 条:阅读形式要更丰富)
+  ///
+  /// kind: table(表格)/mindmap(思维导图)/timeline(时间线)/points(要点卡)/quiz(自测)
+  /// payload 存 JSON(各 kind 自己的结构);chunk_index = -1 表示"整篇级"
+  static const String _materialBlocksTableSql = '''
+    CREATE TABLE IF NOT EXISTS material_blocks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      material_id INTEGER NOT NULL,
+      chunk_index INTEGER DEFAULT -1,
+      kind TEXT NOT NULL,
+      title TEXT,
+      payload TEXT,
+      created_at TEXT,
+      UNIQUE(material_id, chunk_index, kind)
+    )
+  ''';
+
   /// 测验结果(词汇量测试 / 读后测验 / 回译 / 听写统一进这张表)
   static const String _quizResultsTableSql = '''
     CREATE TABLE IF NOT EXISTS quiz_results (
@@ -429,6 +480,10 @@ class DatabaseService {
     await db.execute(_tutorMessagesTableSql);
     await db.execute(_tutorMemoryTableSql);
     await db.execute(_tutorConversationsTableSql);
+    // v2.9(用户 10/2 的 2/3(5)/5 条)
+    await db.execute(_drillPlansTableSql);
+    await db.execute(_drillLogsTableSql);
+    await db.execute(_materialBlocksTableSql);
     await _createIndexes(db);
   }
 
@@ -558,6 +613,12 @@ class DatabaseService {
       await _ensureTable(db, 'tutor_memory', _tutorMemoryTableSql, repaired);
       await _ensureTable(db, 'tutor_conversations', _tutorConversationsTableSql, repaired);
       await _ensureColumn(db, 'tutor_messages', 'conversation_id', 'INTEGER', repaired);
+      // v2.9:练习计划/记录、材料内容块、材料来源与分组
+      await _ensureTable(db, 'drill_plans', _drillPlansTableSql, repaired);
+      await _ensureTable(db, 'drill_logs', _drillLogsTableSql, repaired);
+      await _ensureTable(db, 'material_blocks', _materialBlocksTableSql, repaired);
+      await _ensureColumn(db, 'materials', 'origin', 'TEXT', repaired);
+      await _ensureColumn(db, 'materials', 'group_name', 'TEXT', repaired);
       await _createIndexes(db);
       // v2.0 不变式:每个生词都有一条复习状态(word_review)。
       // 放在自检里而不是只放迁移里:这样"迁移后新增的词"也有状态,
@@ -1839,6 +1900,8 @@ class DatabaseService {
                m.word_count AS word_count,
                m.coverage AS coverage,
                m.est_minutes AS est_minutes,
+               m.origin AS origin,
+               m.group_name AS group_name,
                p.position AS position,
                p.percent AS percent,
                p.minutes AS minutes,
@@ -2575,7 +2638,332 @@ class DatabaseService {
   }
 
   /// 记一条导师长期记忆(kind: preference/commitment/obstacle/insight)。
-  /// 与 tutor_messages 分表:对话可以清,偏好/承诺/障碍/结论必须留着。
+  ///
+  /// ─────────────── 练习计划与记录(v2.9,用户第 2 条)───────────────
+  ///
+  /// 用户原话:"词汇练习、翻译练习这些,都要有系统规划、进度追踪,要让用户看得出
+  /// 有完整的练习方向 —— 而不是现在这种随便给几个词、给几个句子翻译。"
+  ///
+  /// 三种模式(用户答"都需要,给用户提供选择"):plan(4 周计划)/daily(今日包)/auto(自适应)
+  static Future<int> createDrillPlan({
+    required String mode,
+    required List<String> goals,
+    String levelNote = '',
+    int weeks = 4,
+    int perDay = 10,
+    DateTime? startDate,
+  }) async {
+    try {
+      final db = await database;
+      final now = DateTime.now().toIso8601String();
+      // 同模式只留一个进行中的计划:旧的直接关掉(避免"两个计划同时算进度")
+      await db.update(
+        'drill_plans',
+        {'status': 'archived', 'updated_at': now},
+        where: 'mode = ? AND status = ?',
+        whereArgs: [mode, 'active'],
+      );
+      return await db.insert('drill_plans', {
+        'mode': mode,
+        'goals': jsonEncode(goals),
+        'level_note': levelNote,
+        'weeks': weeks,
+        'per_day': perDay,
+        'start_date': (startDate ?? DateTime.now()).toIso8601String(),
+        'status': 'active',
+        'created_at': now,
+        'updated_at': now,
+      });
+    } catch (e) {
+      debugPrint('ReadFlow createDrillPlan failed: $e');
+      return -1;
+    }
+  }
+
+  /// 当前进行中的计划(没有就返回 null)
+  static Future<Map<String, Object?>?> activeDrillPlan(String mode) async {
+    try {
+      final db = await database;
+      final rows = await db.query(
+        'drill_plans',
+        where: 'mode = ? AND status = ?',
+        whereArgs: [mode, 'active'],
+        orderBy: 'id DESC',
+        limit: 1,
+      );
+      return rows.isEmpty ? null : rows.first;
+    } catch (e) {
+      debugPrint('ReadFlow activeDrillPlan failed: $e');
+      return null;
+    }
+  }
+
+  static Future<void> closeDrillPlan(int id, {String status = 'done'}) async {
+    try {
+      final db = await database;
+      await db.update(
+        'drill_plans',
+        {'status': status, 'updated_at': DateTime.now().toIso8601String()},
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    } catch (e) {
+      debugPrint('ReadFlow closeDrillPlan failed: $e');
+    }
+  }
+
+  /// 记一次练习(进度追踪的原子记录)
+  static Future<int> logDrill({
+    required String mode,
+    required int total,
+    required int correct,
+    int seconds = 0,
+    int? planId,
+    List<String> goals = const [],
+    List<String> wrong = const [],
+  }) async {
+    try {
+      final db = await database;
+      final id = await db.insert('drill_logs', {
+        'mode': mode,
+        'plan_id': planId,
+        'goals': jsonEncode(goals),
+        'total': total,
+        'correct': correct,
+        'seconds': seconds,
+        'wrong_words': jsonEncode(wrong.take(30).toList()),
+        'created_at': DateTime.now().toIso8601String(),
+      });
+      if (planId != null) {
+        await db.update(
+          'drill_plans',
+          {'updated_at': DateTime.now().toIso8601String()},
+          where: 'id = ?',
+          whereArgs: [planId],
+        );
+      }
+      return id;
+    } catch (e) {
+      debugPrint('ReadFlow logDrill failed: $e');
+      return -1;
+    }
+  }
+
+  /// 练习记录(按时间倒序)
+  static Future<List<Map<String, Object?>>> getDrillLogs({
+    String? mode,
+    int limit = 100,
+  }) async {
+    try {
+      final db = await database;
+      return await db.query(
+        'drill_logs',
+        where: mode == null ? null : 'mode = ?',
+        whereArgs: mode == null ? null : [mode],
+        orderBy: 'created_at DESC, id DESC',
+        limit: limit,
+      );
+    } catch (e) {
+      debugPrint('ReadFlow getDrillLogs failed: $e');
+      return [];
+    }
+  }
+
+  /// 某模式的累计进度(界面上的"进度追踪"直接读它)
+  ///
+  /// 返回:times 练习次数 / total 总题数 / correct 总对题 / accuracy 正确率 /
+  /// todayTotal 今日题数 / todayDone 今日是否练过 / streak 连续练习天数
+  static Future<Map<String, Object?>> drillProgress({String? mode}) async {
+    try {
+      final logs = await getDrillLogs(mode: mode, limit: 2000);
+      var total = 0, correct = 0, seconds = 0;
+      final days = <String>{};
+      final today = DateTime.now();
+      var todayTotal = 0;
+      for (final r in logs) {
+        total += (r['total'] as int?) ?? 0;
+        correct += (r['correct'] as int?) ?? 0;
+        seconds += (r['seconds'] as int?) ?? 0;
+        final t = DateTime.tryParse('${r['created_at'] ?? ''}');
+        if (t == null) continue;
+        days.add('${t.year}-${t.month}-${t.day}');
+        if (t.year == today.year && t.month == today.month && t.day == today.day) {
+          todayTotal += (r['total'] as int?) ?? 0;
+        }
+      }
+      // 连续天数:从今天(或昨天)往前数
+      var streak = 0;
+      var cursor = DateTime(today.year, today.month, today.day);
+      if (!days.contains('${cursor.year}-${cursor.month}-${cursor.day}')) {
+        cursor = cursor.subtract(const Duration(days: 1));
+      }
+      while (days.contains('${cursor.year}-${cursor.month}-${cursor.day}')) {
+        streak++;
+        cursor = cursor.subtract(const Duration(days: 1));
+      }
+      return {
+        'times': logs.length,
+        'total': total,
+        'correct': correct,
+        'accuracy': total == 0 ? 0.0 : correct / total,
+        'seconds': seconds,
+        'todayTotal': todayTotal,
+        'streak': streak,
+      };
+    } catch (e) {
+      debugPrint('ReadFlow drillProgress failed: $e');
+      return {
+        'times': 0,
+        'total': 0,
+        'correct': 0,
+        'accuracy': 0.0,
+        'seconds': 0,
+        'todayTotal': 0,
+        'streak': 0,
+      };
+    }
+  }
+
+  // ── 材料里的 AI 内容块(v2.9,用户第 3(5) 条)──
+
+  static Future<int> upsertMaterialBlock({
+    required int materialId,
+    required String kind,
+    int chunkIndex = -1,
+    String title = '',
+    required String payloadJson,
+  }) async {
+    try {
+      final db = await database;
+      final now = DateTime.now().toIso8601String();
+      final existing = await db.query(
+        'material_blocks',
+        where: 'material_id = ? AND chunk_index = ? AND kind = ?',
+        whereArgs: [materialId, chunkIndex, kind],
+        limit: 1,
+      );
+      if (existing.isNotEmpty) {
+        final id = existing.first['id'] as int;
+        await db.update(
+          'material_blocks',
+          {
+            'title': title,
+            'payload': payloadJson,
+            'created_at': now,
+          },
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+        return id;
+      }
+      return await db.insert('material_blocks', {
+        'material_id': materialId,
+        'chunk_index': chunkIndex,
+        'kind': kind,
+        'title': title,
+        'payload': payloadJson,
+        'created_at': now,
+      });
+    } catch (e) {
+      debugPrint('ReadFlow upsertMaterialBlock failed: $e');
+      return -1;
+    }
+  }
+
+  static Future<List<Map<String, Object?>>> getMaterialBlocks(
+    int materialId, {
+    int? chunkIndex,
+  }) async {
+    try {
+      final db = await database;
+      return await db.query(
+        'material_blocks',
+        where: chunkIndex == null
+            ? 'material_id = ?'
+            : 'material_id = ? AND chunk_index = ?',
+        whereArgs:
+            chunkIndex == null ? [materialId] : [materialId, chunkIndex],
+        orderBy: 'chunk_index ASC, id ASC',
+      );
+    } catch (e) {
+      debugPrint('ReadFlow getMaterialBlocks failed: $e');
+      return [];
+    }
+  }
+
+  static Future<void> deleteMaterialBlocks(
+    int materialId, {
+    String? kind,
+    int? chunkIndex,
+  }) async {
+    try {
+      final db = await database;
+      var where = 'material_id = ?';
+      final args = <Object?>[materialId];
+      if (chunkIndex != null) {
+        where += ' AND chunk_index = ?';
+        args.add(chunkIndex);
+      }
+      if (kind != null) {
+        where += ' AND kind = ?';
+        args.add(kind);
+      }
+      await db.delete('material_blocks', where: where, whereArgs: args);
+    } catch (e) {
+      debugPrint('ReadFlow deleteMaterialBlocks failed: $e');
+    }
+  }
+
+  // ── 材料来源与分组(v2.9,用户第 5 条:材料导入要能分类)──
+
+  /// 设置材料的分组名(用户自定义,如「新视野教材」);传空 = 取消分组
+  static Future<void> setMaterialGroup(int materialId, String? group) async {
+    try {
+      final db = await database;
+      final g = (group ?? '').trim();
+      await db.update(
+        'materials',
+        {'group_name': g.isEmpty ? null : g},
+        where: 'id = ?',
+        whereArgs: [materialId],
+      );
+    } catch (e) {
+      debugPrint('ReadFlow setMaterialGroup failed: $e');
+    }
+  }
+
+  /// 已有的分组名(去重、按材料数倒序)
+  static Future<List<String>> materialGroups() async {
+    try {
+      final db = await database;
+      final rows = await db.rawQuery(
+        'SELECT group_name, COUNT(*) AS c FROM materials '
+        "WHERE group_name IS NOT NULL AND group_name != '' "
+        'GROUP BY group_name ORDER BY c DESC, group_name ASC',
+      );
+      return [for (final r in rows) '${r['group_name']}'];
+    } catch (e) {
+      debugPrint('ReadFlow materialGroups failed: $e');
+      return [];
+    }
+  }
+
+  /// 按来源统计材料数(import/local/ai/feed)——「材料导入」与「词汇本」分家的依据
+  static Future<Map<String, int>> materialCountByOrigin() async {
+    try {
+      final db = await database;
+      final rows = await db.rawQuery(
+        'SELECT COALESCE(origin, source) AS o, COUNT(*) AS c FROM materials '
+        'GROUP BY o',
+      );
+      return {
+        for (final r in rows) '${r['o']}': (r['c'] as int?) ?? 0,
+      };
+    } catch (e) {
+      debugPrint('ReadFlow materialCountByOrigin failed: $e');
+      return {};
+    }
+  }  /// 与 tutor_messages 分表:对话可以清,偏好/承诺/障碍/结论必须留着。
   static Future<int> addTutorMemory({
     required String kind,
     required String text,

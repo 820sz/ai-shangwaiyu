@@ -11,7 +11,13 @@ import '../../../utils/page_label.dart';
 import '../../../widgets/app_ui.dart';
 import '../../profile/vocab_list.dart';
 
-/// 板块2：我的学习材料 — 按分类浏览用户已保存的材料
+/// 板块:**我的词汇本**(v1.6.0 起叫「我的学习材料」;v2.9 改名)。
+///
+/// 用户 10/2 第 5 条:"'我的学习材料'现在**本质是个词汇本**,需改为'材料导入'
+/// (…)+'我的词汇本'(然后子功能就是现有的教程、等等这些逻辑)"。
+///
+/// 所以这一块只做**词汇**:按分类(教材/书籍/外刊/碎片文章/其他)浏览已收藏的生词,
+/// 材料本体与导入在隔壁 [ImportedMaterialsSection]。
 class MyMaterialsSection extends StatelessWidget {
   const MyMaterialsSection({super.key});
 
@@ -43,7 +49,7 @@ class MyMaterialsSection extends StatelessWidget {
             const EdgeInsets.fromLTRB(14, 0, 14, 12),
         leading: Icon(Icons.folder_open, color: theme.colorScheme.primary),
         title: Text(
-          '我的学习材料',
+          '我的词汇本',
           style: theme.textTheme.titleSmall?.copyWith(
             fontWeight: FontWeight.w600,
           ),

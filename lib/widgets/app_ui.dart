@@ -11,6 +11,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../config/design_tokens.dart';
+import 'waiting.dart';
 
 /// 卡片:统一圆角、内边距、外边距与点击反馈
 class AppCard extends StatelessWidget {
@@ -224,36 +225,92 @@ class AppEmpty extends StatelessWidget {
   }
 }
 
-/// 加载态:居中转圈 + 可选文案(替代各页 `Center(child: CircularProgressIndicator())`)
+/// 加载态(v2.9 改版:不再是一个转圈)。
+///
+/// 用户 10/2 原话:"该软件最后所有让 ai 进行思考或者什么任务的功能,都要把现在的
+/// **转圈等待 ui 改成其他更可感、更高级的等待动画形式**,最好是流式输出"。
+/// 他选了三套方案**都要**,于是这里:
+/// - 默认 = **骨架屏**(B 方案):先铺出"结果将要占据的形状",内容一到原地替换 ——
+///   等待感显著变短,也不会再出现"一个孤零零的圈在屏幕中间";
+/// - 传 [steps] = **流式过程时间线**(A 方案):有明确步骤的任务(检索/抓取/识图/批改),
+///   每一步都是真实发生的;
+/// - 传 [progress] = **进度条**(C 方案):能估算进度的批量任务(逐段翻译/批量分析)。
+///
+/// 三种共用同一个入口,调用方按任务类型选,不必各页自己画。
 class AppLoading extends StatelessWidget {
   final String? label;
 
-  const AppLoading({super.key, this.label});
+  /// A 方案:真实步骤(传了就显示时间线)
+  final List<AiStep>? steps;
+
+  /// C 方案:0~1 的真实进度(传了就显示进度条)
+  final double? progress;
+
+  /// C 方案:开始时间(显示"已用 N 秒")
+  final DateTime? startedAt;
+
+  /// 骨架屏行数(默认 4)
+  final int skeletonLines;
+
+  const AppLoading({
+    super.key,
+    this.label,
+    this.steps,
+    this.progress,
+    this.startedAt,
+    this.skeletonLines = 4,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(Gap.lg),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(
-              width: 22,
-              height: 22,
-              child: CircularProgressIndicator(strokeWidth: 2.4),
-            ),
-            if (label != null) ...[
-              const SizedBox(height: Gap.sm),
-              Text(
-                label!,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-              ),
-            ],
-          ],
+    // A:有步骤 → 时间线(用户最想要的"可感的等待")
+    if (steps != null && steps!.isNotEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: Gap.md),
+        child: AiWaitingTimeline(
+          steps: steps!,
+          running: true,
+          footer: null,
         ),
+      );
+    }
+    // C:有进度 → 进度条
+    if (progress != null || startedAt != null) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: Gap.md),
+        child: ProgressStageBar(
+          stage: label ?? '正在处理',
+          value: progress,
+          startedAt: startedAt,
+        ),
+      );
+    }
+    // B:默认 → 骨架屏 + 一行说明
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: Gap.sm),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (label != null) ...[
+            Row(
+              children: [
+                const ThinkingDots(label: '', compact: true),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    label!,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: Gap.sm),
+          ],
+          SkeletonLines(lines: skeletonLines),
+        ],
       ),
     );
   }

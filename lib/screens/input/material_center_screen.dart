@@ -20,7 +20,9 @@ import '../../services/material_topics.dart';
 import '../../services/original_search.dart';
 import '../../services/word_frequency.dart';
 import '../../widgets/app_ui.dart';
+import '../../widgets/collapsible_section.dart';
 import '../../widgets/material_cover.dart';
+import '../../widgets/waiting.dart';
 import 'category_material_screen.dart';
 import 'material_import_flow.dart';
 import 'material_reader_screen.dart';
@@ -76,13 +78,18 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
   MaterialAnalysis? _dailyAnalysis;
   bool _dailyLoading = false;
 
-  // ── 发现更多(v2.8):题材 tab + 图文列表 + 流式检索过程 ──
-  MaterialTopic _topic = MaterialTopic.all.first;
+  // ── 发现更多(v2.8;v2.9 多选 + 自定义分区 + 卡片排版修)──
+  List<MaterialTopic> _availableTopics = [...MaterialTopic.all];
+  List<MaterialTopic> _topics = const [];
+  Set<String> _selectedTopics = {};
   List<OriginalHit> _topicHits = const [];
   List<SearchEvent> _topicEvents = const [];
   bool _topicLoading = false;
   bool _topicLoaded = false;
   String _topicNote = '';
+
+  /// 区块的展开/收起/隐藏(v2.9,用户 3(1) 条)
+  final _sectionPrefs = SectionPrefsNotifier(UiSectionPrefs.load());
 
   @override
   void initState() {
@@ -99,7 +106,7 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
       );
       _loadShelf();
       _loadItems();
-      _loadTopic(_topic);
+      _loadTopics([_availableTopics.first]);
     });
   }
 
@@ -188,9 +195,14 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
   }
 
   /// 「发现更多」:按题材检索(公版书 + 论文 + 外媒三路并行),过程流式上报
-  Future<void> _loadTopic(MaterialTopic topic) async {
+  ///
+  /// v2.9(用户 3(3) 条):题材**可多选**(多选就一起搜、结果合并去重),
+  /// 也可以**自己加分区**(自定义题材存 Hive,与内置的一起出现在这里)。
+  Future<void> _loadTopics(List<MaterialTopic> topics) async {
+    if (topics.isEmpty) return;
     setState(() {
-      _topic = topic;
+      _topics = topics;
+      _selectedTopics = {for (final t in topics) t.id};
       _topicLoading = true;
       _topicLoaded = true;
       _topicHits = const [];
@@ -206,38 +218,48 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
 
     push(SearchEvent(
       stage: SearchStage.preparing,
-      label: '按「${topic.label}」找材料:${topic.description}',
+      label: topics.length == 1
+          ? '按「${topics.first.label}」找材料:${topics.first.description}'
+          : '一起找 ${topics.length} 个题材:${topics.map((t) => t.label).join('、')}',
     ));
     try {
-      // 用该题材的英文检索词(公开源只认英文,见 v2.6 教训);
-      // 用户在偏好里写了题材就优先用他的说法
+      // 用户若在偏好里写了题材,优先用它的说法(他比我们更清楚要什么)
       final genres = _prefs.genres.trim();
-      final query = genres.isEmpty ? topic.queries.first : genres;
-      final result = await OriginalSearch.search(
-        query,
-        category: '其他',
-        sourceIds: _prefs.kinds.isEmpty
-            ? null
-            : [for (final s in _prefs.preferredSources) s.id],
-        onProgress: push,
-      );
-      if (!mounted) return;
+      final all = <OriginalHit>[];
+      final seen = <String>{};
+      final notes = <String>[];
+      for (final topic in topics) {
+        final query = genres.isEmpty ? topic.queries.first : genres;
+        final result = await OriginalSearch.search(
+          query,
+          category: '其他',
+          sourceIds: _prefs.kinds.isEmpty
+              ? null
+              : [for (final s in _prefs.preferredSources) s.id],
+          onProgress: push,
+        );
+        for (final h in result.hits) {
+          // 多题材合并时按 URL 去重(同一篇可能被两个题材的检索词命中)
+          final key = h.url.trim().isEmpty ? h.title : h.url;
+          if (seen.add(key)) all.add(h);
+        }
+        notes.addAll(result.notes);
+        if (!mounted) return;
+      }
       final seconds = DateTime.now().difference(started).inSeconds;
       push(SearchEvent(
         stage: SearchStage.done,
-        label: '查阅了 ${result.hits.length} 篇 · 用时 ${seconds == 0 ? '不到 1' : seconds} 秒',
+        label: '查阅了 ${all.length} 篇 · 用时 ${seconds == 0 ? '不到 1' : seconds} 秒',
         done: 1,
         total: 1,
-        hits: result.hits.length,
+        hits: all.length,
       ));
       setState(() {
-        _topicHits = result.hits;
+        _topicHits = all;
         _topicLoading = false;
-        _topicNote = result.notes.join(' · ');
+        _topicNote = notes.toSet().join(' · ');
       });
-      unawaited(
-        _translateTitles(result.hits.take(12).map((h) => h.title).toList()),
-      );
+      unawaited(_translateTitles(all.take(12).map((h) => h.title).toList()));
     } catch (e) {
       if (!mounted) return;
       push(SearchEvent(stage: SearchStage.sourceFailed, label: '这次没找成:$e'));
@@ -246,6 +268,102 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
         _topicNote = '$e';
       });
     }
+  }
+
+  /// 加一个自定义分区(用户 3(3) 条:发现更多的子分类要能自己加)
+  Future<void> _addCustomTopic() async {
+    final nameCtrl = TextEditingController();
+    final queryCtrl = TextEditingController();
+    final saved = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(
+            Gap.md,
+            0,
+            Gap.md,
+            Gap.md + MediaQuery.of(ctx).viewInsets.bottom,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('加一个自己的分区',
+                  style: Theme.of(ctx)
+                      .textTheme
+                      .titleMedium
+                      ?.copyWith(fontWeight: FontWeight.w700)),
+              const SizedBox(height: Gap.xxs),
+              Text(
+                '公开内容源只认英文,所以检索词写英文(逗号分隔多个,越多搜得越广)。',
+                style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                      height: 1.4,
+                    ),
+              ),
+              const SizedBox(height: Gap.md),
+              TextField(
+                controller: nameCtrl,
+                decoration: const InputDecoration(
+                  labelText: '分区名(中文)',
+                  hintText: '如:帮我找金融英语',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: Gap.sm),
+              TextField(
+                controller: queryCtrl,
+                minLines: 2,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  labelText: '英文检索词',
+                  hintText: 'finance news, financial times, investment',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: Gap.md),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('加上去'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (saved != true || !mounted) return;
+    final topic = await CustomTopics.add(
+      label: nameCtrl.text,
+      queriesText: queryCtrl.text,
+      description: '自定义分区',
+    );
+    nameCtrl.dispose();
+    queryCtrl.dispose();
+    if (topic == null || !mounted) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('分区名和英文检索词都要填')),
+        );
+      }
+      return;
+    }
+    _reloadTopics();
+    if (!mounted) return;
+    await _loadTopics([..._topics, topic]);
+  }
+
+  void _reloadTopics() {
+    setState(() {
+      _availableTopics = [...MaterialTopic.all, ...CustomTopics.load()];
+    });
   }
 
   /// 批量把英文标题翻成中文(带缓存;AI 没配就静默返回)
@@ -522,7 +640,7 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
       ),
     );
     // 题材/类型变了就重搜一次发现区,让偏好立刻生效
-    unawaited(_loadTopic(_topic));
+    unawaited(_loadTopics(_topics.isEmpty ? [_availableTopics.first] : _topics));
   }
 
   int get _fitCount {
@@ -543,105 +661,214 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
             return c == null || _prefs.band.contains(c);
           }).toList()
         : _shelf;
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('材料中心'),
-        actions: [
-          IconButton(
-            tooltip: '导入材料(文件 / 图片 / 链接 / 粘贴)',
-            onPressed: _import,
-            icon: const Icon(Icons.add_circle_outline),
-          ),
-        ],
+    return SectionPrefsScope(
+      notifier: _sectionPrefs,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('材料中心'),
+          actions: [
+            IconButton(
+              tooltip: '区块管理(恢复被隐藏的功能区)',
+              onPressed: _showSectionManager,
+              icon: const Icon(Icons.view_agenda_outlined),
+            ),
+            IconButton(
+              tooltip: '导入材料(文件 / 图片 / 链接 / 粘贴)',
+              onPressed: _import,
+              icon: const Icon(Icons.add_circle_outline),
+            ),
+          ],
+        ),
+        body: ListView(
+          // 记住滚动位置:收起/展开后不会跳回顶部
+          key: const PageStorageKey<String>('material_center'),
+          padding: Insets.page,
+          children: [
+            // ── 每个功能区都可收起/隐藏(v2.9,用户 3(1) 条)──
+            // 用户原话:"每个功能都展示得太满,没有收起和隐藏这些基本逻辑,
+            // 导致得往下翻半天"。所以标题行整行可点收放,菜单里可隐藏。
+            AppStagger(
+              index: 0,
+              child: CollapsibleSection(
+                id: 'prefs',
+                title: '个性化找资源',
+                icon: Icons.tune,
+                subtitle: _prefs.summary,
+                collapsedHint: _prefs.summary,
+                trailing: TextButton(
+                  onPressed: _showPrefsSheet,
+                  child: const Text('调整'),
+                ),
+                child: _buildPrefsCard(theme, muted),
+              ),
+            ),
+            AppStagger(
+              index: 1,
+              child: CollapsibleSection(
+                id: 'daily',
+                title: '今日精读',
+                icon: Icons.local_fire_department_outlined,
+                subtitle: '每天一篇,打开前先告诉你它有多难',
+                collapsedHint: _daily == null ? '还没有可精读的条目' : _daily!.title,
+                child: _buildDailyCard(theme, muted),
+              ),
+            ),
+            AppStagger(
+              index: 2,
+              child: CollapsibleSection(
+                id: 'discover',
+                title: '发现更多',
+                icon: Icons.explore_outlined,
+                subtitle: '按题材找:公版书 + 论文 + 外媒三路并行',
+                collapsedHint: _selectedTopics.isEmpty
+                    ? '选题材后在这里出结果'
+                    : '已选 ${_selectedTopics.length} 个题材 · ${_topicHits.length} 篇材料',
+                child: _buildDiscover(theme, muted),
+              ),
+            ),
+            AppStagger(
+              index: 3,
+              child: CollapsibleSection(
+                id: 'byLevel',
+                title: '按你的水平找材料',
+                icon: Icons.school_outlined,
+                subtitle: '中文说需求,AI 去公开源找原文',
+                child: _buildAiDiscoverGrid(theme),
+              ),
+            ),
+            AppStagger(
+              index: 4,
+              child: CollapsibleSection(
+                id: 'feed',
+                title: '今日推荐',
+                icon: Icons.rss_feed,
+                subtitle:
+                    '${MaterialSourceService.sourceOf(_sourceId)?.label ?? _sourceId} · 最新条目',
+                collapsedHint: _items.isEmpty ? '还没有条目' : '${_items.length} 条最新条目',
+                trailing: TextButton(
+                  onPressed: _probing ? null : _probeAll,
+                  child: Text(_probing ? '检测中…' : '检测可用源'),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _sourceStrip(theme),
+                    const SizedBox(height: Gap.xs),
+                    _sourceNote(theme, muted),
+                    const SizedBox(height: Gap.sm),
+                    if (_loadingItems)
+                      // 方案 B:骨架屏(与最终卡片同形状),不再是转圈
+                      const SkeletonLines(lines: 4, seed: 1)
+                    else if (_error != null)
+                      _errorCard(theme, muted)
+                    else if (_items.isEmpty)
+                      const AppEmpty(
+                        icon: Icons.article_outlined,
+                        title: '这个源暂时没有条目',
+                        hint: '换一个源试试,或点「检测可用源」',
+                      )
+                    else
+                      for (final item in _items.take(6))
+                        _buildFeedCard(theme, item),
+                  ],
+                ),
+              ),
+            ),
+            AppStagger(
+              index: 5,
+              child: CollapsibleSection(
+                id: 'shelf',
+                title: '材料库',
+                icon: Icons.library_books_outlined,
+                subtitle: _prefs.band.isAny
+                    ? '按「今天最适合读」排序'
+                    : '按 ${_prefs.band.label} 排序 · 符合 $_fitCount 篇',
+                collapsedHint: '${shelf.length} 篇 · 点开继续读',
+                trailing: _prefs.band.isAny || _shelf.isEmpty
+                    ? null
+                    : FilterChip(
+                        label: const Text('只看符合'),
+                        selected: _onlyFit,
+                        onSelected: (v) => setState(() => _onlyFit = v),
+                      ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (_loadingShelf)
+                      const SkeletonLines(lines: 3, seed: 2)
+                    else if (shelf.isEmpty)
+                      AppEmpty(
+                        icon: Icons.library_books_outlined,
+                        title: _onlyFit ? '没有符合 ${_prefs.band.label} 的材料' : '还没有材料',
+                        hint: _onlyFit
+                            ? '把「只看符合」取消,或换一个难度档'
+                            : '从上面挑一份,或点右上角「+」导入',
+                      )
+                    else
+                      for (final s in shelf) _buildShelfCard(theme, s),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: Gap.lg),
+          ],
+        ),
       ),
-      body: ListView(
-        padding: Insets.page,
-        children: [
-          AppStagger(index: 0, child: _buildPrefsCard(theme, muted)),
-          AppStagger(index: 1, child: _buildDailyCard(theme, muted)),
-          AppStagger(index: 2, child: _buildDiscover(theme, muted)),
-          AppStagger(
-            index: 3,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const AppSectionTitle(
-                  title: '按你的水平找材料',
-                  subtitle: '中文说需求,AI 去公开源找原文',
+    );
+  }
+
+  /// 区块管理(v2.9):被隐藏的功能区在这里恢复 —— 隐藏不是"删掉找不回来"。
+  Future<void> _showSectionManager() async {
+    const all = [
+      ('prefs', '个性化找资源', '难度 / 类型 / 题材 / 补充需求'),
+      ('daily', '今日精读', '每天一篇大卡'),
+      ('discover', '发现更多', '题材检索与结果'),
+      ('byLevel', '按你的水平找材料', '分类入口'),
+      ('feed', '今日推荐', '内容源最新条目'),
+      ('shelf', '材料库', '你收藏与导入的材料'),
+    ];
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(Gap.md, 0, Gap.md, Gap.xs),
+                child: Text('区块管理',
+                    style: Theme.of(ctx)
+                        .textTheme
+                        .titleMedium
+                        ?.copyWith(fontWeight: FontWeight.w700)),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(Gap.md, 0, Gap.md, Gap.xs),
+                child: Text(
+                  '关掉不想天天看到的区块,页面就短了 —— 这里是开关,随时能开回来。',
+                  style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                        height: 1.4,
+                      ),
                 ),
-                _buildAiDiscoverGrid(theme),
-              ],
-            ),
-          ),
-          AppStagger(
-            index: 4,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                AppSectionTitle(
-                  title: '今日推荐',
-                  subtitle:
-                      '${MaterialSourceService.sourceOf(_sourceId)?.label ?? _sourceId} · 最新条目',
-                  trailing: TextButton(
-                    onPressed: _probing ? null : _probeAll,
-                    child: Text(_probing ? '检测中…' : '检测可用源'),
-                  ),
+              ),
+              for (final s in all)
+                SwitchListTile(
+                  dense: true,
+                  value: !_sectionPrefs.isHidden(s.$1),
+                  title: Text(s.$2, style: const TextStyle(fontSize: 14)),
+                  subtitle: Text(s.$3, style: const TextStyle(fontSize: 11)),
+                  onChanged: (on) {
+                    on ? _sectionPrefs.show(s.$1) : _sectionPrefs.hide(s.$1);
+                    setSheet(() {});
+                  },
                 ),
-                _sourceStrip(theme),
-                const SizedBox(height: Gap.xs),
-                _sourceNote(theme, muted),
-                const SizedBox(height: Gap.sm),
-                if (_loadingItems)
-                  const AppLoading(label: '正在拉取最新条目…')
-                else if (_error != null)
-                  _errorCard(theme, muted)
-                else if (_items.isEmpty)
-                  const AppEmpty(
-                    icon: Icons.article_outlined,
-                    title: '这个源暂时没有条目',
-                    hint: '换一个源试试,或点「检测可用源」',
-                  )
-                else
-                  for (final item in _items.take(6))
-                    _buildFeedCard(theme, item),
-              ],
-            ),
+              const SizedBox(height: Gap.xs),
+            ],
           ),
-          AppStagger(
-            index: 5,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                AppSectionTitle(
-                  title: '材料库',
-                  subtitle: _prefs.band.isAny
-                      ? '按「今天最适合读」排序'
-                      : '按 ${_prefs.band.label} 排序 · 符合 $_fitCount 篇',
-                  trailing: _prefs.band.isAny || _shelf.isEmpty
-                      ? null
-                      : FilterChip(
-                          label: const Text('只看符合'),
-                          selected: _onlyFit,
-                          onSelected: (v) => setState(() => _onlyFit = v),
-                        ),
-                ),
-                if (_loadingShelf)
-                  const AppLoading()
-                else if (shelf.isEmpty)
-                  AppEmpty(
-                    icon: Icons.library_books_outlined,
-                    title: _onlyFit ? '没有符合 ${_prefs.band.label} 的材料' : '还没有材料',
-                    hint: _onlyFit
-                        ? '把「只看符合」取消,或换一个难度档'
-                        : '从上面挑一份,或点右上角「+」导入',
-                  )
-                else
-                  for (final s in shelf) _buildShelfCard(theme, s),
-              ],
-            ),
-          ),
-          const SizedBox(height: Gap.lg),
-        ],
+        ),
       ),
     );
   }
@@ -928,33 +1155,113 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
   // ───────────────── ② 发现更多 ─────────────────
 
   Widget _buildDiscover(ThemeData theme, Color muted) {
+    final selected = _selectedTopics;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const AppSectionTitle(
-          title: '发现更多',
-          subtitle: '按题材找:公版书 + 论文 + 外媒三路并行',
-        ),
+        // 题材 chip:**可多选**(用户 3(3) 条);选中的一起搜、结果合并去重
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: Row(
             children: [
-              for (final t in MaterialTopic.all)
+              for (final t in _availableTopics)
                 Padding(
                   padding: const EdgeInsets.only(right: Gap.xs),
-                  child: ChoiceChip(
+                  child: FilterChip(
                     avatar: Icon(t.icon, size: 15),
                     label: Text(t.label),
-                    selected: _topic.id == t.id,
-                    onSelected: (_) => _loadTopic(t),
+                    selected: selected.contains(t.id),
+                    onSelected: (on) {
+                      final next = {...selected};
+                      on ? next.add(t.id) : next.remove(t.id);
+                      setState(() => _selectedTopics = next);
+                    },
+                    // 自定义分区:长按可删(内置的不给删)
+                    onDeleted: t.id.startsWith('custom_')
+                        ? () async {
+                            await CustomTopics.remove(t.id);
+                            _reloadTopics();
+                            if (!mounted) return;
+                            final next = {...selected}..remove(t.id);
+                            setState(() => _selectedTopics = next);
+                          }
+                        : null,
+                    deleteIcon: const Icon(Icons.close, size: 14),
+                    visualDensity: VisualDensity.compact,
+                    labelStyle: const TextStyle(fontSize: 12),
                   ),
                 ),
+              // 加一个自己的分区
+              ActionChip(
+                avatar: const Icon(Icons.add, size: 15),
+                label: const Text('自定义分区', style: TextStyle(fontSize: 12)),
+                onPressed: _addCustomTopic,
+                visualDensity: VisualDensity.compact,
+              ),
             ],
           ),
         ),
         const SizedBox(height: Gap.xs),
-        // 检索过程:**流式时间线**(用户第 6(4) 条"查阅了 xxx")
-        if (_topicEvents.isNotEmpty) _buildSearchTimeline(theme),
+        // 操作行:搜选中的 / 清空选择
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                selected.isEmpty
+                    ? '选一个或多个题材(可多选,也可以自己加分区)'
+                    : '已选 ${selected.length} 个题材'
+                        '${_topicHits.isEmpty ? '' : ' · ${_topicHits.length} 篇'}',
+                style: TextStyle(fontSize: 11.5, color: muted),
+              ),
+            ),
+            if (selected.isNotEmpty)
+              TextButton(
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  minimumSize: const Size(0, 30),
+                ),
+                onPressed: () => setState(() => _selectedTopics = {}),
+                child: const Text('清空', style: TextStyle(fontSize: 12)),
+              ),
+            FilledButton.tonal(
+              style: FilledButton.styleFrom(
+                minimumSize: const Size(0, 34),
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                textStyle: const TextStyle(fontSize: 12.5),
+              ),
+              onPressed: _topicLoading || selected.isEmpty
+                  ? null
+                  : () {
+                      final chosen = [
+                        for (final t in _availableTopics)
+                          if (selected.contains(t.id)) t,
+                      ];
+                      if (chosen.isNotEmpty) _loadTopics(chosen);
+                    },
+              child: Text(_topicLoading ? '检索中…' : '开始找'),
+            ),
+          ],
+        ),
+        const SizedBox(height: Gap.xs),
+        // 检索过程:流式时间线(用户第 6(4) 条;v2.9 换成全 App 共用组件)
+        if (_topicEvents.isNotEmpty)
+          AiWaitingTimeline(
+            steps: [
+              for (final e in _topicEvents)
+                AiStep(
+                  label: e.label,
+                  detail: e.total > 0 && e.done > 0
+                      ? '${e.done}/${e.total}'
+                      : null,
+                  state: switch (e.stage) {
+                    SearchStage.done => AiStepState.done,
+                    SearchStage.sourceFailed => AiStepState.failed,
+                    _ => AiStepState.running,
+                  },
+                ),
+            ],
+            running: _topicLoading,
+          ),
         if (_topicNote.isNotEmpty) ...[
           const SizedBox(height: Gap.xs),
           Text(_topicNote,
@@ -963,12 +1270,13 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
         ],
         const SizedBox(height: Gap.xs),
         if (_topicLoading && _topicHits.isEmpty)
-          const AppLoading(label: '正在检索…')
+          // 方案 B:骨架屏(与结果卡片同形状),不再是转圈
+          const SkeletonLines(lines: 6, seed: 3)
         else if (_topicHits.isEmpty && _topicLoaded)
           AppEmpty(
             icon: Icons.search_off,
             title: '这个题材这次没找到',
-            hint: '换个题材,或在上面「个性化找资源」里写清你想要什么',
+            hint: '换个题材,或加一个自己的分区;也可以在「个性化找资源」里写清你想要什么',
           )
         else
           for (var i = 0; i < _topicHits.length; i++)
@@ -980,160 +1288,110 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
     );
   }
 
-  /// 检索时间线(v2.8):把真实发生的每一步摊开,而不是一个转圈
-  Widget _buildSearchTimeline(ThemeData theme) {
-    final muted = theme.colorScheme.onSurfaceVariant;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: Gap.sm, vertical: Gap.xs),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest.withAlpha(150),
-        borderRadius: Radii.controlRadius,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          for (var i = 0; i < _topicEvents.length; i++)
-            Padding(
-              padding: EdgeInsets.only(
-                bottom: i == _topicEvents.length - 1 ? 0 : 4,
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(
-                    _topicEvents[i].icon,
-                    size: 14,
-                    color: switch (_topicEvents[i].stage) {
-                      SearchStage.sourceFailed =>
-                        AppTheme.warningColor(context),
-                      SearchStage.done => AppTheme.successColor(context),
-                      _ => theme.colorScheme.primary,
-                    },
-                  ),
-                  const SizedBox(width: Gap.xxs + 2),
-                  Expanded(
-                    child: Text(
-                      _topicEvents[i].label,
-                      style: TextStyle(
-                        fontSize: 11.5,
-                        height: 1.4,
-                        color: _topicEvents[i].stage == SearchStage.done
-                            ? theme.colorScheme.onSurface
-                            : muted,
-                        fontWeight: _topicEvents[i].stage == SearchStage.done
-                            ? FontWeight.w600
-                            : FontWeight.normal,
-                      ),
-                    ),
-                  ),
-                  if (_topicEvents[i].total > 0 &&
-                      _topicEvents[i].done > 0 &&
-                      _topicEvents[i].done <= _topicEvents[i].total)
-                    Text(
-                      '${_topicEvents[i].done}/${_topicEvents[i].total}',
-                      style: TextStyle(fontSize: 10, color: muted),
-                    ),
-                ],
-              ),
-            ),
-          if (_topicLoading)
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: Row(
-                children: [
-                  const SizedBox(
-                    width: 12,
-                    height: 12,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                  const SizedBox(width: Gap.xs),
-                  Text('还在检索…',
-                      style: TextStyle(fontSize: 11, color: muted)),
-                ],
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  /// 发现区卡片:缩略图 + 标题(中文(英文))+ 元信息 + Lv 徽标 + 两个动作
+  /// 发现区卡片:缩略图 + 标题(中文(英文))+ 元信息 + Lv 徽标 + 动作
+  ///
+  /// v2.9 修(用户截图指出的问题):上一版把「软件内阅读」做成默认尺寸的大按钮
+  /// 塞进一行,结果**两个按钮超出卡片宽度**、右边那个被裁成「原」字,
+  /// 标题与元信息也被挤到截断。现在:
+  /// - 卡片整体可点(读到阅读器),不再靠一个占半行的大按钮;
+  /// - 两个动作都是**紧凑小按钮** + `Wrap`,窄屏会自动换行,**永远不会溢出**;
+  /// - 元信息独立一行,不吃按钮的宽度。
   Widget _buildDiscoverCard(ThemeData theme, OriginalHit hit) {
     final muted = theme.colorScheme.onSurfaceVariant;
     final kind = MaterialLevel.kindOfSource(hit.sourceId);
     final lv = MaterialLevel.fallbackForKind(kind);
     final cn = _titleCnOf(hit.title);
     final accent = MaterialLevel.accentOf(hit.sourceId);
+    final source = MaterialSourceService.sourceOf(hit.sourceId);
     return Padding(
       padding: const EdgeInsets.only(bottom: Gap.xs),
       child: AppCard(
+        padding: const EdgeInsets.all(Gap.sm),
         onTap: () => _openHit(hit),
-        child: Row(
+        child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            MaterialCover(
-              seed: hit.title,
-              kind: kind,
-              imageUrl: hit.imageUrl,
-              width: 92,
-              height: 92,
-              radius: Radii.control,
-              levelLabel: 'Lv$lv',
-            ),
-            const SizedBox(width: Gap.sm),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    hit.title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodyLarge?.copyWith(
-                      fontSize: 15,
-                      height: 1.3,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  if (cn.isNotEmpty) ...[
-                    const SizedBox(height: 2),
-                    Text(
-                      cn,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodySmall
-                          ?.copyWith(color: muted, height: 1.3),
-                    ),
-                  ],
-                  const SizedBox(height: 4),
-                  Wrap(
-                    spacing: Gap.xs,
-                    runSpacing: 2,
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                MaterialCover(
+                  seed: hit.title,
+                  kind: kind,
+                  imageUrl: hit.imageUrl,
+                  width: 78,
+                  height: 78,
+                  radius: Radii.control,
+                  levelLabel: 'Lv$lv',
+                ),
+                const SizedBox(width: Gap.sm),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      if (hit.note.trim().isNotEmpty)
-                        _meta(theme, Icons.schedule, hit.note),
-                      if (accent.isNotEmpty)
-                        _meta(theme, Icons.volume_up_outlined, accent),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      FilledButton.tonal(
-                        onPressed: () => _openHit(hit),
-                        child: const Text('软件内阅读'),
-                      ),
-                      const SizedBox(width: Gap.xxs),
-                      if (hit.url.trim().isNotEmpty)
-                        TextButton.icon(
-                          onPressed: () => _openExternal(hit.url),
-                          icon: const Icon(Icons.open_in_new, size: 15),
-                          label: const Text('原文链接'),
+                      Text(
+                        hit.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodyLarge?.copyWith(
+                          fontSize: 14.5,
+                          height: 1.28,
+                          fontWeight: FontWeight.w600,
                         ),
+                      ),
+                      if (cn.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          cn,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall
+                              ?.copyWith(color: muted, height: 1.25),
+                        ),
+                      ],
+                      const SizedBox(height: 4),
+                      Text(
+                        [
+                          source?.label ?? '',
+                          if (hit.note.trim().isNotEmpty) hit.note.trim(),
+                          if (accent.isNotEmpty) accent,
+                        ].where((s) => s.isNotEmpty).join(' · '),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 11, color: muted),
+                      ),
                     ],
                   ),
-                ],
-              ),
+                ),
+              ],
+            ),
+            const SizedBox(height: Gap.xs),
+            // 动作:紧凑 + Wrap —— 窄屏换行而不是溢出(上一版就是在这溢出)
+            Wrap(
+              spacing: Gap.xs,
+              runSpacing: 4,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                FilledButton.tonal(
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(0, 34),
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    textStyle: const TextStyle(fontSize: 12.5),
+                  ),
+                  onPressed: () => _openHit(hit),
+                  child: const Text('软件内阅读'),
+                ),
+                if (hit.url.trim().isNotEmpty)
+                  TextButton.icon(
+                    style: TextButton.styleFrom(
+                      minimumSize: const Size(0, 34),
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      textStyle: const TextStyle(fontSize: 12.5),
+                    ),
+                    onPressed: () => _openExternal(hit.url),
+                    icon: const Icon(Icons.open_in_new, size: 14),
+                    label: const Text('原文'),
+                  ),
+              ],
             ),
           ],
         ),

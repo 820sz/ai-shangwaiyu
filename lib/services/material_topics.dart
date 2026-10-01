@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+
+import '../config/constants.dart';
 
 /// 材料题材分类(v2.8,用户第 6(2)(5) 条:"分类逻辑清晰""找到的材料太少")。
 ///
@@ -82,7 +85,10 @@ class MaterialTopic {
   ];
 
   static MaterialTopic? byId(String id) {
-    for (final t in all) {
+    for (final t in MaterialTopic.all) {
+      if (t.id == id) return t;
+    }
+    for (final t in CustomTopics.load()) {
       if (t.id == id) return t;
     }
     return null;
@@ -90,6 +96,110 @@ class MaterialTopic {
 
   /// 给 AI 的一句话(选材偏好面板里选题材时用)
   String get hintForAi => '$label(${queries.first})';
+}
+
+/// **用户自定义分区**(v2.9,用户 10/2 第 3(3) 条)。
+///
+/// 用户原话:"'发现更多'里的子分类**没法让用户自定义添加分区**,没法多选分区。"
+///
+/// 所以:用户可以加自己的题材(一个中文名 + 一到几组英文检索词),
+/// 加完它就和内置题材一样出现在 tab 里,并且可以**多选**一起搜。
+/// 存 Hive(JSON 字符串,自己编码,不引依赖)。
+class CustomTopics {
+  static List<MaterialTopic>? _cache;
+
+  static const List<IconData> iconChoices = [
+    Icons.interests,
+    Icons.science,
+    Icons.history_edu,
+    Icons.psychology,
+    Icons.rocket_launch,
+    Icons.music_note,
+    Icons.sports_esports,
+    Icons.theater_comedy,
+  ];
+
+  static List<MaterialTopic> load() {
+    if (_cache != null) return _cache!;
+    try {
+      final raw =
+          Hive.box(AppConstants.hiveBoxSettings).get(AppConstants.keyCustomTopics);
+      final list = <MaterialTopic>[];
+      if (raw is String && raw.trim().isNotEmpty) {
+        for (final block in raw.split('\n')) {
+          final parts = block.split('\t');
+          if (parts.length < 4) continue;
+          final queries = parts[3]
+              .split('|')
+              .map((s) => s.trim())
+              .where((s) => s.isNotEmpty)
+              .toList();
+          if (queries.isEmpty) continue;
+          final iconIndex = int.tryParse(parts.length > 4 ? parts[4] : '0') ?? 0;
+          list.add(MaterialTopic(
+            id: parts[0],
+            label: parts[1],
+            icon: iconChoices[iconIndex % iconChoices.length],
+            queries: queries,
+            description: parts[2],
+          ));
+        }
+      }
+      _cache = list;
+      return list;
+    } catch (e) {
+      debugPrint('ReadFlow 读取自定义分区失败(当作没有): $e');
+      return const [];
+    }
+  }
+
+  static Future<void> _save(List<MaterialTopic> list) async {
+    final encoded = list
+        .map((t) => [
+              t.id,
+              t.label,
+              t.description,
+              t.queries.join('|'),
+              '${iconChoices.contains(t.icon) ? iconChoices.indexOf(t.icon) : 0}',
+            ].join('\t'))
+        .join('\n');
+    await Hive.box(AppConstants.hiveBoxSettings)
+        .put(AppConstants.keyCustomTopics, encoded);
+    _cache = list;
+  }
+
+  /// 新增一个自定义分区。[queriesText] 允许用逗号/换行分隔多个检索词
+  static Future<MaterialTopic?> add({
+    required String label,
+    required String queriesText,
+    String description = '',
+    IconData? icon,
+  }) async {
+    final name = label.trim();
+    if (name.isEmpty) return null;
+    final queries = queriesText
+        .split(RegExp(r'[,,\n;；]'))
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
+    if (queries.isEmpty) return null;
+    final list = [...load()];
+    final topic = MaterialTopic(
+      id: 'custom_${DateTime.now().millisecondsSinceEpoch}',
+      label: name,
+      icon: icon ?? iconChoices[list.length % iconChoices.length],
+      queries: queries,
+      description: description.trim().isEmpty ? '自定义分区' : description.trim(),
+    );
+    list.add(topic);
+    await _save(list);
+    return topic;
+  }
+
+  static Future<void> remove(String id) async {
+    final list = [...load()]..removeWhere((t) => t.id == id);
+    await _save(list);
+  }
 }
 
 /// 题材 → 展示用的"题材色"角标色(与封面配色同一套低饱和思路)

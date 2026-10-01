@@ -6,6 +6,7 @@ import '../config/design_tokens.dart';
 import '../config/theme.dart';
 import '../services/api_endpoint.dart';
 import '../services/doubao_api.dart' show primaryModelChoices;
+import 'waiting.dart';
 
 /// 阅读器底部动作栏(v2.7,用户第 3 条)。
 ///
@@ -37,6 +38,10 @@ class ReaderActionBar extends StatelessWidget {
   /// 「更多」菜单里的动作
   final List<ReaderMoreAction> moreActions;
 
+  /// 打开「丰富形式」(v2.9,用户第 3(5) 条):把这一段变成表格/思维导图/
+  /// 时间线/要点卡/自测卡。为 null 时不显示这个按钮。
+  final VoidCallback? onRichForms;
+
   /// 收词保存位置的说明(如「书籍 / 红楼梦 · p33」)
   final String saveTargetLabel;
 
@@ -47,6 +52,13 @@ class ReaderActionBar extends StatelessWidget {
   /// 为什么要有:改成按需翻译后,用户需要知道"翻到哪了/还有多少没翻",
   /// 否则"往下滚才会翻"这件事没有任何提示。
   final String translationNote;
+
+  /// 换一个范围重新翻译(v2.9:用户自选翻译范围)
+  final VoidCallback? onRetranslate;
+
+  /// 翻译进度条(v2.9,用户第 3(2) 条"增加翻译的进度条"):
+  /// 真实进度 = 已完成段数 / 本次要翻的总段数;不在翻译时为 null(不显示)。
+  final ProgressStageBar? translationProgress;
 
   /// 换了模型/思考档后通知页面重建(否则菜单里的勾还停在旧值)
   final VoidCallback? onModelChanged;
@@ -62,6 +74,9 @@ class ReaderActionBar extends StatelessWidget {
     required this.saveTargetLabel,
     required this.onChangeTarget,
     this.translationNote = '',
+    this.translationProgress,
+    this.onRetranslate,
+    this.onRichForms,
     this.onModelChanged,
   });
 
@@ -117,7 +132,17 @@ class ReaderActionBar extends StatelessWidget {
               ],
             ),
           ),
-          // 翻译进度(v2.8):只有开着翻译时才出现,一行就把"翻到哪了"说清
+          // 翻译进度(v2.9,用户第 3(2) 条):真实进度条 + 第 N/M 段 + 剩余估算 +
+          // 取消。**只在真的在翻的时候出现** —— 不翻的时候不留一个空进度条骗人。
+          if (translationProgress != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(Gap.sm, 0, Gap.sm, Gap.xxs),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 460),
+                child: translationProgress,
+              ),
+            ),
+          // 翻译说明(v2.8):开着翻译时显示「已翻 3/40」这类状态;关着传空串。
           if (translationNote.isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(Gap.sm, 0, Gap.sm, 2),
@@ -136,6 +161,17 @@ class ReaderActionBar extends StatelessWidget {
                       ),
                     ),
                   ),
+                  // 换范围再翻(第 3(2) 条"让用户自选翻译范围")
+                  if (onRetranslate != null)
+                    TextButton(
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 6),
+                        minimumSize: const Size(0, 26),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      onPressed: onRetranslate,
+                      child: const Text('换范围', style: TextStyle(fontSize: 11)),
+                    ),
                 ],
               ),
             ),
@@ -181,6 +217,28 @@ class ReaderActionBar extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 4),
+
+                // 丰富形式(第 3(5) 条):让 AI 把这一段整理成表格/导图/时间线…
+                if (onRichForms != null) ...[
+                  Flexible(
+                    flex: 3,
+                    child: ActionChip(
+                      avatar: Icon(Icons.auto_awesome_outlined,
+                          size: 16, color: cs.primary),
+                      label: Text(
+                        '丰富形式',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 12, color: cs.onSurface),
+                      ),
+                      onPressed: onRichForms,
+                      visualDensity: VisualDensity.compact,
+                      backgroundColor: cs.surface,
+                      side: BorderSide(color: cs.outlineVariant),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                ],
 
                 // 保存(C 位)
                 Flexible(

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../config/design_tokens.dart';
 import '../config/theme.dart';
 import '../services/original_search.dart';
+import 'waiting.dart';
 
 /// 检索过程的**流式时间线**(v2.8,用户第 6(4) 条)。
 ///
@@ -82,17 +83,7 @@ class SearchTimeline extends StatelessWidget {
           if (loading)
             Padding(
               padding: const EdgeInsets.only(top: 6),
-              child: Row(
-                children: [
-                  const SizedBox(
-                    width: 12,
-                    height: 12,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                  const SizedBox(width: Gap.xs),
-                  Text('还在检索…', style: TextStyle(fontSize: 11, color: muted)),
-                ],
-              ),
+              child: const ThinkingDots(label: '还在检索', compact: true),
             ),
         ],
       ),

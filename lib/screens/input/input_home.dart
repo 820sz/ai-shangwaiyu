@@ -19,6 +19,7 @@ import 'process_chat.dart';
 import 'widgets/ai_article_section.dart';
 import 'material_center_screen.dart';
 import 'widgets/analysis_mode_picker.dart';
+import 'widgets/imported_materials_section.dart';
 import 'widgets/material_preview_dialog.dart';
 import 'widgets/my_materials_section.dart';
 
@@ -86,8 +87,11 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
             // ── AI 生词定制文章 ──
             const AppStagger(index: 2, child: AiArticleSection()),
 
-            // ── 我的学习材料 ──
-            const AppStagger(index: 3, child: MyMaterialsSection()),
+            // ── 材料导入（v2.9,用户第 5 条:外部导入的材料本体，可分类、可阅读）──
+            const AppStagger(index: 3, child: ImportedMaterialsSection()),
+
+            // ── 我的词汇本（v2.9,用户第 5 条:原来这块本质就是词汇本）──
+            const AppStagger(index: 4, child: MyMaterialsSection()),
           ],
         ),
       ),

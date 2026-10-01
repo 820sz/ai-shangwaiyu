@@ -115,7 +115,7 @@ class AppConstants {
 
   // ── 数据库 ──
   static const String dbName = 'readflow.db';
-  static const int dbVersion = 15;
+  static const int dbVersion = 16;
 
   // ── 收藏夹 ──
   /// 收藏来源(v2.8 扩展:用户第 10 条"收藏夹要体现不同功能区收藏进来的东西")
@@ -158,6 +158,12 @@ class AppConstants {
 
   /// 「我的」个性化名片(v2.8,用户第 9 条):头像 / 背景 / 签名。
   static const String keyProfileCard = 'profile_card';
+
+  /// 长页面区块的展开/收起/隐藏状态(v2.9,用户 3(1) 条)。
+  static const String keyUiSections = 'ui_sections';
+
+  /// 用户自定义的「发现更多」分区(v2.9,用户 3(3) 条)。
+  static const String keyCustomTopics = 'custom_topics';
 
   /// 内容源可用性记忆(v2.2):{sourceId: {ok, at, msg}} 的 JSON。
   /// 为什么存:公开源在不同网络下可达性差别极大(BBC/VOA/TED/Wikipedia 在

@@ -12,6 +12,7 @@ import '../services/tts_service.dart';
 import '../screens/input/widgets/category_picker.dart';
 import '../screens/input/widgets/sub_category_input.dart';
 import 'app_ui.dart';
+import 'waiting.dart';
 
 /// 词条要存到哪儿(v2.7,用户第 3 条:"选择保存位置")。
 ///
@@ -333,18 +334,15 @@ class _WordActionSheetState extends State<_WordActionSheet> {
                 ),
               ),
               child: _loading
-                  ? Row(
+                  ? Column(
                       key: const ValueKey('loading'),
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        ),
-                        const SizedBox(width: Gap.xs),
-                        Text('正在查释义…',
-                            style: theme.textTheme.bodySmall
-                                ?.copyWith(color: muted)),
+                        // v2.9:释义是"生成长文本",用骨架屏而不是转圈 ——
+                        // 用户先看到结果将要占据的形状,等待感明显变短
+                        const ThinkingDots(label: '正在查释义', compact: true),
+                        const SizedBox(height: Gap.xs),
+                        const SkeletonLines(lines: 3, withTitle: false),
                       ],
                     )
                   : (_error != null

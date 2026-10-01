@@ -8,6 +8,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:readflow/config/constants.dart';
 import 'package:readflow/models/vocabulary.dart';
 import 'package:readflow/services/database.dart';
+import 'package:readflow/services/material_library.dart';
 
 /// v2.0 数据访问层回归(材料中心 / 阅读进度与会话 / 测验 / 错误档案 / 复习 / 导师)。
 ///
@@ -956,6 +957,162 @@ void main() {
     final title = '${convs.first['title']}';
     expect(title.length, lessThanOrEqualTo(17)); // 16 字 + 省略号
     expect(title, endsWith('…'));
+  });
+
+  // ── 8d. 练习计划与记录(v2.9,用户 10/2 第 2 条)──
+
+  test('练习:建计划 → 记两次练习 → 进度数字对得上 → 关计划', () async {
+    final planId = await DatabaseService.createDrillPlan(
+      mode: 'spelling',
+      goals: ['四六级', '考研'],
+      levelNote: 'mode:plan|level:intermediate',
+      weeks: 4,
+      perDay: 12,
+    );
+    expect(planId, greaterThan(0));
+
+    final active = await DatabaseService.activeDrillPlan('spelling');
+    expect(active, isNotNull);
+    expect(active!['per_day'], 12);
+    expect('${active['goals']}', contains('四六级'));
+
+    await DatabaseService.logDrill(
+      mode: 'spelling',
+      planId: planId,
+      goals: ['四六级'],
+      total: 12,
+      correct: 9,
+      seconds: 240,
+      wrong: ['abandon', 'deteriorate'],
+    );
+    await DatabaseService.logDrill(
+      mode: 'spelling',
+      planId: planId,
+      total: 8,
+      correct: 8,
+      seconds: 120,
+    );
+
+    final progress = await DatabaseService.drillProgress(mode: 'spelling');
+    expect(progress['times'], 2);
+    expect(progress['total'], 20);
+    expect(progress['correct'], 17);
+    expect((progress['accuracy'] as double), closeTo(0.85, 0.001));
+    expect(progress['todayTotal'], 20); // 两次都是今天
+    expect(progress['streak'], 1); // 今天练过 → 连续 1 天
+
+    // 关掉后不再有"进行中"的计划,但记录还在(进度追踪不能因为关计划就清空)
+    await DatabaseService.closeDrillPlan(planId);
+    expect(await DatabaseService.activeDrillPlan('spelling'), isNull);
+    expect(await DatabaseService.getDrillLogs(mode: 'spelling'), hasLength(2));
+  });
+
+  test('练习:两个模式(拼写/翻译)的进度互不串味,同模式新计划会归档旧的', () async {
+    final a = await DatabaseService.createDrillPlan(
+      mode: 'translation',
+      goals: ['雅思/托福'],
+    );
+    await DatabaseService.logDrill(
+      mode: 'translation',
+      planId: a,
+      total: 5,
+      correct: 5,
+    );
+    await DatabaseService.logDrill(mode: 'spelling', total: 10, correct: 2);
+
+    expect((await DatabaseService.drillProgress(mode: 'translation'))['total'], 5);
+    expect((await DatabaseService.drillProgress(mode: 'spelling'))['total'], 10);
+    expect((await DatabaseService.drillProgress())['total'], 15);
+
+    // 同模式再建一个:旧计划归档,active 只剩新的
+    final b = await DatabaseService.createDrillPlan(
+      mode: 'translation',
+      goals: ['考研'],
+      perDay: 20,
+    );
+    final active = await DatabaseService.activeDrillPlan('translation');
+    expect(active!['id'], b);
+    expect(active['per_day'], 20);
+  });
+
+  // ── 8e. 材料里的 AI 内容块与材料分组(v2.9,用户 3(5)/5 条)──
+
+  test('内容块:同 material+chunk+kind 是 upsert,不同 kind 各自保留', () async {
+    final mid = await DatabaseService.upsertMaterial(
+      {'kind': 'article', 'source': 'import', 'title': '测试材料'},
+      chunks: const [
+        {'chunk_index': 0, 'text': '第一段有 3 个数字:1、2、3。'},
+      ],
+    );
+    await DatabaseService.upsertMaterialBlock(
+      materialId: mid,
+      kind: 'table',
+      chunkIndex: 0,
+      title: '数据对比',
+      payloadJson: '{"rows":[["a","1"]]}',
+    );
+    // 同 kind 再写一次 → 覆盖,不新增
+    await DatabaseService.upsertMaterialBlock(
+      materialId: mid,
+      kind: 'table',
+      chunkIndex: 0,
+      title: '数据对比(改)',
+      payloadJson: '{"rows":[["a","2"]]}',
+    );
+    await DatabaseService.upsertMaterialBlock(
+      materialId: mid,
+      kind: 'points',
+      chunkIndex: 0,
+      payloadJson: '{"items":["要点"]}',
+    );
+
+    final blocks = await DatabaseService.getMaterialBlocks(mid);
+    expect(blocks, hasLength(2));
+    final table = blocks.firstWhere((b) => b['kind'] == 'table');
+    expect('${table['title']}', '数据对比(改)');
+    expect('${table['payload']}', contains('"2"'));
+
+    // 只删表格:要点卡留着
+    await DatabaseService.deleteMaterialBlocks(mid, kind: 'table');
+    final left = await DatabaseService.getMaterialBlocks(mid);
+    expect(left, hasLength(1));
+    expect('${left.first['kind']}', 'points');
+  });
+
+  test('材料分组:改名/解散,分组清单按材料数排序', () async {
+    final a = await DatabaseService.upsertMaterial(
+      {'kind': 'article', 'source': 'import', 'title': '新视野 1'},
+      chunks: const [
+        {'chunk_index': 0, 'text': 'Unit 1'},
+      ],
+    );
+    final b = await DatabaseService.upsertMaterial(
+      {'kind': 'article', 'source': 'import', 'title': '新视野 2'},
+      chunks: const [
+        {'chunk_index': 0, 'text': 'Unit 2'},
+      ],
+    );
+    final c = await DatabaseService.upsertMaterial(
+      {'kind': 'article', 'source': 'import', 'title': '论文一篇'},
+      chunks: const [
+        {'chunk_index': 0, 'text': 'Abstract'},
+      ],
+    );
+    await DatabaseService.setMaterialGroup(a, '新视野教材');
+    await DatabaseService.setMaterialGroup(b, '新视野教材');
+    await DatabaseService.setMaterialGroup(c, '论文');
+
+    final groups = await DatabaseService.materialGroups();
+    expect(groups.first, '新视野教材'); // 材料多的排前面
+    expect(groups, containsAll(['新视野教材', '论文']));
+
+    // 解散一个分组:分组没了,材料还在(只解组不删材料)
+    await DatabaseService.setMaterialGroup(a, null);
+    await DatabaseService.setMaterialGroup(b, null);
+    final after = await DatabaseService.materialGroups();
+    expect(after, isNot(contains('新视野教材')));
+    final shelf = await MaterialLibrary.shelf(limit: 50);
+    expect(shelf.where((s) => s.title.startsWith('新视野')), hasLength(2));
   });
 
   test('助理会话:老消息(conversation_id 为空)不会被任何会话读到', () async {
