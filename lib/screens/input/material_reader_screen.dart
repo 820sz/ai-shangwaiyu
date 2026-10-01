@@ -66,11 +66,15 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
   double _fontScale = ReaderSettings.defaultFontScale;
   double _lineHeight = ReaderSettings.defaultLineHeight;
 
-  /// 逐段翻译(v2.6,用户第 8(4) 条):"侧边栏提供翻译,点击后按段逐段翻译,
-  /// 按每段英文 + 中文的方式呈现材料"。
+  /// 逐段翻译(v2.6 用户第 8(4) 条;v2.8 改为**按需**:滚到哪翻到哪)
   bool _showTranslation = false;
-  bool _translating = false;
+
+  /// 正在翻(底部动作栏显示进度)
+  bool _translateRunning = false;
   String? _translateError;
+
+  /// 翻不出来 / 段数对不上的段(可就地重试)
+  final Set<int> _chunkErrors = {};
 
   /// 块索引 → 中文译文(与 _chunks 一一对应)
   final Map<int, String> _translations = {};
@@ -116,8 +120,14 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     _scrollCtrl.addListener(_onScroll);
   }
 
-  /// 开/关逐段翻译。首次打开时按批调用文本 API(每批 8 段),
-  /// 段落数对不上就整批丢弃并说明原因 —— 绝不把译文错位到别的段落上。
+  /// 开/关逐段翻译。**v2.8 重做为按需翻译**(用户第 6(3) 条"逐段翻译无法使用")。
+  ///
+  /// 旧实现:打开时按每批 8 段、串行把**整篇**翻完才显示 —— 一本书 200+ 块
+  /// = 几十次请求,每块还是最多 2500 词的整段,用户看到的就是永远在转圈,
+  /// 体验上等于"这功能不能用"。
+  ///
+  /// 现在:打开时只翻**当前位置附近的几段**,之后**滚到哪翻到哪**;
+  /// 底部动作栏显示「翻译 x/y」进度,单段失败只影响那一段(可就地重试)。
   Future<void> _toggleTranslation() async {
     if (_showTranslation) {
       setState(() => _showTranslation = false);
@@ -127,33 +137,80 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
       _showTranslation = true;
       _translateError = null;
     });
-    if (_translations.isNotEmpty || _chunks.isEmpty) return;
-
-    setState(() => _translating = true);
-    try {
-      final api = DeepseekApiService();
-      if (!api.isConfigured) {
-        throw Exception('还没有配置 API Key —— 到「我的 → API 设置」填一个就能翻译');
-      }
-      const batchSize = 8;
-      for (var start = 0; start < _chunks.length; start += batchSize) {
-        final end = (start + batchSize).clamp(0, _chunks.length);
-        final slice = <String>[
-          for (var i = start; i < end; i++) '${_chunks[i]['text'] ?? ''}',
-        ];
-        final translated = await api.translateParagraphs(slice);
-        if (!mounted) return;
-        setState(() {
-          for (var i = 0; i < translated.length; i++) {
-            _translations[start + i] = translated[i];
-          }
-        });
-      }
-    } catch (e) {
-      if (mounted) setState(() => _translateError = '$e');
-    } finally {
-      if (mounted) setState(() => _translating = false);
+    if (_chunks.isEmpty) return;
+    final api = DeepseekApiService();
+    if (!api.isConfigured) {
+      setState(() => _translateError = '还没有配置 API Key —— 到「我的 → API 设置」填一个就能翻译');
+      return;
     }
+    await _translateAround(_lastChunkIndex, radius: 3);
+  }
+
+  /// 翻译 [center] 附近还没翻过的几段(按需翻译的核心)。
+  ///
+  /// 每批 3 段合一次请求(段落数对不上就退回逐段重试,绝不把译文错位到别的段落上),
+  /// 失败只标这一批,不打断阅读。
+  Future<void> _translateAround(int center, {int radius = 3}) async {
+    if (!_showTranslation || _chunks.isEmpty) return;
+    if (_translateRunning) return; // 同一时刻只跑一批,避免并发打爆限流
+    final api = DeepseekApiService();
+    if (!api.isConfigured) return;
+    final targets = <int>[];
+    for (var i = center; i <= center + radius && i < _chunks.length; i++) {
+      if (i < 0) continue;
+      if (_translations.containsKey(i) || _chunkErrors.contains(i)) continue;
+      targets.add(i);
+    }
+    if (targets.isEmpty) return;
+
+    _translateRunning = true;
+    setState(() {});
+    try {
+      const batch = 3;
+      for (var s = 0; s < targets.length; s += batch) {
+        if (!mounted || !_showTranslation) return;
+        final slice = targets.sublist(s, (s + batch).clamp(0, targets.length));
+        final texts = [
+          for (final i in slice) '${_chunks[i]['text'] ?? ''}',
+        ];
+        try {
+          final translated = await api.translateParagraphs(texts);
+          if (!mounted) return;
+          setState(() {
+            if (translated.length == slice.length) {
+              for (var k = 0; k < slice.length; k++) {
+                _translations[slice[k]] = translated[k];
+              }
+            } else {
+              // 段数对不上:整批丢弃并标记,让用户点单段重试(错误可见 > 静默错位)
+              _chunkErrors.addAll(slice);
+              _translateError = '译文段数与原文对不上,已丢弃这一批(可点该段的「重试」)';
+            }
+          });
+        } catch (e) {
+          if (!mounted) return;
+          setState(() {
+            _chunkErrors.addAll(slice);
+            _translateError = '$e';
+          });
+        }
+      }
+    } finally {
+      _translateRunning = false;
+      if (mounted) setState(() {});
+    }
+  }
+
+  /// 单段重试(点该段上的「重试」)
+  Future<void> _retryChunk(int index) async {
+    setState(() {
+      _chunkErrors.remove(index);
+      _translateError = null;
+    });
+    if (!_showTranslation) {
+      setState(() => _showTranslation = true);
+    }
+    await _translateAround(index, radius: 0);
   }
 
   /// 阅读设置面板:字号 / 行距 —— 边调边生效(不用"确定"按钮),退出时已落盘
@@ -262,7 +319,16 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     final max = _scrollCtrl.position.maxScrollExtent;
     if (max <= 0 || _chunks.isEmpty) return;
     final ratio = (_scrollCtrl.offset / max).clamp(0, 1);
-    _lastChunkIndex = (ratio * (_chunks.length - 1)).round();
+    final idx = (ratio * (_chunks.length - 1)).round();
+    final moved = (idx - _lastChunkIndex).abs() >= 2;
+    _lastChunkIndex = idx;
+    // v2.8:开了翻译就"滚到哪翻到哪"(预取当前位置往后 3 段)
+    if (moved && _showTranslation) {
+      // 不在滚动回调里直接 await:交给下一帧,避免滚动期间做 IO 与 setState
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _showTranslation) _translateAround(idx);
+      });
+    }
   }
 
   Future<void> _load() async {
@@ -783,23 +849,8 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
                         controller: _scrollCtrl,
                         padding: const EdgeInsets.fromLTRB(
                             Gap.md, Gap.sm, Gap.md, 80),
-                        itemCount: _chunks.length + (_translateError == null ? 0 : 1),
-                        itemBuilder: (_, i) {
-                          // 第一行留给翻译失败的说明(不挡住正文)
-                          if (_translateError != null && i == 0) {
-                            return Padding(
-                              padding: const EdgeInsets.only(bottom: Gap.sm),
-                              child: AppErrorCard(
-                                message: '翻译失败:$_translateError',
-                                onRetry: _toggleTranslation,
-                                retryLabel: '重试翻译',
-                              ),
-                            );
-                          }
-                          final index =
-                              _translateError == null ? i : i - 1;
-                          return _buildChunk(theme, index);
-                        },
+                        itemCount: _chunks.length,
+                        itemBuilder: (_, index) => _buildChunk(theme, index),
                       ),
                     ),
                     // ── 底部动作栏(v2.7,用户第 3 条):模型 / 翻译 / 保存 / 追问,
@@ -815,6 +866,14 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
                       onModelChanged: () {
                         if (mounted) setState(() {});
                       },
+                      // v2.8:翻译进度摊在动作栏上 —— 用户要知道"翻到哪了"
+                      translationNote: !_showTranslation
+                          ? ''
+                          : (_translateRunning
+                              ? '翻译中 ${_translations.length}/${_chunks.length}'
+                              : (_translateError != null
+                                  ? '翻译出错,往下滚或点该段重试'
+                                  : '已翻 ${_translations.length}/${_chunks.length} · 滚到哪翻到哪')),
                       moreActions: [
                         if (url.isNotEmpty)
                           ReaderMoreAction(
@@ -893,13 +952,22 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
             onSelectionAction: _onSelectionAction,
             style: bodyStyle,
           ),
-          // 逐段译文(v2.6):紧跟在本段英文下面,浅色区分 + 稍小字号
+          // 逐段译文(v2.6;v2.8 按需+可就地重试):紧跟在本段英文下面,浅色区分 + 稍小字号
           if (_showTranslation) ...[
             const SizedBox(height: Gap.xs),
-            if (_translating && !_translations.containsKey(index))
-              Text('翻译中…',
-                  style: theme.textTheme.bodySmall
-                      ?.copyWith(color: theme.colorScheme.onSurfaceVariant))
+            if (_chunkErrors.contains(index))
+              AppErrorCard(
+                message: '这一段的翻译没成功'
+                    '${_translateError == null ? '' : ':$_translateError'}',
+                onRetry: () => _retryChunk(index),
+                retryLabel: '重试这一段',
+              )
+            else if (!_translations.containsKey(index))
+              Text(
+                _translateRunning ? '翻译中…' : '还没翻到这一段(往下滚会自动翻)',
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              )
             else
               Container(
                 width: double.infinity,
@@ -909,7 +977,7 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
                   borderRadius: Radii.controlRadius,
                 ),
                 child: Text(
-                  _translations[index] ?? '(这一段还没翻出来)',
+                  _translations[index]!,
                   style: TextStyle(
                     fontSize: ReaderSettings.baseFontSize * _fontScale * 0.86,
                     height: _lineHeight * 0.95,

@@ -1,9 +1,13 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:provider/provider.dart';
+import '../../config/constants.dart';
 import '../../config/design_tokens.dart';
 import '../../config/theme.dart';
+import '../../models/bookmark.dart';
 import '../../models/writing_log.dart';
+import '../../providers/bookmark_provider.dart';
 import '../../services/base_api.dart';
 import '../../services/database.dart';
 import '../../services/doubao_api.dart';
@@ -258,8 +262,44 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
     }
   }
 
-  // ── 退出保护(P2-27) ──
+  /// 收藏这次批改(v2.8,用户第 10 条):错处与点评进「写译收藏夹」。
+  ///
+  /// 为什么值得有:写译的问题是"每次都犯同一类错",把批改收藏起来,
+  /// 以后在收藏夹里能集中回看"我反复踩的坑是什么"。
+  Future<void> _bookmarkReview() async {
+    final bp = context.read<BookmarkProvider>();
+    final summary = (_result['summary'] ?? '').toString().trim();
+    final score = (_result['score'] ?? '').toString().trim();
+    final issues = _issues
+        .map((e) => '· ${e['type'] ?? ''}：${e['detail'] ?? e['original'] ?? ''}')
+        .join('\n');
+    // 错误归类是 Map<类别, 说明>,拼成一行"类别:说明"更省地方
+    final errorLines = _errorSummary.entries
+        .where((e) => e.value.trim().isNotEmpty)
+        .map((e) => '${e.key}:${e.value.trim()}')
+        .join('; ');
+    final body = StringBuffer();
+    if (score.isNotEmpty) body.writeln('得分：$score');
+    if (summary.isNotEmpty) body.writeln(summary);
+    if (errorLines.isNotEmpty) body.writeln('错误归类：$errorLines');
+    if (issues.isNotEmpty) body.writeln(issues);
+    if (body.toString().trim().isEmpty) {
+      _toast('这次还没有可收藏的批改内容');
+      return;
+    }
+    final saved = await bp.toggle(
+      Bookmark(
+        source: AppConstants.bookmarkSourceWriting,
+        title: '写译批改 ${DateTime.now().month}/${DateTime.now().day}'
+            '${score.isEmpty ? '' : ' · $score'}',
+        content: body.toString().trim(),
+      ),
+    );
+    if (!mounted) return;
+    _toast(saved ? '已收藏进「写译」收藏夹' : '已取消收藏');
+  }
 
+  // ── 退出保护(P2-27) ──
   /// 页面上是否有"值得挽留"的产物:敲过的原文 / 拍过的手写稿 / 已出的批改结果。
   bool _hasUnsavedWork() {
     if (_textCtrl.text.trim().isNotEmpty) return true;
@@ -386,6 +426,14 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
                   _saved ? Icons.check_circle_outline : Icons.save_outlined,
                 ),
                 onPressed: _saved ? null : () => _saveLog(),
+              ),
+            // v2.8(用户第 10 条):批改结果可收藏进「写译收藏夹」
+            // —— 收藏的是这次批改的错处与点评,方便以后集中回看
+            if (_phase == _Phase.result)
+              IconButton(
+                tooltip: '收藏这次批改(写译收藏夹)',
+                icon: const Icon(Icons.star_border),
+                onPressed: _bookmarkReview,
               ),
             IconButton(
               tooltip: '写译记录',

@@ -52,6 +52,11 @@ class FeedItem {
   /// 作者(`<dc:creator>`/`<itunes:author>`/Atom `<author><name>`,可能为空)
   final String? author;
 
+  /// 配图地址(v2.8,用户第 6(2) 条"别人都有文章图片")。
+  /// 取 `media:content` / `media:thumbnail` / `itunes:image` / `<enclosure type=image/*>`
+  /// 里的图片 URL —— 与音频同一个来源,只是筛的是图片而非音频。
+  final String? imageUrl;
+
   const FeedItem({
     required this.title,
     required this.link,
@@ -60,6 +65,7 @@ class FeedItem {
     this.audioUrl,
     this.guid,
     this.author,
+    this.imageUrl,
   });
 
   @override
@@ -140,6 +146,35 @@ class FeedParser {
     }
     if (withType.isNotEmpty) return withType.first;
     return fallback.isEmpty ? null : fallback.first;
+  }
+
+  /// 从**单条** item 的 XML 片段里抽配图地址(v2.8)。
+  ///
+  /// 与 [audioOf] 同一个来源、相反筛选:只认 `type=image/*` 或以图片扩展名结尾的 URL。
+  /// 另外支持 `<media:thumbnail url=…>` 与 `<itunes:image href=…>`(属性名不同)。
+  /// 拿不到就返回 null —— 界面用程序化封面兜底,不留白块。
+  static String? imageOf(String itemXml) {
+    if (itemXml.trim().isEmpty) return null;
+    for (final m in _mediaContentTag.allMatches(itemXml)) {
+      final tag = m.group(0)!;
+      // itunes:image 用的是 href
+      final url = _attr(tag, 'url') ?? _attr(tag, 'href');
+      final u = HtmlText.decodeEntities(url ?? '').trim();
+      if (u.isEmpty) continue;
+      if (!u.startsWith('http')) continue;
+      final t = (_attr(tag, 'type') ?? '').toLowerCase();
+      if (t.contains('image') || _imageExt.hasMatch(u)) return u;
+    }
+    // 有些源把配图放在 enclosure 里(type=image/jpeg)
+    for (final m in _enclosureTag.allMatches(itemXml)) {
+      final tag = m.group(0)!;
+      final t = (_attr(tag, 'type') ?? '').toLowerCase();
+      final u = (_attr(tag, 'url') ?? '').trim();
+      if (u.startsWith('http') && (t.contains('image') || _imageExt.hasMatch(u))) {
+        return u;
+      }
+    }
+    return null;
   }
 
   // ────────────────────────── 内部实现 ──────────────────────────
@@ -257,6 +292,8 @@ class FeedParser {
       audioUrl: audioOf(raw),
       guid: guid,
       author: author.isEmpty ? null : author,
+      // v2.8:配图(RSS 的 media:content / media:thumbnail / itunes:image)
+      imageUrl: imageOf(raw),
     );
   }
 

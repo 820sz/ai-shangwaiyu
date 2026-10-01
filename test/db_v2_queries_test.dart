@@ -891,6 +891,84 @@ void main() {
     expect(after.map((v) => v.word).toList(), ['keep']);
   });
 
+  // ── 8c. 助理会话:新建 / 多开 / 改名 / 清空 / 删除(v2.8 用户第 5(2) 条)──
+
+  test('助理会话:两个对话的消息互不串味,清空一个不影响另一个', () async {
+    final a = await DatabaseService.createTutorConversation(title: '对话A');
+    final b = await DatabaseService.createTutorConversation(title: '对话B');
+    expect(a, greaterThan(0));
+    expect(b, greaterThan(0));
+
+    await DatabaseService.insertTutorMessage(
+        role: 'user', content: 'A 的问题', conversationId: a);
+    await DatabaseService.insertTutorMessage(
+        role: 'tutor', content: 'A 的回答', conversationId: a);
+    await DatabaseService.insertTutorMessage(
+        role: 'user', content: 'B 的问题', conversationId: b);
+
+    final onlyA = await DatabaseService.getTutorMessages(conversationId: a);
+    expect(onlyA.map((m) => m['content']).toList(), ['A 的问题', 'A 的回答']);
+
+    // 清空 A:B 必须毫发无伤
+    await DatabaseService.clearTutorMessages(conversationId: a);
+    expect(await DatabaseService.getTutorMessages(conversationId: a), isEmpty);
+    final onlyB = await DatabaseService.getTutorMessages(conversationId: b);
+    expect(onlyB.map((m) => m['content']).toList(), ['B 的问题']);
+  });
+
+  test('助理会话:改标题 + 按最近聊过排序', () async {
+    final a = await DatabaseService.createTutorConversation(title: '旧的');
+    await Future<void>.delayed(const Duration(milliseconds: 5));
+    final b = await DatabaseService.createTutorConversation(title: '新的');
+    await DatabaseService.renameTutorConversation(a, '改过的标题');
+
+    // 给 a 追加一条消息 → a 变成"最近聊过",应排在前面
+    await DatabaseService.insertTutorMessage(
+        role: 'user', content: '再问一句', conversationId: a);
+    final list = await DatabaseService.getTutorConversations();
+    expect(list.first['id'], a);
+    expect(list.first['title'], '改过的标题');
+    expect(list.map((c) => c['id']).toList(), contains(b));
+  });
+
+  test('助理会话:删除会话会连它的消息一起删(其它会话不受影响)', () async {
+    final a = await DatabaseService.createTutorConversation(title: 'A');
+    final b = await DatabaseService.createTutorConversation(title: 'B');
+    await DatabaseService.insertTutorMessage(
+        role: 'user', content: 'a1', conversationId: a);
+    await DatabaseService.insertTutorMessage(
+        role: 'user', content: 'b1', conversationId: b);
+
+    await DatabaseService.deleteTutorConversation(a);
+    final convs = await DatabaseService.getTutorConversations();
+    expect(convs.map((c) => c['id']).toList(), [b]);
+    expect(await DatabaseService.getTutorMessages(conversationId: a), isEmpty);
+    expect(await DatabaseService.getTutorMessages(conversationId: b), isNotEmpty);
+  });
+
+  test('助理会话:自动标题取首问前 16 字(长问题不撑爆列表)', () async {
+    final id = await DatabaseService.createTutorConversation(title: '新对话');
+    await DatabaseService.autoTitleTutorConversation(
+      id,
+      '帮我把接下来两周的复习和阅读排一下,每天晚上九点之后有空,大概四十分钟',
+    );
+    final convs = await DatabaseService.getTutorConversations();
+    final title = '${convs.first['title']}';
+    expect(title.length, lessThanOrEqualTo(17)); // 16 字 + 省略号
+    expect(title, endsWith('…'));
+  });
+
+  test('助理会话:老消息(conversation_id 为空)不会被任何会话读到', () async {
+    await DatabaseService.insertTutorMessage(role: 'user', content: '历史消息');
+    final a = await DatabaseService.createTutorConversation(title: 'A');
+    expect(await DatabaseService.getTutorMessages(conversationId: a), isEmpty);
+    // 但不传 conversationId 时仍能拿到(兼容老调用方/导出)
+    expect(
+      (await DatabaseService.getTutorMessages()).map((m) => m['content']).toList(),
+      contains('历史消息'),
+    );
+  });
+
   // ── 9. 快照聚合 ──
   test('聚合:mastery 分布、近 N 天生词、按 word_type 计数', () async {
     await DatabaseService.insertVocabularies([

@@ -15,6 +15,8 @@ import '../../services/material_prefs.dart';
 import '../../services/material_source.dart';
 import '../../services/original_search.dart';
 import '../../widgets/app_ui.dart';
+import '../../widgets/material_cover.dart';
+import '../../widgets/search_timeline.dart';
 import 'ai_material_search.dart';
 import 'material_reader_screen.dart';
 
@@ -55,6 +57,9 @@ class _CategoryMaterialScreenState extends State<CategoryMaterialScreen> {
   /// 材料偏好(v2.7,第 4/5 条):难度档 + 类型 + 题材 + 补充需求,一并交给 AI
   MaterialPrefs _prefs = MaterialPrefs.empty;
 
+  /// 检索过程事件(第 6(4) 条:流式展示"查阅了 xxx")
+  List<SearchEvent> _events = const [];
+
   /// 正在抓取的 AI 点名作品(按引用比较,用来只禁用那一行)
   Map<String, String>? _openingPick;
 
@@ -90,17 +95,31 @@ class _CategoryMaterialScreenState extends State<CategoryMaterialScreen> {
   /// 是不是"中文需求"(v2.6):是的话先让 AI 把它变成能搜的东西。
   bool get _looksChinese => RegExp(r'[\u4e00-\u9fa5]').hasMatch(_queryCtrl.text);
 
-  Future<void> _search({bool auto = false}) async {
-    final raw = auto ? _autoQuery() : _queryCtrl.text.trim();
+  Future<void> _search({bool auto = false, String? overrideQuery}) async {
+    final raw = (overrideQuery ?? (auto ? _autoQuery() : _queryCtrl.text)).trim();
     // 记住用户真正搜过的东西(自动首搜不记,免得把默认词写成"历史")
     if (!auto && raw.isNotEmpty) {
       await MaterialPrefs.rememberQuery(widget.category, raw);
     }
+    final started = DateTime.now();
+    final events = <SearchEvent>[];
+    void push(SearchEvent e) {
+      events.add(e);
+      if (mounted) setState(() => _events = List.of(events));
+    }
+
     setState(() {
       _loading = true;
       _searched = true;
       _aiNote = '';
+      _events = const [];
     });
+    push(SearchEvent(
+      stage: SearchStage.preparing,
+      label: raw.isEmpty
+          ? '按「${widget.category}」入门经典为你找材料'
+          : '读懂你的需求:「$raw」',
+    ));
 
     // ── ① AI 规划:中文需求 → 英文检索词 + 直接点名作品(带原文链接)──
     var query = raw;
@@ -108,6 +127,10 @@ class _CategoryMaterialScreenState extends State<CategoryMaterialScreen> {
     var aiNote = '';
     if (_ai.isConfigured && (raw.isEmpty || _looksChinese || !_prefs.isEmpty)) {
       try {
+        push(SearchEvent(
+          stage: SearchStage.preparing,
+          label: '让 AI 把它变成公开源认的英文检索词…',
+        ));
         final plan = await _ai.planMaterialSearch(
           raw.isEmpty ? '${widget.category} 入门 经典' : raw,
           category: widget.category,
@@ -123,18 +146,29 @@ class _CategoryMaterialScreenState extends State<CategoryMaterialScreen> {
             const <Map<String, String>>[];
         aiNote = '${plan['note'] ?? ''}';
         if (queries.isNotEmpty) query = queries.first;
+        push(SearchEvent(
+          stage: SearchStage.preparing,
+          label: '检索词:「$query」'
+              '${picks.isEmpty ? '' : ' · AI 另外点名了 ${picks.length} 部作品'}',
+        ));
       } catch (e) {
         debugPrint('ReadFlow 材料检索规划失败(退回关键词直搜): $e');
+        push(SearchEvent(
+          stage: SearchStage.sourceFailed,
+          label: 'AI 规划失败,直接用关键词搜:$e',
+        ));
       }
     }
 
     // ── ② 真实检索:拿 AI 给的英文词去公开源里搜真东西(按偏好挑源)──
+    //     每一步都通过 onProgress 流式上报(用户第 6(4) 条)
     final result = await OriginalSearch.search(
       query,
       category: widget.category,
       sourceIds: _prefs.kinds.isEmpty
           ? null
           : [for (final s in _prefs.preferredSources) s.id],
+      onProgress: push,
     );
 
     // ── ③ 标题中文化:整屏英文没人看得懂(用户第 8(3)/2(2) 条)──
@@ -147,12 +181,30 @@ class _CategoryMaterialScreenState extends State<CategoryMaterialScreen> {
           if ((p['title_en'] ?? '').trim().isNotEmpty) p['title_en']!.trim(),
       ];
       if (titles.isNotEmpty) {
+        push(SearchEvent(
+          stage: SearchStage.translating,
+          label: '正在把 ${titles.length} 个标题翻成中文…',
+        ));
         try {
           titleCn = await _ai.translateTitles(titles);
         } catch (e) {
           debugPrint('ReadFlow 标题中文化失败(保持英文): $e');
         }
       }
+    }
+    if (mounted) {
+      final seconds = DateTime.now().difference(started).inSeconds;
+      setState(() => _events = [
+            ...events,
+            SearchEvent(
+              stage: SearchStage.done,
+              label: '查阅了 ${result.hits.length} 篇 · 用时 '
+                  '${seconds == 0 ? '不到 1' : seconds} 秒',
+              done: 1,
+              total: 1,
+              hits: result.hits.length,
+            ),
+          ]);
     }
 
     if (!mounted) return;
@@ -301,6 +353,16 @@ class _CategoryMaterialScreenState extends State<CategoryMaterialScreen> {
       child: Scaffold(
         appBar: AppBar(
           title: Text(widget.category),
+          actions: [
+            // v2.8(用户第 6(5) 条):分类区里的 **AI 对话入口** ——
+            // "在每个找材料分类区点击后增加 ai 对话的功能,方便用户自行补充需求、
+            //  寻找材料方向"
+            IconButton(
+              tooltip: '跟 AI 说需求,让它换个方向找',
+              onPressed: _loading ? null : _showAiChatSheet,
+              icon: const Icon(Icons.forum_outlined),
+            ),
+          ],
           bottom: const TabBar(
             tabs: [
               Tab(text: '资料原文'),
@@ -316,6 +378,111 @@ class _CategoryMaterialScreenState extends State<CategoryMaterialScreen> {
         ),
       ),
     );
+  }
+
+  /// **AI 对话找材料**(v2.8,用户第 6(5) 条)。
+  ///
+  /// 不是把用户丢给一个空白搜索框,而是:给几个**可直接点的方向**(像 agent 给选项),
+  /// 也可以自己打字;AI 读懂后换检索词重搜,并把"它理解成了什么"显示出来。
+  Future<void> _showAiChatSheet() async {
+    final ctrl = TextEditingController(text: _queryCtrl.text);
+    // 快捷方向:点的都是"改方向"的常见诉求,比自己想词快得多
+    const hints = [
+      '再简单一点,能读懂就行',
+      '换短一点的文章(5 分钟内读完)',
+      '不要学术腔,口语一点的',
+      '我要能听的材料(带音频)',
+      '难度拉高,想挑战一下',
+      '换个题材,腻了',
+    ];
+    final need = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(
+            Gap.md,
+            0,
+            Gap.md,
+            Gap.md + MediaQuery.of(ctx).viewInsets.bottom,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.forum_outlined,
+                      size: 18, color: Theme.of(ctx).colorScheme.primary),
+                  const SizedBox(width: Gap.xs),
+                  Text('跟 AI 说你要什么',
+                      style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          )),
+                ],
+              ),
+              const SizedBox(height: Gap.xxs),
+              Text(
+                '你说的会进检索方案,AI 换词重找一遍 —— 不用自己想英文关键词。',
+                style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                      height: 1.4,
+                    ),
+              ),
+              const SizedBox(height: Gap.sm),
+              Wrap(
+                spacing: Gap.xs,
+                runSpacing: Gap.xs,
+                children: [
+                  for (final h in hints)
+                    ActionChip(
+                      label: Text(h, style: const TextStyle(fontSize: 12)),
+                      onPressed: () => Navigator.pop(ctx, h),
+                    ),
+                ],
+              ),
+              const SizedBox(height: Gap.sm),
+              TextField(
+                controller: ctrl,
+                minLines: 1,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  hintText: '也可以自己写,例如:想读英文笑话,别太长',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+                onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
+              ),
+              const SizedBox(height: Gap.sm),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('取消'),
+                    ),
+                  ),
+                  const SizedBox(width: Gap.xs),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+                      icon: const Icon(Icons.search, size: 16),
+                      label: const Text('按这个找'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    ctrl.dispose();
+    if (need == null || need.trim().isEmpty || !mounted) return;
+    _queryCtrl.text = need.trim();
+    setState(() {});
+    await _search(overrideQuery: need.trim());
   }
 
   // ── 方向一:资料原文(默认) ──
@@ -381,25 +548,29 @@ class _CategoryMaterialScreenState extends State<CategoryMaterialScreen> {
             ),
           ],
         ),
+        // 检索过程:流式时间线(v2.8,用户第 6(4) 条 —— 不再只是一个转圈)
+        if (_events.isNotEmpty) ...[
+          const SizedBox(height: Gap.sm),
+          SearchTimeline(events: _events, loading: _loading),
+        ],
         // AI 规划说明 + AI 直接点名的作品(带「中文(英文)」标题与原文链接)
         if (_aiNote.isNotEmpty || _picks.isNotEmpty) ...[
           const SizedBox(height: Gap.sm),
           _aiPicksSection(theme, muted),
         ],
-        // 每个源的真实情况(v2.5):通了几条 / 为什么没结果 / 上次没连上已跳过 ——
-        // 旧版只有"没有结果"四个字,用户只能得出"这功能没用"
+        // 每个源的真实情况(v2.5):通了几条 / 为什么没结果 / 上次没连上已跳过
         if (_notes.isNotEmpty) ...[
           const SizedBox(height: Gap.sm),
           _notesStrip(theme, muted),
         ],
         const SizedBox(height: Gap.sm),
-        if (_loading)
+        if (_loading && _hits.isEmpty)
           const AppLoading(label: '正在检索公开源…')
         else if (_hits.isEmpty && _searched && _picks.isEmpty)
           AppEmpty(
             icon: Icons.search_off,
             title: '这次没找到原文',
-            hint: '换个说法再试(中文描述需求也行);或到材料中心点「检测可用源」看看哪个源通',
+            hint: '换个说法再试(中文描述需求也行);或用右上角的 AI 对话让它换方向找',
           )
         else ...[
           if (_hits.isNotEmpty) const AppSectionTitle(title: '公开源检索结果'),
@@ -566,63 +737,91 @@ class _CategoryMaterialScreenState extends State<CategoryMaterialScreen> {
 
   Widget _buildHitCard(ThemeData theme, Color muted, OriginalHit hit) {
     final source = MaterialSourceService.sourceOf(hit.sourceId);
-    return AppCard(
-      onTap: () => _open(hit),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(_displayTitle(hit.title),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodyLarge
-                  ?.copyWith(fontWeight: FontWeight.w600)),
-          const SizedBox(height: Gap.xs),
-          // 来源徽章:这条是**真实原文**,来自哪个站 —— 用户最关心的信息
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.primary.withAlpha(24),
-                  borderRadius: BorderRadius.circular(Radii.control - 4),
-                ),
-                child: Text(
-                  '原文 · ${source?.label ?? hit.sourceId}',
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
-                    color: theme.colorScheme.primary,
+    final kind = MaterialLevel.kindOfSource(hit.sourceId);
+    final lv = MaterialLevel.fallbackForKind(kind);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: Gap.xs),
+      child: AppCard(
+        onTap: () => _open(hit),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // v2.8:配图(用户第 6(2) 条"别人都有文章图片")。
+            // 公版书用官方封面,RSS 用 media:content,其余程序化封面兜底
+            MaterialCover(
+              seed: hit.title,
+              kind: kind,
+              imageUrl: hit.imageUrl,
+              width: 88,
+              height: 88,
+              radius: Radii.control,
+              levelLabel: 'Lv$lv',
+            ),
+            const SizedBox(width: Gap.sm),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(_displayTitle(hit.title),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodyLarge?.copyWith(
+                        fontSize: 15,
+                        height: 1.3,
+                        fontWeight: FontWeight.w600,
+                      )),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 7, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.primary.withAlpha(22),
+                          borderRadius:
+                              BorderRadius.circular(Radii.control - 4),
+                        ),
+                        child: Text(
+                          '原文 · ${source?.label ?? hit.sourceId}',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                            color: theme.colorScheme.primary,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                ),
+                  if (hit.note.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(hit.note,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall
+                            ?.copyWith(color: muted, fontSize: 11)),
+                  ],
+                  const SizedBox(height: 6),
+                  // 第 2(1) 条:软件内读 + 原文链接**两条路都给**
+                  Row(
+                    children: [
+                      FilledButton.tonal(
+                        onPressed: () => _open(hit),
+                        child: const Text('软件内阅读'),
+                      ),
+                      const SizedBox(width: Gap.xxs),
+                      if (hit.url.trim().isNotEmpty)
+                        TextButton.icon(
+                          onPressed: () => _openExternalUrl(hit.url),
+                          icon: const Icon(Icons.open_in_new, size: 15),
+                          label: const Text('原文链接'),
+                        ),
+                    ],
+                  ),
+                ],
               ),
-            ],
-          ),
-          if (hit.note.isNotEmpty) ...[
-            const SizedBox(height: Gap.xxs),
-            Text(hit.note,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall
-                    ?.copyWith(color: muted, fontSize: 11)),
+            ),
           ],
-          const SizedBox(height: Gap.xs),
-          // 第 2(1) 条:软件内读 + 原文链接**两条路都给**
-          Row(
-            children: [
-              FilledButton.tonal(
-                onPressed: () => _open(hit),
-                child: const Text('软件内阅读'),
-              ),
-              const SizedBox(width: Gap.xs),
-              if (hit.url.trim().isNotEmpty)
-                TextButton.icon(
-                  onPressed: () => _openExternalUrl(hit.url),
-                  icon: const Icon(Icons.link, size: 16),
-                  label: const Text('原文链接'),
-                ),
-            ],
-          ),
-        ],
+        ),
       ),
     );
   }

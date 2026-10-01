@@ -16,6 +16,7 @@ import '../../services/learner_model_store.dart';
 import '../../services/material_source.dart';
 import '../../services/material_source_status.dart';
 import '../../services/widget_service.dart';
+import '../../widgets/profile_name_card.dart';
 import '../../utils/crash_logger.dart';
 import '../../widgets/app_ui.dart';
 import '../../widgets/stats_chart.dart';
@@ -90,6 +91,9 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
         child: ListView(
           padding: Insets.page,
           children: [
+            // ── 个性化名片(v2.8,用户第 9 条):头像 / 背景 / 签名 / 词汇量 ──
+            ProfileNameCard(vocabCount: stats.totalVocab),
+
             // ── 数据就在手边:三个关键数字 ──
             _buildStatsRow(theme, stats),
             const SizedBox(height: Gap.md),

@@ -360,13 +360,21 @@ class _ReviewScreenState extends State<ReviewScreen> {
   /// - 「不认识 / 模糊」:翻面显示释义,看完点「下一张」
   /// - 同一张卡重复点同一档位不再计次(修复"一个词反复点认识刷进度"的 bug);
   ///   回看时改标记会先撤销旧档位计数再计新档位 —— 统计始终等于已标记卡片数
+  ///
+  /// v2.8(用户第 4(1) 条):**重复点「认识」也必须翻到下一张**。
+  /// 旧实现在 `previous == level` 时直接 return —— 用户从下一张退回来看完再点
+  /// 「认识」,卡片就"卡住"不动了(他的原话:"点击认识,词汇板块不会继续跳转")。
+  /// "不重复计数"与"该往下走"是两件事,不能混在一个 return 里。
   Future<void> _mark(int level) async {
     if (_deck.isEmpty || _index >= _deck.length) return;
     final v = _deck[_index];
     final id = v.id;
     if (id == null) return;
     final previous = _marks[id];
-    if (previous == level) return; // 重复点同一档位:忽略
+    if (previous == level) {
+      if (level == 2) _next(); // 认识:照样往下走
+      return; // 计数不动(避免刷进度)
+    }
     try {
       await context.read<VocabProvider>().updateMastery(id, level);
     } catch (_) {
@@ -1366,6 +1374,52 @@ class _ReviewScreenState extends State<ReviewScreen> {
     );
   }
 
+  /// 词条主词 / 主句的显示(v2.8,用户第 4(2) 条:"经常一个单词拆成几行,ui 利用率低")。
+  ///
+  /// 规则:
+  /// - **单个长单词**(如 primordial)用 `FittedBox` 压到一行 —— 绝不拦腰拆行;
+  /// - **短语/句子**正常换行,但字号随长度收缩,别把卡片撑成两屏;
+  /// - 一律不省略号:复习看的就是完整词形。
+  Widget _wordHeadline(
+    BuildContext context,
+    String text, {
+    double maxFontSize = 32,
+    double minFontSize = 17,
+    TextAlign align = TextAlign.center,
+    Color? color,
+  }) {
+    final theme = Theme.of(context);
+    final base = (theme.textTheme.headlineMedium ?? const TextStyle()).copyWith(
+      fontWeight: FontWeight.bold,
+      height: 1.25,
+      color: color,
+    );
+    final singleWord = !text.contains(' ') && text.length <= 24;
+    if (singleWord) {
+      return LayoutBuilder(
+        builder: (ctx, c) => FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: align == TextAlign.center
+              ? Alignment.center
+              : Alignment.centerLeft,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: c.maxWidth),
+            child: Text(
+              text,
+              maxLines: 1,
+              textAlign: align,
+              style: base.copyWith(fontSize: maxFontSize),
+            ),
+          ),
+        ),
+      );
+    }
+    // 短语/句子:每多 3 个字符降一点字号(40 字符落到 min 档)
+    final shrink = ((text.length - 12).clamp(0, 40) / 3) * 1.0;
+    final size = (maxFontSize - shrink).clamp(minFontSize, maxFontSize);
+    return Text(text, textAlign: align, style: base.copyWith(fontSize: size));
+  }
+
   Widget _cardFront(ThemeData theme, Vocabulary v) {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
@@ -1380,18 +1434,13 @@ class _ReviewScreenState extends State<ReviewScreen> {
           ),
         ),
         const SizedBox(height: 20),
-        Text(
-          v.displayLabel,
-          textAlign: TextAlign.center,
-          style: theme.textTheme.headlineMedium?.copyWith(
-            fontWeight: FontWeight.bold,
-            height: 1.3,
-          ),
-        ),
+        // v2.8:主词自适应,长词不拆行;卡片正面也把「出处」摊出来(以前只有保存日期)
+        _wordHeadline(context, v.displayLabel, maxFontSize: 40),
         if (v.displayPhonetic != null) ...[
           const SizedBox(height: 10),
           Text(
             v.displayPhonetic!,
+            textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 16,
               fontStyle: FontStyle.italic,
@@ -1399,7 +1448,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
             ),
           ),
         ],
-        const SizedBox(height: 12),
+        const SizedBox(height: 8),
         IconButton(
           onPressed: () => _speak(v),
           tooltip: '朗读',
@@ -1411,10 +1460,23 @@ class _ReviewScreenState extends State<ReviewScreen> {
         ),
         const Spacer(),
         Text(
-          '保存于 ${v.createdLabel}',
+          [
+            if ((v.sourceBook ?? '').trim().isNotEmpty) '《${v.sourceBook!.trim()}》',
+            if ((v.sourcePage ?? '').trim().isNotEmpty) v.sourcePage!.trim(),
+            '保存于 ${v.createdLabel}',
+          ].join(' · '),
+          textAlign: TextAlign.center,
           style: TextStyle(
             fontSize: 12,
             color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          '点卡片看释义 · 左右滑动换词',
+          style: TextStyle(
+            fontSize: 11,
+            color: theme.colorScheme.outline,
           ),
         ),
       ],
@@ -1425,21 +1487,16 @@ class _ReviewScreenState extends State<ReviewScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                v.displayLabel,
-                style: theme.textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-            if (markedLevel != null) _markBadge(markedLevel),
-          ],
-        ),
+        // v2.8:徽标从"与词抢宽度"改成"跟在词后面另起一行" ——
+        // 「已标记:不认识 · 新词」这类长徽标会把 titleLarge 的词挤成两行
+        _wordHeadline(context, v.displayLabel,
+            maxFontSize: 30, align: TextAlign.left),
+        if (markedLevel != null) ...[
+          const SizedBox(height: 6),
+          Align(alignment: Alignment.centerLeft, child: _markBadge(markedLevel)),
+        ],
         if (v.displayPhonetic != null) ...[
-          const SizedBox(height: 4),
+          const SizedBox(height: 6),
           Text(
             v.displayPhonetic!,
             style: TextStyle(
@@ -1449,13 +1506,19 @@ class _ReviewScreenState extends State<ReviewScreen> {
             ),
           ),
         ],
-        const SizedBox(height: 12),
+        const SizedBox(height: 10),
+        Divider(height: 1, color: theme.colorScheme.outlineVariant),
+        const SizedBox(height: 10),
         Expanded(
           child: SingleChildScrollView(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(v.translation ?? '', style: theme.textTheme.titleMedium),
+                Text(
+                  v.translation ?? '',
+                  style: (theme.textTheme.titleMedium ?? const TextStyle())
+                      .copyWith(height: 1.4),
+                ),
                 if (v.originalSentence != null &&
                     v.originalSentence!.isNotEmpty) ...[
                   const SizedBox(height: 12),

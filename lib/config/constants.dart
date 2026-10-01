@@ -115,12 +115,26 @@ class AppConstants {
 
   // ── 数据库 ──
   static const String dbName = 'readflow.db';
-  static const int dbVersion = 13;
+  static const int dbVersion = 15;
 
   // ── 收藏夹 ──
-  /// 收藏来源:追问答案 / 词汇卡片
+  /// 收藏来源(v2.8 扩展:用户第 10 条"收藏夹要体现不同功能区收藏进来的东西")
+  /// - follow_up:追问抽屉里的回答(对话收藏夹)
+  /// - vocab:词汇卡片 / 词条(词汇收藏夹)
+  /// - article:材料阅读器 / AI 文章里的好句段(文章收藏夹)
+  /// - writing:写译批改里的错句与点评(写译收藏夹)
   static const String bookmarkSourceFollowUp = 'follow_up';
   static const String bookmarkSourceVocab = 'vocab';
+  static const String bookmarkSourceArticle = 'article';
+  static const String bookmarkSourceWriting = 'writing';
+
+  /// 收藏夹分区(顺序即展示顺序;id → 显示名 + 图标说明)
+  static const List<Map<String, String>> bookmarkSections = [
+    {'id': bookmarkSourceVocab, 'label': '词汇', 'hint': '你在词条上点过 ☆ 的单词'},
+    {'id': bookmarkSourceFollowUp, 'label': '对话', 'hint': '追问抽屉里收藏的回答'},
+    {'id': bookmarkSourceArticle, 'label': '文章', 'hint': '阅读材料里收藏的句子/段落'},
+    {'id': bookmarkSourceWriting, 'label': '写译', 'hint': '写译批改里收藏的问题与好句'},
+  ];
 
   // ── 分类系统 ──
   static const List<String> learningCategories = [
@@ -141,6 +155,9 @@ class AppConstants {
   /// 材料中心的个性化找资源偏好(v2.7,用户第 5 条):
   /// 难度档(i+1/i+10/i+100/不限)+ 内容类型 + 题材倾向 + 补充需求,JSON 存。
   static const String keyMaterialPrefs = 'material_prefs';
+
+  /// 「我的」个性化名片(v2.8,用户第 9 条):头像 / 背景 / 签名。
+  static const String keyProfileCard = 'profile_card';
 
   /// 内容源可用性记忆(v2.2):{sourceId: {ok, at, msg}} 的 JSON。
   /// 为什么存:公开源在不同网络下可达性差别极大(BBC/VOA/TED/Wikipedia 在

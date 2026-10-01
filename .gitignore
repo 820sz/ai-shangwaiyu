@@ -53,3 +53,6 @@ app.*.map.json
 # 审查工具(open-code-review)的中间产物与脚本临时文件(审查 §3 仓库卫生)
 /_ocr_*.json
 /_tmp_*
+
+# 调研产物(子代理下载的对标 App 截屏,不进仓库)
+.research/

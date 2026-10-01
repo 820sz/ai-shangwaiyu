@@ -211,6 +211,46 @@ class WordListTile extends StatelessWidget {
                 overflow: TextOverflow.visible,
               ),
             ],
+            // 行3:页边中文批注(v2.8,用户第 2 条)。
+            // 以前中文批注**单独占一张卡**(中文当头)→ 同一内容两张卡、结构还一张
+            // 中文一张英文,用户说"涉及中文词汇板块就乱"。现在并到英文词条上,
+            // 用一行带标签的小字显示,卡片结构与其它条目完全一致。
+            if ((item.annotation ?? '').trim().isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 5, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: AppTheme.amber(context).withAlpha(26),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      '页边批注',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: AppTheme.amber(context),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      item.annotation!.trim(),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                        height: 1.4,
+                      ),
+                      maxLines: null,
+                      overflow: TextOverflow.visible,
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ],
         ),
       ),

@@ -293,7 +293,9 @@ class _MaterialRecommendationDetailScreenState
     final provider = context.read<BookmarkProvider>();
     final saved = await provider.toggle(
       Bookmark(
-        source: AppConstants.bookmarkSourceFollowUp,
+        // v2.8(用户第 10 条):收藏要能看出"从哪个功能区来的" ——
+        // AI 材料的内容归到「文章」收藏夹(以前一律记成"追问")
+        source: AppConstants.bookmarkSourceArticle,
         title: _rec.title,
         content: _content.trim().isEmpty ? _rec.summary : _content,
       ),

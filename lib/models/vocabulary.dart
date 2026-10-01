@@ -37,6 +37,13 @@ class Vocabulary {
   /// 例句缺失(v2.6):模型没给 original_sentence,界面提示"这条没有出处原句"
   final bool sentenceMissing;
 
+  /// 页边中文批注(v2.8,用户第 2 条"涉及中文词汇板块就乱")。
+  ///
+  /// 用户手写在页边的中文(如「苏格拉底」),并到对应的英文词条上 ——
+  /// 而不是像以前那样**单独占一张卡**(中文当头),结果同一个内容出现两张、
+  /// 卡片结构还一张中文一张英文。
+  final String? annotation;
+
   final DateTime createdAt;
   final DateTime? updatedAt;
 
@@ -60,6 +67,7 @@ class Vocabulary {
     this.occurrences = const [],
     this.needsReview = false,
     this.sentenceMissing = false,
+    this.annotation,
     DateTime? createdAt,
     this.updatedAt,
   }) : createdAt = createdAt ?? DateTime.now();
@@ -111,6 +119,8 @@ class Vocabulary {
       'material_path': materialPath,
       'occurrences_json':
           occurrences.isEmpty ? null : VocabOccurrence.encodeList(occurrences),
+      // v2.8:页边中文批注(并到英文词条上,不再单独成卡)
+      'annotation': annotation,
       'created_at': createdAt.toIso8601String(),
       'updated_at': (updatedAt ?? DateTime.now()).toIso8601String(),
     };
@@ -138,6 +148,7 @@ class Vocabulary {
       materialPath: map['material_path'] as String?,
       // v2.4(B4):出现记录;坏 JSON/老库缺列都退成空列表
       occurrences: VocabOccurrence.decodeList(map['occurrences_json']),
+      annotation: _str(map['annotation']),
       createdAt: _tryParseDate(map['created_at']),
       updatedAt: map['updated_at'] != null
           ? _tryParseDate(map['updated_at'])
@@ -168,6 +179,7 @@ class Vocabulary {
     List<VocabOccurrence>? occurrences,
     bool? needsReview,
     bool? sentenceMissing,
+    Object? annotation = _sentinel,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) {
@@ -191,6 +203,7 @@ class Vocabulary {
       occurrences: occurrences ?? this.occurrences,
       needsReview: needsReview ?? this.needsReview,
       sentenceMissing: sentenceMissing ?? this.sentenceMissing,
+      annotation: _unwrap(annotation, this.annotation) as String?,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );

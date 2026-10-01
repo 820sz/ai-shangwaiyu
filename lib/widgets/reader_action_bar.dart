@@ -43,6 +43,11 @@ class ReaderActionBar extends StatelessWidget {
   /// 改保存位置(分类 / 材料名 / 页码)
   final VoidCallback onChangeTarget;
 
+  /// 翻译进度说明(v2.8):开着翻译时显示「翻译中 3/40」这类状态;关着传空串。
+  /// 为什么要有:改成按需翻译后,用户需要知道"翻到哪了/还有多少没翻",
+  /// 否则"往下滚才会翻"这件事没有任何提示。
+  final String translationNote;
+
   /// 换了模型/思考档后通知页面重建(否则菜单里的勾还停在旧值)
   final VoidCallback? onModelChanged;
 
@@ -56,6 +61,7 @@ class ReaderActionBar extends StatelessWidget {
     required this.moreActions,
     required this.saveTargetLabel,
     required this.onChangeTarget,
+    this.translationNote = '',
     this.onModelChanged,
   });
 
@@ -111,6 +117,28 @@ class ReaderActionBar extends StatelessWidget {
               ],
             ),
           ),
+          // 翻译进度(v2.8):只有开着翻译时才出现,一行就把"翻到哪了"说清
+          if (translationNote.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(Gap.sm, 0, Gap.sm, 2),
+              child: Row(
+                children: [
+                  Icon(Icons.translate, size: 12, color: cs.primary),
+                  const SizedBox(width: Gap.xxs),
+                  Expanded(
+                    child: Text(
+                      translationNote,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: cs.primary,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           Padding(
             padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
             child: Row(

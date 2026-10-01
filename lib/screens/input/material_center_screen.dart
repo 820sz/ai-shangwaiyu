@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -6,6 +8,7 @@ import '../../config/design_tokens.dart';
 import '../../config/theme.dart';
 import '../../models/learner_model.dart';
 import '../../providers/vocab_provider.dart';
+import '../../services/deepseek_api.dart';
 import '../../services/external_link.dart';
 import '../../services/feed_parser.dart' show FeedItem;
 import '../../services/learner_model_store.dart';
@@ -13,32 +16,35 @@ import '../../services/material_library.dart';
 import '../../services/material_prefs.dart';
 import '../../services/material_source.dart';
 import '../../services/material_source_status.dart';
+import '../../services/material_topics.dart';
+import '../../services/original_search.dart';
 import '../../services/word_frequency.dart';
 import '../../widgets/app_ui.dart';
+import '../../widgets/material_cover.dart';
 import 'category_material_screen.dart';
 import 'material_import_flow.dart';
 import 'material_reader_screen.dart';
 import 'widgets/material_preview_dialog.dart';
 
-/// 材料中心(v2.0;v2.7 大改)。
+/// 材料中心(v2.0;v2.7 大改;v2.8 按参考软件做视觉与信息架构升级)。
 ///
-/// 定位(用户明确要求):**材料由软件提供渠道,不是让用户上传**。
-/// 所以这一页的主入口是"从公开内容源拉真实材料",而不是一个上传框。
+/// ## v2.8 为什么重排(用户第 6(2) 条)
+/// 用户原话:**"你做的所有功能的展示逻辑都非常单一枯燥,没有任何想用的欲望。
+/// 整个软件全是字唉。"** 并附了参考软件(扇贝阅读)的两张截屏。
+/// 调研(见 `docs/SPEC-material-discovery-2026-10-01.md`)结论 + 本机实测:
+/// - 参考软件的结构是「大图卡片 + 分类 tab + 图文列表 + Lv 徽标 + 开始阅读」;
+/// - 公开图源里 Wikipedia/Openverse/Gutendex/Open Library **全部不可达**,
+///   只有 Gutenberg 封面 / RSS 的 media:content 可用 →
+///   所以**程序化封面**(零网络零版权,按标题 hash 稳定取色)是首版最稳的底,
+///   有真图时用真图([MaterialCover] 自动二选一)。
 ///
-/// v2.7 按用户第 2/4/5 条重做:
-/// - **顶部个性化找资源**(第 5 条):难度档 + 内容类型 + 题材倾向 + 补充需求,
-///   全部只影响"给 AI 的检索方案",不动用户已有的数据;
-/// - **难度自选**(第 4 条):i+1 / i+10 / i+100 既可快速切换,也参与材料库排序与标注,
-///   并作为约束交给 AI(`MaterialBand`);
-/// - **每条材料都有两条路**(第 2(1) 条):「软件内阅读」+「原文链接」——
-///   反爬/需要登录的页面至少还能点开看;
-/// - **导入三通道**(第 2(4) 条):粘贴文本 / 文件 / 图片(AI 提取)/ 链接,
-///   不再是"只能填标题和正文"。
-///
-/// 三段:
-/// 1. **个性化找资源** → 偏好摘要(点开改);
-/// 2. **今日推荐** → 选源 → 拉该源最新条目 → 逐条"分析并打开"(打开时才抓正文);
-/// 3. **材料库** → 已入库材料(带覆盖率/进度),按当前难度档排序,直接续读。
+/// ## 本页结构
+/// 1. **个性化找资源**(v2.7):难度 + 类型 + 题材 + 补充需求;
+/// 2. **今日精读**(v2.8):一张大卡 —— 配图 / 题材 / Lv / 中英标题 / 句数时长口音 / 开始阅读;
+/// 3. **发现更多**(v2.8):题材 tab + 图文列表,检索过程**流式**展示(「查阅了 xxx」);
+/// 4. **按你的水平找材料**(分类入口);
+/// 5. **今日推荐**(源最新条目,标题中文化);
+/// 6. **材料库**:图文卡片 + 难度适配标注 + 原文链接。
 class MaterialCenterScreen extends StatefulWidget {
   const MaterialCenterScreen({super.key});
 
@@ -47,10 +53,9 @@ class MaterialCenterScreen extends StatefulWidget {
 }
 
 class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
-  /// 源服务只有私有构造(全静态配置 + 无状态抓取),这里按需即用即弃
   final _service = MaterialSourceService.instance;
+  final _ai = DeepseekApiService();
 
-  /// 默认源:**上次成功过的源** → 没有就用实测可达的 NPR。
   String _sourceId = MaterialSourceService.defaultSourceId;
   List<FeedItem> _items = const [];
   List<ShelfItem> _shelf = const [];
@@ -58,16 +63,26 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
   bool _loadingItems = false;
   String? _error;
   LearnerModel _model = LearnerModel();
-
-  /// 用户偏好(第 4/5 条)
   MaterialPrefs _prefs = MaterialPrefs.empty;
-
-  /// 材料库是否只显示"符合当前难度档"的材料(第 4 条:筛选)
   bool _onlyFit = false;
-
-  /// 各源最近一次可用性(界面据此标注"上次失败",不让用户一个个试)
   Map<String, SourceHealth> _health = const {};
   bool _probing = false;
+
+  /// 标题中文化缓存(英文原标题 → 中文译名)
+  final Map<String, String> _titleCn = {};
+
+  // ── 今日精读(v2.8)──
+  FeedItem? _daily;
+  MaterialAnalysis? _dailyAnalysis;
+  bool _dailyLoading = false;
+
+  // ── 发现更多(v2.8):题材 tab + 图文列表 + 流式检索过程 ──
+  MaterialTopic _topic = MaterialTopic.all.first;
+  List<OriginalHit> _topicHits = const [];
+  List<SearchEvent> _topicEvents = const [];
+  bool _topicLoading = false;
+  bool _topicLoaded = false;
+  String _topicNote = '';
 
   @override
   void initState() {
@@ -84,6 +99,7 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
       );
       _loadShelf();
       _loadItems();
+      _loadTopic(_topic);
     });
   }
 
@@ -92,7 +108,6 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
       final items = await MaterialLibrary.shelf(limit: 50);
       if (!mounted) return;
       setState(() {
-        // 排序与筛选都按用户选的难度档(v2.7,第 4 条)
         _shelf = MaterialLibrary.rankForBand(items, _prefs.band);
         _loadingShelf = false;
       });
@@ -110,7 +125,6 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
     });
     try {
       final items = await _service.listItems(_sourceId, limit: 12);
-      // 成功要记下来:下次打开材料中心直接落在这个源上
       await MaterialSourceStatus.recordOk(_sourceId);
       if (!mounted) return;
       setState(() {
@@ -118,6 +132,10 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
         _loadingItems = false;
         _health = MaterialSourceStatus.loadAll();
       });
+      // 今日精读:取第一条做"预分析"(抓正文 + 本地难度),失败就退回不带难度的卡
+      unawaited(_loadDaily(items.isEmpty ? null : items.first));
+      // 标题中文化(用户第 2(2)/6(1) 条:标题一律「中文(英文)」)
+      unawaited(_translateTitles(items.take(10).map((e) => e.title).toList()));
     } catch (e) {
       await MaterialSourceStatus.recordFail(_sourceId, e);
       if (!mounted) return;
@@ -129,7 +147,126 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
     }
   }
 
-  /// 挨个探测所有源,把"哪个能用"一次性问清楚。
+  /// 今日精读:抓第一条的正文并做本地难度分析(不入库)。
+  /// 大字卡要显示真实 Lv / 认知率,所以这一步值得花一次网络往返。
+  Future<void> _loadDaily(FeedItem? item) async {
+    if (item == null) {
+      if (!mounted) return;
+      setState(() {
+        _daily = null;
+        _dailyAnalysis = null;
+        _dailyLoading = false;
+      });
+      return;
+    }
+    setState(() {
+      _daily = item;
+      _dailyAnalysis = null;
+      _dailyLoading = true;
+    });
+    try {
+      final doc = await _service.fetchDocument(_sourceId, url: item.link);
+      if (!mounted) return;
+      final vocab = context.read<VocabProvider>().vocabularies;
+      final a = await MaterialLibrary.analyze(
+        doc.plainText.isEmpty
+            ? doc.chunks.map((c) => c.text).join('\n\n')
+            : doc.plainText,
+        model: _model,
+        vocab: vocab,
+      );
+      if (!mounted) return;
+      setState(() {
+        _dailyAnalysis = a;
+        _dailyLoading = false;
+      });
+    } catch (e) {
+      debugPrint('今日精读预分析失败(不影响打开): $e');
+      if (!mounted) return;
+      setState(() => _dailyLoading = false);
+    }
+  }
+
+  /// 「发现更多」:按题材检索(公版书 + 论文 + 外媒三路并行),过程流式上报
+  Future<void> _loadTopic(MaterialTopic topic) async {
+    setState(() {
+      _topic = topic;
+      _topicLoading = true;
+      _topicLoaded = true;
+      _topicHits = const [];
+      _topicEvents = const [];
+      _topicNote = '';
+    });
+    final started = DateTime.now();
+    final events = <SearchEvent>[];
+    void push(SearchEvent e) {
+      events.add(e);
+      if (mounted) setState(() => _topicEvents = List.of(events));
+    }
+
+    push(SearchEvent(
+      stage: SearchStage.preparing,
+      label: '按「${topic.label}」找材料:${topic.description}',
+    ));
+    try {
+      // 用该题材的英文检索词(公开源只认英文,见 v2.6 教训);
+      // 用户在偏好里写了题材就优先用他的说法
+      final genres = _prefs.genres.trim();
+      final query = genres.isEmpty ? topic.queries.first : genres;
+      final result = await OriginalSearch.search(
+        query,
+        category: '其他',
+        sourceIds: _prefs.kinds.isEmpty
+            ? null
+            : [for (final s in _prefs.preferredSources) s.id],
+        onProgress: push,
+      );
+      if (!mounted) return;
+      final seconds = DateTime.now().difference(started).inSeconds;
+      push(SearchEvent(
+        stage: SearchStage.done,
+        label: '查阅了 ${result.hits.length} 篇 · 用时 ${seconds == 0 ? '不到 1' : seconds} 秒',
+        done: 1,
+        total: 1,
+        hits: result.hits.length,
+      ));
+      setState(() {
+        _topicHits = result.hits;
+        _topicLoading = false;
+        _topicNote = result.notes.join(' · ');
+      });
+      unawaited(
+        _translateTitles(result.hits.take(12).map((h) => h.title).toList()),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      push(SearchEvent(stage: SearchStage.sourceFailed, label: '这次没找成:$e'));
+      setState(() {
+        _topicLoading = false;
+        _topicNote = '$e';
+      });
+    }
+  }
+
+  /// 批量把英文标题翻成中文(带缓存;AI 没配就静默返回)
+  Future<void> _translateTitles(List<String> titles) async {
+    final todo = [
+      for (final t in titles)
+        if (t.trim().isNotEmpty && !_titleCn.containsKey(t)) t,
+    ];
+    if (todo.isEmpty || !_ai.isConfigured) return;
+    try {
+      final map = await _ai.translateTitles(todo);
+      if (!mounted) return;
+      setState(() => _titleCn.addAll(map));
+    } catch (e) {
+      debugPrint('ReadFlow 标题中文化失败(保持英文): $e');
+    }
+  }
+
+  /// 「中文(英文)」标题(与分类页同一规则)
+  String _titleCnOf(String en) => _titleCn[en]?.trim() ?? '';
+
   Future<void> _probeAll() async {
     setState(() => _probing = true);
     for (final s in MaterialSourceService.sources) {
@@ -157,60 +294,37 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
     );
   }
 
-  /// 打开一篇源材料:抓正文 → 标题中文化 → 本地分析 → 入库 → 读前卡 → 阅读器
-  Future<void> _openItem(FeedItem item) async {
-    showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const Dialog(child: AppLoading(label: '正在抓取并分析原文…')),
+  /// 打开今日精读(大卡按钮)
+  Future<void> _openDaily() async {
+    final item = _daily;
+    if (item == null) return;
+    await MaterialImportFlow.openHitWithProgress(
+      context,
+      hit: OriginalHit(
+        sourceId: _sourceId,
+        sourceId2: item.link,
+        title: item.title,
+        url: item.link,
+        note: item.summary,
+        imageUrl: item.imageUrl,
+      ),
+      model: _model,
+      label: '正在抓取并分析这篇…',
     );
-    try {
-      final doc = await _service.fetchDocument(_sourceId, url: item.link);
-      if (!mounted) return;
-      final vocab = context.read<VocabProvider>().vocabularies;
-      // 标题补成「中文(英文)」(第 2(2) 条):入库前就定好,书架/阅读器/材料文件夹
-      // 三处显示的是同一个标题,不会一处中文一处英文
-      final title = await MaterialImportFlow.localizedTitle(doc.title);
-      final ingested = await MaterialLibrary.ingestDoc(
-        _retitled(doc, title),
-        model: _model,
-        vocab: vocab,
-      );
-      if (!mounted) return;
-      Navigator.pop(context); // 关掉加载框
-      await _showPreview(ingested);
-      await _loadShelf();
-    } catch (e) {
-      if (!mounted) return;
-      Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('打开失败:$e')),
-      );
-    }
+    if (!mounted) return;
+    _model = LearnerModelStore.load();
+    await _loadShelf();
   }
 
-  /// 只换标题(正文与元信息原样)
-  MaterialDoc _retitled(MaterialDoc doc, String title) {
-    if (title.trim().isEmpty || title.trim() == doc.title.trim()) return doc;
-    return MaterialDoc(
-      sourceId: doc.sourceId,
-      sourceId2: doc.sourceId2,
-      kind: doc.kind,
-      title: title.trim(),
-      author: doc.author,
-      url: doc.url,
-      license: doc.license,
-      language: doc.language,
-      audioUrl: doc.audioUrl,
-      chunks: doc.chunks,
-      plainText: doc.plainText,
+  /// 打开一条发现结果(软件内阅读)
+  Future<void> _openHit(OriginalHit hit) async {
+    await MaterialImportFlow.openHitWithProgress(
+      context,
+      hit: hit,
+      model: _model,
     );
-  }
-
-  /// 读前卡:告诉用户"这份材料对你是什么难度",再决定读不读(v2.7 抽到公共件)
-  Future<void> _showPreview(IngestedMaterial ingested) async {
-    final go = await showMaterialPreview(context, ingested);
-    if (go && mounted) await _openReader(ingested.materialId);
+    if (!mounted) return;
+    await _loadShelf();
   }
 
   Future<void> _openReader(int materialId) async {
@@ -225,7 +339,6 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
     await _loadShelf();
   }
 
-  /// 导入材料(v2.7,第 2(4) 条):粘贴文本 / 文件 / 图片(AI 提取)/ 链接
   Future<void> _import() async {
     final ingested = await MaterialImportFlow.run(
       context,
@@ -237,7 +350,11 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
     await _loadShelf();
   }
 
-  /// 用系统浏览器打开原文链接(第 2(1) 条:反爬/付费页面的退路)
+  Future<void> _showPreview(IngestedMaterial ingested) async {
+    final go = await showMaterialPreview(context, ingested);
+    if (go && mounted) await _openReader(ingested.materialId);
+  }
+
   Future<void> _openExternal(String url) async {
     try {
       final ok = await launchExternalUrl(url);
@@ -261,7 +378,6 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
     await _loadShelf();
   }
 
-  /// 个性化找资源面板(第 5 条):难度 / 类型 / 题材倾向 / 补充需求
   Future<void> _showPrefsSheet() async {
     var draft = _prefs;
     final genresCtrl = TextEditingController(text: _prefs.genres);
@@ -298,8 +414,6 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
                           ?.copyWith(color: muted, height: 1.4),
                     ),
                     const SizedBox(height: Gap.md),
-
-                    // ① 难度
                     Text('难度(i+1 / i+10 / i+100)',
                         style: theme.textTheme.bodySmall?.copyWith(color: muted)),
                     const SizedBox(height: Gap.xs),
@@ -311,8 +425,7 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
                           ChoiceChip(
                             label: Text(b.label),
                             selected: draft.band == b,
-                            onSelected: (_) =>
-                                apply(draft.copyWith(band: b)),
+                            onSelected: (_) => apply(draft.copyWith(band: b)),
                           ),
                       ],
                     ),
@@ -320,8 +433,6 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
                     Text(draft.band.description,
                         style: theme.textTheme.bodySmall
                             ?.copyWith(color: muted, fontSize: 11)),
-
-                    // ② 内容类型
                     const SizedBox(height: Gap.md),
                     Text('内容类型',
                         style: theme.textTheme.bodySmall?.copyWith(color: muted)),
@@ -346,8 +457,6 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
                           ),
                       ],
                     ),
-
-                    // ③ 题材倾向
                     const SizedBox(height: Gap.md),
                     TextField(
                       controller: genresCtrl,
@@ -359,8 +468,6 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
                       ),
                       onChanged: (v) => apply(draft.copyWith(genres: v)),
                     ),
-
-                    // ④ 补充需求
                     const SizedBox(height: Gap.sm),
                     TextField(
                       controller: extraCtrl,
@@ -374,7 +481,6 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
                       ),
                       onChanged: (v) => apply(draft.copyWith(extra: v)),
                     ),
-
                     const SizedBox(height: Gap.md),
                     Row(
                       children: [
@@ -415,9 +521,10 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
         behavior: SnackBarBehavior.floating,
       ),
     );
+    // 题材/类型变了就重搜一次发现区,让偏好立刻生效
+    unawaited(_loadTopic(_topic));
   }
 
-  /// 材料库里符合当前档位的条数(摘要行用)
   int get _fitCount {
     if (_prefs.band.isAny) return _shelf.length;
     return _shelf.where((s) {
@@ -430,7 +537,6 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final muted = theme.colorScheme.onSurfaceVariant;
-    // 只显示符合档位的(第 4 条:筛选);不限档时不过滤
     final shelf = (_onlyFit && !_prefs.band.isAny)
         ? _shelf.where((s) {
             final c = s.coverage;
@@ -451,50 +557,37 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
       body: ListView(
         padding: Insets.page,
         children: [
-          // ── ⓪ 个性化找资源(v2.7,第 5 条 + 第 4 条)──
           AppStagger(index: 0, child: _buildPrefsCard(theme, muted)),
-
-          // ── ① 按你的水平找材料(两个方向:资料原文 / AI 整理)──
+          AppStagger(index: 1, child: _buildDailyCard(theme, muted)),
+          AppStagger(index: 2, child: _buildDiscover(theme, muted)),
           AppStagger(
-            index: 1,
+            index: 3,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const AppSectionTitle(
                   title: '按你的水平找材料',
-                  subtitle: '中文说需求,AI 去公开源找原文;AI 整理的内容单独一栏',
+                  subtitle: '中文说需求,AI 去公开源找原文',
                 ),
                 _buildAiDiscoverGrid(theme),
               ],
             ),
           ),
-
-          // ── ② 今日推荐 ──
           AppStagger(
-            index: 2,
+            index: 4,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 AppSectionTitle(
                   title: '今日推荐',
-                  subtitle: '公开内容源 · 无需 API Key',
+                  subtitle:
+                      '${MaterialSourceService.sourceOf(_sourceId)?.label ?? _sourceId} · 最新条目',
                   trailing: TextButton(
                     onPressed: _probing ? null : _probeAll,
                     child: Text(_probing ? '检测中…' : '检测可用源'),
                   ),
                 ),
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: [
-                      for (final s in MaterialSourceService.sources)
-                        Padding(
-                          padding: const EdgeInsets.only(right: 6),
-                          child: _sourceChip(context, theme, s),
-                        ),
-                    ],
-                  ),
-                ),
+                _sourceStrip(theme),
                 const SizedBox(height: Gap.xs),
                 _sourceNote(theme, muted),
                 const SizedBox(height: Gap.sm),
@@ -506,17 +599,16 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
                   const AppEmpty(
                     icon: Icons.article_outlined,
                     title: '这个源暂时没有条目',
-                    hint: '换一个源试试,或让助手「检测可用源」',
+                    hint: '换一个源试试,或点「检测可用源」',
                   )
                 else
-                  for (final item in _items.take(8)) _buildItemCard(theme, item),
+                  for (final item in _items.take(6))
+                    _buildFeedCard(theme, item),
               ],
             ),
           ),
-
-          // ── ③ 材料库 ──
           AppStagger(
-            index: 3,
+            index: 5,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -540,8 +632,8 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
                     icon: Icons.library_books_outlined,
                     title: _onlyFit ? '没有符合 ${_prefs.band.label} 的材料' : '还没有材料',
                     hint: _onlyFit
-                        ? '把上面的「只看符合」取消,或换一个难度档'
-                        : '从上面挑一份,或点右上角「+」导入自己的材料',
+                        ? '把「只看符合」取消,或换一个难度档'
+                        : '从上面挑一份,或点右上角「+」导入',
                   )
                 else
                   for (final s in shelf) _buildShelfCard(theme, s),
@@ -554,7 +646,8 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
     );
   }
 
-  /// 个性化找资源卡(第 5 条):摘要 + 难度档快捷切换
+  // ───────────────── ⓪ 个性化找资源 ─────────────────
+
   Widget _buildPrefsCard(ThemeData theme, Color muted) {
     return AppCard(
       child: Column(
@@ -599,7 +692,6 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
                 ?.copyWith(color: muted, height: 1.4),
           ),
           const SizedBox(height: Gap.sm),
-          // 难度自选(第 4 条):常用档位直接露在外面,点一下立刻影响排序/检索
           Text('难度', style: theme.textTheme.bodySmall?.copyWith(color: muted)),
           const SizedBox(height: Gap.xxs),
           Wrap(
@@ -627,7 +719,445 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
     );
   }
 
-  /// 源 chip:选中态 + **可用性标记**(✔ 最近可用 / ⚠ 上次失败 / 未测)。
+  // ───────────────── ① 今日精读大卡(v2.8) ─────────────────
+
+  Widget _buildDailyCard(ThemeData theme, Color muted) {
+    final item = _daily;
+    final a = _dailyAnalysis;
+    final kind = MaterialLevel.kindOfSource(_sourceId);
+    final lv = a == null
+        ? MaterialLevel.fallbackForKind(kind)
+        : MaterialLevel.of(a.cefr, kind: kind);
+    final accent = MaterialLevel.accentOf(_sourceId);
+
+    if (item == null) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: Gap.xs),
+        child: AppCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('今日精读',
+                  style: theme.textTheme.titleSmall
+                      ?.copyWith(fontWeight: FontWeight.w700)),
+              const SizedBox(height: Gap.sm),
+              if (_loadingItems || _dailyLoading)
+                const AppLoading(label: '正在准备今天的精读…')
+              else
+                Text('这个源暂时没有可精读的条目 —— 换一个源,或看上面的「发现更多」',
+                    style: theme.textTheme.bodySmall?.copyWith(color: muted)),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final cn = _titleCnOf(item.title);
+    final sentences = a == null
+        ? 0
+        : MaterialLevel.sentenceCount(item.summary.isEmpty ? item.title : item.summary);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: Gap.xs),
+      child: AppCard(
+        padding: EdgeInsets.zero,
+        onTap: _openDaily,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            MaterialCover(
+              seed: item.title,
+              kind: kind,
+              imageUrl: item.imageUrl,
+              height: 186,
+              radius: 0,
+              levelLabel: 'Lv$lv',
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(Gap.md, Gap.sm, Gap.md, Gap.md),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      _chip(theme, '今日精读', accent: true),
+                      const SizedBox(width: Gap.xxs + 2),
+                      _chip(theme, _kindLabel(kind)),
+                      const SizedBox(width: Gap.xxs + 2),
+                      _chip(theme, 'Lv$lv'),
+                    ],
+                  ),
+                  const SizedBox(height: Gap.xs),
+                  Text(
+                    item.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontSize: 17,
+                      height: 1.3,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  if (cn.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      cn,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodyMedium
+                          ?.copyWith(color: muted, height: 1.3),
+                    ),
+                  ],
+                  const SizedBox(height: Gap.xs),
+                  // 元信息:认知率 + 时长 + 词数 + 句数 + 口音
+                  // (参考软件只有"难度 + 词数"两项 —— 这几项是我们多给的)
+                  Wrap(
+                    spacing: Gap.sm,
+                    runSpacing: 4,
+                    children: [
+                      if (a != null)
+                        _meta(
+                          theme,
+                          Icons.speed,
+                          '已知 ${(a.knownTokenRatio * 100).toStringAsFixed(0)}%',
+                        ),
+                      if (a != null)
+                        _meta(theme, Icons.timer_outlined, '约 ${a.estMinutes} 分钟'),
+                      if (a != null && a.wordCount > 0)
+                        _meta(theme, Icons.notes, '${a.wordCount} 词'),
+                      if (sentences > 0)
+                        _meta(theme, Icons.format_quote, '摘要约 $sentences 句'),
+                      if (accent.isNotEmpty)
+                        _meta(theme, Icons.volume_up_outlined, accent),
+                    ],
+                  ),
+                  if (a != null) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      '${a.cefr} · ${MaterialLevel.matchHint(a.knownTokenRatio)}'
+                      '${a.tooHard ? ' · 建议只精读前几段' : ''}',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: a.tooHard
+                            ? AppTheme.warningColor(context)
+                            : theme.colorScheme.primary,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: Gap.sm),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: SizedBox(
+                          height: 46,
+                          child: FilledButton.icon(
+                            onPressed: _dailyLoading ? null : _openDaily,
+                            icon: const Icon(Icons.play_arrow_rounded, size: 20),
+                            label: Text(_dailyLoading ? '正在分析…' : '开始阅读'),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: Gap.xs),
+                      IconButton.outlined(
+                        tooltip: '换一篇',
+                        onPressed: _loadingItems
+                            ? null
+                            : () {
+                                final next = _items.length > 1 ? _items[1] : null;
+                                if (next != null) _loadDaily(next);
+                              },
+                        icon: const Icon(Icons.refresh),
+                      ),
+                      IconButton.outlined(
+                        tooltip: '原文链接',
+                        onPressed: () => _openExternal(item.link),
+                        icon: const Icon(Icons.link),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _kindLabel(String kind) => switch (kind) {
+        'book' => '公版书',
+        'paper' => '论文',
+        'news' => '外刊',
+        'podcast' => '播客',
+        'wiki' => '百科',
+        _ => '文章',
+      };
+
+  Widget _chip(ThemeData theme, String text, {bool accent = false}) {
+    final color =
+        accent ? theme.colorScheme.primary : theme.colorScheme.onSurfaceVariant;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withAlpha(accent ? 22 : 16),
+        borderRadius: BorderRadius.circular(Radii.control - 4),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          color: color,
+        ),
+      ),
+    );
+  }
+
+  Widget _meta(ThemeData theme, IconData icon, String text) {
+    final muted = theme.colorScheme.onSurfaceVariant;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 13, color: muted),
+        const SizedBox(width: 3),
+        Text(text, style: TextStyle(fontSize: 11, color: muted)),
+      ],
+    );
+  }
+
+  // ───────────────── ② 发现更多 ─────────────────
+
+  Widget _buildDiscover(ThemeData theme, Color muted) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const AppSectionTitle(
+          title: '发现更多',
+          subtitle: '按题材找:公版书 + 论文 + 外媒三路并行',
+        ),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              for (final t in MaterialTopic.all)
+                Padding(
+                  padding: const EdgeInsets.only(right: Gap.xs),
+                  child: ChoiceChip(
+                    avatar: Icon(t.icon, size: 15),
+                    label: Text(t.label),
+                    selected: _topic.id == t.id,
+                    onSelected: (_) => _loadTopic(t),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: Gap.xs),
+        // 检索过程:**流式时间线**(用户第 6(4) 条"查阅了 xxx")
+        if (_topicEvents.isNotEmpty) _buildSearchTimeline(theme),
+        if (_topicNote.isNotEmpty) ...[
+          const SizedBox(height: Gap.xs),
+          Text(_topicNote,
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: muted, fontSize: 11, height: 1.4)),
+        ],
+        const SizedBox(height: Gap.xs),
+        if (_topicLoading && _topicHits.isEmpty)
+          const AppLoading(label: '正在检索…')
+        else if (_topicHits.isEmpty && _topicLoaded)
+          AppEmpty(
+            icon: Icons.search_off,
+            title: '这个题材这次没找到',
+            hint: '换个题材,或在上面「个性化找资源」里写清你想要什么',
+          )
+        else
+          for (var i = 0; i < _topicHits.length; i++)
+            AppStagger(
+              index: i,
+              child: _buildDiscoverCard(theme, _topicHits[i]),
+            ),
+      ],
+    );
+  }
+
+  /// 检索时间线(v2.8):把真实发生的每一步摊开,而不是一个转圈
+  Widget _buildSearchTimeline(ThemeData theme) {
+    final muted = theme.colorScheme.onSurfaceVariant;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: Gap.sm, vertical: Gap.xs),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withAlpha(150),
+        borderRadius: Radii.controlRadius,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (var i = 0; i < _topicEvents.length; i++)
+            Padding(
+              padding: EdgeInsets.only(
+                bottom: i == _topicEvents.length - 1 ? 0 : 4,
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    _topicEvents[i].icon,
+                    size: 14,
+                    color: switch (_topicEvents[i].stage) {
+                      SearchStage.sourceFailed =>
+                        AppTheme.warningColor(context),
+                      SearchStage.done => AppTheme.successColor(context),
+                      _ => theme.colorScheme.primary,
+                    },
+                  ),
+                  const SizedBox(width: Gap.xxs + 2),
+                  Expanded(
+                    child: Text(
+                      _topicEvents[i].label,
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        height: 1.4,
+                        color: _topicEvents[i].stage == SearchStage.done
+                            ? theme.colorScheme.onSurface
+                            : muted,
+                        fontWeight: _topicEvents[i].stage == SearchStage.done
+                            ? FontWeight.w600
+                            : FontWeight.normal,
+                      ),
+                    ),
+                  ),
+                  if (_topicEvents[i].total > 0 &&
+                      _topicEvents[i].done > 0 &&
+                      _topicEvents[i].done <= _topicEvents[i].total)
+                    Text(
+                      '${_topicEvents[i].done}/${_topicEvents[i].total}',
+                      style: TextStyle(fontSize: 10, color: muted),
+                    ),
+                ],
+              ),
+            ),
+          if (_topicLoading)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Row(
+                children: [
+                  const SizedBox(
+                    width: 12,
+                    height: 12,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  const SizedBox(width: Gap.xs),
+                  Text('还在检索…',
+                      style: TextStyle(fontSize: 11, color: muted)),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// 发现区卡片:缩略图 + 标题(中文(英文))+ 元信息 + Lv 徽标 + 两个动作
+  Widget _buildDiscoverCard(ThemeData theme, OriginalHit hit) {
+    final muted = theme.colorScheme.onSurfaceVariant;
+    final kind = MaterialLevel.kindOfSource(hit.sourceId);
+    final lv = MaterialLevel.fallbackForKind(kind);
+    final cn = _titleCnOf(hit.title);
+    final accent = MaterialLevel.accentOf(hit.sourceId);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: Gap.xs),
+      child: AppCard(
+        onTap: () => _openHit(hit),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            MaterialCover(
+              seed: hit.title,
+              kind: kind,
+              imageUrl: hit.imageUrl,
+              width: 92,
+              height: 92,
+              radius: Radii.control,
+              levelLabel: 'Lv$lv',
+            ),
+            const SizedBox(width: Gap.sm),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    hit.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodyLarge?.copyWith(
+                      fontSize: 15,
+                      height: 1.3,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  if (cn.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      cn,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall
+                          ?.copyWith(color: muted, height: 1.3),
+                    ),
+                  ],
+                  const SizedBox(height: 4),
+                  Wrap(
+                    spacing: Gap.xs,
+                    runSpacing: 2,
+                    children: [
+                      if (hit.note.trim().isNotEmpty)
+                        _meta(theme, Icons.schedule, hit.note),
+                      if (accent.isNotEmpty)
+                        _meta(theme, Icons.volume_up_outlined, accent),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      FilledButton.tonal(
+                        onPressed: () => _openHit(hit),
+                        child: const Text('软件内阅读'),
+                      ),
+                      const SizedBox(width: Gap.xxs),
+                      if (hit.url.trim().isNotEmpty)
+                        TextButton.icon(
+                          onPressed: () => _openExternal(hit.url),
+                          icon: const Icon(Icons.open_in_new, size: 15),
+                          label: const Text('原文链接'),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ───────────────── ③ 今日推荐(源最新条目) ─────────────────
+
+  Widget _sourceStrip(ThemeData theme) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          for (final s in MaterialSourceService.sources)
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: _sourceChip(context, theme, s),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _sourceChip(BuildContext context, ThemeData theme, MaterialSource s) {
     final health = _health[s.id];
     final measured = MaterialSourceService.measuredReachable.contains(s.id);
@@ -639,7 +1169,6 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
         : (health.ok
               ? AppTheme.successColor(context)
               : AppTheme.warningColor(context));
-    // 偏好里选了类型 → 对应的源排在前面(用户第 5 条:类型偏好要真的起作用)
     final preferred = _prefs.kinds.isEmpty || _prefs.kinds.contains(s.kind);
     return ChoiceChip(
       avatar: mark == null ? null : Icon(mark, size: 15, color: markColor),
@@ -655,7 +1184,6 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
     );
   }
 
-  /// 选中源的一行说明:它是什么 + 在你这儿最近一次行不行。
   Widget _sourceNote(ThemeData theme, Color muted) {
     final s = MaterialSourceService.sourceOf(_sourceId);
     if (s == null) return const SizedBox.shrink();
@@ -670,7 +1198,7 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
     final status = health == null
         ? (MaterialSourceService.measuredReachable.contains(s.id)
             ? '实测可用(2026-09 中国大陆):这个源一直比较稳'
-            : '还没试过这个源 —— 拉不到就换一个,不必纠结')
+            : '还没试过这个源 —— 拉不到就换一个')
         : '${health.label(now)}'
             '${ok ? '' : ' —— ${health.message ?? '未知原因'}'}';
     return Row(
@@ -708,18 +1236,9 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
     );
   }
 
-  /// 失败卡片:说清"哪个源、为什么、下一步点哪"
   Widget _errorCard(ThemeData theme, Color muted) {
     final s = MaterialSourceService.sourceOf(_sourceId);
     final label = s?.label ?? _sourceId;
-    final others = MaterialSourceService.sources
-        .where((x) => x.id != _sourceId)
-        .toList()
-      ..sort((a, b) {
-        final ah = _health[a.id]?.ok == true ? 0 : 1;
-        final bh = _health[b.id]?.ok == true ? 0 : 1;
-        return ah.compareTo(bh);
-      });
     return AppCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -745,38 +1264,88 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
               style: theme.textTheme.bodySmall?.copyWith(color: muted)),
           const SizedBox(height: Gap.xxs),
           Text(
-            '内容源都在境外,部分网络(含中国大陆多数宽带/移动网络)会连不上 —— '
-            '这不是 App 坏了。换个源试试,或点右上角「检测可用源」一次问清。',
+            '内容源都在境外,部分网络会连不上 —— 这不是 App 坏了。'
+            '换个源试试,或看上面的「发现更多」(题材检索会多路并行)。',
             style: theme.textTheme.bodySmall
                 ?.copyWith(color: muted, fontSize: 11, height: 1.5),
-          ),
-          const SizedBox(height: Gap.sm),
-          Text('换到哪个源:',
-              style: theme.textTheme.bodySmall?.copyWith(color: muted)),
-          const SizedBox(height: Gap.xxs),
-          Wrap(
-            spacing: Gap.xs,
-            runSpacing: Gap.xxs,
-            children: [
-              for (final o in others.take(3))
-                ActionChip(
-                  avatar: _health[o.id]?.ok == true
-                      ? const Icon(Icons.check_circle, size: 15)
-                      : null,
-                  label: Text(o.label),
-                  onPressed: () {
-                    setState(() => _sourceId = o.id);
-                    _loadItems();
-                  },
-                ),
-            ],
           ),
         ],
       ),
     );
   }
 
-  /// 「按你的水平找材料」入口网格
+  Widget _buildFeedCard(ThemeData theme, FeedItem item) {
+    final muted = theme.colorScheme.onSurfaceVariant;
+    final kind = MaterialLevel.kindOfSource(_sourceId);
+    final cn = _titleCnOf(item.title);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: Gap.xs),
+      child: AppCard(
+        onTap: () {
+          setState(() => _daily = item);
+          _loadDaily(item);
+        },
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            MaterialCover(
+              seed: item.title,
+              kind: kind,
+              imageUrl: item.imageUrl,
+              width: 76,
+              height: 76,
+              radius: Radii.control,
+            ),
+            const SizedBox(width: Gap.sm),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(item.title.isEmpty ? '(无标题)' : item.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodyLarge?.copyWith(
+                        fontSize: 14.5,
+                        height: 1.3,
+                        fontWeight: FontWeight.w600,
+                      )),
+                  if (cn.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(cn,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall
+                            ?.copyWith(color: muted, height: 1.3)),
+                  ],
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      if (item.published != null)
+                        _meta(theme, Icons.schedule, item.published!),
+                      const SizedBox(width: Gap.xs),
+                      TextButton(
+                        style: TextButton.styleFrom(
+                          padding: EdgeInsets.zero,
+                          minimumSize: const Size(0, 24),
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        onPressed: () => _openExternal(item.link),
+                        child: const Text('原文链接',
+                            style: TextStyle(fontSize: 11)),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ───────────────── ④ 分类入口 ─────────────────
+
   Widget _buildAiDiscoverGrid(ThemeData theme) {
     final cats = AppConstants.learningCategories;
     const icons = <String, IconData>{
@@ -850,126 +1419,84 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
     );
   }
 
-  /// 今日推荐条目卡(v2.7):「分析并读」+「原文链接」两条路
-  Widget _buildItemCard(ThemeData theme, FeedItem item) {
-    final muted = theme.colorScheme.onSurfaceVariant;
-    final link = item.link.trim();
-    return AppCard(
-      onTap: () => _openItem(item),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(item.title.isEmpty ? '(无标题)' : item.title,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodyLarge
-                  ?.copyWith(fontWeight: FontWeight.w600)),
-          if (item.summary.isNotEmpty) ...[
-            const SizedBox(height: Gap.xxs),
-            Text(item.summary,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall?.copyWith(color: muted)),
-          ],
-          if (item.published != null) ...[
-            const SizedBox(height: Gap.xxs),
-            Text(item.published!,
-                style: theme.textTheme.bodySmall
-                    ?.copyWith(color: muted, fontSize: 11)),
-          ],
-          const SizedBox(height: Gap.xs),
-          Row(
-            children: [
-              FilledButton.tonal(
-                onPressed: () => _openItem(item),
-                child: const Text('分析并读'),
-              ),
-              const SizedBox(width: Gap.xs),
-              if (link.isNotEmpty)
-                TextButton.icon(
-                  onPressed: () => _openExternal(link),
-                  icon: const Icon(Icons.link, size: 16),
-                  label: const Text('原文链接'),
-                ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
+  // ───────────────── ⑤ 材料库卡片 ─────────────────
 
-  /// 书架卡(v2.7):难度档适配标注 + 原文链接入口
   Widget _buildShelfCard(ThemeData theme, ShelfItem s) {
     final muted = theme.colorScheme.onSurfaceVariant;
     final cov = s.coverage;
     final fit = cov == null ? '' : _prefs.band.fitLabel(cov);
-    final meta = '${MaterialLibrary.kindLabel(s.kind)} · ${s.wordCount} 词'
-        '${s.cefr.isEmpty ? '' : ' · ${s.cefr}'}'
-        '${cov == null ? '' : ' · 覆盖 ${(cov * 100).toStringAsFixed(0)}%'}'
-        ' · ${s.progressLabel}'
-        '${s.pickedWords > 0 ? ' · 已收 ${s.pickedWords} 词' : ''}';
-    return AppCard(
-      onTap: () => _openReader(s.id),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(s.title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodyLarge
-                        ?.copyWith(fontWeight: FontWeight.w500)),
-              ),
-              if (fit.isNotEmpty) ...[
-                const SizedBox(width: Gap.xxs),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                  decoration: BoxDecoration(
-                    color: (fit.startsWith('符合')
-                            ? AppTheme.successColor(context)
-                            : muted)
-                        .withAlpha(26),
-                    borderRadius: BorderRadius.circular(4),
+    final lv = MaterialLevel.of(s.cefr, kind: s.kind);
+    final meta = [
+      '${s.wordCount} 词',
+      '约 ${s.estMinutes} 分钟',
+      s.progressLabel,
+      if (s.pickedWords > 0) '已收 ${s.pickedWords} 词',
+    ].join(' · ');
+    return Padding(
+      padding: const EdgeInsets.only(bottom: Gap.xs),
+      child: AppCard(
+        onTap: () => _openReader(s.id),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            MaterialCover(
+              seed: s.title,
+              kind: s.kind,
+              width: 76,
+              height: 76,
+              radius: Radii.control,
+              levelLabel: 'Lv$lv',
+            ),
+            const SizedBox(width: Gap.sm),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(s.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodyLarge?.copyWith(
+                        fontSize: 15,
+                        height: 1.3,
+                        fontWeight: FontWeight.w600,
+                      )),
+                  const SizedBox(height: 2),
+                  Text(meta,
+                      style: theme.textTheme.bodySmall
+                          ?.copyWith(color: muted, fontSize: 11.5)),
+                  const SizedBox(height: 4),
+                  Wrap(
+                    spacing: Gap.xs,
+                    runSpacing: 2,
+                    children: [
+                      if (cov != null)
+                        _meta(theme, Icons.speed,
+                            '已知 ${(cov * 100).toStringAsFixed(0)}%'),
+                      if (fit.isNotEmpty)
+                        _chip(theme, fit, accent: fit.startsWith('符合')),
+                    ],
                   ),
-                  child: Text(
-                    fit,
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w600,
-                      color: fit.startsWith('符合')
-                          ? AppTheme.successColor(context)
-                          : muted,
-                    ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      FilledButton.tonal(
+                        onPressed: () => _openReader(s.id),
+                        child: const Text('继续读'),
+                      ),
+                      const SizedBox(width: Gap.xxs),
+                      if (s.url.trim().isNotEmpty)
+                        TextButton.icon(
+                          onPressed: () => _openExternal(s.url),
+                          icon: const Icon(Icons.link, size: 15),
+                          label: const Text('原文链接'),
+                        ),
+                    ],
                   ),
-                ),
-              ],
-            ],
-          ),
-          const SizedBox(height: Gap.xxs),
-          Text(meta,
-              style: theme.textTheme.bodySmall
-                  ?.copyWith(color: muted, fontSize: 12)),
-          const SizedBox(height: Gap.xs),
-          Row(
-            children: [
-              FilledButton.tonal(
-                onPressed: () => _openReader(s.id),
-                child: const Text('继续读'),
+                ],
               ),
-              const SizedBox(width: Gap.xs),
-              // 第 2(1) 条:软件内读与原文链接**都给**,让用户灵活切换
-              if (s.url.trim().isNotEmpty)
-                TextButton.icon(
-                  onPressed: () => _openExternal(s.url),
-                  icon: const Icon(Icons.link, size: 16),
-                  label: const Text('原文链接'),
-                ),
-            ],
-          ),
-        ],
+            ),
+          ],
+        ),
       ),
     );
   }

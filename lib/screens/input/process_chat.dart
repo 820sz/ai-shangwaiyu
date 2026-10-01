@@ -159,6 +159,28 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
   /// 本轮识别从第几张图开始（追加模式 = 上次的图片数；首次 = 0）
   int _streamStartIndex = 0;
 
+  /// 一次会话最多几张图(v2.8,用户第 1 条):追加识别的请求体随张数线性膨胀,
+  /// 而每条业务上都是"一页/几页材料" —— 10 张足够,再多了分两轮更稳。
+  static const int _maxImages = 10;
+
+  /// 单次追加最多几张:4 张一次请求,内存与耗时都可控
+  static const int _maxPerAppend = 4;
+
+  /// 图片锚点:补齐缺少的下标(不重建已有 key)。
+  ///
+  /// v2.8 修:旧实现在每次识别成功后 `_imageGroupKeys.clear()` 再全量新建 ——
+  /// 而上一轮结果的 widget 还挂在**旧 key** 上,换 key 会让整棵结果树重建,
+  /// 在"追加图片"这种本来内存就吃紧的时刻是最不该发生的抖动。
+  /// 现在只**补新的**,老 key 原样保留(GlobalKey 必须稳定,才能保住元素与滚动位置)。
+  void _ensureImageKeys() {
+    for (int i = 0; i < _images.length; i++) {
+      _imageGroupKeys.putIfAbsent(
+        i,
+        () => GlobalKey(debugLabel: 'image_group_$i'),
+      );
+    }
+  }
+
   /// 校准重识别模式(v1.7.0, v1.8.0 合并"补充识别"后成为唯一的重跑入口):
   /// 用户对首次识别不满意时的"认真重做一遍" —— 逐行扫描 + 高清图 + 输出前
   /// 自检,结果**整组替换**(手动补充的词保留)。
@@ -195,10 +217,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
   void _restoreSession(SavedSession s) {
     try {
       // 图片锚点按实际文件重建
-      _imageGroupKeys.clear();
-      for (int i = 0; i < _images.length; i++) {
-        _imageGroupKeys[i] = GlobalKey(debugLabel: 'image_group_$i');
-      }
+      _ensureImageKeys();
 
       // 结果还原:照片副本丢失时置 null(分组标题仍显示,不崩)
       _results = s.results.map((m) {
@@ -581,10 +600,14 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
   Vocabulary _vocabFromMap(Map<String, dynamic> r, int imgIdx) {
     // 越界(模型幻觉组号)回退第一张而非最后一张:
     // 识别从第一张开始,0 更可能是"模型忘标"而非"标到最后一本",
-    // 避免把词悄悄绑到最后一本书上
-    final photoPath = imgIdx >= 0 && imgIdx < _images.length
-        ? _images[imgIdx].path
-        : _images[0].path;
+    // 避免把词悄悄绑到最后一本书上。
+    // v2.8:`_images` 为空时不再取 `_images[0]`(那会 RangeError 崩掉整页)——
+    // 恢复会话时图片副本可能全部丢失,这时 photoPath 就该是 null。
+    final String? photoPath = _images.isEmpty
+        ? null
+        : ((imgIdx >= 0 && imgIdx < _images.length)
+            ? _images[imgIdx].path
+            : _images[0].path);
     return Vocabulary(
       word: r['word'] as String,
       translation: r['translation'] as String?,
@@ -602,6 +625,11 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
       phoneticUs:
           (r['phonetic_us'] as String?) ?? (r['phonetic'] as String?),
       grammarNote: r['grammar_note'] as String?,
+      // v2.8(用户第 2 条):页边中文批注 —— 校验层已把它并到英文词条上,
+      // 这里带上,卡片与词库都显示为「页边批注:xxx」,不再单独占一张中文卡
+      annotation: (r['annotation'] as String?)?.trim().isEmpty ?? true
+          ? null
+          : (r['annotation'] as String).trim(),
       // v2.6:模型"拿不准算不算标记"但仍然收进来的条目 → 界面打「待确认」标
       needsReview: r['uncertain'] == true || r['needs_review'] == true,
       sentenceMissing: r['sentence_missing'] == true,
@@ -798,11 +826,8 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         return;
       }
 
-      // 多图分组：为每张图片建锚点 GlobalKey
-      _imageGroupKeys.clear();
-      for (int i = 0; i < _images.length; i++) {
-        _imageGroupKeys[i] = GlobalKey(debugLabel: 'image_group_$i');
-      }
+      // 多图分组：为每张图片建锚点 GlobalKey(v2.8:只补缺失的,不重建旧的)
+      _ensureImageKeys();
 
       if (widget.analysisMode == AppConstants.analysisModeFullText) {
         // 全文翻译结果：Map{original, translation}
@@ -1617,11 +1642,46 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
 
   /// 追加图片继续识别:不退出当前对话,新图识别结果接在旧结果后,
   /// 按来源图分 p1/p2/pn 组,页码条可点击跳转
+  ///
+  /// v2.8(用户第 1 条"追加图片会卡死闪退")—— 修三处:
+  /// 1. **必须限尺寸**:旧实现 `pickMultiImage(imageQuality: 85)` 没有 maxWidth,
+  ///    拿到的是 12MP 原图(单张 RGBA 解码 ≈48MB)。接着 `_imageToDataUri` 要把整图
+  ///    base64 进内存、`VisionImagePrep` 再解码切块 → 3~4 张就 OOM,
+  ///    表现就是"卡死一下然后闪退"。首页相册那条路一直是 1024px,所以只有追加会炸。
+  /// 2. **限数量**:总张数与单次追加都设上限,避免请求体无限膨胀(服务端也会拒)。
+  /// 3. **兜底**:识别启动失败不再让异常冒到 zone(那会直接崩),而是转成可重试的错误态。
   Future<void> _addMoreImages() async {
     if (_phase != _StreamPhase.results) return;
-    final picked = await ImagePicker().pickMultiImage(imageQuality: 85);
+    if (_images.length >= _maxImages) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('最多 $_maxImages 张图片 —— 可以先保存结果再开新一轮'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+    final room = _maxImages - _images.length;
+    final limit = room < _maxPerAppend ? room : _maxPerAppend;
+    List<XFile> picked;
+    try {
+      // maxWidth 2600 与识图管线的最长边一致(再大也会被 VisionImagePrep 压回去,
+      // 白白吃内存);imageQuality 92 保住淡色划线的可辨识度
+      picked = await ImagePicker().pickMultiImage(
+        imageQuality: 92,
+        maxWidth: 2600,
+        limit: limit,
+      );
+    } catch (e) {
+      debugPrint('ReadFlow 追加图片选择失败: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('选择图片失败:$e'), behavior: SnackBarBehavior.floating),
+      );
+      return;
+    }
     if (picked.isEmpty || !mounted) return;
-    final newFiles = picked.map((x) => File(x.path)).toList();
+    final newFiles = picked.take(limit).map((x) => File(x.path)).toList();
     setState(() {
       _streamStartIndex = _images.length; // 从新图开始识别
       _images.addAll(newFiles);
@@ -1631,8 +1691,26 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
       _thinkingStartAt = null;
       _thinkingSeconds = 0;
       _thinkingExpanded = false;
+      // 新图在结果区占位:先建好锚点,结果回来时不用重建旧 key
+      _ensureImageKeys();
     });
-    _startStreaming();
+    try {
+      _startStreaming();
+    } catch (e, st) {
+      // 追加失败不能把整个会话带走:回到结果态 + 明确提示(旧结果仍然在)
+      debugPrint('ReadFlow 追加图片识别启动失败: $e\n$st');
+      if (!mounted) return;
+      setState(() {
+        _phase = _StreamPhase.results;
+        _streamStartIndex = 0;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('追加识别启动失败:$e'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   /// 重新识别(v1.8.0 合并版):对识别结果不满意时**重新认真识别一遍**——

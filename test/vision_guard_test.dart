@@ -29,7 +29,6 @@ void main() {
       expect(VisionGuard.classify('nature-versus-nurture'), 'word');
       expect(VisionGuard.classify('"vault"'), 'word');
     });
-
     test('2-3 个词且无句末标点 → 短语', () {
       expect(VisionGuard.classify('began to blur'), 'phrase');
       expect(VisionGuard.classify('cerebral power'), 'phrase');
@@ -216,6 +215,96 @@ void main() {
       expect(r.typeFixed, 0);
       expect(r.sentenceMissing, 0);
       expect(r.note, isNull);
+    });
+  });
+
+  group('中英批注合并(v2.8 用户第 2 条:涉及中文词汇板块就乱)', () {
+    Map<String, dynamic> cjk(
+      String word,
+      String translation, {
+      String sentence = '',
+      String line = '',
+    }) =>
+        {
+          'word': word,
+          'word_type': 'word',
+          'translation': translation,
+          'original_sentence': sentence,
+          if (line.isNotEmpty) 'line': line,
+        };
+
+    test('中文批注 + 对应英文条目 → 并成一条,不再出现两张卡', () {
+      final r = VisionGuard.apply([
+        item('hierarchy',
+            sentence: 'strict hierarchy in which elders are respected.',
+            line: 'strict hierarchy in which elders are respected'),
+        cjk('等级制度', 'hierarchy',
+            sentence: 'strict hierarchy in which elders are respected.'),
+      ]);
+      expect(r.kept.length, 1);
+      expect(r.kept.single['word'], 'hierarchy');
+      expect(r.kept.single['annotation'], '等级制度');
+      expect(r.annotationMerged, 1);
+      expect(r.note, contains('中文批注并入 1 条'));
+    });
+
+    test('找不到对应英文条目 → 保留,但**英文当头**(结构与其它卡一致)', () {
+      final r = VisionGuard.apply([
+        cjk('苏格拉底', 'Socrates', sentence: 'Socrates asked questions.'),
+      ]);
+      expect(r.kept.length, 1);
+      expect(r.kept.single['word'], 'Socrates');
+      expect(r.kept.single['translation'], '苏格拉底');
+      expect(r.kept.single['annotation'], '苏格拉底');
+      expect(r.kept.single['annotation_only'], true);
+      expect(r.annotationKept, 1);
+    });
+
+    test('纯中文条目(没有英文对照)→ 原样保留并标成批注', () {
+      final r = VisionGuard.apply([
+        cjk('这里划重点', ''),
+      ]);
+      expect(r.kept.length, 1);
+      expect(r.kept.single['word'], '这里划重点');
+      expect(r.kept.single['annotation_only'], true);
+      expect(r.kept.single['annotation'], '这里划重点');
+    });
+
+    test('中文批注合并后不改变英文条目自己的释义与例句', () {
+      final r = VisionGuard.apply([
+        {
+          ...item('hierarchy',
+              sentence: 'strict hierarchy in which elders are respected.',
+              line: 'strict hierarchy in which elders are respected'),
+          'translation': '等级制度; 层级',
+        },
+        cjk('等级制度', 'hierarchy'),
+      ]);
+      expect(r.kept.single['translation'], '等级制度; 层级');
+      expect(r.kept.single['original_sentence'],
+          'strict hierarchy in which elders are respected.');
+    });
+
+    test('两条中文批注指向同一个英文词 → 合并显示,不丢内容', () {
+      final r = VisionGuard.apply([
+        item('hierarchy',
+            sentence: 'strict hierarchy here.', line: 'strict hierarchy here'),
+        cjk('等级制度', 'hierarchy'),
+        cjk('层级', 'hierarchy'),
+      ]);
+      expect(r.kept.length, 1);
+      expect(r.kept.single['annotation'], '等级制度 / 层级');
+      expect(r.annotationMerged, 2);
+    });
+
+    test('没有中文批注时,mergeAnnotations 是恒等变换(不影响英文条目)', () {
+      final out = VisionGuard.mergeAnnotations([
+        {'word': 'blur'},
+        {'word': 'vault'},
+      ]);
+      expect(out.items.length, 2);
+      expect(out.merged, 0);
+      expect(out.keptAsAnnotation, 0);
     });
   });
 }

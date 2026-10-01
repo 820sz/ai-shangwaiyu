@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:provider/provider.dart';
 import '../../../config/constants.dart';
+import '../../../config/design_tokens.dart';
 import '../../../config/theme.dart';
 import '../../../models/bookmark.dart';
 import '../../../providers/bookmark_provider.dart';
@@ -129,65 +130,7 @@ class _AiFollowUpBubbleState extends State<AiFollowUpBubble> {
                         // 让 Markdown 文本参与外层 SelectionArea 的选择
                         // (此前设成 false,选中范围拿不到内容 → 只能"复制整条")
                         selectable: true,
-                        styleSheet: MarkdownStyleSheet.fromTheme(
-                          theme,
-                        ).copyWith(
-                          p: theme.textTheme.bodyMedium?.copyWith(
-                            fontSize: 13,
-                            height: 1.5,
-                            color: theme.colorScheme.onSurface,
-                          ),
-                          h1: theme.textTheme.titleMedium?.copyWith(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                          ),
-                          h2: theme.textTheme.titleMedium?.copyWith(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700,
-                          ),
-                          h3: theme.textTheme.titleSmall?.copyWith(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                          ),
-                          strong: theme.textTheme.bodyMedium?.copyWith(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
-                            color: theme.colorScheme.onSurface,
-                          ),
-                          tableBorder: TableBorder.all(
-                            color: theme.colorScheme.outlineVariant,
-                            width: 0.5,
-                          ),
-                          tableHead: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            color: theme.colorScheme.primary,
-                          ),
-                          tableBody: TextStyle(fontSize: 12, height: 1.4),
-                          tableCellsPadding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 4,
-                          ),
-                          blockquote: TextStyle(
-                            fontSize: 12,
-                            color: theme.colorScheme.onSurfaceVariant,
-                            fontStyle: FontStyle.italic,
-                          ),
-                          code: TextStyle(
-                            fontSize: 12,
-                            // 深色下 deepOrange[700] 偏暗,浅色下也用主题的 error 系更统一
-                            color: theme.colorScheme.tertiary,
-                            fontFamily: 'monospace',
-                          ),
-                          horizontalRuleDecoration: BoxDecoration(
-                            border: Border(
-                              top: BorderSide(
-                                color: theme.colorScheme.outlineVariant,
-                                width: 1,
-                              ),
-                            ),
-                          ),
-                        ),
+                        styleSheet: calmMarkdownSheet(theme),
                       ),
                     )
                   else if (msg.streaming)
@@ -358,4 +301,78 @@ class ThinkingBlock extends StatelessWidget {
       ),
     );
   }
+}
+
+/// **克制的 Markdown 样式**(v2.8,用户第 8 条:"回复里各种多余的配色导致很花")。
+///
+/// 问题:`MarkdownStyleSheet.fromTheme` 会把标题/行内代码/表格头/引用各染一种颜色,
+/// 一段正常的 AI 回复里于是同时出现主色蓝、tertiary 紫、成功绿、警示橙 ——
+/// 用户的原话是"很花"。
+///
+/// 规则(只保留两条):**正文一律 onSurface**,**链接用 primary**;
+/// 其余全部靠**字重与斜体**区分层级,不用颜色。代码块只给中性底色。
+MarkdownStyleSheet calmMarkdownSheet(ThemeData theme) {
+  final cs = theme.colorScheme;
+  final body = theme.textTheme.bodyMedium?.copyWith(
+    fontSize: 13,
+    height: 1.55,
+    color: cs.onSurface,
+  );
+  TextStyle head(double size) => TextStyle(
+        fontSize: size,
+        height: 1.4,
+        fontWeight: FontWeight.w700,
+        color: cs.onSurface,
+      );
+  return MarkdownStyleSheet.fromTheme(theme).copyWith(
+    p: body,
+    a: body?.copyWith(
+      color: cs.primary,
+      decoration: TextDecoration.underline,
+      decorationColor: cs.primary.withAlpha(90),
+    ),
+    em: body?.copyWith(fontStyle: FontStyle.italic),
+    strong: body?.copyWith(fontWeight: FontWeight.w700),
+    del: body?.copyWith(decoration: TextDecoration.lineThrough),
+    h1: head(16),
+    h2: head(15),
+    h3: head(14),
+    h4: head(13.5),
+    h5: head(13),
+    h6: head(13),
+    // 行内代码:中性底色 + 等宽,不用彩色(以前是 tertiary,一片紫)
+    code: TextStyle(
+      fontSize: 12,
+      fontFamily: 'monospace',
+      color: cs.onSurface,
+      backgroundColor: cs.surfaceContainerHighest,
+    ),
+    codeblockDecoration: BoxDecoration(
+      color: cs.surfaceContainerHighest,
+      borderRadius: Radii.controlRadius,
+    ),
+    codeblockPadding: const EdgeInsets.all(Gap.sm),
+    blockquote: body?.copyWith(
+      color: cs.onSurfaceVariant,
+      fontStyle: FontStyle.italic,
+    ),
+    blockquoteDecoration: BoxDecoration(
+      color: cs.surfaceContainerHighest.withAlpha(120),
+      borderRadius: Radii.controlRadius,
+    ),
+    blockquotePadding: const EdgeInsets.all(Gap.sm),
+    listBullet: body,
+    listBulletPadding: const EdgeInsets.only(right: Gap.xxs),
+    tableHead: TextStyle(
+      fontSize: 12,
+      fontWeight: FontWeight.w700,
+      color: cs.onSurface,
+    ),
+    tableBody: TextStyle(fontSize: 12, height: 1.4, color: cs.onSurface),
+    tableBorder: TableBorder.all(color: cs.outlineVariant, width: 0.5),
+    tableCellsPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+    horizontalRuleDecoration: BoxDecoration(
+      border: Border(top: BorderSide(color: cs.outlineVariant, width: 1)),
+    ),
+  );
 }

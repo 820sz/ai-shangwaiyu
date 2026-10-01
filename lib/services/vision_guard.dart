@@ -49,6 +49,12 @@ class VisionGuardResult {
   /// 例句彻底缺失的条数(界面上标出来,不再静默)
   final int sentenceMissing;
 
+  /// 中文批注被**并入**英文条目的条数(v2.8,用户第 2 条)
+  final int annotationMerged;
+
+  /// 中文批注保留为独立条目的条数(界面按「批注」渲染)
+  final int annotationKept;
+
   const VisionGuardResult({
     required this.kept,
     required this.dropped,
@@ -59,6 +65,8 @@ class VisionGuardResult {
     this.containedIn = 0,
     this.sentenceFilled = 0,
     this.sentenceMissing = 0,
+    this.annotationMerged = 0,
+    this.annotationKept = 0,
   });
 
   int get keptCount => kept.length;
@@ -70,6 +78,7 @@ class VisionGuardResult {
     final parts = <String>[];
     if (dropped.isNotEmpty) parts.add('忽略 ${dropped.length} 条');
     if (mergedOccurrences > 0) parts.add('合并重复出现 $mergedOccurrences 处');
+    if (annotationMerged > 0) parts.add('中文批注并入 $annotationMerged 条');
     if (typeFixed > 0) parts.add('纠正类型 $typeFixed 条');
     if (truncationFixed > 0) parts.add('补全截断 $truncationFixed 条');
     if (sentenceFilled > 0) parts.add('补上例句 $sentenceFilled 条');
@@ -262,8 +271,9 @@ class VisionGuard {
       if (kept.length >= maxItems) break;
     }
 
+    final merged = mergeAnnotations(kept);
     return VisionGuardResult(
-      kept: kept,
+      kept: merged.items,
       dropped: dropped,
       typeFixed: typeFixed,
       truncationFixed: truncationFixed,
@@ -272,7 +282,80 @@ class VisionGuard {
       containedIn: containedIn,
       sentenceFilled: sentenceFilledCount,
       sentenceMissing: sentenceMissingCount,
+      annotationMerged: merged.merged,
+      annotationKept: merged.keptAsAnnotation,
     );
+  }
+
+  /// **中英批注合并**(v2.8,用户第 2 条:"一旦上传的材料涉及中文,词汇板块就又乱了")。
+  ///
+  /// 背景:模型对页边中文批注是**单独给一条**(word=中文批注原文,translation=对应英文),
+  /// 而那个英文往往**同时也是被标记的正文词条** —— 结果里同一份内容出现两张卡:
+  /// 一张中文当头、一张英文当头,用户看到的就是"又乱又重复"。
+  ///
+  /// 规则(纯函数,可单测):
+  /// 1. 中文条目(含 CJK)的 `translation` 是一个**英文词/短语**,且结果里已经有同词面的
+  ///    英文条目 → 把中文原文挂到英文条目的 `annotation` 上,中文条目不再单独成卡;
+  /// 2. 找不到对应英文条目,但 `translation` 是英文 → 保留这一条,**把 word/translation
+  ///    对调**:英文当头、中文当释义,annotation 记中文原文 ——
+  ///    这样卡片结构与其它条目完全一致(英文 → 音标 → 词性 → 释义),不再"有的先中文"。
+  /// 3. 连 translation 都不是英文(纯中文条目)→ 原样保留,只标 `annotation_only`,
+  ///    界面按「批注」渲染(至少不会假装它是个英文词)。
+  static AnnotationMergeResult mergeAnnotations(List<Map<String, dynamic>> kept) {
+    final out = <Map<String, dynamic>>[];
+    final consumed = <int>{};
+    var merged = 0;
+    var keptAsAnnotation = 0;
+
+    String wordOf(Map<String, dynamic> m) =>
+        (m['word'] ?? m['text'] ?? '').toString().trim();
+
+    for (var i = 0; i < kept.length; i++) {
+      if (consumed.contains(i)) continue;
+      final item = kept[i];
+      final text = wordOf(item);
+      if (!hasCjk(text)) {
+        out.add(item);
+        continue;
+      }
+      // 中文批注:它的 translation 是"对应的英文"
+      final en = (item['translation'] ?? '').toString().trim();
+      final enIsEnglish = en.isNotEmpty && isMostlyEnglish(en) && !hasCjk(en);
+      if (enIsEnglish) {
+        final key = normalize(en);
+        final target = out.indexWhere(
+          (k) => normalize(wordOf(k)) == key || normalize(wordOf(k)).startsWith('$key '),
+        );
+        if (target >= 0) {
+          // ① 挂到已有英文条目上(不新增卡片)
+          final prev = out[target];
+          final existing = (prev['annotation'] ?? '').toString().trim();
+          out[target] = {
+            ...prev,
+            'annotation': existing.isEmpty ? text : '$existing / $text',
+          };
+          consumed.add(i);
+          merged++;
+          continue;
+        }
+        // ② 没有对应英文条目:对调,英文当头
+        keptAsAnnotation++;
+        out.add({
+          ...item,
+          'word': en,
+          'translation': text,
+          'annotation': text,
+          'annotation_only': true,
+        });
+        consumed.add(i);
+        continue;
+      }
+      // ③ 纯中文(没有英文对照):保留但标出来,界面按批注渲染
+      keptAsAnnotation++;
+      out.add({...item, 'annotation': text, 'annotation_only': true});
+      consumed.add(i);
+    }
+    return AnnotationMergeResult(out, merged, keptAsAnnotation);
   }
 
   /// 本地判定 word / phrase / sentence(确定性规则,可单测)
@@ -350,4 +433,13 @@ class VisionGuard {
     final flat = s.replaceAll(RegExp(r'\s+'), ' ').trim();
     return flat.length <= max ? flat : '${flat.substring(0, max)}…';
   }
+}
+
+/// 中英批注合并的结果(v2.8;公开类型,便于单测直接断言)
+class AnnotationMergeResult {
+  final List<Map<String, dynamic>> items;
+  final int merged;
+  final int keptAsAnnotation;
+
+  const AnnotationMergeResult(this.items, this.merged, this.keptAsAnnotation);
 }

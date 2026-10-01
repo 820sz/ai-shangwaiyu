@@ -375,13 +375,26 @@ class DatabaseService {
   ''';
 
   /// 导师会话(长期记忆的另一半:短期对话)
+  ///
+  /// v2.8(用户第 5(2) 条"无法清除聊天或者新建、多开对话、编辑对话标题"):
+  /// 加 `conversation_id` —— 以前所有消息平铺在**一条**会话里,想"多开"根本没有概念。
   static const String _tutorMessagesTableSql = '''
     CREATE TABLE IF NOT EXISTS tutor_messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       role TEXT NOT NULL,
       content TEXT NOT NULL,
       tool_calls TEXT,
+      conversation_id INTEGER,
       created_at TEXT
+    )
+  ''';
+  static const String _tutorConversationsTableSql = '''
+    CREATE TABLE IF NOT EXISTS tutor_conversations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      kind TEXT,
+      created_at TEXT,
+      updated_at TEXT
     )
   ''';
 
@@ -415,6 +428,7 @@ class DatabaseService {
     await db.execute(_tutorTasksTableSql);
     await db.execute(_tutorMessagesTableSql);
     await db.execute(_tutorMemoryTableSql);
+    await db.execute(_tutorConversationsTableSql);
     await _createIndexes(db);
   }
 
@@ -475,6 +489,8 @@ class DatabaseService {
       await _ensureTable(db, 'tutor_tasks', _tutorTasksTableSql);
       await _ensureTable(db, 'tutor_messages', _tutorMessagesTableSql);
       await _ensureTable(db, 'tutor_memory', _tutorMemoryTableSql);
+      await _ensureTable(db, 'tutor_conversations', _tutorConversationsTableSql);
+      await _ensureColumn(db, 'tutor_messages', 'conversation_id', 'INTEGER');
       // v2.0 决策:音标英式美式都给(词条同时显示两套)
       await _ensureColumn(db, 'vocabulary', 'phonetic_uk', 'TEXT');
       await _ensureColumn(db, 'vocabulary', 'phonetic_us', 'TEXT');
@@ -491,6 +507,18 @@ class DatabaseService {
       // v2.5(M2):AI 推荐内容要能看到"用哪个模型生成的、思考过程是什么"
       await _ensureColumn(db, 'recommendations', 'model', 'TEXT');
       await _ensureColumn(db, 'recommendations', 'reasoning', 'TEXT');
+    }
+    if (oldV < 14) {
+      // v2.8(用户第 2 条):页边中文批注并到英文词条上,需要一列来存它。
+      // 纯加列、不动既有数据 —— 老词条 annotation 为空,显示与以前一致。
+      await _ensureColumn(db, 'vocabulary', 'annotation', 'TEXT');
+    }
+    if (oldV < 15) {
+      // v2.8(用户第 5(2) 条):助理对话要能**新建/多开/改名/删除** ——
+      // 加一张会话表 + 消息上的 conversation_id。
+      // 老消息没有会话归属:留给界面按"默认对话"处理(不迁移,避免猜错)。
+      await _ensureTable(db, 'tutor_conversations', _tutorConversationsTableSql);
+      await _ensureColumn(db, 'tutor_messages', 'conversation_id', 'INTEGER');
     }
   }
 
@@ -509,6 +537,8 @@ class DatabaseService {
       await _ensureColumn(db, 'vocabulary', 'phonetic_us', 'TEXT', repaired);
       // v2.4:出现记录列(半迁移/老库自愈)
       await _ensureColumn(db, 'vocabulary', 'occurrences_json', 'TEXT', repaired);
+      // v2.8:页边中文批注列(同上)
+      await _ensureColumn(db, 'vocabulary', 'annotation', 'TEXT', repaired);
       await _ensureColumn(db, 'exercises', 'reference_answers', 'TEXT', repaired);
       await _ensureColumn(db, 'articles', 'translation', 'TEXT', repaired);
       await _ensureTable(db, 'daily_log', _dailyLogTableSql, repaired);
@@ -526,6 +556,8 @@ class DatabaseService {
       await _ensureTable(db, 'tutor_tasks', _tutorTasksTableSql, repaired);
       await _ensureTable(db, 'tutor_messages', _tutorMessagesTableSql, repaired);
       await _ensureTable(db, 'tutor_memory', _tutorMemoryTableSql, repaired);
+      await _ensureTable(db, 'tutor_conversations', _tutorConversationsTableSql, repaired);
+      await _ensureColumn(db, 'tutor_messages', 'conversation_id', 'INTEGER', repaired);
       await _createIndexes(db);
       // v2.0 不变式:每个生词都有一条复习状态(word_review)。
       // 放在自检里而不是只放迁移里:这样"迁移后新增的词"也有状态,
@@ -2384,20 +2416,35 @@ class DatabaseService {
   }
 
   /// 追加一条导师对话。[at] 用于补齐历史(导入/测试),不传就是"现在"。
+  ///
+  /// [conversationId] 为 null 时归入"默认对话"(老数据与未指定时的兜底)。
   static Future<int> insertTutorMessage({
     required String role,
     required String content,
     String? toolCalls,
+    int? conversationId,
     DateTime? at,
   }) async {
     try {
       final db = await database;
-      return await db.insert('tutor_messages', {
+      final now = (at ?? DateTime.now()).toIso8601String();
+      final id = await db.insert('tutor_messages', {
         'role': role,
         'content': content,
         'tool_calls': toolCalls,
-        'created_at': (at ?? DateTime.now()).toIso8601String(),
+        'conversation_id': conversationId,
+        'created_at': now,
       });
+      // 会话列表要按"最近聊过"排序,所以每条消息都推一下 updated_at
+      if (conversationId != null) {
+        await db.update(
+          'tutor_conversations',
+          {'updated_at': now},
+          where: 'id = ?',
+          whereArgs: [conversationId],
+        );
+      }
+      return id;
     } catch (e) {
       debugPrint('ReadFlow insertTutorMessage failed: $e');
       return -1;
@@ -2407,13 +2454,18 @@ class DatabaseService {
   /// 最近 [limit] 条导师对话,按**时间正序**返回(老的在前,新的在后)。
   /// 为什么要"查 DESC 再反转":limit 必须作用在最新的 N 条上,直接 ASC + LIMIT
   /// 会取到最早的 N 条(聊得越久上下文越跑偏);反转是为了喂模型时顺序正确。
+  ///
+  /// [conversationId] 传具体 id 只取该会话;传 null 取**全部**(兼容老调用方)。
   static Future<List<Map<String, Object?>>> getTutorMessages({
     int limit = 50,
+    int? conversationId,
   }) async {
     try {
       final db = await database;
       final rows = await db.query(
         'tutor_messages',
+        where: conversationId == null ? null : 'conversation_id = ?',
+        whereArgs: conversationId == null ? null : [conversationId],
         orderBy: 'created_at DESC, id DESC',
         limit: limit,
       );
@@ -2425,13 +2477,101 @@ class DatabaseService {
   }
 
   /// 清空短期对话(长期记忆 tutor_memory 不受影响:那是导师的"人格档案")
-  static Future<void> clearTutorMessages() async {
+  ///
+  /// [conversationId] 非空只清那一个会话(用户第 5(2) 条"清除聊天")。
+  static Future<void> clearTutorMessages({int? conversationId}) async {
     try {
       final db = await database;
-      await db.delete('tutor_messages');
+      await db.delete(
+        'tutor_messages',
+        where: conversationId == null ? null : 'conversation_id = ?',
+        whereArgs: conversationId == null ? null : [conversationId],
+      );
     } catch (e) {
       debugPrint('ReadFlow clearTutorMessages failed: $e');
     }
+  }
+
+  // ── 助理会话(v2.8,用户第 5(2) 条:新建 / 多开 / 改名 / 删除)──
+
+  /// 新建一个会话,返回 id。标题默认「新对话」,首条提问后由界面改名。
+  static Future<int> createTutorConversation({
+    String title = '新对话',
+    String? kind,
+  }) async {
+    try {
+      final db = await database;
+      final now = DateTime.now().toIso8601String();
+      return await db.insert('tutor_conversations', {
+        'title': title,
+        'kind': kind,
+        'created_at': now,
+        'updated_at': now,
+      });
+    } catch (e) {
+      debugPrint('ReadFlow createTutorConversation failed: $e');
+      return -1;
+    }
+  }
+
+  /// 会话列表(最近聊过的在前)
+  static Future<List<Map<String, Object?>>> getTutorConversations({
+    int limit = 50,
+  }) async {
+    try {
+      final db = await database;
+      return await db.query(
+        'tutor_conversations',
+        orderBy: 'updated_at DESC, id DESC',
+        limit: limit,
+      );
+    } catch (e) {
+      debugPrint('ReadFlow getTutorConversations failed: $e');
+      return [];
+    }
+  }
+
+  static Future<int> renameTutorConversation(int id, String title) async {
+    final t = title.trim();
+    if (t.isEmpty) return 0;
+    try {
+      final db = await database;
+      return await db.update(
+        'tutor_conversations',
+        {'title': t, 'updated_at': DateTime.now().toIso8601String()},
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    } catch (e) {
+      debugPrint('ReadFlow renameTutorConversation failed: $e');
+      return 0;
+    }
+  }
+
+  /// 删除会话**连同它的消息**(不删 tutor_memory)
+  static Future<void> deleteTutorConversation(int id) async {
+    try {
+      final db = await database;
+      await db.transaction((txn) async {
+        await txn.delete('tutor_messages',
+            where: 'conversation_id = ?', whereArgs: [id]);
+        await txn.delete('tutor_conversations',
+            where: 'id = ?', whereArgs: [id]);
+      });
+    } catch (e) {
+      debugPrint('ReadFlow deleteTutorConversation failed: $e');
+    }
+  }
+
+  /// 为会话自动取个标题(用首条提问的前 16 个字)
+  static Future<void> autoTitleTutorConversation(
+    int id,
+    String firstQuestion,
+  ) async {
+    final q = firstQuestion.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (q.isEmpty) return;
+    final title = q.length <= 16 ? q : '${q.substring(0, 16)}…';
+    await renameTutorConversation(id, title);
   }
 
   /// 记一条导师长期记忆(kind: preference/commitment/obstacle/insight)。

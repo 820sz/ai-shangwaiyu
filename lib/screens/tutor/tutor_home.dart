@@ -19,6 +19,7 @@ import '../input/learner_preferences_screen.dart';
 import '../review/review_screen.dart';
 import 'placement_test_screen.dart';
 import 'tutor_chat_screen.dart';
+import 'tutor_interview_screen.dart';
 
 /// 导师页(v2.0,v1 版本)。
 ///
@@ -228,77 +229,197 @@ class _TutorHomeScreenState extends State<TutorHomeScreen> {
       body: ListView(
         padding: Insets.page,
         children: [
-          // ── 一屏一个主行动(v2.5,U1)──────────────────────────────
-          // 学的本质(训记):"一进来就能马上开始,无需多余的过程"。
-          // 所以这里把"今天第一件事"做成一张大卡 + 一个大按钮,
-          // 其余任务收进折叠区 —— 而不是像以前那样把 4 张任务卡平铺在首屏。
-          AppStagger(index: 0, child: _buildPrimaryAction(theme, muted, snap)),
+          // ── ① AI 助理沟通(先用)──────────────────────────────
+          // 用户第 5(3) 条:助理必须先**问清楚**水平/偏好/目标,再谈建议。
+          // 所以这一页第一条是"先聊两句"(给选项的访谈,一分钟答完),
+          // 它的答案会写进学习者模型与长期记忆,②③ 直接吃这份数据。
+          AppStagger(index: 0, child: _buildInterviewCard(theme, muted, snap)),
+          // 不想走访谈?给一条"只补一项"的快路(目标 / 时间 / 题材点一下就存)
+          if (snap.model.missingFields.isNotEmpty) _buildProfileForm(theme),
           const SizedBox(height: Gap.md),
 
-          if (snap.model.missingFields.isNotEmpty) _buildProfileForm(theme),
-
-          if (_taskRows.length > 1)
-            Theme(
-              data: theme.copyWith(dividerColor: Colors.transparent),
-              child: ExpansionTile(
-                tilePadding: EdgeInsets.zero,
-                childrenPadding: EdgeInsets.zero,
-                title: Text('今天还有 ${_taskRows.length - 1} 件事',
-                    style: theme.textTheme.titleSmall
-                        ?.copyWith(fontWeight: FontWeight.w700)),
-                children: [
-                  for (final row in _taskRows.skip(1))
-                    _buildTaskCard(theme, row),
-                ],
-              ),
-            ),
-
-          // ── 诊断:默认折叠(v2.5,U1)────────────────────────────
-          // 诊断是"回头看"的内容,不该和"今天做什么"抢首屏。
-          Theme(
-            data: theme.copyWith(dividerColor: Colors.transparent),
-            child: ExpansionTile(
-              tilePadding: EdgeInsets.zero,
-              childrenPadding: EdgeInsets.zero,
-              title: Text('诊断(${findings.length} 条)',
-                  style: theme.textTheme.titleSmall
-                      ?.copyWith(fontWeight: FontWeight.w700)),
-              subtitle: Text(
-                findings.isEmpty ? '目前没有发现问题' : findings.first.title,
-                style: TextStyle(fontSize: 12, color: muted),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              children: [for (final f in findings) _buildFindingCard(theme, f)],
+          // ── ② 学习现状分析以及规划 ─────────────────────────────
+          AppStagger(
+            index: 1,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const AppSectionTitle(
+                  title: '学习现状分析',
+                  subtitle: '基于你软件里的真实数据(不编造)',
+                ),
+                if (findings.isEmpty)
+                  const AppEmpty(
+                    icon: Icons.check_circle_outline,
+                    title: '目前没有发现明显问题',
+                    hint: '继续按计划走就好;想知道下一步,点下面「让 AI 排规划」',
+                  )
+                else
+                  for (final f in findings) _buildFindingCard(theme, f),
+                const SizedBox(height: Gap.xs),
+                Row(
+                  children: [
+                    Expanded(
+                      child: FilledButton.tonalIcon(
+                        onPressed: () => _openChat(
+                          snap,
+                          question: '根据我的现状,帮我排一份这两周的学习规划:'
+                              '每天多少分钟、先练什么、用什么材料。',
+                        ),
+                        icon: const Icon(Icons.auto_awesome, size: 16),
+                        label: const Text('让 AI 排规划'),
+                      ),
+                    ),
+                    const SizedBox(width: Gap.xs),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => _openChat(
+                          snap,
+                          question: '我这块最薄弱?给我一个最小可行的改进动作。',
+                        ),
+                        icon: const Icon(Icons.insights, size: 16),
+                        label: const Text('看我最薄弱的'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: Gap.xs),
+          const SizedBox(height: Gap.sm),
 
-          // ── 和助理聊聊(独立窗口) ──
-          AppActionTile(
-            icon: Icons.chat_bubble_outline,
-            title: _lastChatLine.isEmpty ? '和助理聊聊' : '继续上次的对话',
-            subtitle: _lastChatLine.isEmpty
-                ? '助理知道你现在的全部学习数据'
-                : (_lastChatLine.length > 44
-                    ? '${_lastChatLine.substring(0, 44)}…'
-                    : _lastChatLine),
-            highlight: true,
-            onTap: () async {
-              await Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => TutorChatScreen(snapshot: snap),
+          // ── ③ 学习任务(②的结论落成今天能做的事)────────────────
+          AppStagger(
+            index: 2,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const AppSectionTitle(
+                  title: '学习任务',
+                  subtitle: '今天做完就算完成,不用想顺序',
                 ),
-              );
-              // 回来自刷新:对话里可能问了画像问题、或用户改了设置
-              if (!mounted) return;
-              _refresh();
-            },
+                _buildPrimaryAction(theme, muted, snap),
+                if (_taskRows.length > 1)
+                  Theme(
+                    data: theme.copyWith(dividerColor: Colors.transparent),
+                    child: ExpansionTile(
+                      tilePadding: EdgeInsets.zero,
+                      childrenPadding: EdgeInsets.zero,
+                      title: Text('今天还有 ${_taskRows.length - 1} 件事',
+                          style: theme.textTheme.titleSmall
+                              ?.copyWith(fontWeight: FontWeight.w700)),
+                      children: [
+                        for (final row in _taskRows.skip(1))
+                          _buildTaskCard(theme, row),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: Gap.sm),
+
+          // ── ④ 与 AI 聊聊(自由对话;它同样影响 ②③)────────────
+          AppStagger(
+            index: 3,
+            child: AppActionTile(
+              icon: Icons.chat_bubble_outline,
+              title: _lastChatLine.isEmpty ? '与 AI 聊聊' : '继续上次的对话',
+              subtitle: _lastChatLine.isEmpty
+                  ? '聊你的想法、卡点、计划 —— 它会记进长期记忆,影响上面的分析与任务'
+                  : (_lastChatLine.length > 44
+                      ? '${_lastChatLine.substring(0, 44)}…'
+                      : _lastChatLine),
+              highlight: true,
+              onTap: () => _openChat(snap),
+            ),
           ),
         ],
       ),
     );
+  }
+
+  /// ① 助理访谈入口(v2.8,用户第 5(3) 条)
+  Widget _buildInterviewCard(
+    ThemeData theme,
+    Color muted,
+    LearnerSnapshot snap,
+  ) {
+    final model = snap.model;
+    final done = (model.extras['interview_at'] as String?) != null;
+    final items = <String>[
+      if ((model.goal?.value ?? '').isNotEmpty) '目标 ${model.goal!.value}',
+      if ((model.dailyMinutes?.value ?? 0) > 0) '每天 ${model.dailyMinutes!.value} 分钟',
+      if ((model.interests?.value ?? const []).isNotEmpty)
+        '题材 ${model.interests!.value.join('、')}',
+      if (model.blockedTopics.isNotEmpty) '避开 ${model.blockedTopics.join('、')}',
+    ];
+    return AppCard(
+      color: done ? null : theme.colorScheme.primary.withAlpha(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.record_voice_over_outlined,
+                  size: 18, color: theme.colorScheme.primary),
+              const SizedBox(width: Gap.xs),
+              Expanded(
+                child: Text(
+                  done ? '你的情况(助理已了解)' : '先聊两句,助理才知道你要什么',
+                  style: theme.textTheme.titleSmall
+                      ?.copyWith(fontWeight: FontWeight.w700),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: Gap.xxs),
+          Text(
+            done
+                ? (items.isEmpty ? '还没填 — 再聊一次补上' : items.join(' · '))
+                : '6 个问题,点选项就行(一分钟)。答完它就知道你的目标、时间与偏好 —— '
+                    '下面的分析与任务才会真的贴合你。',
+            style: theme.textTheme.bodySmall
+                ?.copyWith(color: muted, height: 1.45),
+          ),
+          const SizedBox(height: Gap.sm),
+          SizedBox(
+            width: double.infinity,
+            height: 44,
+            child: FilledButton.icon(
+              onPressed: () async {
+                final changed = await Navigator.push<bool>(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const TutorInterviewScreen(),
+                  ),
+                );
+                if (!mounted) return;
+                if (changed == true) _refresh();
+              },
+              icon: Icon(done ? Icons.tune : Icons.play_arrow, size: 18),
+              label: Text(done ? '重新聊一次 / 补全信息' : '开始(1 分钟)'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 打开对话窗口(可带开场问题 —— 从②点进来时用)
+  Future<void> _openChat(LearnerSnapshot snap, {String? question}) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => TutorChatScreen(
+          snapshot: snap,
+          initialQuestion: question,
+        ),
+      ),
+    );
+    // 回来自刷新:对话里可能补了画像、或用户改了设置(①④ 会影响②③)
+    if (!mounted) return;
+    _refresh();
   }
 
   /// 主行动卡(v2.5,U1):今天最该做的那件事 + 一个大按钮。
@@ -366,40 +487,55 @@ class _TutorHomeScreenState extends State<TutorHomeScreen> {
             ),
           ],
           const SizedBox(height: Gap.md),
-          Row(
-            children: [
-              if (first != null)
-                // 大按钮:这一屏的主行动(44 高度,单手可点)
-                SizedBox(
-                  height: 44,
-                  child: FilledButton.icon(
-                    onPressed: () {
-                      if (first['id'] is int) {
-                        done
-                            ? _reopenTask(first)
-                            : _completeTask(first);
-                      }
-                      if (action != null) _jump(action, jumpArg);
-                    },
-                    icon: Icon(done ? Icons.undo : Icons.play_arrow, size: 20),
-                    label: Text(done
-                        ? '已完成,点这里取消'
-                        : (action == null ? '标记完成' : '开始')),
+          // v2.8(用户第 5(1) 条):两个按钮以前是**定宽**塞进 Row(没有 Expanded),
+          // 「已完成,点这里取消」带图标 + 「取消完成」总宽超卡片 → 文字溢出卡片、
+          // 第二个按钮被裁(用户截屏就是这个)。而且 done 时两个按钮做的是同一件事。
+          // 现在:未完成 = 「开始」+「直接标记完成」各占一半;完成 = 只有一个「撤销完成」。
+          if (done)
+            SizedBox(
+              width: double.infinity,
+              height: 44,
+              child: OutlinedButton.icon(
+                onPressed: () => _reopenTask(first),
+                icon: const Icon(Icons.undo, size: 18),
+                label: const Text('撤销完成'),
+              ),
+            )
+          else
+            Row(
+              children: [
+                Expanded(
+                  child: SizedBox(
+                    height: 44,
+                    child: FilledButton.icon(
+                      onPressed: first == null
+                          ? null
+                          : () {
+                              _completeTask(first);
+                              if (action != null) _jump(action, jumpArg);
+                            },
+                      icon: Icon(
+                        action == null ? Icons.check : Icons.play_arrow,
+                        size: 20,
+                      ),
+                      label: Text(action == null ? '标记完成' : '开始'),
+                    ),
                   ),
                 ),
-              if (first != null) const SizedBox(width: Gap.xs),
-              if (first != null)
-                SizedBox(
-                  height: 44,
-                  child: OutlinedButton(
-                    onPressed: () => done
-                        ? _reopenTask(first)
-                        : _completeTask(first),
-                    child: Text(done ? '取消完成' : '直接标记完成'),
+                const SizedBox(width: Gap.xs),
+                Expanded(
+                  child: SizedBox(
+                    height: 44,
+                    child: OutlinedButton(
+                      onPressed: first == null
+                          ? null
+                          : () => _completeTask(first),
+                      child: const Text('只标记完成'),
+                    ),
                   ),
                 ),
-            ],
-          ),
+              ],
+            ),
         ],
       ),
     );

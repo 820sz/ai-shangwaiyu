@@ -14,7 +14,9 @@ import '../../services/file_pick.dart';
 import '../../services/material_import.dart';
 import '../../services/material_library.dart';
 import '../../services/material_source.dart';
+import '../../services/original_search.dart';
 import '../../widgets/app_ui.dart';
+import 'material_reader_screen.dart';
 
 /// 材料导入的通道。
 enum ImportChannel {
@@ -134,6 +136,79 @@ class MaterialImportFlow {
     final vocab = context.read<VocabProvider>().vocabularies;
     return MaterialLibrary.ingestDoc(doc, model: model, vocab: vocab);
   }
+
+  /// **打开一条检索命中**(v2.8):抓正文 → 标题中文化 → 入库 → 推进阅读器。
+  ///
+  /// 材料中心与「按你的水平找材料」分类页共用这一份 —— 以前两处各写一份
+  /// (一处按 sourceId 分支、一处只处理链接),改一处忘一处。
+  static Future<IngestedMaterial?> openHit(
+    BuildContext context, {
+    required OriginalHit hit,
+    required LearnerModel model,
+    bool pushReader = true,
+  }) async {
+    final title = hit.title.trim();
+    final url = hit.url.trim();
+    final nav = Navigator.of(context);
+    try {
+      final svc = MaterialSourceService.instance;
+      final doc = switch (hit.sourceId) {
+        'gutenberg' =>
+          await svc.fetchGutenberg(int.tryParse(hit.sourceId2) ?? 0),
+        'arxiv' => await svc.fetchArxiv(hit.sourceId2),
+        _ => url.isEmpty
+            ? await svc.fetchDocument(hit.sourceId, url: hit.url)
+            : await MaterialImport.fromAnyUrl(url, title: title),
+      };
+      final localized = await MaterialImport.localizedTitle(
+        title.isEmpty ? doc.title : title,
+      );
+      if (!context.mounted) return null;
+      final ingested = await ingest(
+        context,
+        _retitle(doc, title: localized, text: null),
+        model: model,
+      );
+      if (pushReader && context.mounted) {
+        await nav.push(
+          MaterialPageRoute(
+            builder: (_) => MaterialReaderScreen(materialId: ingested.materialId),
+          ),
+        );
+      }
+      return ingested;
+    } catch (e) {
+      if (context.mounted) {
+        _toast(context, '打不开这条原文:$e');
+      }
+      return null;
+    }
+  }
+
+  /// 打开一条命中并带加载框(用户点「开始阅读」/「软件内阅读」时用)
+  static Future<IngestedMaterial?> openHitWithProgress(
+    BuildContext context, {
+    required OriginalHit hit,
+    required LearnerModel model,
+    String label = '正在抓取并分析原文…',
+  }) async {
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => Dialog(child: AppLoading(label: label)),
+    );
+    try {
+      return await openHit(context, hit: hit, model: model);
+    } finally {
+      if (context.mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
+    }
+  }
+
+  /// 只换标题(正文与元信息原样)—— 材料中心/分类页共用
+  static MaterialDoc retitle(MaterialDoc doc, String title) =>
+      _retitle(doc, title: title);
 
   // ───────────────────────── ① 粘贴文本 ─────────────────────────
 
@@ -266,7 +341,7 @@ class MaterialImportFlow {
       if (edited == null || !context.mounted) return null;
       return await ingest(
         context,
-        _retitle(doc, edited),
+        _retitle(doc, title: edited.title, text: edited.text),
         model: model,
       );
     } catch (e) {
@@ -558,7 +633,7 @@ class MaterialImportFlow {
     );
     if (edited == null || !context.mounted) return null;
     try {
-      return await ingest(context, _retitle(doc, edited), model: model);
+      return await ingest(context, _retitle(doc, title: edited.title, text: edited.text), model: model);
     } catch (e) {
       if (context.mounted) _toast(context, '$e');
       return null;
@@ -703,32 +778,38 @@ class MaterialImportFlow {
         '不会丢,入库的是完整正文)';
   }
 
-  /// 用用户改过的标题重建文档(块与元信息原样保留,只换标题)
+  /// 用新标题/新正文重建文档(块与元信息原样保留)。
+  /// [text] 传 null 表示正文不动(只改标题的场景,如标题中文化)。
   static MaterialDoc _retitle(
-    MaterialDoc doc,
-    ({String title, String text}) edited,
-  ) {
-    final titleChanged = edited.title.trim() != doc.title.trim();
-    final textChanged = edited.text.trim() != doc.plainText.trim();
+    MaterialDoc doc, {
+    required String title,
+    String? text,
+  }) {
+    final newTitle = title.trim();
+    final newText = text?.trim();
+    final titleChanged = newTitle.isNotEmpty && newTitle != doc.title.trim();
+    final textChanged = newText != null && newText != doc.plainText.trim();
     if (!titleChanged && !textChanged) return doc;
     return MaterialDoc(
       sourceId: doc.sourceId,
       sourceId2: doc.sourceId2,
       kind: doc.kind,
-      title: edited.title.trim().isEmpty ? doc.title : edited.title.trim(),
+      title: titleChanged ? newTitle : doc.title,
       author: doc.author,
       url: doc.url,
       license: doc.license,
       language: doc.language,
       audioUrl: doc.audioUrl,
       chunks: textChanged
-          ? MaterialSourceService.chunkByWords(edited.text, wordsPerChunk: 2500)
+          ? MaterialSourceService.chunkByWords(newText, wordsPerChunk: 2500)
           : doc.chunks,
-      plainText: textChanged
-          ? edited.text
-          : doc.plainText,
+      plainText: textChanged ? newText : doc.plainText,
     );
   }
+
+  /// 只换标题的公开入口(材料中心/分类页入库前中文化标题用)
+  static MaterialDoc withTitle(MaterialDoc doc, String title) =>
+      _retitle(doc, title: title);
 
   /// 弹一个不可取消的进度框跑一段异步活儿
   static Future<T> _withProgress<T>(

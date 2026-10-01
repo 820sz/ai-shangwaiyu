@@ -90,6 +90,13 @@ Future<void> showWordActionSheet(
     context: context,
     isScrollControlled: true,
     showDragHandle: true,
+    // v2.8(用户第 3 条):弹层换更"跟手"的曲线与时长 —— 默认 250ms 线性上滑
+    // 在真机上像"啪一下弹出来";这里先快后慢,与全 App 的 Motion.curve 一致
+    sheetAnimationStyle: const AnimationStyle(
+      duration: Duration(milliseconds: 320),
+      curve: Curves.easeOutCubic,
+      reverseDuration: Duration(milliseconds: 220),
+    ),
     builder: (ctx) => _WordActionSheet(
       word: word,
       sentence: sentence,
@@ -308,79 +315,110 @@ class _WordActionSheetState extends State<_WordActionSheet> {
             const SizedBox(height: Gap.sm),
 
             // ② 释义区(按需从 AI 拉)
-            if (_loading)
-              Row(
-                children: [
-                  const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                  const SizedBox(width: Gap.xs),
-                  Text('正在查释义…',
-                      style: theme.textTheme.bodySmall?.copyWith(color: muted)),
-                ],
-              )
-            else if (_error != null)
-              AppErrorCard(
-                message: '查询失败:$_error',
-                retryLabel: '重新查',
-                onRetry: () {
-                  setState(() {
-                    _loading = true;
-                    _error = null;
-                  });
-                  _lookup();
-                },
-              )
-            else ...[
-              if (pos.isNotEmpty) ...[
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: Gap.xs, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(Radii.control - 4),
-                  ),
-                  child: Text(pos,
-                      style: theme.textTheme.bodySmall?.copyWith(color: muted)),
+            //
+            // v2.8(用户第 3 条"唤起要有过渡动画"):加载态与结果之间用
+            // AnimatedSwitcher 过渡 —— 旧实现是"转圈突然被一段文字顶掉",
+            // 视觉上很生硬;现在淡入 + 轻微上移,弹层内容的出现不再"跳"。
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 220),
+              switchInCurve: Curves.easeOutCubic,
+              transitionBuilder: (child, anim) => FadeTransition(
+                opacity: anim,
+                child: SlideTransition(
+                  position: Tween<Offset>(
+                    begin: const Offset(0, 0.04),
+                    end: Offset.zero,
+                  ).animate(anim),
+                  child: child,
                 ),
-                const SizedBox(height: Gap.xs),
-              ],
-              if (translation.isNotEmpty)
-                Text(translation, style: theme.textTheme.bodyLarge),
-              if (example.isNotEmpty) ...[
-                const SizedBox(height: Gap.sm),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(Gap.sm),
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.surfaceContainerHighest,
-                    borderRadius: Radii.controlRadius,
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('例句',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                              color: muted,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600)),
-                      const SizedBox(height: Gap.xxs),
-                      Text(example,
-                          style: theme.textTheme.bodyMedium
-                              ?.copyWith(height: 1.5)),
-                    ],
-                  ),
-                ),
-              ],
-              if (grammar.isNotEmpty) ...[
-                const SizedBox(height: Gap.xs),
-                Text('语法:$grammar',
-                    style: theme.textTheme.bodySmall
-                        ?.copyWith(color: muted, height: 1.5)),
-              ],
-            ],
+              ),
+              child: _loading
+                  ? Row(
+                      key: const ValueKey('loading'),
+                      children: [
+                        const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                        const SizedBox(width: Gap.xs),
+                        Text('正在查释义…',
+                            style: theme.textTheme.bodySmall
+                                ?.copyWith(color: muted)),
+                      ],
+                    )
+                  : (_error != null
+                      ? AppErrorCard(
+                          key: const ValueKey('error'),
+                          message: '查询失败:$_error',
+                          retryLabel: '重新查',
+                          onRetry: () {
+                            setState(() {
+                              _loading = true;
+                              _error = null;
+                            });
+                            _lookup();
+                          },
+                        )
+                      : Column(
+                          key: const ValueKey('loaded'),
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (pos.isNotEmpty) ...[
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: Gap.xs, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: theme
+                                      .colorScheme.surfaceContainerHighest,
+                                  borderRadius:
+                                      BorderRadius.circular(Radii.control - 4),
+                                ),
+                                child: Text(pos,
+                                    style: theme.textTheme.bodySmall
+                                        ?.copyWith(color: muted)),
+                              ),
+                              const SizedBox(height: Gap.xs),
+                            ],
+                            if (translation.isNotEmpty)
+                              Text(translation,
+                                  style: theme.textTheme.bodyLarge),
+                            if (example.isNotEmpty) ...[
+                              const SizedBox(height: Gap.sm),
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(Gap.sm),
+                                decoration: BoxDecoration(
+                                  color: theme
+                                      .colorScheme.surfaceContainerHighest,
+                                  borderRadius: Radii.controlRadius,
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text('例句',
+                                        style: theme.textTheme.bodySmall
+                                            ?.copyWith(
+                                                color: muted,
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w600)),
+                                    const SizedBox(height: Gap.xxs),
+                                    Text(example,
+                                        style: theme.textTheme.bodyMedium
+                                            ?.copyWith(height: 1.5)),
+                                  ],
+                                ),
+                              ),
+                            ],
+                            if (grammar.isNotEmpty) ...[
+                              const SizedBox(height: Gap.xs),
+                              Text('语法:$grammar',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                      color: muted, height: 1.5)),
+                            ],
+                          ],
+                        )),
+            ),
 
             // ③ 保存位置(第 3 条):默认跟着材料走,可改 —— 不改也不会掉进「未归类」
             const SizedBox(height: Gap.sm),
@@ -450,48 +488,171 @@ class _WordActionSheetState extends State<_WordActionSheet> {
               ),
             ),
 
-            // ⑤ AI 讲解区(流式)
-            if (_aiAnswer.isNotEmpty || _aiError != null || _asking) ...[
-              const SizedBox(height: Gap.sm),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(Gap.sm),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.primary.withAlpha(12),
-                  borderRadius: Radii.controlRadius,
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(Icons.auto_awesome,
-                            size: 14, color: theme.colorScheme.primary),
-                        const SizedBox(width: Gap.xxs + 2),
-                        Text('AI 讲解',
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.primary,
-                              fontWeight: FontWeight.w600,
-                            )),
-                      ],
-                    ),
-                    const SizedBox(height: Gap.xxs + 2),
-                    if (_aiError != null)
-                      Text('讲解失败:$_aiError',
-                          style: theme.textTheme.bodySmall
-                              ?.copyWith(color: AppTheme.dangerColor(context)))
-                    else
-                      Text(
-                        _aiAnswer.isEmpty ? '正在想…' : _aiAnswer,
-                        style:
-                            theme.textTheme.bodyMedium?.copyWith(height: 1.5),
+            // ⑤ AI 讲解区(流式;v2.8 加出现动画与"打字中"指示)
+            AnimatedSize(
+              duration: const Duration(milliseconds: 240),
+              curve: Curves.easeOutCubic,
+              alignment: Alignment.topCenter,
+              child: !(_aiAnswer.isNotEmpty || _aiError != null || _asking)
+                  ? const SizedBox(width: double.infinity)
+                  : Padding(
+                      padding: const EdgeInsets.only(top: Gap.sm),
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(Gap.sm),
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.primary.withAlpha(12),
+                          borderRadius: Radii.controlRadius,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(Icons.auto_awesome,
+                                    size: 14, color: theme.colorScheme.primary),
+                                const SizedBox(width: Gap.xxs + 2),
+                                Text('AI 讲解',
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: theme.colorScheme.primary,
+                                      fontWeight: FontWeight.w600,
+                                    )),
+                                const Spacer(),
+                                if (_asking) const _TypingDots(),
+                              ],
+                            ),
+                            const SizedBox(height: Gap.xxs + 2),
+                            if (_aiError != null)
+                              Text('讲解失败:$_aiError',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                      color: AppTheme.dangerColor(context)))
+                            else if (_aiAnswer.isEmpty)
+                              // 还没吐第一个字:给骨架条,而不是一句静止的"正在想…"
+                              const _SkeletonLines()
+                            else
+                              // v2.8(用户第 8 条"配色太多显得花"):讲解正文**只用正文色**,
+                              // 强调靠字重 —— 旧实现里标题/列表/引用各一套色,
+                              // 一段话里同时出现主色+琥珀+绿+红,看着很乱
+                              Text(
+                                _aiAnswer,
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  height: 1.6,
+                                  color: theme.colorScheme.onSurface,
+                                ),
+                              ),
+                          ],
+                        ),
                       ),
-                  ],
-                ),
-              ),
-            ],
+                    ),
+            ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// AI 正在生成时的三点动画(v2.8,用户第 3 条"要过渡动画")。
+///
+/// 比一句静止的「正在想…」好得多:用户一眼就知道"它还在打字",不会以为卡住。
+class _TypingDots extends StatefulWidget {
+  const _TypingDots();
+
+  @override
+  State<_TypingDots> createState() => _TypingDotsState();
+}
+
+class _TypingDotsState extends State<_TypingDots>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 900),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  /// 第 i 个点的亮度:0.25~1.0 之间按周期依次亮起
+  double _dotOpacity(int i) {
+    final phase = (_ctrl.value - i / 3.0) % 1.0;
+    final wave = phase < 0.5 ? phase * 2 : (1 - phase) * 2;
+    return 0.25 + 0.75 * wave;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color = Theme.of(context).colorScheme.primary;
+    return AnimatedBuilder(
+      animation: _ctrl,
+      builder: (_, _) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (var i = 0; i < 3; i++)
+            Padding(
+              padding: const EdgeInsets.only(left: 3),
+              child: Opacity(
+                opacity: _dotOpacity(i).clamp(0.25, 1.0),
+                child: Container(
+                  width: 5,
+                  height: 5,
+                  decoration:
+                      BoxDecoration(color: color, shape: BoxShape.circle),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 讲解还没开始出字时的骨架条(比一句静止的"正在想…"更像"正在生产")
+class _SkeletonLines extends StatefulWidget {
+  const _SkeletonLines();
+
+  @override
+  State<_SkeletonLines> createState() => _SkeletonLinesState();
+}
+
+class _SkeletonLinesState extends State<_SkeletonLines>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1100),
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final base = Theme.of(context).colorScheme.onSurface;
+    return AnimatedBuilder(
+      animation: _ctrl,
+      builder: (_, _) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (final w in const [1.0, 0.86, 0.55])
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: FractionallySizedBox(
+                widthFactor: w,
+                child: Container(
+                  height: 10,
+                  decoration: BoxDecoration(
+                    color: base.withAlpha((14 + 16 * _ctrl.value).round()),
+                    borderRadius: BorderRadius.circular(5),
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }

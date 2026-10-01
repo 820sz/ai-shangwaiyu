@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/material.dart' show IconData, Icons;
 
 import 'html_text.dart';
 import 'material_source.dart';
@@ -26,6 +27,10 @@ class OriginalHit {
   /// 一句话说明(作者/日期/摘要片段)
   final String note;
 
+  /// 配图地址(v2.8,用户第 6(2) 条):Gutenberg 封面 / RSS 的 media:content。
+  /// 为空时界面用程序化封面兜底 —— 卡片永远不会是空白块。
+  final String? imageUrl;
+
   const OriginalHit({
     required this.sourceId,
     required this.sourceId2,
@@ -33,7 +38,64 @@ class OriginalHit {
     this.author = '',
     required this.url,
     this.note = '',
+    this.imageUrl,
   });
+
+  /// Gutenberg 公版书封面(已实测可达:200 / 31KB;没有封面的书返回 404 →
+  /// 由 [MaterialCover] 的 errorBuilder 回落程序化封面)
+  static String? gutenbergCoverUrl(String bookId) {
+    final id = int.tryParse(bookId.trim());
+    if (id == null || id <= 0) return null;
+    return 'https://www.gutenberg.org/cache/epub/$id/pg$id.cover.medium.jpg';
+  }
+}
+
+/// 检索进度事件(v2.8,用户第 6(4) 条)。
+///
+/// 用户原话:"找材料时,要有像 ai 软件网页版那样,能看到'查阅了 xxx'这种流式输出!
+/// 现在所有搜索材料,进去都是非常单一简略的转圈等待"。所以这一层把**真实发生的事**
+/// 逐条吐出来(哪个源、通没通、几条、翻标题…),界面按时间线渲染 ——
+/// 不是假进度条:每一条都对应一次真实网络往返。
+class SearchEvent {
+  final SearchStage stage;
+
+  /// 直接显示的中文文案(界面无需再拼)
+  final String label;
+
+  /// 已完成的源数 / 总源数(界面显示「2/4」)
+  final int done;
+  final int total;
+
+  /// 目前累计命中的条数
+  final int hits;
+
+  const SearchEvent({
+    required this.stage,
+    required this.label,
+    this.done = 0,
+    this.total = 0,
+    this.hits = 0,
+  });
+
+  IconData get icon => switch (stage) {
+        SearchStage.preparing => Icons.auto_awesome,
+        SearchStage.searching => Icons.travel_explore,
+        SearchStage.sourceOk => Icons.check_circle,
+        SearchStage.sourceEmpty => Icons.remove_circle_outline,
+        SearchStage.sourceFailed => Icons.error_outline,
+        SearchStage.translating => Icons.translate,
+        SearchStage.done => Icons.done_all,
+      };
+}
+
+enum SearchStage {
+  preparing,
+  searching,
+  sourceOk,
+  sourceEmpty,
+  sourceFailed,
+  translating,
+  done,
 }
 
 /// 检索结果 + **每个源的真实情况**(v2.5:M1 修"完全找不出任何原版材料")。
@@ -86,12 +148,16 @@ class OriginalSearch {
   /// 仍然为空则取"最受欢迎"书单(总有结果)。
   ///
   /// [sourceIds] 非空时**只查这些源**(v2.7:材料中心的"内容类型偏好"选了论文就
-  /// 只去 arXiv 找,省掉三个必然超时的外刊源)。
+  /// 只去 arXiv 找,省掉三个必然超时的源)。
+  ///
+  /// [onProgress] 每完成一个源/阶段就回调一次(v2.8,用户第 6(4) 条)——
+  /// 界面据此渲染"查阅了 xxx"的流式过程。
   static Future<OriginalSearchResult> search(
     String query, {
     String category = '其他',
     Dio? dio,
     List<String>? sourceIds,
+    void Function(SearchEvent event)? onProgress,
   }) async {
     final client = dio ?? MaterialSourceService.dio;
     var q = query.trim();
@@ -120,6 +186,13 @@ class OriginalSearch {
 
     // **并行**检索各源(v2.5):串行时外刊分类要为 BBC/VOA/TED 各等 20 秒超时,
     // 实测一次搜索要 62 秒 —— 用户等的只是三条失败提示。并行后总耗时 = 最慢那个源。
+    onProgress?.call(SearchEvent(
+      stage: SearchStage.searching,
+      label: '正在检索 ${wanted.length} 个来源(${wanted.map((e) => MaterialSourceService.sourceOf(e)?.label ?? e).join('、')})',
+      total: wanted.length,
+    ));
+    var finished = 0;
+    var runningHits = 0;
     final tasks = <Future<({String id, String label, List<OriginalHit> hits, String? error})>>[];
     for (final id in wanted) {
       final label = MaterialSourceService.sourceOf(id)?.label ?? id;
@@ -152,6 +225,27 @@ class OriginalSearch {
           // 交互式检索给 12 秒预算:超过就没必要让用户继续等
           .timeout(const Duration(seconds: 12), onTimeout: () {
         return (id: id, label: label, hits: const <OriginalHit>[], error: '超时(12 秒)');
+      }).then((r) {
+        // v2.8:每个源**一有结果就上报**(用户要看"查阅了 xxx"的过程)
+        finished++;
+        runningHits += r.hits.length;
+        onProgress?.call(SearchEvent(
+          stage: r.error == null
+              ? (r.hits.isEmpty ? SearchStage.sourceEmpty : SearchStage.sourceOk)
+              : SearchStage.sourceFailed,
+          label: switch (r.error) {
+            null => r.hits.isEmpty
+                ? '${r.label}:没有匹配'
+                : '${r.label}:找到 ${r.hits.length} 篇',
+            'skip' => '${r.label}:上次没连上,已跳过',
+            'cjk' => '${r.label}:只认英文关键词,已跳过',
+            _ => '${r.label}:没连上(${r.error})',
+          },
+          done: finished,
+          total: wanted.length,
+          hits: runningHits,
+        ));
+        return r;
       }));
     }
 
@@ -232,6 +326,8 @@ class OriginalSearch {
         author: author,
         url: 'https://www.gutenberg.org/ebooks/$href',
         note: author.isEmpty ? '公版书全文' : '$author · 公版书全文',
+        // v2.8:公版书有官方封面图,直接用(拿不到就回落程序化封面)
+        imageUrl: OriginalHit.gutenbergCoverUrl(href),
       ));
       if (out.length >= maxPerSource) break;
     }
@@ -303,6 +399,7 @@ class OriginalSearch {
             title: it.title,
             url: it.link,
             note: '${source.label} · ${it.published ?? '最新'}',
+            imageUrl: it.imageUrl,
           ),
     ];
     // 一条都没匹配上时给最新的几条(总比空页面有用;仍然是真实原文)
@@ -316,6 +413,7 @@ class OriginalSearch {
                 title: it.title,
                 url: it.link,
                 note: '${source.label} · ${it.published ?? '最新'}(最新条目)',
+                imageUrl: it.imageUrl,
               ),
           ];
     return list.take(maxPerSource).toList();
