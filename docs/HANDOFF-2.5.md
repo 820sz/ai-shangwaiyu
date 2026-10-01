@@ -270,8 +270,12 @@ $env:RF_DIFF_BASE = '<那个本地提交>'
 > - 2026-09-28(v2.6.0 发版):远端 tree `c4ef0e1e` ↔ 本地提交 `aa0d0dc`;随后 tree `2b72efbd` ↔ `01175d0`
 > - 2026-09-28(v2.6 文档同步):远端 tree `10b0e3d4` ↔ 本地提交 `98ec112`
 > - 2026-09-29(**v2.7.0 发版这次**):远端 tree `176c1626` ↔ 本地提交 `66ddd04`
-> - 2026-09-29(发版后文档收尾):远端 tree `7499c8f6` ↔ 本地提交 `5cce23d`(之后再改文档会产生一次新的推进,**照上面的方法比 tree 找基准即可**)
+> - 2026-09-29(发版后文档收尾):远端 tree `7499c8f6` ↔ 本地提交 `5cce23d`
+> - 2026-09-29(最终):远端 tree `389a058d` ↔ 本地提交 `b315c9b`
+> - 2026-10-01(**v2.8.0 发版这次**):远端 tree `e1facc13` ↔ 本地提交 `40d75cd`(基准取 `b315c9b`)
 > - 判断方法同上:比对 `git rev-parse 'HEAD^{tree}'` 与远端 `tree.sha`。
+>   ⚠️ **文件名不要用中文**:`push_via_api.ps1` 里 `git rev-parse "HEAD:<文件>"` 在中文路径上会被
+>   PowerShell 的编码搞成 mojibake,报 `path ... does not exist in HEAD`(v2.8 踩过一次,改名即恢复)。
 > - 同步脚本:`Set-ExecutionPolicy -Scope Process Bypass -Force` 后 `& .\tool\push_via_api.ps1`
 >   (本机是 **Windows PowerShell 5.1**,没有 `pwsh` 命令,别写 `pwsh tool/...`)。
 
