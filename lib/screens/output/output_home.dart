@@ -150,7 +150,7 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
                 const SizedBox(height: Gap.xs),
                 Text(
                   '在那之前:拼写与翻译练的是"想得起、写得出",这正是口语的地基 —— '
-                  '说不出来，多半是先写不出来。',
+                  '说不出来,多半是先写不出来。',
                   style: theme.textTheme.bodySmall?.copyWith(
                     height: 1.5,
                     fontWeight: FontWeight.w600,
