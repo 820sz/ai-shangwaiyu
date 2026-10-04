@@ -1,10 +1,25 @@
 import 'dart:convert';
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
 import 'api_endpoint.dart';
 import 'base_api.dart';
 import 'database.dart';
 import 'doubao_api.dart';
+
+/// 一批翻译的结果(v2.10)。
+///
+/// [translations] 是**能安全用**的译文(与输入的前若干段一一对应);
+/// [note] 非空表示"这批没全好"(被截断/少给),界面据此把那几段标成可重试,
+/// 而不是整批丢掉让用户看到一片失败。
+class TranslateOutcome {
+  final List<String> translations;
+  final String? note;
+
+  const TranslateOutcome({required this.translations, this.note});
+
+  bool get isEmpty => translations.isEmpty;
+}
 
 /// 专项文本 API 服务(副槽位):文章生成、回译练习、个性化建议。
 ///
@@ -208,34 +223,68 @@ $vocabText
   /// 返回与输入等长的中文数组(段落一一对应);数量对不上就抛错,由调用方
   /// 决定是否退回整段直译 —— 宁可不显示,也不能把译文错位到别的段落上。
   Future<List<String>> translateParagraphs(List<String> paragraphs) async {
-    if (paragraphs.isEmpty || !config.isConfigured) return const [];
+    final rich = await translateParagraphsRich(paragraphs);
+    return rich.translations;
+  }
+
+  /// 逐段翻译(可取消、按需抢救版)。
+  ///
+  /// v2.10 修(用户 10/4 原话:"翻译的进度条是死的,而且点击取消后仍然在翻译取消不掉,
+  /// 而且翻译功能几乎没法用"):
+  /// 1. **[cancelToken] 真的中断网络请求** —— 旧实现只在"下一批开始前"看一眼标志位,
+  ///    当前这批还在跑,用户点了取消界面依旧"正在翻译"(这就是"取消不掉");
+  /// 2. **maxTokens 随输入长度自适应** —— 旧实现固定 4096,公版书那种长段很容易把
+  ///    自己截断 → JSON 不完整 → 整批丢弃 → 用户看到的就是"0% 卡死 + 一直报错";
+  /// 3. **段数对不上时抢救**(能对上前 k 段就先给前 k 段),而不是整批扔掉。
+  Future<TranslateOutcome> translateParagraphsRich(
+    List<String> paragraphs, {
+    CancelToken? cancelToken,
+  }) async {
+    if (paragraphs.isEmpty || !config.isConfigured) {
+      return const TranslateOutcome(translations: [], note: 'AI 未配置');
+    }
     const systemPrompt = '''你是翻译助手。用户给一段英文(可能多段,用空行分隔),
 请逐段翻译成**通顺的中文**。返回 JSON:{"translations":["第一段译文","第二段译文",...]}
 规则:1. 段数必须与输入**完全一致**,顺序对应,不许合并或拆分;
 2. 不要逐词硬译,不要保留英文语序;
 3. 只输出 JSON。''';
+    // 输出预算按输入长度给:英文 1 字符≈0.25 token,中文译文≈0.5 token,再留 600 余量
+    final chars = paragraphs.fold<int>(0, (a, s) => a + s.length);
+    final budget = (700 + chars * 2).clamp(1200, 8192);
     final response = await postWithReasoningFallback(
       '/v1/chat/completions',
       BaseApiService.buildChatBody(
         cfg: config,
         temperature: 0.3,
-        maxTokens: 4096,
+        maxTokens: budget,
         messages: [
           {'role': 'system', 'content': systemPrompt},
           {'role': 'user', 'content': paragraphs.join('\n\n')},
         ],
       ),
       cfg: config,
+      cancelToken: cancelToken,
     );
     final content = BaseApiService.extractContentWithReasoning(response.data);
     final parsed = _parseJsonResponse(content);
     final list = (parsed['translations'] as List? ?? const [])
         .map((e) => '$e')
+        .where((s) => s.trim().isNotEmpty)
         .toList();
-    if (list.length != paragraphs.length) {
-      throw Exception('翻译段落数对不上(${list.length} ≠ ${paragraphs.length}),已放弃本次翻译');
+    if (list.isEmpty) {
+      return const TranslateOutcome(translations: [], note: 'AI 没返回译文(可能被截断)');
     }
-    return list;
+    if (list.length != paragraphs.length) {
+      // 抢救:AI 少给了就丢弃后面几段(那几段标失败可重试),绝不把译文错位
+      final kept = list.length > paragraphs.length
+          ? list.sublist(0, paragraphs.length)
+          : list;
+      return TranslateOutcome(
+        translations: kept,
+        note: '只翻好了前 ${kept.length}/${paragraphs.length} 段(可能被截断)',
+      );
+    }
+    return TranslateOutcome(translations: list);
   }
 
   // ═══════════════ 生成回译练习 ═══════════════

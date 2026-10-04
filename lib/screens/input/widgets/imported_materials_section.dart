@@ -47,7 +47,11 @@ class _ImportedMaterialsSectionState extends State<ImportedMaterialsSection> {
 
   Future<void> _load() async {
     try {
-      final items = await MaterialLibrary.shelf(limit: 200);
+      // v2.10 修(用户 10/4 第 3 条):这里**只放用户自己导入的材料**。
+      // 旧实现用 shelf() 拉全库,材料中心点过的公版书/论文/外刊全跑进来了 ——
+      // 用户原话:"我说了啊,这个功能是用来保存用户自己手动导入的东西啊,
+      // 不是材料中心那些东西。"
+      final items = await MaterialLibrary.importedShelf(limit: 200);
       if (!mounted) return;
       setState(() {
         _items = items;

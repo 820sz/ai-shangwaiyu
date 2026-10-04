@@ -16,6 +16,7 @@ import '../../services/material_library.dart';
 import '../../services/material_source.dart';
 import '../../services/original_search.dart';
 import '../../widgets/app_ui.dart';
+import '../../widgets/waiting.dart';
 import 'material_reader_screen.dart';
 
 /// 材料导入的通道。
@@ -146,12 +147,15 @@ class MaterialImportFlow {
     required OriginalHit hit,
     required LearnerModel model,
     bool pushReader = true,
+    /// v2.10:流式过程的回调(每完成一步就报一次;调用方据此显示时间线)
+    void Function(String text, {AiStepState state})? onStep,
   }) async {
     final title = hit.title.trim();
     final url = hit.url.trim();
     final nav = Navigator.of(context);
     try {
       final svc = MaterialSourceService.instance;
+      onStep?.call('正在抓取正文…');
       final doc = switch (hit.sourceId) {
         'gutenberg' =>
           await svc.fetchGutenberg(int.tryParse(hit.sourceId2) ?? 0),
@@ -160,14 +164,26 @@ class MaterialImportFlow {
             ? await svc.fetchDocument(hit.sourceId, url: hit.url)
             : await MaterialImport.fromAnyUrl(url, title: title),
       };
+      // 真实数字:抓到多少段、多少字(用户能看到"确实在干活")
+      onStep?.call(
+        '抓到正文:${doc.chunks.length} 段 · 约 '
+        '${doc.chunks.fold<int>(0, (a, c) => a + c.text.length)} 字',
+      );
+      onStep?.call('正在把标题翻成中文…');
       final localized = await MaterialImport.localizedTitle(
         title.isEmpty ? doc.title : title,
       );
       if (!context.mounted) return null;
+      onStep?.call('正在分析难度并入库…');
       final ingested = await ingest(
         context,
         _retitle(doc, title: localized, text: null),
         model: model,
+      );
+      onStep?.call(
+        '分析完成:${ingested.analysis.cefr} · '
+        '${ingested.analysis.wordCount} 词 · 约 ${ingested.analysis.estMinutes} 分钟',
+        state: AiStepState.done,
       );
       if (pushReader && context.mounted) {
         await nav.push(
@@ -185,25 +201,83 @@ class MaterialImportFlow {
     }
   }
 
-  /// 打开一条命中并带加载框(用户点「开始阅读」/「软件内阅读」时用)
+  /// 打开一条命中并带**流式过程**(用户点「开始阅读」/「软件内阅读」时用)。
+  ///
+  /// v2.10 修(用户 10/4 第 2(3) 条原话:"'软件内阅读'的思考进度过程不行,
+  /// **还是得流式输出才行**"):
+  /// 旧实现就是一个 `Dialog + AppLoading` —— 用户看到的是一个转圈加一句固定文案,
+  /// 二三十秒里不知道程序到底在干什么。现在把**真实发生的每一步**逐条推上去:
+  /// 抓正文 → 解析出多少段 → 难度分析 → 入库 → 打开;
+  /// 每完成一步就多一行(带该步的真实数字),并用 `AiWaitingTimeline` 渲染。
   static Future<IngestedMaterial?> openHitWithProgress(
     BuildContext context, {
     required OriginalHit hit,
     required LearnerModel model,
     String label = '正在抓取并分析原文…',
   }) async {
-    showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => Dialog(child: AppLoading(label: label)),
-    );
-    try {
-      return await openHit(context, hit: hit, model: model);
-    } finally {
+    // 用 ValueNotifier 把进度推给对话框:对话框只是"显示器",流程仍在外面跑
+    final steps = ValueNotifier<List<AiStep>>([
+      AiStep(label: label, state: AiStepState.running),
+    ]);
+    final startedAt = DateTime.now();
+    var closed = false;
+    void closeDialog() {
+      if (closed) return;
+      closed = true;
       if (context.mounted) {
         Navigator.of(context, rootNavigator: true).pop();
       }
+      steps.dispose();
     }
+
+    void addStep(String text, {AiStepState state = AiStepState.running}) {
+      final list = List<AiStep>.from(steps.value);
+      // 上一步若还在"进行中",标成完成(真实语义:它已经过去了)
+      if (list.isNotEmpty && list.last.state == AiStepState.running) {
+        final last = list.removeLast();
+        list.add(AiStep(label: last.label, state: AiStepState.done, detail: last.detail));
+      }
+      list.add(AiStep(label: text, state: state));
+      steps.value = list;
+    }
+
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => Dialog(
+        child: Padding(
+          padding: const EdgeInsets.all(Gap.md),
+          child: ValueListenableBuilder<List<AiStep>>(
+            valueListenable: steps,
+            builder: (_, list, _) => AiWaitingTimeline(
+              steps: list,
+              running: true,
+              footer: _elapsedLabel(startedAt),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    try {
+      return await openHit(
+        context,
+        hit: hit,
+        model: model,
+        onStep: addStep,
+      );
+    } catch (e) {
+      addStep('这次没成:$e', state: AiStepState.failed);
+      rethrow;
+    } finally {
+      closeDialog();
+    }
+  }
+
+  static String? _elapsedLabel(DateTime startedAt) {
+    final s = DateTime.now().difference(startedAt).inSeconds;
+    if (s < 3) return null;
+    return '已用 $s 秒';
   }
 
   /// 只换标题(正文与元信息原样)—— 材料中心/分类页共用

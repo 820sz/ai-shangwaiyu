@@ -314,6 +314,130 @@ class _CategoryVocabSheetState extends State<_CategoryVocabSheet> {
     await _load();
   }
 
+  /// 「移动材料」(v2.10,用户 10/4 第 8 条)。
+  ///
+  /// 用户要的是"**从已有分类里选**",而不是每次都要手打一遍材料名。所以:
+  /// 1. 列出**当前分类下已有的材料**(按生词数倒序)—— 一个词一个词点过来的人,
+  ///    通常就是要把零散的词并到同一本书下面;
+  /// 2. 再列出**其它分类下的材料**(跨分类移动也常见:拍下来的词原本归到"教材",
+  ///    其实属于某本"书籍");
+  /// 3. 都没有合适的 → 底部给「新建一个材料…」走原来的手填流程(兜底,不是主路径)。
+  Future<void> _moveToExisting({
+    required String label,
+    required List<Vocabulary> items,
+  }) async {
+    // 已经在"未归类"里的词:材料名是空的,列表里不会出现它们,直接给新建入口
+    final paths = await DatabaseService.getMaterialPathsByCategory(
+      widget.category,
+    );
+    if (!mounted) return;
+    final choices = <String>[
+      for (final p in paths)
+        if (p.trim().isNotEmpty && p != label) p,
+    ]..sort();
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.6,
+        minChildSize: 0.35,
+        maxChildSize: 0.9,
+        builder: (ctx, scrollCtrl) => Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(Gap.md, 0, Gap.md, Gap.xs),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('移动到哪?',
+                      style: Theme.of(ctx)
+                          .textTheme
+                          .titleMedium
+                          ?.copyWith(fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${items.length} 个生词 · 从「${widget.category}」里已有的材料中选一个',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      height: 1.4,
+                      color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: choices.isEmpty
+                  ? const Center(child: Text('这个分类下还没有别的材料'))
+                  : ListView.builder(
+                      controller: scrollCtrl,
+                      itemCount: choices.length,
+                      itemBuilder: (_, i) {
+                        final p = choices[i];
+                        return ListTile(
+                          dense: true,
+                          leading: const Icon(Icons.menu_book_outlined, size: 18),
+                          title: Text(p,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 14)),
+                          trailing: const Icon(Icons.chevron_right, size: 18),
+                          onTap: () => Navigator.pop(ctx, p),
+                        );
+                      },
+                    ),
+            ),
+            const SizedBox(height: Gap.xs),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: Gap.md),
+              child: SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () => Navigator.pop(ctx, '__new__'),
+                  icon: const Icon(Icons.create_new_folder_outlined, size: 17),
+                  label: const Text('新建一个材料…(手动输入)'),
+                ),
+              ),
+            ),
+            const SizedBox(height: Gap.sm),
+          ],
+        ),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    if (picked == '__new__') {
+      await _assignMaterial(label: label, items: items);
+      return;
+    }
+    await _moveInto(picked, items);
+  }
+
+  /// 真正把这批词移到目标材料下(不弹任何对话框,选完即生效)
+  Future<void> _moveInto(String materialName, List<Vocabulary> items) async {
+    final ids = items.map((v) => v.id).whereType<int>().toList();
+    if (ids.isEmpty) return;
+    await context.read<VocabProvider>().moveVocabularies(
+          ids,
+          category: widget.category,
+          materialPath: buildMaterialPath(
+            category: widget.category,
+            name: materialName,
+          ),
+          sourceBook: materialName,
+        );
+    if (!mounted) return;
+    await _load();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('已把 ${ids.length} 个生词移到「$materialName」'),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
   /// 归入材料 / 改出处(v2.7,用户第 6(2) 条):写 `material_path` + `source_book`
   /// (+ 可选页码)。这是"未归类"唯一的出口 —— 填了材料名,这一组就移到
   /// 「分类 / 材料名」下面。
@@ -633,7 +757,6 @@ class _CategoryVocabSheetState extends State<_CategoryVocabSheet> {
     );
   }
 
-  /// 分组操作条(v2.7,用户第 6(1)(2) 条)
   Widget _groupActions(
     MaterialGroup g,
     List<Vocabulary> items,
@@ -656,8 +779,11 @@ class _CategoryVocabSheetState extends State<_CategoryVocabSheet> {
             ),
           ActionChip(
             avatar: const Icon(Icons.drive_file_move_outline, size: 15),
-            label: Text(isUncategorized ? '归入材料…' : '改出处…'),
-            onPressed: () => _assignMaterial(label: g.label, items: items),
+            // v2.10(用户 10/4 第 8 条):"应该是用户能**选移动进已有的分类里**,
+            // 而不是现在的'归入材料出处'这种点进去还得用户手动填"
+            // → 先弹"选已有的分类/材料",手填只作为兜底入口。
+            label: const Text('移动材料…'),
+            onPressed: () => _moveToExisting(label: g.label, items: items),
           ),
           if (!isUncategorized)
             ActionChip(

@@ -154,17 +154,21 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
           ),
           const SizedBox(height: Gap.sm),
 
-          // ① 两个子功能平级并排:拍照识别 / 外部链接导入(第 3 条)
+          // ① v2.10(用户 10/4 第 1 条):**"拍照识别"与"从相册选择"合并成一个入口**。
+          //
+          // 用户原话:"'输入'界面的上传分析材料——'拍照...'和'从相册选择'可以合并成一个 ui,
+          // 点进去后再提供选项。"
+          // 所以这里只留一个大按钮「上传图片」,点开底部弹层再选 拍照 / 相册(可多选)。
           Row(
             children: [
               Expanded(
                 child: FilledButton.icon(
-                  onPressed: _takePhoto,
+                  onPressed: _pickImageSource,
                   style: FilledButton.styleFrom(
                     minimumSize: const Size(0, 52),
                   ),
-                  icon: const Icon(Icons.photo_camera_outlined, size: 18),
-                  label: const Text('拍照识别', style: TextStyle(fontSize: 14)),
+                  icon: const Icon(Icons.add_photo_alternate_outlined, size: 18),
+                  label: const Text('上传图片', style: TextStyle(fontSize: 14)),
                 ),
               ),
               const SizedBox(width: Gap.xs),
@@ -180,20 +184,6 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
                 ),
               ),
             ],
-          ),
-          const SizedBox(height: Gap.xs),
-
-          // ② 次要行动:从相册选择(属于"拍照识别"这条路)
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: _pickFromGallery,
-              style: OutlinedButton.styleFrom(
-                minimumSize: const Size(0, 44),
-              ),
-              icon: const Icon(Icons.photo_library_outlined, size: 18),
-              label: const Text('从相册选择(可多选)'),
-            ),
           ),
 
           const SizedBox(height: Gap.xs),
@@ -369,6 +359,53 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
   }
 
   /// AI 模型 & 思考强度选择行 — 识图前即可切换，避免进入识别后再打断
+  /// 上传图片入口(v2.10,用户 10/4 第 1 条):一个按钮 → 弹层里再选拍照 / 相册。
+  ///
+  /// 为什么要合并:以前"拍照识别"和"从相册选择"是**两个并排的按钮**,用户得先想
+  /// "我这算拍照还是相册"——其实他心里只有"我要传张图"。收成一个入口后再分叉,
+  /// 主界面少一个按钮,选择也更清楚。
+  Future<void> _pickImageSource() async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(Gap.md, 0, Gap.md, Gap.xs),
+              child: Text('图片来源',
+                  style: Theme.of(ctx)
+                      .textTheme
+                      .titleMedium
+                      ?.copyWith(fontWeight: FontWeight.w700)),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined),
+              title: const Text('拍一张'),
+              subtitle: const Text('用手写稿 / 书页 / 屏幕直接拍'),
+              onTap: () => Navigator.pop(ctx, 'camera'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('从相册选(可多选)'),
+              subtitle: const Text('最多 9 张,一次识别完'),
+              onTap: () => Navigator.pop(ctx, 'gallery'),
+            ),
+            const SizedBox(height: Gap.xs),
+          ],
+        ),
+      ),
+    );
+    if (choice == null || !mounted) return;
+    if (choice == 'camera') {
+      await _takePhoto();
+    } else {
+      await _pickFromGallery();
+    }
+  }
+
   Widget _buildModelThinkingRow(ThemeData theme) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),

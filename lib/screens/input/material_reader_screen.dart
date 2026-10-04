@@ -1,12 +1,16 @@
 import 'dart:async';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
+import '../../config/constants.dart';
 import '../../config/design_tokens.dart';
 import '../../config/theme.dart';
+import '../../models/bookmark.dart';
 import '../../models/vocabulary.dart';
+import '../../providers/bookmark_provider.dart';
 import '../../providers/vocab_provider.dart';
 import '../../services/audio_service.dart';
 import '../../services/backup_service.dart';
@@ -100,6 +104,9 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
   /// 用户点了取消(已翻好的保留)
   bool _translateCanceled = false;
 
+  /// 在途请求的取消令牌(v2.10:取消要真的中断网络请求,而不是等它跑完)
+  final List<CancelToken> _translateTokens = [];
+
   /// 上次选的范围(默认"当前段前后各 3 段" —— 打开翻译时最常用的一档)
   blocks.TranslateScope _scope = blocks.TranslateScope.around;
 
@@ -183,9 +190,16 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     if (_showTranslation) {
       setState(() {
         _showTranslation = false;
-        // 关掉翻译 = 停止后台翻(已翻好的保留,再打开继续)
+        // 关掉翻译 = 停止后台翻(已翻好的保留,再打开继续)——
+        // v2.10:同时 cancel 在途请求,否则关掉后请求还在跑
         _translateCanceled = true;
       });
+      for (final t in List.of(_translateTokens)) {
+        try {
+          t.cancel('关闭翻译');
+        } catch (_) {}
+      }
+      _translateTokens.clear();
       return;
     }
     setState(() {
@@ -417,50 +431,135 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     }
   }
 
-  /// 分批翻译(每批最多 3 段合一次请求)并**实时更新进度**。
+  /// 分批翻译(**真并发 + 真进度 + 立刻可取消**)。
   ///
-  /// 进度口径(硬规则:只显示真实进度):
-  /// - 分子 [_translateDone] = 已处理完的段(失败也算处理过,否则进度会停在
-  ///   原地让人以为卡死);
-  /// - 分母在"本次要翻的段数"与 60 之间取小 —— 一次翻 200 段时按 200 算
-  ///   进度条几乎不动,同样会让人以为卡死;真正的段数写在 detail 里。
+  /// v2.10 重写(用户 10/4 原话:"翻译的进度条是死的,而且点击取消后仍然在翻译
+  /// 取消不掉,而且翻译功能几乎没法用,选取的范围也是乱的"):
+  /// - **旧实现的三个硬伤**:①一批 3 段、串行 await,67 段 = 23 次往返,慢到没法用;
+  ///   ②取消只在"下一批开始前"生效,当前请求还在跑,界面一直显示"正在翻译";
+  ///   ③`_translateDone` 只有整批回来才 +1,第一批卡住时进度条永远 0%(看着像死的)。
+  /// - **现在**:按**字符预算**切批(长段单段成批,短段最多 4 段合批),同时跑
+  ///   [concurrency] 路;每完成一批就推进度;取消时 **cancelToken 直接中断在途请求**
+  ///   并立刻把状态清干净(不再等 20 秒)。
   Future<void> _translateBatches(List<int> indices) async {
     final api = DeepseekApiService();
-    const batch = 3;
-    for (var s = 0; s < indices.length; s += batch) {
-      if (!mounted || !_showTranslation || _translateCanceled) return;
-      final slice = indices.sublist(s, (s + batch).clamp(0, indices.length));
-      final texts = [for (final i in slice) '${_chunks[i]['text'] ?? ''}'];
+    final batches = _packBatches(indices);
+    var next = 0;
+    var inFlight = 0;
+    final done = <Future<void>>[];
+
+    Future<void> runBatch(List<int> slice) async {
+      if (_translateCanceled || !mounted) return;
+      final token = CancelToken();
+      _translateTokens.add(token);
       try {
-        final translated = await api.translateParagraphs(texts);
+        final texts = [for (final i in slice) '${_chunks[i]['text'] ?? ''}'];
+        final outcome = await api.translateParagraphsRich(
+          texts,
+          cancelToken: token,
+        );
+        if (!mounted || _translateCanceled) return;
+        setState(() {
+          // 能安全用的译文就写进去(前 k 段一一对应),剩下的标失败可重试
+          for (var k = 0; k < outcome.translations.length; k++) {
+            _translations[slice[k]] = outcome.translations[k];
+            _chunkErrors.remove(slice[k]);
+          }
+          if (outcome.translations.length < slice.length) {
+            _chunkErrors.addAll(slice.sublist(outcome.translations.length));
+            _translateError = outcome.note ??
+                '这一批只翻好了一部分(可点该段的「重试」)';
+          }
+          _translateDone += slice.length;
+          _rangeEnd = (_rangeEnd < indices.length) ? indices.length : _rangeEnd;
+        });
+      } on DioException catch (e) {
+        // 用户点了取消 → Dio 抛的就是取消,不该当成"翻译失败"弹给用户
+        if (_translateCanceled || CancelToken.isCancel(e)) return;
         if (!mounted) return;
         setState(() {
-          if (translated.length == slice.length) {
-            for (var k = 0; k < slice.length; k++) {
-              _translations[slice[k]] = translated[k];
-              _chunkErrors.remove(slice[k]);
-            }
-          } else {
-            // 段数对不上:整批丢弃并标记,让用户点单段重试(错误可见 > 静默错位)
-            _chunkErrors.addAll(slice);
-            _translateError = '译文段数与原文对不上,已丢弃这一批(可点该段的「重试」)';
-          }
+          _chunkErrors.addAll(slice);
+          _translateError = '翻译失败:${_humanError(e)}';
           _translateDone += slice.length;
         });
       } catch (e) {
-        if (!mounted) return;
+        if (!mounted || _translateCanceled) return;
         setState(() {
           _chunkErrors.addAll(slice);
           _translateError = '翻译失败:$e';
           _translateDone += slice.length;
         });
+      } finally {
+        _translateTokens.remove(token);
       }
     }
+
+    while (next < batches.length) {
+      if (_translateCanceled || !mounted) break;
+      while (inFlight < concurrency && next < batches.length) {
+        final slice = batches[next++];
+        inFlight++;
+        final f = runBatch(slice).whenComplete(() => inFlight--);
+        done.add(f);
+      }
+      // 等"最先完成的那一批",而不是死等第 n 批 —— 进度因此是连续推进的
+      if (done.isNotEmpty) await done.removeAt(0);
+    }
+    if (!_translateCanceled) await Future.wait(done);
   }
 
-  /// 取消本次批量翻译(已翻好的保留)
+  /// 按**字符预算**切批:一次请求里塞太多字会被模型截断(截断=整批报废)。
+  /// 长段(>900 字符)单独成批,短段最多 4 段合并 —— 这是"能用"与"不能用"的分界。
+  List<List<int>> _packBatches(List<int> indices) {
+    const maxChars = 1600;
+    const maxParagraphs = 4;
+    final out = <List<int>>[];
+    var cur = <int>[];
+    var chars = 0;
+    for (final i in indices) {
+      final len = '${_chunks[i]['text'] ?? ''}'.length;
+      if (cur.isNotEmpty &&
+          (chars + len > maxChars || cur.length >= maxParagraphs)) {
+        out.add(cur);
+        cur = <int>[];
+        chars = 0;
+      }
+      cur.add(i);
+      chars += len;
+    }
+    if (cur.isNotEmpty) out.add(cur);
+    return out;
+  }
+
+  /// 并发路数:2 路是"快"与"不触发限流"的平衡点(串行太慢,4 路容易 429)
+  static const int concurrency = 2;
+
+  String _humanError(Object e) {
+    final s = '$e';
+    if (s.length > 120) return '${s.substring(0, 120)}…';
+    return s;
+  }
+
+  /// 取消本次批量翻译(已翻好的保留)。
+  ///
+  /// v2.10 修:以前只置一个标志位,当前那一批请求还在跑 → 界面继续显示"正在翻译"
+  /// (用户原话:"点击取消后仍然在翻译取消不掉")。现在**同时 cancel 掉在途请求**,
+  /// 并立刻把进度状态清干净。
   void _cancelTranslation() {
-    setState(() => _translateCanceled = true);
+    if (!_translateRunning && _translateTokens.isEmpty) return;
+    setState(() {
+      _translateCanceled = true;
+      _translateRunning = false;
+      _translateTargets = const [];
+    });
+    for (final t in List.of(_translateTokens)) {
+      try {
+        t.cancel('用户取消翻译');
+      } catch (_) {
+        // 取消失败不影响界面状态:结果回来时也会被 _translateCanceled 丢掉
+      }
+    }
+    _translateTokens.clear();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -470,31 +569,34 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     }
   }
 
-  /// 进度条(v2.9):真实进度;不在翻译时返回 null(不显示假进度条)
+  /// 进度条(v2.10 修):**分母就是本次要翻的真实段数**。
+  ///
+  /// 旧实现把分母压成 `min(段数, 60)`,于是界面上同时出现「第 1/67 段」和
+  /// 「已完成 0/66 段」两套数字(用户原话:"选取的范围也是乱的")。
+  /// 现在统一到一套口径:分子=已处理段数(失败也算处理过),分母=本次段数;
+  /// 并发批次让进度是连续推进的,不再出现"0% 卡死"。
   ProgressStageBar? _buildTranslateProgress() {
     if (!_translateRunning) return null;
-    final targetCount = _translateTargets.length;
-    if (targetCount <= 0) return null;
-    // 分母:本次段数与 60 取小(见 _translateBatches 的注释)
-    final denom = targetCount <= 60 ? targetCount : 60;
-    final value = (_translateDone / denom).clamp(0.0, 1.0);
-    final processedUpto = _rangeStart + _translateDone;
-    final detail = StringBuffer(
-      '已完成 $_translateDone/$targetCount 段 · 读到第 '
-      '${processedUpto.clamp(1, _chunks.length)} 段',
-    );
+    final total = _translateTargets.length;
+    if (total <= 0) return null;
+    final done = _translateDone.clamp(0, total);
+    final value = total == 0 ? null : done / total;
+    // "正在翻译第 k 段":k 以**本次范围**为准(不再是全书绝对段号,避免用户看不懂)
+    final current = (done + 1).clamp(1, total);
+    final absIndex = (_rangeStart + done).clamp(1, _chunks.length);
+    final detail = StringBuffer('已完成 $done/$total 段 · 正文第 $absIndex 段');
     // 剩余估算:样本不足(<2 段)不给 —— 宁可不说,也不给一个乱跳的数字
     final started = _translateStartedAt;
-    if (started != null && _translateDone >= 2) {
+    if (started != null && done >= 2) {
       final secs = DateTime.now().difference(started).inSeconds;
-      final per = secs / _translateDone;
-      final left = (targetCount - _translateDone) * per;
+      final per = secs / done;
+      final left = (total - done) * per;
       if (left >= 20) {
         detail.write(' · 约剩 ${blocks.formatEstimate(left.round())}');
       }
     }
     return ProgressStageBar(
-      stage: '正在翻译第 ${processedUpto.clamp(1, _chunks.length)}/${_chunks.length} 段',
+      stage: '正在翻译第 $current/$total 段',
       value: value,
       detail: detail.toString(),
       startedAt: started,
@@ -842,6 +944,8 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
           await DatabaseService.getMaterialProgress(widget.materialId);
       final savedBlocks = await blocks.loadBlocks(widget.materialId);
       if (!mounted) return;
+      // 书架状态(用户 10/4 第 4 条):决定 AppBar 上的 ☆ 是实心还是空心
+      unawaited(_loadShelfState());
       MaterialAnalysis? analysis;
       final raw = material?['difficulty'];
       if (raw is Map) {
@@ -1315,6 +1419,145 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     }
   }
 
+  /// 是否已在书架(用户 10/4 第 4 条)
+  bool _onShelf = false;
+
+  /// 这次进来是否已经问过"放进书架?"(退出时只问一次,不烦人)
+  bool _askedShelf = false;
+
+  /// 材料 id(书架/收藏都要用)
+  int? get _materialId {
+    final v = _material?['id'];
+    return v is int ? v : int.tryParse('$v');
+  }
+
+  Future<void> _loadShelfState() async {
+    final id = _materialId;
+    if (id == null) return;
+    final on = await DatabaseService.isOnBookshelf(id);
+    if (!mounted) return;
+    setState(() => _onShelf = on);
+  }
+
+  Future<void> _toggleShelf() async {
+    final id = _materialId;
+    if (id == null) return;
+    if (_onShelf) {
+      await DatabaseService.removeFromBookshelf(id);
+      if (!mounted) return;
+      setState(() => _onShelf = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('已从书架移出'), behavior: SnackBarBehavior.floating),
+      );
+      return;
+    }
+    await DatabaseService.addToBookshelf(id);
+    if (!mounted) return;
+    setState(() => _onShelf = true);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('已放上书架 —— 在「材料中心 → 书架」里能看到它'),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  /// 收藏这篇材料(进「文章」收藏夹)
+  Future<void> _bookmarkCurrent() async {
+    final title = '${_material?['title'] ?? ''}';
+    if (title.isEmpty) return;
+    final bp = context.read<BookmarkProvider>();
+    final firstChunks = _chunks
+        .take(3)
+        .map((c) => '${c['text'] ?? ''}')
+        .where((t) => t.trim().isNotEmpty)
+        .join('\n\n');
+    final saved = await bp.toggle(
+      Bookmark(
+        source: AppConstants.bookmarkSourceArticle,
+        title: title,
+        content: '${_material?['url'] ?? ''}\n\n$firstChunks'.trim(),
+      ),
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(saved ? '已收藏到「文章」收藏夹' : '已取消收藏'),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  /// 退出阅读器时的三选一(用户 10/4 第 4 条原话:
+  /// "在退出材料中心里的文章时,发出提问'放进书架?'or'不了,就看看'or'放进收藏夹'")。
+  ///
+  /// 只在"真读过一点"且**还没在书架上**时问 —— 刚点开就退出不问,已经在架子上的也不问。
+  Future<void> _askShelfOnExit() async {
+    final id = _materialId;
+    if (id == null || _askedShelf || _onShelf) return;
+    if (_chunks.isEmpty) return;
+    _askedShelf = true;
+    if (!mounted) return;
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(Gap.md, 0, Gap.md, Gap.xs),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('这篇要留下吗?',
+                      style: Theme.of(ctx)
+                          .textTheme
+                          .titleMedium
+                          ?.copyWith(fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 4),
+                  Text(
+                    '放进书架 = 以后在「材料中心 → 书架」里一眼看见、接着读',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.collections_bookmark_outlined),
+              title: const Text('放进书架'),
+              subtitle: const Text('摆到架子上,带进度'),
+              onTap: () => Navigator.pop(ctx, 'shelf'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.star_border),
+              title: const Text('放进收藏夹'),
+              subtitle: const Text('收藏到「文章」分区'),
+              onTap: () => Navigator.pop(ctx, 'bookmark'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.visibility_outlined),
+              title: const Text('不了,就看看'),
+              onTap: () => Navigator.pop(ctx, 'none'),
+            ),
+            const SizedBox(height: Gap.xs),
+          ],
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if (choice == 'shelf') {
+      await _toggleShelf();
+    } else if (choice == 'bookmark') {
+      await _bookmarkCurrent();
+    }
+  }
+
   /// 「更多」菜单的动作分发(v2.7)
   void _onMoreAction(String v) {
     switch (v) {
@@ -1359,10 +1602,33 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     final url = '${_material?['url'] ?? ''}'.trim();
     final a = _analysis;
 
-    return Scaffold(
+    // v2.10(用户 10/4 第 4 条):退出这篇材料时问一句
+    // "放进书架? / 放进收藏夹 / 不了,就看看" —— 用 PopScope 拦住返回,
+    // 问完再真的退出(已经在架上或没读过就不问)
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        final nav = Navigator.of(context);
+        await _askShelfOnExit();
+        if (!mounted) return;
+        // 让最后一笔进度先落盘,再退出
+        await _persist(finished: _finished, force: true);
+        nav.pop();
+      },
+      child: Scaffold(
       appBar: AppBar(
         title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
         actions: [
+          // v2.10(用户 10/4 第 4 条):**加入书架** —— 明明白白一个按钮,
+          // 不用翻"更多"菜单(用户说的是"在文章内部增加一个 ui 即加入书架")
+          IconButton(
+            tooltip: _onShelf ? '已在书架上(点一下移出)' : '加入书架',
+            onPressed: _toggleShelf,
+            icon: Icon(
+              _onShelf ? Icons.collections_bookmark : Icons.collections_bookmark_outlined,
+            ),
+          ),
           // v2.7(第 3 条):原来这里是 5 个图标挤在一起 —— 现在只留「更多」,
           // 其余(翻译 / 模型 / 保存 / 追问)按用户要求挪到界面下方的动作栏
           PopupMenuButton<String>(
@@ -1583,6 +1849,7 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
               ),
               child: const Icon(Icons.arrow_upward),
             ),
+      ),
     );
   }
 

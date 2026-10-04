@@ -102,6 +102,9 @@ class ShelfItem {
 
   /// 材料来路(v2.9:import 导入 / gutenberg 等公开源 / ai 生成)
   final String origin;
+
+  /// 中文标题(v2.10:标题中文化要落库,任何界面都能显示中文)
+  final String titleCn;
   final String cefr;
   final int wordCount;
   final double? coverage;
@@ -120,6 +123,7 @@ class ShelfItem {
     required this.source,
     this.group,
     this.origin = '',
+    this.titleCn = '',
     required this.cefr,
     required this.wordCount,
     required this.coverage,
@@ -182,6 +186,21 @@ class MaterialLibrary {
   }
 
   /// 把抓到的原始文档分析 + 入库,返回 materialId 与分析结果
+  /// 材料来路(v2.10,用户 10/4 第 3 条)。
+  ///
+  /// 用户原话:"'输入界面'的'材料导入',**为什么会默认保存在材料中心点过的文章**?
+  /// 我说了啊,这个功能是用来保存用户**自己手动导入**的东西啊,不是材料中心那些东西。"
+  ///
+  /// 所以入库时就把来路写清楚:手动导入(paste/file/image/link)记 `import`,
+  /// 公开源(公版书/论文/外媒)记 `feed`,AI 生成记 `ai`。
+  /// 「材料导入」列表**只认 import**,材料中心的公开源一律不进那里。
+  static String originOf(String sourceId) {
+    const imported = {'paste', 'file', 'import', 'image', 'link', 'clipboard'};
+    if (imported.contains(sourceId)) return 'import';
+    if (sourceId == 'ai' || sourceId == 'ai_article') return 'ai';
+    return 'feed';
+  }
+
   static Future<IngestedMaterial> ingestDoc(
     MaterialDoc doc, {
     required LearnerModel model,
@@ -204,6 +223,8 @@ class MaterialLibrary {
         'url': doc.url,
         'license': doc.license,
         'language': doc.language,
+        // v2.10:来路(材料导入 vs 材料中心的公开源)
+        'origin': originOf(doc.sourceId),
         'word_count': analysis.wordCount,
         'unique_words': analysis.uniqueWords,
         'cefr': analysis.cefr,
@@ -276,6 +297,18 @@ class MaterialLibrary {
     return rows.map(_toShelfItem).toList();
   }
 
+  /// **只取用户自己导入的材料**(v2.10,用户 10/4 第 3 条)。
+  ///
+  /// 「材料导入」这一块只该显示他手动导进来的东西(教材/粘贴的文本/图片/链接),
+  /// 材料中心里点过的公版书、论文、外刊**不属于这里**(那是"材料库"的事)。
+  /// 判据是 `materials.origin`;老数据没有 origin 的按 source 反推(见 [originOf])。
+  static Future<List<ShelfItem>> importedShelf({int limit = 200}) async {
+    final all = await shelf(limit: limit);
+    return all
+        .where((s) => s.origin == 'import' || originOf(s.source) == 'import')
+        .toList();
+  }
+
   static ShelfItem _toShelfItem(Map<String, Object?> r) {
     double? cov;
     final rawCov = r['coverage'];
@@ -289,6 +322,7 @@ class MaterialLibrary {
           ? null
           : '${r['group_name']}'.trim(),
       origin: '${r['origin'] ?? ''}',
+      titleCn: (r['title_cn'] as String?)?.trim() ?? '',
       cefr: '${r['cefr'] ?? ''}',
       wordCount: _asInt(r['word_count']),
       coverage: cov,

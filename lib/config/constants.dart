@@ -115,7 +115,7 @@ class AppConstants {
 
   // ── 数据库 ──
   static const String dbName = 'readflow.db';
-  static const int dbVersion = 16;
+  static const int dbVersion = 17;
 
   // ── 收藏夹 ──
   /// 收藏来源(v2.8 扩展:用户第 10 条"收藏夹要体现不同功能区收藏进来的东西")

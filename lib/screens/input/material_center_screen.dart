@@ -8,6 +8,8 @@ import '../../config/design_tokens.dart';
 import '../../config/theme.dart';
 import '../../models/learner_model.dart';
 import '../../providers/vocab_provider.dart';
+import '../../services/bookshelf.dart' show spineLabel, spinePalette;
+import '../../services/database.dart';
 import '../../services/deepseek_api.dart';
 import '../../services/external_link.dart';
 import '../../services/feed_parser.dart' show FeedItem;
@@ -24,6 +26,7 @@ import '../../widgets/collapsible_section.dart';
 import '../../widgets/material_cover.dart';
 import '../../widgets/waiting.dart';
 import 'category_material_screen.dart';
+import 'bookshelf_screen.dart';
 import 'material_import_flow.dart';
 import 'material_reader_screen.dart';
 import 'widgets/material_preview_dialog.dart';
@@ -107,6 +110,8 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
       _loadShelf();
       _loadItems();
       _loadTopics([_availableTopics.first]);
+      // 已有的材料里还没中文名的,后台补齐(用户为此提过两次)
+      unawaited(_backfillShelfTitles());
     });
   }
 
@@ -223,13 +228,18 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
           : '一起找 ${topics.length} 个题材:${topics.map((t) => t.label).join('、')}',
     ));
     try {
-      // 用户若在偏好里写了题材,优先用它的说法(他比我们更清楚要什么)
+      // 用户若在偏好里写了题材,优先用它的说法(他比我们更清楚要什么);
+      // v2.10:选了"内容类型"就把它的英文检索词拼进来(中文标签对公开源没用)
       final genres = _prefs.genres.trim();
+      final contentQueries = _prefs.contentQueries;
       final all = <OriginalHit>[];
       final seen = <String>{};
       final notes = <String>[];
       for (final topic in topics) {
-        final query = genres.isEmpty ? topic.queries.first : genres;
+        final base = genres.isEmpty ? topic.queries.first : genres;
+        final query = contentQueries.isEmpty
+            ? base
+            : '$base ${contentQueries.first}';
         final result = await OriginalSearch.search(
           query,
           category: '其他',
@@ -366,7 +376,14 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
     });
   }
 
-  /// 批量把英文标题翻成中文(带缓存;AI 没配就静默返回)
+  /// 批量把英文标题翻成中文(**并且落库**)。
+  ///
+  /// v2.10 修(用户 10/4 原话:"推荐的所有材料,我都说了标题要有中文翻译呀 ——
+  /// 我都说了几次了,一次都没实现过"):
+  /// 旧实现只把译名塞进**这一次列表加载**的内存缓存 —— 材料库、书架、阅读器标题、
+  /// 历史记录全都没中文,用户当然觉得"从来没实现"。
+  /// 现在:①译名写进 `materials.title_cn`(任何界面读同一份、只翻一次);
+  /// ②材料库/书架加载后**后台补齐**还没译名的材料;③界面上凡是英文标题都带中文。
   Future<void> _translateTitles(List<String> titles) async {
     final todo = [
       for (final t in titles)
@@ -377,8 +394,59 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
       final map = await _ai.translateTitles(todo);
       if (!mounted) return;
       setState(() => _titleCn.addAll(map));
+      await _persistTitleCn(map);
     } catch (e) {
       debugPrint('ReadFlow 标题中文化失败(保持英文): $e');
+    }
+  }
+
+  /// 把译名写回材料表(标题 → 材料 id)
+  Future<void> _persistTitleCn(Map<String, String> map) async {
+    try {
+      final shelf = await MaterialLibrary.shelf(limit: 300);
+      for (final s in shelf) {
+        final cn = map[s.title]?.trim();
+        if (cn != null && cn.isNotEmpty) {
+          await DatabaseService.setMaterialTitleCn(s.id, cn);
+        }
+      }
+    } catch (e) {
+      debugPrint('ReadFlow 写回中文标题失败: $e');
+    }
+  }
+
+  /// 材料库里还没有中文名的,在后台慢慢补齐(app 打开时补几条,不阻塞界面)
+  Future<void> _backfillShelfTitles() async {
+    if (!_ai.isConfigured) return;
+    try {
+      for (var round = 0; round < 3; round++) {
+        final rows = await DatabaseService.materialsMissingTitleCn(limit: 6);
+        if (rows.isEmpty || !mounted) return;
+        final titles = [for (final r in rows) '${r['title'] ?? ''}']
+            .where((t) => t.trim().isNotEmpty)
+            .toList();
+        if (titles.isEmpty) return;
+        final map = await _ai.translateTitles(titles);
+        if (!mounted) return;
+        var saved = 0;
+        for (final r in rows) {
+          final cn = map['${r['title']}']?.trim();
+          final id = r['id'] as int?;
+          if (id != null && cn != null && cn.isNotEmpty) {
+            await DatabaseService.setMaterialTitleCn(id, cn);
+            saved++;
+          }
+        }
+        setState(() => _titleCn.addAll(map));
+        // 一条都没写成功(比如 AI 一直返回空)就别再循环了,免得刷接口
+        if (saved == 0) return;
+      }
+      if (mounted) {
+        _model = LearnerModelStore.load();
+        await _loadShelf();
+      }
+    } catch (e) {
+      debugPrint('ReadFlow 后台补标题失败: $e');
     }
   }
 
@@ -410,6 +478,26 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
             : '可用源:${usable.join('、')}'),
       ),
     );
+  }
+
+  /// 打开一条"今日推荐"条目(v2.10)**真的打开它**,不是只换上面那张卡
+  Future<void> _openFeedItem(FeedItem item) async {
+    await MaterialImportFlow.openHitWithProgress(
+      context,
+      hit: OriginalHit(
+        sourceId: _sourceId,
+        sourceId2: item.link,
+        title: item.title,
+        url: item.link,
+        note: item.summary,
+        imageUrl: item.imageUrl,
+      ),
+      model: _model,
+    );
+    if (!mounted) return;
+    _model = LearnerModelStore.load();
+    await _loadShelf();
+    unawaited(_backfillShelfTitles());
   }
 
   /// 打开今日精读(大卡按钮)
@@ -552,7 +640,39 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
                         style: theme.textTheme.bodySmall
                             ?.copyWith(color: muted, fontSize: 11)),
                     const SizedBox(height: Gap.md),
-                    Text('内容类型',
+                    // v2.10(用户 10/4 第 2(4) 条):**内容层面**的类型 —— 与上面
+                    // "来源类型"是两个维度:那个管"从哪来",这个管"里面是什么"。
+                    Text('内容类型(可多选)',
+                        style: theme.textTheme.bodySmall?.copyWith(color: muted)),
+                    const SizedBox(height: Gap.xxs),
+                    Text(
+                      '来源管"从哪来",这里管"里面是什么" —— 选中的会被翻成英文检索词,直接影响找什么。',
+                      style: TextStyle(fontSize: 11, height: 1.4, color: muted),
+                    ),
+                    const SizedBox(height: Gap.xs),
+                    Wrap(
+                      spacing: Gap.xs,
+                      runSpacing: Gap.xs,
+                      children: [
+                        for (final t in MaterialPrefs.contentCatalog)
+                          FilterChip(
+                            label: Text(t.label),
+                            selected: draft.contentTypes.contains(t.id),
+                            onSelected: (on) {
+                              final next = {...draft.contentTypes};
+                              if (on) {
+                                next.add(t.id);
+                              } else {
+                                next.remove(t.id);
+                              }
+                              apply(draft.copyWith(contentTypes: next));
+                            },
+                            tooltip: t.hint,
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: Gap.md),
+                    Text('来源类型',
                         style: theme.textTheme.bodySmall?.copyWith(color: muted)),
                     const SizedBox(height: Gap.xs),
                     Wrap(
@@ -729,6 +849,24 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
             AppStagger(
               index: 3,
               child: CollapsibleSection(
+                id: 'bookshelf',
+                title: '书架',
+                icon: Icons.collections_bookmark_outlined,
+                subtitle: _shelfCount == 0
+                    ? '还没放书 —— 读过的材料可以摆上来'
+                    : '架上 $_shelfCount 本 · 点开继续读',
+                collapsedHint: _shelfCount == 0 ? '空书架' : '$_shelfCount 本',
+                trailing: TextButton(
+                  onPressed: () => _openBookshelf(),
+                  child: const Text('去看看'),
+                ),
+                // 书架本体在独立页面(那里要画真的架子),这里给一个"当前架上"的横排预览
+                child: _buildBookshelfPreview(theme, muted),
+              ),
+            ),
+            AppStagger(
+              index: 4,
+              child: CollapsibleSection(
                 id: 'byLevel',
                 title: '按你的水平找材料',
                 icon: Icons.school_outlined,
@@ -737,7 +875,7 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
               ),
             ),
             AppStagger(
-              index: 4,
+              index: 5,
               child: CollapsibleSection(
                 id: 'feed',
                 title: '今日推荐',
@@ -775,7 +913,7 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
               ),
             ),
             AppStagger(
-              index: 5,
+              index: 6,
               child: CollapsibleSection(
                 id: 'shelf',
                 title: '材料库',
@@ -1288,7 +1426,163 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
     );
   }
 
-  /// 发现区卡片:缩略图 + 标题(中文(英文))+ 元信息 + Lv 徽标 + 动作
+  /// 书架(v2.10,用户 10/4 第 4/5 条):材料中心里的一块,点开是独立书架页
+  int _shelfCount = 0;
+  List<Map<String, Object?>> _bookshelf = const [];
+
+  Future<void> _loadBookshelf() async {
+    try {
+      final rows = await DatabaseService.bookshelfItems();
+      if (!mounted) return;
+      setState(() {
+        _bookshelf = rows;
+        _shelfCount = rows.length;
+      });
+    } catch (e) {
+      debugPrint('读书架失败: $e');
+    }
+  }
+
+  Future<void> _openBookshelf() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const BookshelfScreen()),
+    );
+    if (!mounted) return;
+    await _loadBookshelf();
+    await _loadShelf();
+  }
+
+  /// 材料中心里的书架预览:一条横排书脊(真书架在独立页)
+  Widget _buildBookshelfPreview(ThemeData theme, Color muted) {
+    if (_bookshelf.isEmpty) {
+      return AppCard(
+        onTap: _openBookshelf,
+        child: Column(
+          children: [
+            Icon(Icons.collections_bookmark_outlined,
+                size: 34, color: theme.colorScheme.outline),
+            const SizedBox(height: Gap.xs),
+            Text('书架还是空的',
+                style: theme.textTheme.titleSmall
+                    ?.copyWith(fontWeight: FontWeight.w600)),
+            const SizedBox(height: 4),
+            Text(
+              '读到想留着的材料,在阅读器里点「加入书架」;\n退出时会问你一句「放进书架?」',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 11.5, height: 1.5, color: muted),
+            ),
+            const SizedBox(height: Gap.sm),
+            FilledButton.tonalIcon(
+              onPressed: _openBookshelf,
+              icon: const Icon(Icons.auto_stories_outlined, size: 16),
+              label: const Text('看看空书架'),
+            ),
+          ],
+        ),
+      );
+    }
+    return AppCard(
+      onTap: _openBookshelf,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            height: 96,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: _bookshelf.length,
+              separatorBuilder: (_, _) => const SizedBox(width: Gap.xs),
+              itemBuilder: (_, i) {
+                final r = _bookshelf[i];
+                final title = '${r['title'] ?? ''}';
+                final percent = (r['percent'] as num?)?.toDouble() ?? 0;
+                return _shelfSpine(theme, title, percent, r);
+              },
+            ),
+          ),
+          const SizedBox(height: Gap.xs),
+          Row(
+            children: [
+              Icon(Icons.touch_app_outlined, size: 14, color: muted),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text('点一本继续读,或进书架页看整架',
+                    style: TextStyle(fontSize: 11, color: muted)),
+              ),
+              const Icon(Icons.chevron_right, size: 18),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _shelfSpine(
+    ThemeData theme,
+    String title,
+    double percent,
+    Map<String, Object?> row,
+  ) {
+    // 用书架模块里已测过的纯函数(自己手写 characters.take(6).toString()
+    // 会得到 "(傲, 慢, ...)" 这种带括号的字符串 —— 子任务指出过这个坑)
+    final color = spinePalette(title).first;
+    final label = spineLabel(title, vertical: false);
+    return InkWell(
+      borderRadius: Radii.controlRadius,
+      onTap: () async {
+        await _openReader((row['material_id'] as num).toInt());
+        if (!mounted) return;
+        await _loadBookshelf();
+      },
+      child: Container(
+        width: 44,
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: Radii.controlRadius,
+          border: Border.all(color: Colors.black.withAlpha(30)),
+        ),
+        child: Column(
+          children: [
+            const SizedBox(height: 6),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: Text(
+                  label,
+                  maxLines: 4,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 10.5,
+                    height: 1.25,
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+            // 书签带 = 阅读进度
+            Container(
+              height: 3,
+              margin: const EdgeInsets.symmetric(horizontal: 6),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(2),
+                child: LinearProgressIndicator(
+                  value: (percent / 100).clamp(0.0, 1.0),
+                  minHeight: 3,
+                  backgroundColor: Colors.white.withAlpha(60),
+                  valueColor: AlwaysStoppedAnimation(Colors.white),
+                ),
+              ),
+            ),
+            const SizedBox(height: 5),
+          ],
+        ),
+      ),
+    );
+  }
+
   ///
   /// v2.9 修(用户截图指出的问题):上一版把「软件内阅读」做成默认尺寸的大按钮
   /// 塞进一行,结果**两个按钮超出卡片宽度**、右边那个被裁成「原」字,
@@ -1539,10 +1833,11 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
     return Padding(
       padding: const EdgeInsets.only(bottom: Gap.xs),
       child: AppCard(
-        onTap: () {
-          setState(() => _daily = item);
-          _loadDaily(item);
-        },
+        // v2.10 修(用户 10/4:"'今日推荐'的文章点了后没反应"):
+        // 旧实现把点击做成了"设为今日精读"(只换上面那张大卡),用户当然觉得没反应。
+        // 现在**点卡片 = 直接打开这篇文章阅读**(这才是点下去该发生的事),
+        // 「设为今日精读」降级成卡片右下角的小按钮。
+        onTap: () => _openFeedItem(item),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -1580,6 +1875,29 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
                     children: [
                       if (item.published != null)
                         _meta(theme, Icons.schedule, item.published!),
+                      const SizedBox(width: Gap.xs),
+                      // 设成今日精读(次要动作,小按钮)
+                      TextButton.icon(
+                        style: TextButton.styleFrom(
+                          padding: EdgeInsets.zero,
+                          minimumSize: const Size(0, 24),
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        onPressed: () {
+                          setState(() => _daily = item);
+                          _loadDaily(item);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('已设为今日精读(在上面的「今日精读」卡里)'),
+                              behavior: SnackBarBehavior.floating,
+                            ),
+                          );
+                        },
+                        icon: const Icon(Icons.local_fire_department_outlined,
+                            size: 13),
+                        label: const Text('设为今日精读',
+                            style: TextStyle(fontSize: 11)),
+                      ),
                       const SizedBox(width: Gap.xs),
                       TextButton(
                         style: TextButton.styleFrom(

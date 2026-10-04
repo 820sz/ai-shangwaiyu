@@ -6,6 +6,29 @@ import 'package:hive_flutter/hive_flutter.dart';
 import '../config/constants.dart';
 import 'material_source.dart';
 
+/// **内容层面**的类型(v2.10,用户 10/4 第 2(4) 条)。
+///
+/// 与 `MaterialSource.kind`(来源:公版书/论文/外刊…)是两个维度:
+/// 这个回答"里面是什么东西"(新闻报道/评论社论/科普/文学/学术…),
+/// 每一项都带一组**英文检索词** —— 公开源只认英文,中文标签只是给用户看的。
+class MaterialContentType {
+  final String id;
+  final String label;
+
+  /// 一句话说明(界面上当 tooltip:告诉用户选它意味着什么)
+  final String hint;
+
+  /// 英文检索词(第一组会拼进实际检索)
+  final List<String> queries;
+
+  const MaterialContentType({
+    required this.id,
+    required this.label,
+    required this.hint,
+    required this.queries,
+  });
+}
+
 /// 材料难度档(v2.7,用户第 4 条:材料中心要能"用户难度自选(i+1, i+10, i+100)")。
 ///
 /// **数字怎么定义**:按**未知词率**分档,与 `LearnerContext` 的既有阈值同一口径
@@ -107,9 +130,19 @@ class MaterialPrefs {
   /// 补充/调整需求(自由文本,如"不要学术腔,每篇别超过 10 分钟")
   final String extra;
 
+  /// **内容层面**的类型偏好(v2.10,用户 10/4 第 2(4) 条)。
+  ///
+  /// 用户原话:"'个性化找资源'的内容类型**再提高多一些**,现在只有体裁分类,
+  /// 没有**内容层面**的分类。"
+  /// 体裁(kinds)回答的是"这材料从哪来"(公版书/论文/外刊…),
+  /// 这里回答的是"里面是什么东西"(新闻/评论/科普/文学/商务/学术/演讲/访谈…),
+  /// 两者是**两个维度**,都可以多选,一起交给 AI 当检索约束。
+  final Set<String> contentTypes;
+
   const MaterialPrefs({
     this.band = MaterialBand.any,
     this.kinds = const {},
+    this.contentTypes = const {},
     this.genres = '',
     this.extra = '',
   });
@@ -125,28 +158,112 @@ class MaterialPrefs {
     'wiki': '百科',
   };
 
+  /// **内容层面**的分类(用户 10/4 第 2(4) 条):每个都给一句"适合谁/练什么",
+  /// 并且带一组英文检索词 —— 点一下就能真的影响检索,不是装饰。
+  static const List<MaterialContentType> contentCatalog = [
+    MaterialContentType(
+      id: 'news_report',
+      label: '新闻报道',
+      hint: '时事、硬新闻;练信息提取',
+      queries: ['news report', 'breaking news'],
+    ),
+    MaterialContentType(
+      id: 'opinion',
+      label: '评论社论',
+      hint: '观点与论证;练立场判断',
+      queries: ['opinion editorial', 'op-ed'],
+    ),
+    MaterialContentType(
+      id: 'science',
+      label: '科普',
+      hint: '把复杂事讲清楚;练说明文',
+      queries: ['popular science', 'science explained'],
+    ),
+    MaterialContentType(
+      id: 'literature',
+      label: '文学小说',
+      hint: '叙事与描写;练语感',
+      queries: ['short story', 'classic novel'],
+    ),
+    MaterialContentType(
+      id: 'academic',
+      label: '学术论文',
+      hint: '摘要与论证;备考/科研',
+      queries: ['research paper abstract', 'academic study'],
+    ),
+    MaterialContentType(
+      id: 'business',
+      label: '商业财经',
+      hint: '市场与公司;职场英语',
+      queries: ['business news', 'market analysis'],
+    ),
+    MaterialContentType(
+      id: 'speech',
+      label: '演讲致辞',
+      hint: '成段的正式口语;练跟读',
+      queries: ['famous speech transcript', 'commencement address'],
+    ),
+    MaterialContentType(
+      id: 'interview',
+      label: '访谈对话',
+      hint: '真实口语节奏;练听说',
+      queries: ['interview transcript', 'conversation'],
+    ),
+    MaterialContentType(
+      id: 'howto',
+      label: '教程指南',
+      hint: '步骤与说明;练指令句',
+      queries: ['how-to guide', 'tutorial'],
+    ),
+    MaterialContentType(
+      id: 'history',
+      label: '历史人文',
+      hint: '时间线与因果;练长句',
+      queries: ['history essay', 'historical account'],
+    ),
+  ];
+
   bool get isEmpty =>
-      band.isAny && kinds.isEmpty && genres.trim().isEmpty && extra.trim().isEmpty;
+      band.isAny &&
+      kinds.isEmpty &&
+      contentTypes.isEmpty &&
+      genres.trim().isEmpty &&
+      extra.trim().isEmpty;
 
   /// 有几项偏好生效(界面上的小角标:N 项偏好)
   int get activeCount =>
       (band.isAny ? 0 : 1) +
       kinds.length +
+      contentTypes.length +
       (genres.trim().isEmpty ? 0 : 1) +
       (extra.trim().isEmpty ? 0 : 1);
 
   MaterialPrefs copyWith({
     MaterialBand? band,
     Set<String>? kinds,
+    Set<String>? contentTypes,
     String? genres,
     String? extra,
   }) =>
       MaterialPrefs(
         band: band ?? this.band,
         kinds: kinds ?? this.kinds,
+        contentTypes: contentTypes ?? this.contentTypes,
         genres: genres ?? this.genres,
         extra: extra ?? this.extra,
       );
+
+  /// 内容类型的中文名清单
+  List<String> get contentLabels => [
+        for (final t in contentCatalog)
+          if (contentTypes.contains(t.id)) t.label,
+      ];
+
+  /// 内容类型对应的英文检索词(第一组就够用;拿去当检索词比中文标签有效)
+  List<String> get contentQueries => [
+        for (final t in contentCatalog)
+          if (contentTypes.contains(t.id)) t.queries.first,
+      ];
 
   /// 偏好的源清单(空 = 全部源)。用户选了"论文"就只去 arXiv 找 —— 这比在
   /// 结果里过滤更省一次网络往返,而且能让 AI 的检索词一开始就对路。
@@ -167,7 +284,13 @@ class MaterialPrefs {
       final names = [
         for (final k in kinds) kindLabels[k] ?? k,
       ];
-      parts.add('内容类型偏好:${names.join('、')}');
+      parts.add('来源类型偏好:${names.join('、')}');
+    }
+    // v2.10(第 2(4) 条):内容层面的偏好单独说一句,并带上英文检索词 ——
+    // "科普"这种中文标签对公开源没用,给英文词才真的影响检索结果
+    if (contentTypes.isNotEmpty) {
+      parts.add('内容类型偏好:${contentLabels.join('、')}'
+          '(建议检索词:${contentQueries.join(' / ')})');
     }
     if (genres.trim().isNotEmpty) parts.add('题材倾向:${genres.trim()}');
     if (extra.trim().isNotEmpty) parts.add('补充要求:${extra.trim()}');
@@ -185,6 +308,7 @@ class MaterialPrefs {
         for (final k in kinds) kindLabels[k] ?? k,
       ].join('/'));
     }
+    if (contentTypes.isNotEmpty) parts.add(contentLabels.join('/'));
     if (genres.trim().isNotEmpty) parts.add(genres.trim());
     if (extra.trim().isNotEmpty) parts.add(extra.trim());
     return parts.join(' · ');
@@ -193,6 +317,7 @@ class MaterialPrefs {
   Map<String, Object?> toJson() => {
         'band': band.name,
         'kinds': kinds.toList(),
+        'content_types': contentTypes.toList(),
         'genres': genres,
         'extra': extra,
       };
@@ -209,9 +334,19 @@ class MaterialPrefs {
           if (kindLabels.containsKey(id)) kinds.add(id);
         }
       }
+      // 内容类型:只认目录里的 id(旧的偏好串里没有这个 key → 空集合,天然兼容)
+      final contentTypes = <String>{};
+      final rawContent = raw['content_types'];
+      if (rawContent is List) {
+        for (final c in rawContent) {
+          final id = '$c'.trim();
+          if (contentCatalog.any((t) => t.id == id)) contentTypes.add(id);
+        }
+      }
       return MaterialPrefs(
         band: MaterialBand.parse(raw['band']),
         kinds: kinds,
+        contentTypes: contentTypes,
         genres: '${raw['genres'] ?? ''}',
         extra: '${raw['extra'] ?? ''}',
       );

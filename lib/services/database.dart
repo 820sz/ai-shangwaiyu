@@ -383,6 +383,22 @@ class DatabaseService {
     )
   ''';
 
+  /// 书架(v2.10,用户 10/4 第 4/5 条:"材料中心里的书架,像真书架一样,放一篇多一本")
+  ///
+  /// 为什么单独一张表而不是给 materials 加一列:
+  /// 书架是**用户自己挑选**的结果(materials 里混着公版书/论文/外刊/导入件),
+  /// 还要有摆放顺序与加入时间 —— "我挑进来的"这层语义独立成表最干净。
+  static const String _bookshelfTableSql = '''
+    CREATE TABLE IF NOT EXISTS bookshelf (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      material_id INTEGER NOT NULL UNIQUE,
+      slot INTEGER DEFAULT 0,
+      note TEXT,
+      added_at TEXT,
+      from_where TEXT
+    )
+  ''';
+
   /// 测验结果(词汇量测试 / 读后测验 / 回译 / 听写统一进这张表)
   static const String _quizResultsTableSql = '''
     CREATE TABLE IF NOT EXISTS quiz_results (
@@ -484,6 +500,7 @@ class DatabaseService {
     await db.execute(_drillPlansTableSql);
     await db.execute(_drillLogsTableSql);
     await db.execute(_materialBlocksTableSql);
+    await db.execute(_bookshelfTableSql);
     await _createIndexes(db);
   }
 
@@ -619,6 +636,9 @@ class DatabaseService {
       await _ensureTable(db, 'material_blocks', _materialBlocksTableSql, repaired);
       await _ensureColumn(db, 'materials', 'origin', 'TEXT', repaired);
       await _ensureColumn(db, 'materials', 'group_name', 'TEXT', repaired);
+      // v2.10:书架表 + 材料中文标题缓存
+      await _ensureTable(db, 'bookshelf', _bookshelfTableSql, repaired);
+      await _ensureColumn(db, 'materials', 'title_cn', 'TEXT', repaired);
       await _createIndexes(db);
       // v2.0 不变式:每个生词都有一条复习状态(word_review)。
       // 放在自检里而不是只放迁移里:这样"迁移后新增的词"也有状态,
@@ -1902,6 +1922,7 @@ class DatabaseService {
                m.est_minutes AS est_minutes,
                m.origin AS origin,
                m.group_name AS group_name,
+               m.title_cn AS title_cn,
                p.position AS position,
                p.percent AS percent,
                p.minutes AS minutes,
@@ -2914,8 +2935,186 @@ class DatabaseService {
     }
   }
 
-  // ── 材料来源与分组(v2.9,用户第 5 条:材料导入要能分类)──
+  // ── 书架(v2.10,用户 10/4 第 4/5 条)──
 
+  /// 放进书架(已在架上则只更新备注,不重复加)
+  static Future<int> addToBookshelf(
+    int materialId, {
+    String? note,
+    String fromWhere = 'reader',
+  }) async {
+    try {
+      final db = await database;
+      final now = DateTime.now().toIso8601String();
+      final existing = await db.query(
+        'bookshelf',
+        where: 'material_id = ?',
+        whereArgs: [materialId],
+        limit: 1,
+      );
+      if (existing.isNotEmpty) {
+        final id = existing.first['id'] as int;
+        await db.update(
+          'bookshelf',
+          {'note': note ?? existing.first['note'], 'added_at': now},
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+        return id;
+      }
+      // slot = 当前最大 + 1:摆上去的顺序就是用户放书的顺序(书架要"一本本排")
+      final maxRow = await db.rawQuery('SELECT MAX(slot) AS m FROM bookshelf');
+      final nextSlot = ((maxRow.first['m'] as int?) ?? 0) + 1;
+      return await db.insert('bookshelf', {
+        'material_id': materialId,
+        'slot': nextSlot,
+        'note': note,
+        'added_at': now,
+        'from_where': fromWhere,
+      });
+    } catch (e) {
+      debugPrint('ReadFlow addToBookshelf failed: $e');
+      return -1;
+    }
+  }
+
+  static Future<void> removeFromBookshelf(int materialId) async {
+    try {
+      final db = await database;
+      await db.delete('bookshelf', where: 'material_id = ?', whereArgs: [materialId]);
+    } catch (e) {
+      debugPrint('ReadFlow removeFromBookshelf failed: $e');
+    }
+  }
+
+  static Future<bool> isOnBookshelf(int materialId) async {
+    try {
+      final db = await database;
+      final rows = await db.query(
+        'bookshelf',
+        where: 'material_id = ?',
+        whereArgs: [materialId],
+        limit: 1,
+      );
+      return rows.isNotEmpty;
+    } catch (e) {
+      debugPrint('ReadFlow isOnBookshelf failed: $e');
+      return false;
+    }
+  }
+
+  /// 书架上的书(**按摆放顺序**),带标题/进度/难度/封面所需字段 —— 界面一次查完
+  static Future<List<Map<String, Object?>>> bookshelfItems() async {
+    try {
+      final db = await database;
+      return await db.rawQuery('''
+        SELECT b.id AS shelf_id,
+               b.slot AS slot,
+               b.note AS note,
+               b.added_at AS added_at,
+               b.from_where AS from_where,
+               m.id AS material_id,
+               COALESCE(NULLIF(m.title_cn, ''), m.title) AS title,
+               m.title AS title_en,
+               m.title_cn AS title_cn,
+               m.kind AS kind,
+               m.source AS source,
+               m.origin AS origin,
+               m.cefr AS cefr,
+               m.word_count AS word_count,
+               m.est_minutes AS est_minutes,
+               m.coverage AS coverage,
+               m.url AS url,
+               p.percent AS percent,
+               p.position AS position,
+               p.minutes AS minutes,
+               p.picked_words AS picked_words,
+               p.finished_at AS finished_at,
+               COALESCE(p.updated_at, b.added_at) AS updated_at
+        FROM bookshelf b
+        JOIN materials m ON m.id = b.material_id
+        LEFT JOIN material_progress p ON p.material_id = m.id
+        ORDER BY b.slot ASC, b.id ASC
+      ''');
+    } catch (e) {
+      debugPrint('ReadFlow bookshelfItems failed: $e');
+      return [];
+    }
+  }
+
+  static Future<int> bookshelfCount() async {
+    try {
+      final db = await database;
+      final rows = await db.rawQuery('SELECT COUNT(*) AS c FROM bookshelf');
+      return (rows.first['c'] as int?) ?? 0;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  /// 拖拽/手动调整摆放顺序:把 [materialId] 挪到 [slot] 位置(其余顺延由界面重排后整体提交)
+  static Future<void> setBookshelfOrder(List<int> materialIds) async {
+    try {
+      final db = await database;
+      await db.transaction((txn) async {
+        for (var i = 0; i < materialIds.length; i++) {
+          await txn.update(
+            'bookshelf',
+            {'slot': i + 1},
+            where: 'material_id = ?',
+            whereArgs: [materialIds[i]],
+          );
+        }
+      });
+    } catch (e) {
+      debugPrint('ReadFlow setBookshelfOrder failed: $e');
+    }
+  }
+
+  // ── 材料中文标题(v2.10,用户 10/4 第 2(2) 条)──
+
+  /// 写一份中文标题缓存。
+  ///
+  /// 用户原话:"推荐的所有材料,**我都说了标题要有中文翻译呀** —— 我都说了几次了,
+  /// 一次都没实现过"。以前只在"当下那一次列表加载"里翻,翻完就丢:
+  /// 材料库、书架、阅读器、历史记录里到处都是没翻译的英文标题。
+  /// 现在译名**落库**(materials.title_cn),任何界面读同一份,且只翻一次。
+  static Future<void> setMaterialTitleCn(int materialId, String titleCn) async {
+    final t = titleCn.trim();
+    if (t.isEmpty) return;
+    try {
+      final db = await database;
+      await db.update(
+        'materials',
+        {'title_cn': t},
+        where: 'id = ?',
+        whereArgs: [materialId],
+      );
+    } catch (e) {
+      debugPrint('ReadFlow setMaterialTitleCn failed: $e');
+    }
+  }
+
+  /// 还没中文名的材料(界面在后台补齐译名用;limit 控制一次翻几条,别一次翻一百篇)
+  static Future<List<Map<String, Object?>>> materialsMissingTitleCn({
+    int limit = 8,
+  }) async {
+    try {
+      final db = await database;
+      return await db.rawQuery('''
+        SELECT id, title FROM materials
+        WHERE (title_cn IS NULL OR title_cn = '')
+          AND title IS NOT NULL AND title != ''
+        ORDER BY COALESCE(cached_at, created_at) DESC
+        LIMIT ?
+      ''', [limit]);
+    } catch (e) {
+      debugPrint('ReadFlow materialsMissingTitleCn failed: $e');
+      return [];
+    }
+  }
+
+  // ── 材料来源与分组(v2.9,用户第 5 条:材料导入要能分类)──
   /// 设置材料的分组名(用户自定义,如「新视野教材」);传空 = 取消分组
   static Future<void> setMaterialGroup(int materialId, String? group) async {
     try {
