@@ -17,6 +17,17 @@ import 'package:readflow/widgets/profile_name_card.dart';
 /// 1. **老数据必须还能读**(老用户的 Hive 串里没有 v2.10 的七个 key);
 /// 2. **脏数据必须回落**(越界/NaN/乱填的形状名不能把「我的」打崩);
 /// 3. **入口必须真的能点开**(点卡片 / 点「编辑名片」→ 弹层出现 → 改完能落到库里)。
+/// **这个文件里的等待一律用它,不要用 `tester.pumpAndSettle()`。**
+///
+/// v2.10 排查结论(50 分钟的"卡死"就是这个):这个页面在测试环境里永远"稳定"不下来 ——
+/// `pumpAndSettle` 会一直等到"没有待处理帧",等不满就一直等到默认的 **10 分钟**才抛错,
+/// 于是 5 个 widget 用例连起来 = **50 分钟**。
+/// 换成本函数:泵一帧 + 有界推进 400ms(足够跑完弹层的进出场动画),永不空转。
+Future<void> settle(WidgetTester tester) async {
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 400));
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -35,11 +46,14 @@ void main() {
   });
 
   tearDownAll(() async {
-    await Hive.close();
+    // ⚠️ **不要在这里调 `Hive.close()`**。
+    // v2.10 排查记录:加上它之后 tearDownAll 会卡住(日志里从 40:01 一直挂到 82:13),
+    // 因为 Hive 的关闭要 flush 异步写,而 widget 测试用的是假时钟 —— flush 永远等不到。
+    // 临时目录里的 box 文件随进程退出自生自灭,留着不影响任何断言。
     try {
       tmp.deleteSync(recursive: true);
     } catch (_) {
-      // Windows 上 Hive 的 .lock 有时还没释放;临时目录留着不影响测试结果
+      // Windows 上 Hive 的 .lock 可能还没释放;删不掉就留着,不影响测试结果
     }
   });
 
@@ -365,14 +379,14 @@ void main() {
 
     testWidgets('卡片上写着「编辑名片」;点它 → 弹层出现(入口可用)', (tester) async {
       await tester.pumpWidget(host(const ProfileNameCard(vocabCount: 12)));
-      await tester.pumpAndSettle();
+      await settle(tester);
 
       expect(find.text('编辑名片'), findsOneWidget, reason: '入口必须在卡上看得见');
       // 文案要写明能调"大小形状" —— 用户第二次说"无法编辑",一半是没找到入口
       expect(find.textContaining('头像大小形状'), findsOneWidget);
 
       await tester.tap(find.text('编辑名片'));
-      await tester.pumpAndSettle();
+      await settle(tester);
 
       expect(find.text('保存名片'), findsOneWidget, reason: '弹层打开了');
       expect(find.text('头像大小'), findsOneWidget);
@@ -382,28 +396,32 @@ void main() {
 
     testWidgets('点卡片空白处(不是按钮)也能打开弹层', (tester) async {
       await tester.pumpWidget(host(const ProfileNameCard(vocabCount: 12)));
-      await tester.pumpAndSettle();
-      // 点昵称那行(卡片中部),验证整卡可点
-      await tester.tap(find.text('我'));
-      await tester.pumpAndSettle();
+      await settle(tester);
+      // 点卡片**自己的留白**(左内边距那条缝),验证整卡可点。
+      // 为什么不用 find.text('我'):卡上头像占位与昵称各有一个"我",
+      // 文字 finder 会命中两个(旧写法就是因此报 ambiguous 而失败的)——
+      // 而且这里本来要测的就是"空白处",不是某个具体文字。
+      final rect = tester.getRect(find.byType(ProfileNameCard));
+      await tester.tapAt(Offset(rect.left + 4, rect.center.dy));
+      await settle(tester);
       expect(find.text('保存名片'), findsOneWidget);
     });
 
     testWidgets('选「大 84」→ 预览立刻变大;保存后卡片与库里都是 84', (tester) async {
       await tester.pumpWidget(host(const ProfileNameCard(vocabCount: 12)));
-      await tester.pumpAndSettle();
+      await settle(tester);
       expect(tester.getSize(cardAvatar()), const Size(64, 64));
 
       await tester.tap(find.text('编辑名片'));
-      await tester.pumpAndSettle();
+      await settle(tester);
       // 弹层里:预览(卡) + 头像区各一个头像
       expect(sheetAvatars(), findsNWidgets(2));
 
       // 选大号 —— "选中即预览"是这次的硬要求
       await tester.ensureVisible(find.text('大 84'));
-      await tester.pumpAndSettle();
+      await settle(tester);
       await tester.tap(find.text('大 84'));
-      await tester.pumpAndSettle();
+      await settle(tester);
       expect(
         tester.getSize(sheetAvatars().first),
         const Size(84, 84),
@@ -412,9 +430,9 @@ void main() {
 
       // 换形状与边框也一样要立刻反映
       await tester.ensureVisible(find.text('圆角'));
-      await tester.pumpAndSettle();
+      await settle(tester);
       await tester.tap(find.text('圆角'));
-      await tester.pumpAndSettle();
+      await settle(tester);
       final previewAvatar = tester.widget<ProfileCardAvatar>(
         sheetAvatars().first,
       );
@@ -422,9 +440,9 @@ void main() {
       expect(previewAvatar.settings.avatarRadius, closeTo(18.48, 0.01));
 
       await tester.ensureVisible(find.text('粗边框'));
-      await tester.pumpAndSettle();
+      await settle(tester);
       await tester.tap(find.text('粗边框'));
-      await tester.pumpAndSettle();
+      await settle(tester);
       expect(
         tester
             .widget<ProfileCardAvatar>(sheetAvatars().first)
@@ -435,7 +453,7 @@ void main() {
 
       // 保存 → 卡片本体与 Hive 都要更新
       await tester.tap(find.text('保存名片'));
-      await tester.pumpAndSettle();
+      await settle(tester);
       expect(find.text('保存名片'), findsNothing, reason: '弹层关了');
       expect(tester.getSize(cardAvatar()), const Size(84, 84));
       final stored = ProfileCardSettings.load();
@@ -446,23 +464,23 @@ void main() {
 
       // 把 SnackBar 的定时器放掉,免得测试结束时还挂着
       await tester.pump(const Duration(seconds: 5));
-      await tester.pumpAndSettle();
+      await settle(tester);
     });
 
     testWidgets('下滑关闭弹层 = 什么都不改', (tester) async {
       await tester.pumpWidget(host(const ProfileNameCard()));
-      await tester.pumpAndSettle();
+      await settle(tester);
       await tester.tap(find.text('编辑名片'));
-      await tester.pumpAndSettle();
+      await settle(tester);
       await tester.ensureVisible(find.text('大 84'));
-      await tester.pumpAndSettle();
+      await settle(tester);
       await tester.tap(find.text('大 84'));
-      await tester.pumpAndSettle();
+      await settle(tester);
       expect(tester.getSize(sheetAvatars().first), const Size(84, 84));
 
       // 直接关掉弹层(等价于下滑/点遮罩)
       Navigator.of(tester.element(find.text('保存名片'))).pop();
-      await tester.pumpAndSettle();
+      await settle(tester);
       expect(tester.getSize(cardAvatar()), const Size(64, 64),
           reason: '没点保存就不该有任何变化');
       expect(ProfileCardSettings.load().avatarSize, 64.0);
@@ -470,9 +488,9 @@ void main() {
 
     testWidgets('没有自选背景图时不显示四个图片调整项', (tester) async {
       await tester.pumpWidget(host(const ProfileNameCard()));
-      await tester.pumpAndSettle();
+      await settle(tester);
       await tester.tap(find.text('编辑名片'));
-      await tester.pumpAndSettle();
+      await settle(tester);
       expect(find.byType(Slider), findsNothing);
       expect(find.text('缩放'), findsNothing);
       expect(find.textContaining('选完就能调缩放'), findsOneWidget,
@@ -495,9 +513,9 @@ void main() {
         );
       });
       await tester.pumpWidget(host(const ProfileNameCard()));
-      await tester.pumpAndSettle();
+      await settle(tester);
       await tester.tap(find.text('编辑名片'));
-      await tester.pumpAndSettle();
+      await settle(tester);
 
       expect(find.text('缩放'), findsOneWidget);
       expect(find.text('1.6×'), findsOneWidget);
