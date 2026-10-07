@@ -17,8 +17,8 @@
 | Release | **v2.11.0**(含 `app-release.apk`,26,763,536 B) |
 | APK sha256 | `6358c5330cc579d4bde5747b87b419c99a2624e57d92989e8a1d142ad9e98e0b` |
 | release digest | `sha256:6358c533…9e98e0b` —— **与本地逐字一致** |
-| 本地提交 | `008873c`(之后又跑了同步,未产生新提交);本地 tree `19bf0ef1…` |
-| 远端 | master = `fad8fe1db793bfc5cccd80824c1f5130e60b2785`,tree `19bf0ef1…`(**与本地一致**) |
+| 本地提交 | `d771a1b`(发版+文档全部落地);本地 tree `89e00fcc…` |
+| 远端 | master = `e9dc90e7f704ebcfd6a1409d72fb441035661eb7`,tree `89e00fcc…`(**与本地逐字一致**) |
 | 绿灯 | `flutter analyze` **0 error / 0 warning**(11 条存量 info) |
 | 全量测试 | **1043 passed + 1 skip + 1 failed**(跑三遍结果一致;失败项见 §5) |
 | 数据库 | **dbVersion 18**(新增 `materials.cover_url`) |
