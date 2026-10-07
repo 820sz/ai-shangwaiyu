@@ -156,13 +156,28 @@ class MaterialImportFlow {
     try {
       final svc = MaterialSourceService.instance;
       onStep?.call('正在抓取正文…');
-      final doc = switch (hit.sourceId) {
+      // v2.11 修(用户 10/5:"材料中心存在部分文章打不开")。
+      //
+      // 根因:命中的 `sourceId2` 在不同来源里写法完全不同 ——
+      //   站内检索给纯书号(`1342`),而 RSS 列表给**整条 URL**
+      //   (实测 Gutenberg today.rss 12/12 都是 `.../ebooks/79727`),
+      // 但"今日推荐/今日精读"把 `FeedItem.link` 原样塞进了 `sourceId2`,
+      // 旧代码却写死 `int.tryParse(sourceId2) ?? 0` → 0 → 「书籍 id 不合法:0」。
+      //
+      // 修法:先按源**规范化**这一条命中(书号从任意写法里抠出来),
+      // 把 source/sourceId2 改成与 `fetchGutenberg` 产出的文档一致 ——
+      // 这样入库时的去重键(source + source_id)在两条链路里是同一个,
+      // 同一本书从"发现更多"和从"今日推荐"打开不会在材料库里变成两条。
+      final resolved = _resolveHit(hit);
+      final doc = switch (resolved.sourceId) {
         'gutenberg' =>
-          await svc.fetchGutenberg(int.tryParse(hit.sourceId2) ?? 0),
-        'arxiv' => await svc.fetchArxiv(hit.sourceId2),
+          await svc.fetchGutenberg(int.tryParse(resolved.sourceId2) ?? 0),
+        'arxiv' => await svc.fetchArxiv(resolved.sourceId2),
         _ => url.isEmpty
-            ? await svc.fetchDocument(hit.sourceId, url: hit.url)
-            : await MaterialImport.fromAnyUrl(url, title: title),
+            ? await svc.fetchDocument(resolved.sourceId, url: resolved.url)
+            // 其它源仍走"按链接自动选抓取方式"(能识别 Gutenberg/arXiv 链接,
+            // 但这里 resolved.sourceId 已经确定,所以只是兜底)
+            : await MaterialImport.fromAnyUrl(resolved.url, title: title),
       };
       // 真实数字:抓到多少段、多少字(用户能看到"确实在干活")
       onStep?.call(
@@ -852,6 +867,26 @@ class MaterialImportFlow {
         '不会丢,入库的是完整正文)';
   }
 
+  /// 把一条命中规范化成"抓取器与入库都认"的样子(纯函数,可单测)。
+  ///
+  /// 只做一件事:按源把 `sourceId2` 从"任意写法"收敛成**源内规范 id**
+  /// (公版书 → 书号;arXiv → 去掉版本号的编号;其它源不动)。
+  /// 认不出书号时**保持原样** —— 不猜、也不抛异常,让下游给出人话提示。
+  static OriginalHit _resolveHit(OriginalHit hit) {
+    final id = MaterialSourceService.normalizeSourceId2(hit.sourceId, hit.sourceId2);
+    if (id.isEmpty || id == hit.sourceId2) return hit;
+    return OriginalHit(
+      sourceId: hit.sourceId,
+      sourceId2: id,
+      title: hit.title,
+      author: hit.author,
+      url: hit.url,
+      note: hit.note,
+      // v2.11:配图一路带到入库(以前这里就丢了,封面才会永远是色块)
+      imageUrl: hit.imageUrl,
+    );
+  }
+
   /// 用新标题/新正文重建文档(块与元信息原样保留)。
   /// [text] 传 null 表示正文不动(只改标题的场景,如标题中文化)。
   static MaterialDoc _retitle(
@@ -874,6 +909,9 @@ class MaterialImportFlow {
       license: doc.license,
       language: doc.language,
       audioUrl: doc.audioUrl,
+      // v2.11:改标题不能把配图丢掉(否则"打开时改中文标题"这一步之后
+      // 封面就退化成色块了 —— 这类"复制构造函数漏字段"是无声的)
+      coverUrl: doc.coverUrl,
       chunks: textChanged
           ? MaterialSourceService.chunkByWords(newText, wordsPerChunk: 2500)
           : doc.chunks,

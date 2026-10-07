@@ -8,7 +8,7 @@ import '../../config/design_tokens.dart';
 import '../../config/theme.dart';
 import '../../models/learner_model.dart';
 import '../../providers/vocab_provider.dart';
-import '../../services/bookshelf.dart' show spineLabel, spinePalette;
+import '../../services/bookshelf.dart';
 import '../../services/database.dart';
 import '../../services/deepseek_api.dart';
 import '../../services/external_link.dart';
@@ -22,6 +22,7 @@ import '../../services/material_topics.dart';
 import '../../services/original_search.dart';
 import '../../services/word_frequency.dart';
 import '../../widgets/app_ui.dart';
+import '../../widgets/bookshelf_view.dart';
 import '../../widgets/collapsible_section.dart';
 import '../../widgets/material_cover.dart';
 import '../../widgets/waiting.dart';
@@ -93,6 +94,49 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
 
   /// 区块的展开/收起/隐藏(v2.9,用户 3(1) 条)
   final _sectionPrefs = SectionPrefsNotifier(UiSectionPrefs.load());
+
+  /// 当前显示的功能分组(v2.11 材料中心的信息架构)。
+  ///
+  /// 0 = 找材料(个性化偏好 + 题材发现 + 按水平找)、
+  /// 1 = 在读(书架 + 今日推荐)、2 = 我的东西(材料库)。
+  /// 为什么用"分组切换"而不是继续 7 段竖排:用户 10/5 的原话是
+  /// "材料中心更是没有欲望的竖列呈现" —— 7 个同形标题行首尾相连,
+  /// 首屏全是横杠。分组后首屏只见"主角卡 + 一组内容",每块的空间也变大了。
+  /// 注意:分组**不是把功能藏起来** —— 切一下就全在,而且每个区块自身的
+  /// 折叠/隐藏机制(v2.9)原样保留。
+  int _group = 0;
+
+  /// 分组切换器:一枚 `SegmentedButton`(Material 3,自带选中态与动效)
+  Widget _buildGroupSwitcher(ThemeData theme) {
+    return SegmentedButton<int>(
+      segments: const [
+        ButtonSegment(
+          value: 0,
+          icon: Icon(Icons.travel_explore_outlined, size: 16),
+          label: Text('找材料'),
+        ),
+        ButtonSegment(
+          value: 1,
+          icon: Icon(Icons.auto_stories_outlined, size: 16),
+          label: Text('在读'),
+        ),
+        ButtonSegment(
+          value: 2,
+          icon: Icon(Icons.library_books_outlined, size: 16),
+          label: Text('我的东西'),
+        ),
+      ],
+      selected: {_group},
+      showSelectedIcon: false,
+      style: ButtonStyle(
+        visualDensity: VisualDensity.compact,
+        textStyle: WidgetStatePropertyAll(
+          TextStyle(fontSize: AppFont.caption, fontWeight: FontWeight.w600),
+        ),
+      ),
+      onSelectionChanged: (s) => setState(() => _group = s.first),
+    );
+  }
 
   @override
   void initState() {
@@ -804,24 +848,22 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
           key: const PageStorageKey<String>('material_center'),
           padding: Insets.page,
           children: [
-            // ── 每个功能区都可收起/隐藏(v2.9,用户 3(1) 条)──
-            // 用户原话:"每个功能都展示得太满,没有收起和隐藏这些基本逻辑,
-            // 导致得往下翻半天"。所以标题行整行可点收放,菜单里可隐藏。
-            AppStagger(
-              index: 0,
-              child: CollapsibleSection(
-                id: 'prefs',
-                title: '个性化找资源',
-                icon: Icons.tune,
-                subtitle: _prefs.summary,
-                collapsedHint: _prefs.summary,
-                trailing: TextButton(
-                  onPressed: _showPrefsSheet,
-                  child: const Text('调整'),
-                ),
-                child: _buildPrefsCard(theme, muted),
-              ),
-            ),
+            // ── v2.11 信息架构(用户 10/5:"材料中心更是没有欲望的竖列呈现")──
+            //
+            // 改动:以前是 **7 个折叠区块首尾相连**(标题行由同一份代码渲染 →
+            // 一眼扫过去是 7 条一模一样的横杠)。现在:
+            //   ① 「今日精读」提到最上面当**主角**(hero 卡,不再藏进折叠区);
+            //   ② 其余 6 个区块收进 **3 组分段切换**,一次只显示一组 ——
+            //      首屏看得见的东西变少,每个区块的纵向空间变大;
+            //   ③ 每个区块**本身仍然可折叠/可隐藏**(v2.9 的机制原样保留),
+            //      分段只是"分层",不是"把功能藏起来":切一下就全在。
+            //
+            // 分组依据是"用户此刻想干什么",不是按功能名硬分:
+            //   找材料(个性化偏好 + 题材发现 + 按水平找)、
+            //   在读的(书架 + 今日推荐)、
+            //   我的东西(材料库)。
+            _buildGroupSwitcher(theme),
+            const SizedBox(height: Gap.xs),
             AppStagger(
               index: 1,
               child: CollapsibleSection(
@@ -833,34 +875,52 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
                 child: _buildDailyCard(theme, muted),
               ),
             ),
-            AppStagger(
-              index: 2,
-              child: CollapsibleSection(
-                id: 'discover',
-                title: '发现更多',
-                icon: Icons.explore_outlined,
-                subtitle: '按题材找:公版书 + 论文 + 外媒三路并行',
-                collapsedHint: _selectedTopics.isEmpty
-                    ? '选题材后在这里出结果'
-                    : '已选 ${_selectedTopics.length} 个题材 · ${_topicHits.length} 篇材料',
-                child: _buildDiscover(theme, muted),
+            if (_group == 0) ...[
+              AppStagger(
+                index: 0,
+                child: CollapsibleSection(
+                  id: 'prefs',
+                  title: '个性化找资源',
+                  icon: Icons.tune,
+                  subtitle: _prefs.summary,
+                  collapsedHint: _prefs.summary,
+                  trailing: TextButton(
+                    onPressed: _showPrefsSheet,
+                    child: const Text('调整'),
+                  ),
+                  child: _buildPrefsCard(theme, muted),
+                ),
               ),
-            ),
-            AppStagger(
-              index: 3,
-              child: CollapsibleSection(
-                id: 'bookshelf',
-                title: '书架',
-                icon: Icons.collections_bookmark_outlined,
-                subtitle: _shelfCount == 0
-                    ? '还没放书 —— 读过的材料可以摆上来'
-                    : '架上 $_shelfCount 本 · 点开继续读',
-                collapsedHint: _shelfCount == 0 ? '空书架' : '$_shelfCount 本',
+              AppStagger(
+                index: 2,
+                child: CollapsibleSection(
+                  id: 'discover',
+                  title: '发现更多',
+                  icon: Icons.explore_outlined,
+                  subtitle: '按题材找:公版书 + 论文 + 外媒三路并行',
+                  collapsedHint: _selectedTopics.isEmpty
+                      ? '选题材后在这里出结果'
+                      : '已选 ${_selectedTopics.length} 个题材 · ${_topicHits.length} 篇材料',
+                  child: _buildDiscover(theme, muted),
+                ),
+              ),
+            ],
+            if (_group == 1) ...[
+              AppStagger(
+                index: 3,
+                child: CollapsibleSection(
+                  id: 'bookshelf',
+                  title: '书架',
+                  icon: Icons.collections_bookmark_outlined,
+                  subtitle: _shelfCount == 0
+                      ? '还没放书 —— 读过的材料可以摆上来'
+                      : '架上 $_shelfCount 本 · 点开继续读',
+                  collapsedHint: _shelfCount == 0 ? '空书架' : '$_shelfCount 本',
                 trailing: TextButton(
                   onPressed: () => _openBookshelf(),
                   child: const Text('去看看'),
                 ),
-                // 书架本体在独立页面(那里要画真的架子),这里给一个"当前架上"的横排预览
+                // 书架本体在独立页面(那里要画真的架子),这里给一个"当前架上"的真架子预览
                 child: _buildBookshelfPreview(theme, muted),
               ),
             ),
@@ -874,45 +934,66 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
                 child: _buildAiDiscoverGrid(theme),
               ),
             ),
-            AppStagger(
-              index: 5,
-              child: CollapsibleSection(
-                id: 'feed',
-                title: '今日推荐',
-                icon: Icons.rss_feed,
-                subtitle:
+            ],
+            if (_group == 1)
+              AppStagger(
+                index: 5,
+                child: CollapsibleSection(
+                  id: 'feed',
+                  title: '今日推荐',
+                  icon: Icons.rss_feed,
+                  subtitle:
                     '${MaterialSourceService.sourceOf(_sourceId)?.label ?? _sourceId} · 最新条目',
-                collapsedHint: _items.isEmpty ? '还没有条目' : '${_items.length} 条最新条目',
-                trailing: TextButton(
-                  onPressed: _probing ? null : _probeAll,
-                  child: Text(_probing ? '检测中…' : '检测可用源'),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _sourceStrip(theme),
-                    const SizedBox(height: Gap.xs),
-                    _sourceNote(theme, muted),
-                    const SizedBox(height: Gap.sm),
-                    if (_loadingItems)
-                      // 方案 B:骨架屏(与最终卡片同形状),不再是转圈
-                      const SkeletonLines(lines: 4, seed: 1)
-                    else if (_error != null)
-                      _errorCard(theme, muted)
-                    else if (_items.isEmpty)
-                      const AppEmpty(
-                        icon: Icons.article_outlined,
-                        title: '这个源暂时没有条目',
-                        hint: '换一个源试试,或点「检测可用源」',
-                      )
-                    else
-                      for (final item in _items.take(6))
-                        _buildFeedCard(theme, item),
-                  ],
+                  collapsedHint:
+                      _items.isEmpty ? '还没有条目' : '${_items.length} 条最新条目',
+                  trailing: TextButton(
+                    onPressed: _probing ? null : _probeAll,
+                    child: Text(_probing ? '检测中…' : '检测可用源'),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _sourceStrip(theme),
+                      const SizedBox(height: Gap.xs),
+                      _sourceNote(theme, muted),
+                      const SizedBox(height: Gap.sm),
+                      if (_loadingItems)
+                        // 方案 B:骨架屏(与最终卡片同形状),不再是转圈
+                        const SkeletonLines(lines: 4, seed: 1)
+                      else if (_error != null)
+                        _errorCard(theme, muted)
+                      else if (_items.isEmpty)
+                        const AppEmpty(
+                          icon: Icons.article_outlined,
+                          title: '这个源暂时没有条目',
+                          hint: '换一个源试试,或点「检测可用源」',
+                        )
+                      else
+                        // v2.11:**横滑卡片流**(体检:全页只有一处横滑,其余清一色竖列)。
+                        // 为什么改成横滑而不是继续竖排六张:
+                        // 材料中心一屏里已经有 6 个竖列区块,"今日推荐"再竖排六张,
+                        // 一屏全是同宽同高的卡 —— 这是用户说的"没有欲望的竖列呈现"。
+                        // 横滑让"还能往右看"这件事本身变成吸引力,同时把纵向高度
+                        // 从 6 张卡(约 600px)压到 1 行(约 176px)。
+                        SizedBox(
+                          height: 176,
+                          child: ListView.separated(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: _items.take(8).length,
+                            separatorBuilder: (_, _) =>
+                                const SizedBox(width: Gap.xs),
+                            itemBuilder: (_, i) => SizedBox(
+                              width: 232,
+                              child: _buildFeedCard(theme, _items[i]),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
               ),
-            ),
-            AppStagger(
+            if (_group == 2)
+              AppStagger(
               index: 6,
               child: CollapsibleSection(
                 id: 'shelf',
@@ -1126,6 +1207,10 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
       child: AppCard(
         padding: EdgeInsets.zero,
         onTap: _openDaily,
+        // v2.11:整页唯一一张**主角卡**(变体 hero:大圆角 + 浮起 + 轻微染底)。
+        // 为什么只给这一张:体检查出全页只有一处大图,其余封面都在 76~88px ——
+        // 没有大小对比,眼睛就没有落点。主角卡只允许一屏一个,多了就变"图墙"。
+        variant: AppCardVariant.hero,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -1453,137 +1538,41 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
     await _loadShelf();
   }
 
-  /// 材料中心里的书架预览:一条横排书脊(真书架在独立页)
+  /// 材料中心里的书架预览(v2.11 换成**真书架**)。
+  ///
+  /// 旧实现是自己另写的一条 44px 宽色块书脊 —— 没有搁板、没有厚度、没有空书位,
+  /// 而隔壁 `bookshelf_view.dart` 里已经有一套用 6 个 CustomPainter 画出来的真书架
+  /// (深胡桃木搁板 + 立着的书脊 + 虚线空位),**全 App 只被用过 1 次**。
+  /// 用户 10/4 的原话是"书架的 ui 展示要丰富,最好真的像一个书架…等待用户放满",
+  /// 所以这里直接复用那套:材料中心也能看到"架子还有几个空位"。
+  ///
+  /// 参数取舍(为什么这样传):
+  /// - `booksPerShelf: 4`:材料中心这一块是**预览**,不让它撑得过高;
+  /// - `showStats: false`:统计条已经在独立书架页给了,这里只留"架子"本身;
+  /// - `onTapEmptySlot` / `emptyAction` → 都指向书架页(空书架时它就是引导按钮)。
   Widget _buildBookshelfPreview(ThemeData theme, Color muted) {
-    if (_bookshelf.isEmpty) {
-      return AppCard(
-        onTap: _openBookshelf,
-        child: Column(
-          children: [
-            Icon(Icons.collections_bookmark_outlined,
-                size: 34, color: theme.colorScheme.outline),
-            const SizedBox(height: Gap.xs),
-            Text('书架还是空的',
-                style: theme.textTheme.titleSmall
-                    ?.copyWith(fontWeight: FontWeight.w600)),
-            const SizedBox(height: 4),
-            Text(
-              '读到想留着的材料,在阅读器里点「加入书架」;\n退出时会问你一句「放进书架?」',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 11.5, height: 1.5, color: muted),
-            ),
-            const SizedBox(height: Gap.sm),
-            FilledButton.tonalIcon(
-              onPressed: _openBookshelf,
-              icon: const Icon(Icons.auto_stories_outlined, size: 16),
-              label: const Text('看看空书架'),
-            ),
-          ],
-        ),
-      );
-    }
+    final books = [
+      for (final r in _bookshelf) BookshelfBook.fromRow(r),
+    ];
     return AppCard(
       onTap: _openBookshelf,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            height: 96,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: _bookshelf.length,
-              separatorBuilder: (_, _) => const SizedBox(width: Gap.xs),
-              itemBuilder: (_, i) {
-                final r = _bookshelf[i];
-                final title = '${r['title'] ?? ''}';
-                final percent = (r['percent'] as num?)?.toDouble() ?? 0;
-                return _shelfSpine(theme, title, percent, r);
-              },
-            ),
-          ),
-          const SizedBox(height: Gap.xs),
-          Row(
-            children: [
-              Icon(Icons.touch_app_outlined, size: 14, color: muted),
-              const SizedBox(width: 4),
-              Expanded(
-                child: Text('点一本继续读,或进书架页看整架',
-                    style: TextStyle(fontSize: 11, color: muted)),
-              ),
-              const Icon(Icons.chevron_right, size: 18),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _shelfSpine(
-    ThemeData theme,
-    String title,
-    double percent,
-    Map<String, Object?> row,
-  ) {
-    // 用书架模块里已测过的纯函数(自己手写 characters.take(6).toString()
-    // 会得到 "(傲, 慢, ...)" 这种带括号的字符串 —— 子任务指出过这个坑)
-    final color = spinePalette(title).first;
-    final label = spineLabel(title, vertical: false);
-    return InkWell(
-      borderRadius: Radii.controlRadius,
-      onTap: () async {
-        await _openReader((row['material_id'] as num).toInt());
-        if (!mounted) return;
-        await _loadBookshelf();
-      },
-      child: Container(
-        width: 44,
-        decoration: BoxDecoration(
-          color: color,
-          borderRadius: Radii.controlRadius,
-          border: Border.all(color: Colors.black.withAlpha(30)),
-        ),
-        child: Column(
-          children: [
-            const SizedBox(height: 6),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                child: Text(
-                  label,
-                  maxLines: 4,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontSize: 10.5,
-                    height: 1.25,
-                    color: Colors.white,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ),
-            // 书签带 = 阅读进度
-            Container(
-              height: 3,
-              margin: const EdgeInsets.symmetric(horizontal: 6),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(2),
-                child: LinearProgressIndicator(
-                  value: (percent / 100).clamp(0.0, 1.0),
-                  minHeight: 3,
-                  backgroundColor: Colors.white.withAlpha(60),
-                  valueColor: AlwaysStoppedAnimation(Colors.white),
-                ),
-              ),
-            ),
-            const SizedBox(height: 5),
-          ],
+      variant: AppCardVariant.compact,
+      child: BookshelfView(
+        books: books,
+        booksPerShelf: 4,
+        showStats: false,
+        onTapBook: (_) => _openBookshelf(),
+        onTapEmptySlot: _openBookshelf,
+        emptyHint: '读到想留着的材料,在阅读器里点「加入书架」;\n退出时会问你一句「放进书架?」',
+        emptyAction: FilledButton.tonalIcon(
+          onPressed: _openBookshelf,
+          icon: const Icon(Icons.auto_stories_outlined, size: 16),
+          label: const Text('去挑一本'),
         ),
       ),
     );
   }
 
-  ///
   /// v2.9 修(用户截图指出的问题):上一版把「软件内阅读」做成默认尺寸的大按钮
   /// 塞进一行,结果**两个按钮超出卡片宽度**、右边那个被裁成「原」字,
   /// 标题与元信息也被挤到截断。现在:
@@ -1826,31 +1815,52 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
     );
   }
 
+  /// 「今日推荐」的一张卡(v2.11 改成**横滑卡**的竖版式)。
+  ///
+  /// 旧版式:76×76 封面 + 右边三行文字(标题/中文标题/一行小按钮)——
+  /// 和材料库卡、发现卡几乎一模一样,一屏六张全同宽同高,这就是用户说的
+  /// "清一色的竖列功能块"。
+  /// 新版式:卡片宽 232,上半是**通栏 120 高的封面**(有真图时一眼看到原图),
+  /// 下半是标题 + 中文标题 + 一行动作。整块只占约 176 高,横向滑动看更多。
+  ///
+  /// 动作保持不变(点卡 = 直接打开阅读,「设为今日精读」仍是卡上小按钮)——
+  /// 用户 10/4 明确要求过"点卡片要真的打开",这条不能因为改版式而丢。
   Widget _buildFeedCard(ThemeData theme, FeedItem item) {
     final muted = theme.colorScheme.onSurfaceVariant;
     final kind = MaterialLevel.kindOfSource(_sourceId);
     final cn = _titleCnOf(item.title);
-    return Padding(
-      padding: const EdgeInsets.only(bottom: Gap.xs),
-      child: AppCard(
-        // v2.10 修(用户 10/4:"'今日推荐'的文章点了后没反应"):
-        // 旧实现把点击做成了"设为今日精读"(只换上面那张大卡),用户当然觉得没反应。
-        // 现在**点卡片 = 直接打开这篇文章阅读**(这才是点下去该发生的事),
-        // 「设为今日精读」降级成卡片右下角的小按钮。
-        onTap: () => _openFeedItem(item),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            MaterialCover(
-              seed: item.title,
-              kind: kind,
-              imageUrl: item.imageUrl,
-              width: 76,
-              height: 76,
-              radius: Radii.control,
-            ),
-            const SizedBox(width: Gap.sm),
-            Expanded(
+    return AppCard(
+      variant: AppCardVariant.compact,
+      padding: EdgeInsets.zero,
+      margin: EdgeInsets.zero,
+      // v2.10 修(用户 10/4:"'今日推荐'的文章点了后没反应"):
+      // 旧实现把点击做成了"设为今日精读"(只换上面那张大卡),用户当然觉得没反应。
+      // 现在**点卡片 = 直接打开这篇文章阅读**(这才是点下去该发生的事),
+      // 「设为今日精读」降级成卡片下方的小按钮。
+      onTap: () => _openFeedItem(item),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          MaterialCover(
+            seed: item.title,
+            kind: kind,
+            imageUrl: item.imageUrl,
+            width: double.infinity,
+            height: 120,
+            radius: 0,
+          ),
+          // 文字区:**必须用 Expanded 包住**,不能直接塞进 Column。
+          //
+          // 为什么(这是个真坑,不是防御性多余代码):这张卡的高度是由外层
+          // `SizedBox(height: 176)` 定死的,而下面结构里需要"把动作行压到卡底"。
+          // 如果文字区用 `Column` + `Spacer`,一旦某行行高比估算的高
+          //(系统字号放大、字体回退、中文行高差异),整列就会超出 176 →
+          // **BOTTOM OVERFLOWED** 黄黑条(v2.9 就栽过同类问题)。
+          // `Expanded` 会把它拿到的高度**夹紧**给子列,`Spacer` 再吸收余量:
+          // 有余量时贴底,不够时由子列自己裁剪/省略,永不溢出。
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(Gap.sm, Gap.xs, Gap.sm, Gap.xs),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -1858,29 +1868,32 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodyLarge?.copyWith(
-                        fontSize: 14.5,
-                        height: 1.3,
+                        fontSize: 13.5,
+                        height: 1.25,
                         fontWeight: FontWeight.w600,
                       )),
-                  if (cn.isNotEmpty) ...[
-                    const SizedBox(height: 2),
-                    Text(cn,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodySmall
-                            ?.copyWith(color: muted, height: 1.3)),
-                  ],
-                  const SizedBox(height: 4),
-                  Row(
+                  const SizedBox(height: 2),
+                  // 中文标题(没有就占位一行小字,免得卡片高度在两张卡之间跳动)
+                  Text(cn.isEmpty ? ' ' : cn,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall
+                          ?.copyWith(color: muted, fontSize: 11, height: 1.3)),
+                  const Spacer(),
+                  // 动作行:窄卡里两个按钮必须能换行(Wrap),否则又会出现
+                  // v2.9 那次"按钮被裁成『原』字"的事故
+                  Wrap(
+                    spacing: Gap.xs,
+                    runSpacing: 0,
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       if (item.published != null)
                         _meta(theme, Icons.schedule, item.published!),
-                      const SizedBox(width: Gap.xs),
                       // 设成今日精读(次要动作,小按钮)
                       TextButton.icon(
                         style: TextButton.styleFrom(
                           padding: EdgeInsets.zero,
-                          minimumSize: const Size(0, 24),
+                          minimumSize: const Size(0, 22),
                           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         ),
                         onPressed: () {
@@ -1895,14 +1908,13 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
                         },
                         icon: const Icon(Icons.local_fire_department_outlined,
                             size: 13),
-                        label: const Text('设为今日精读',
+                        label: const Text('设为精读',
                             style: TextStyle(fontSize: 11)),
                       ),
-                      const SizedBox(width: Gap.xs),
                       TextButton(
                         style: TextButton.styleFrom(
                           padding: EdgeInsets.zero,
-                          minimumSize: const Size(0, 24),
+                          minimumSize: const Size(0, 22),
                           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         ),
                         onPressed: () => _openExternal(item.link),
@@ -1914,14 +1926,23 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
                 ],
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 
   // ───────────────── ④ 分类入口 ─────────────────
 
+  /// 「按你的水平找材料」的分类入口(v2.11 改成**真网格**)。
+  ///
+  /// 体检结论:这里以前是"手写 Row + Expanded 拼出的两列",而全库 `GridView`
+  /// **0 处**、真正能称得上网格的只有这一块 —— 于是整页看起来就是"竖列 + 一行行方块"。
+  /// 现在改成 `GridView.count`(shrinkWrap + NeverScrollable,嵌在外层 ListView 里),
+  /// 单元复用 `AppActionTile(style: grid)` —— 全 App 只有一份"网格方块"的实现。
+  ///
+  /// ⚠️ 窄屏安全:`childAspectRatio` 特意给得偏矮(1.35),中文两个字的标签
+  /// (如「碎片文章」)在 320dp 宽屏上不会把文字挤出格子。
   Widget _buildAiDiscoverGrid(ThemeData theme) {
     final cats = AppConstants.learningCategories;
     const icons = <String, IconData>{
@@ -1931,67 +1952,27 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
       '碎片文章': Icons.auto_stories,
       '其他': Icons.folder,
     };
-    final rows = <Widget>[];
-    for (var i = 0; i < cats.length; i += 2) {
-      rows.add(
-        Padding(
-          padding: const EdgeInsets.only(bottom: Gap.xs),
-          child: Row(
-            children: [
-              Expanded(child: _aiCategoryTile(context, theme, cats[i], icons)),
-              if (i + 1 < cats.length) const SizedBox(width: Gap.xs),
-              if (i + 1 < cats.length)
-                Expanded(
-                  child: _aiCategoryTile(context, theme, cats[i + 1], icons),
-                ),
-            ],
-          ),
-        ),
-      );
-    }
-    return Column(children: rows);
-  }
-
-  Widget _aiCategoryTile(
-    BuildContext context,
-    ThemeData theme,
-    String category,
-    Map<String, IconData> icons,
-  ) {
-    return InkWell(
-      borderRadius: Radii.controlRadius,
-      onTap: () => Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => CategoryMaterialScreen(category: category),
-        ),
-      ),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: Gap.sm, horizontal: Gap.xs),
-        decoration: BoxDecoration(
-          color: theme.colorScheme.surface,
-          borderRadius: Radii.controlRadius,
-          border: Border.all(color: theme.colorScheme.outlineVariant),
-        ),
-        child: Column(
-          children: [
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: theme.colorScheme.primary.withAlpha(20),
-                borderRadius: BorderRadius.circular(Radii.control),
+    return GridView.count(
+      crossAxisCount: 2,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      mainAxisSpacing: Gap.xs,
+      crossAxisSpacing: Gap.xs,
+      childAspectRatio: 1.35,
+      children: [
+        for (final c in cats)
+          AppActionTile(
+            style: AppActionTileStyle.grid,
+            icon: icons[c] ?? Icons.folder,
+            title: c,
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => CategoryMaterialScreen(category: c),
               ),
-              child: Icon(icons[category] ?? Icons.folder,
-                  size: 20, color: theme.colorScheme.primary),
             ),
-            const SizedBox(height: Gap.xs),
-            Text(category,
-                style: theme.textTheme.bodyMedium
-                    ?.copyWith(fontWeight: FontWeight.w500)),
-          ],
-        ),
-      ),
+          ),
+      ],
     );
   }
 
@@ -2018,6 +1999,12 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
             MaterialCover(
               seed: s.title,
               kind: s.kind,
+              // v2.11:材料库卡的封面 —— 库里存的 cover_url 优先,老数据按
+              // `url` 里的公版书书号现算(见 MaterialSourceService.coverFor)
+              imageUrl: MaterialSourceService.coverFor(
+                storedCoverUrl: s.coverUrl,
+                sourceUrl: s.url,
+              ),
               width: 76,
               height: 76,
               radius: Radii.control,

@@ -174,7 +174,59 @@ class FeedParser {
         return u;
       }
     }
+    // v2.11 第三级兜底:**item 正文里内嵌的 `<img>`**。
+    //
+    // 为什么必须加:NPR 这类源根本不用 media RSS —— 实测 `feeds.npr.org/1001/rss.xml`
+    // 里 `media:content` / `media:thumbnail` / `<enclosure>` **一个都没有**(0 命中),
+    // 头图是直接写在 `<content:encoded><![CDATA[ <img src='…'/> … ]]>` 里的,
+    // 于是"今日推荐/今日精读"的封面全是程序化色块(用户 10/5:"很多材料明明链接
+    // 点开里面自己就有配图啊")。
+    //
+    // 两个坑(实测踩过):
+    // ① NPR 的 `<img>` 属性用**单引号**,只认双引号的正则会得到 0 条 → 复用 [_attr];
+    // ② 正文里混着 1×1 **追踪像素**(`npr-rss-pixel.png`),必须先滤掉,
+    //    否则每张封面都会是空白像素图(`MaterialCover` 会把它拉伸成一块糊图)。
+    return firstContentImage(itemXml);
+  }
+
+  /// 从一段 HTML 里取**第一张可用的正文配图**(纯函数,articleCoverUrl 的第三级)。
+  ///
+  /// "可用"的判据:http(s) 开头、不是追踪像素、不是明显的 1px 占位图。
+  /// 相对地址用 [baseUrl] 绝对化(文章页里的 `images/i_003.jpg` 这类很常见)。
+  /// 拿不到返回 null(界面回落程序化封面,不留白块)。
+  static String? firstContentImage(String html, {String? baseUrl}) {
+    if (html.trim().isEmpty) return null;
+    for (final m in _imgTag.allMatches(html)) {
+      final tag = m.group(0)!;
+      var u = (_attr(tag, 'src') ?? _attr(tag, 'data-src') ?? '').trim();
+      if (u.isEmpty) continue;
+      if (u.startsWith('//')) u = 'https:$u';
+      if (!u.startsWith('http')) {
+        final base = (baseUrl ?? '').trim();
+        if (base.isEmpty) continue;
+        u = HtmlText.resolveUrl(u, base);
+      }
+      if (!u.startsWith('http')) continue;
+      if (_isTrackingPixel(u, tag)) continue;
+      return u;
+    }
     return null;
+  }
+
+  /// 是不是"读了没意义"的图(追踪像素 / 显式声明 1×1)。
+  ///
+  /// 判据尽量保守:只挡**明确**的像素图,宁可留一张略差的真图,
+  /// 也不要因为过滤过宽把唯一一张真图滤掉。
+  static bool _isTrackingPixel(String url, String tag) {
+    final low = url.toLowerCase();
+    if (low.contains('pixel') || low.contains('spacer') || low.contains('1x1')) {
+      return true;
+    }
+    if (low.contains('/tracking/') || low.contains('beacon')) return true;
+    final w = _attr(tag, 'width');
+    final h = _attr(tag, 'height');
+    if (w == '1' && h == '1') return true;
+    return false;
   }
 
   // ────────────────────────── 内部实现 ──────────────────────────
@@ -185,6 +237,7 @@ class FeedParser {
       RegExp(r'<enclosure\b[^>]*>', caseSensitive: false);
   static final RegExp _mediaContentTag =
       RegExp(r'<(?:media:content|media:thumbnail|itunes:image)\b[^>]*>', caseSensitive: false);
+  static final RegExp _imgTag = RegExp(r'<img\b[^>]*>', caseSensitive: false);
   static final RegExp _attrRe = RegExp(
     r'''([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*=\s*(?:"([^"]*)"|'([^']*)')''',
   );

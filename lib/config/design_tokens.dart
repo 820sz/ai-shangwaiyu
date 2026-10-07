@@ -71,6 +71,62 @@ class Motion {
   static const Curve pop = Curves.easeOutBack;
 }
 
+/// 字号阶梯(v2.11 补)。
+///
+/// 为什么必须补:在此之前全库的字号是**手写散落的** —— `fontSize: 11 / 11.5 / 12 /
+/// 12.5 / 14.5 / 15 / 17` 在 152 个文件里各写各的(体检查出来的),于是同一个层级的
+/// 文字在不同页面不一样大,页面之间没有"节奏"。用户 10/5 的原话是"前端非常单一…
+/// 各种各样的前端表现都非常单调平庸" —— **缺少字号对比**就是其中一半原因。
+///
+/// 这套阶梯只 **5 档**,刻意不细化:档位越多越不统一。用法是"按语义选档",
+/// 不是"按像素凑数":标题用 title、正文用 body、辅助信息用 caption 或 micro。
+class AppFont {
+  AppFont._();
+
+  /// 超小:角标、封面上的种类小字(卡片里的"第三层信息")
+  static const double micro = 10.5;
+
+  /// 小:辅助说明、meta 行
+  static const double caption = 12;
+
+  /// 正文:列表项标题、表单内容
+  static const double body = 14;
+
+  /// 小标题:区块内的小标题
+  static const double title = 15.5;
+
+  /// 区块/页面级大标题
+  static const double heading = 19;
+}
+
+/// 层级(唯一两档)。
+///
+/// 为什么只有两档:M3 的 `elevation` 在深色主题下几乎看不见(theme.dart 的注释
+/// 已经写过这点),堆 3、6、12 只会变成噪点。这里只区分"平铺"与"浮起":
+/// - [flat] = 0:列表里的常规卡片(靠 outline 描边区分,不靠阴影);
+/// - [raised] = 3:需要抢视线的主角卡(今日精读、当前任务)。
+/// 深色下它主要靠**背景色差异**体现(见 [AppSurface.raisedTintAlpha])。
+class AppElevation {
+  AppElevation._();
+
+  static const double flat = 0;
+  static const double raised = 3;
+}
+
+/// 面(背景)层级:同一张卡片按"浮起程度"取不同底色。
+///
+/// 深浅色两套都只是**在 surface 上叠一点点 onSurface / primary 的透明度** ——
+/// 不用硬编码色值,才能跟着主题走(亮暗两套都成立)。
+class AppSurface {
+  AppSurface._();
+
+  /// 主角卡(hero)的叠色强度(浅色下靠 primary 提亮,深色下靠 onSurface 提亮)
+  static const int raisedTintAlpha = 16;
+
+  /// 强调态的叠色强度(比 hero 弱,用于"当前选中/进行中")
+  static const int accentTintAlpha = 10;
+}
+
 /// 页面级统一的边距(Padding)
 class Insets {
   Insets._();

@@ -297,6 +297,41 @@ void main() {
     expect(await DatabaseService.getMaterialProgress(99999), isNull);
   });
 
+  test('v2.11 封面落库:materials.cover_url 能写入并带出(材料库/书架卡要用它显示原图)', () async {
+    final mid = await DatabaseService.upsertMaterial({
+      'kind': 'book',
+      'source': 'gutenberg',
+      'source_id': '1342',
+      'title': '傲慢与偏见',
+      'cover_url': 'https://www.gutenberg.org/cache/epub/1342/pg1342.cover.medium.jpg',
+    });
+    expect(mid, greaterThan(0), reason: '带 cover_url 的入库不能被白名单静默丢弃');
+
+    final recent = await DatabaseService.getRecentMaterials();
+    final row = recent.firstWhere((r) => r['id'] == mid);
+    expect(
+      row['cover_url'],
+      'https://www.gutenberg.org/cache/epub/1342/pg1342.cover.medium.jpg',
+    );
+
+    // 书架查询也要带出来(书架"查看封面"要用)
+    await DatabaseService.addToBookshelf(mid);
+    final shelf = await DatabaseService.bookshelfItems();
+    expect(shelf.single['cover_url'], isNotNull);
+    expect('${shelf.single['cover_url']}', contains('pg1342.cover'));
+
+    // 老数据(没有封面)必须是 NULL,而不是空串 —— 界面靠 null 回落程序化封面
+    final other = await DatabaseService.upsertMaterial({
+      'kind': 'article',
+      'source': 'local',
+      'source_id': 'no-cover',
+      'title': '无图材料',
+    });
+    final noCover = (await DatabaseService.getRecentMaterials())
+        .firstWhere((r) => r['id'] == other);
+    expect(noCover['cover_url'], isNull);
+  });
+
   // ── 3. 阅读会话与统计 ──
 
   test('insertReadingSession:wpm 计算、时长为 0 存空;getReadingStats 窗口与均值', () async {

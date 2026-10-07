@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:ui' show ImageFilter, TileMode;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show LengthLimitingTextInputFormatter;
 import 'package:image_picker/image_picker.dart';
 
 import '../config/design_tokens.dart';
@@ -167,16 +168,25 @@ class ProfileCardView extends StatelessWidget {
                                   ),
                                 ),
                                 const SizedBox(height: 3),
+                                // v2.11(用户 10/5 第 3 条):"个性签名的字体颜色需和名字 id
+                                // 的颜色有区分度"。
+                                // 旧实现:名字 `Colors.white`(纯白)、签名
+                                // `Colors.white.withAlpha(228)` —— **都是白色**,只差透明度,
+                                // 在浅色/花哨的背景图上几乎分不出来。
+                                // 现在签名走一条**冷青灰**并把透明度降到 0.82:
+                                // 色相上与纯白名字拉开距离(名字是"亮",签名是"偏冷" ),
+                                // 亮度上仍保证在压暗过的背景上可读(压暗层由 _CardBackdrop 保证)。
                                 Text(
                                   settings.signature.trim().isEmpty
-                                      ? '点这张卡,给自己配名字、头像和背景'
+                                      ? '点一下,写下你的名字'
                                       : settings.signature.trim(),
                                   maxLines: 2,
                                   overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    color: Colors.white.withAlpha(228),
+                                  style: const TextStyle(
+                                    color: Color(0xD1CFE3E8),
                                     fontSize: 12,
                                     height: 1.35,
+                                    letterSpacing: 0.2,
                                   ),
                                 ),
                               ],
@@ -210,23 +220,16 @@ class ProfileCardView extends StatelessWidget {
                         ),
                       ],
                       const SizedBox(height: Gap.sm),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              // 文案直接写出"大小形状" —— 用户第二次说"无法编辑",
-                              // 一半原因是上一版只写了"名字 / 头像 / 背景"
-                              '点这里改名字 · 头像大小形状 · 背景图',
-                              style: TextStyle(
-                                fontSize: 10.5,
-                                color: Colors.white.withAlpha(200),
-                                height: 1.3,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: Gap.xs),
-                          _editButton(),
-                        ],
+                      // v2.11(用户 10/5 第 3 条):"去掉我图中圈起来的现在这些多余的描述,
+                      // 个性名片要精美、简洁"。
+                      // 用户圈的是**整行**(那句"点这里改名字 · 头像大小形状 · 背景图"
+                      // + 右侧宽大的「编辑名片」按钮)。两样都去掉,只留右上角一个小铅笔:
+                      //   - 那句描述是 v2.10 为了"让用户看见入口"加的,现在入口本身有铅笔,
+                      //     再用一句话解释"点这里改什么"就是啰嗦(卡上已经写着名字、有头像了);
+                      //   - 整卡可点(上面那层 InkWell)+ 小铅笔,一共两个入口,够用且不占版面。
+                      Align(
+                        alignment: Alignment.topRight,
+                        child: _editPencil(),
                       ),
                     ],
                   ),
@@ -239,40 +242,40 @@ class ProfileCardView extends StatelessWidget {
     );
   }
 
-  /// 卡上的编辑按钮:做成真正的 `InkWell`(有水波纹),而不是一段画出来的容器。
-  /// 嵌套在整卡 InkWell 里不会重复触发 —— 手势竞技场里**最内层**的识别器胜出。
-  Widget _editButton() {
-    const shape = StadiumBorder(
-      side: BorderSide(color: Color(0x8CFFFFFF)),
-    );
-    return Material(
-      color: Colors.white.withAlpha(46),
-      shape: shape,
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onEdit,
-        splashColor: Colors.white.withAlpha(60),
-        child: const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.edit_outlined, size: 13, color: Colors.white),
-              SizedBox(width: 4),
-              Text(
-                '编辑名片',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.white,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
+  /// 卡上的编辑入口:右上角**一个小铅笔**(用户 10/5 第 3 条:"编辑名片保留个小铅笔")。
+  ///
+  /// 设计取舍:
+  /// - 保留 `InkWell` 而不是画一个容器 —— 没有水波纹的"假按钮"正是 v2.10 用户
+  ///   以为"名片无法编辑"的原因之一(那时铅笔是纯装饰、点了没反应);
+  /// - 面积做成 40×40 的可点区(视觉上只有 16px 图标,但触控目标够大,
+  ///   免得用户"点了没点准"又以为坏了);
+  /// - 只有图标没有文字:卡面要"精美简洁",文字说明交给弹层自己。
+  Widget _editPencil() {
+    return Semantics(
+      // 无障碍标签 + 测试用的稳定入口(文字按钮删掉后,这里必须还有"能说出名字"的入口)
+      label: '编辑名片',
+      button: true,
+      child: Material(
+        color: Colors.white.withAlpha(38),
+        shape: const CircleBorder(),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onEdit,
+          splashColor: Colors.white.withAlpha(70),
+          child: const SizedBox(
+            width: 34,
+            height: 34,
+            child: Icon(Icons.edit_outlined, size: 15, color: Colors.white),
           ),
         ),
       ),
     );
   }
+
+  /// (v2.11 删除)旧版卡上那个带文字的「编辑名片」按钮。
+  /// 用户 10/5 的原话是"去掉我图中圈起来的现在这些多余的描述,个性名片要精美、简洁",
+  /// 圈里的正是"说明文案 + 这个宽按钮"。删掉而不是留着 —— 死代码会误导下一个人
+  /// 以为卡上还有两个入口。要去旧实现看 `git log -p`(搜索"编辑名片"即可)。
 
   Widget _statDivider() => Container(
         width: 1,
@@ -552,15 +555,15 @@ class _CardEditSheetState extends State<_CardEditSheet> {
             // ── 固定的实时预览 ──
             // 为什么不放进滚动区:调背景缩放/明暗时,预览一旦滚出屏幕,
             // "改一点看一眼"就变成了"改完再滚上去看"
+            //
+            // v2.11(用户 10/5:"编辑界面太冗杂了…约 1 屏就好"):预览留,
+            // 但下面那行「实时预览 · 改任何一项,这里立刻变」删掉了 ——
+            // 预览就贴在表单上面,改动立刻可见是**看得见的事实**,不需要一句解释。
+            // 同时把这块的上下边距收紧(12 → 8),省下的高度给表单。
             Padding(
-              padding: const EdgeInsets.fromLTRB(Gap.md, 0, Gap.md, 6),
+              padding: const EdgeInsets.fromLTRB(Gap.md, 0, Gap.md, Gap.xs),
               child: ProfileCardView(settings: _draft, showStats: false),
             ),
-            Text(
-              '实时预览 · 改任何一项,这里立刻变',
-              style: TextStyle(fontSize: 11, color: muted),
-            ),
-            const SizedBox(height: Gap.xs),
             // ── 表单(可滚) ──
             Flexible(
               child: SingleChildScrollView(
@@ -568,13 +571,20 @@ class _CardEditSheetState extends State<_CardEditSheet> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _section('名字与签名'),
+                    // ── 名字与签名(约 1 屏:v2.11 精简)──
+                    // 三处改动:① `maxLength` 去掉 —— Flutter 会在框下多渲染一行
+                    // "3/12" 计数器,两个输入框就白占掉约 40px;限长改用
+                    // inputFormatters(功能一样,界面干净);
+                    // ② 签名从 2 行高度压到 1 行;③ 标题从「名字与签名」缩成「名字·签名」。
+                    _section('名字 · 签名'),
                     TextField(
                       controller: _name,
-                      maxLength: 12,
+                      inputFormatters: [
+                        LengthLimitingTextInputFormatter(12),
+                      ],
                       decoration: const InputDecoration(
                         labelText: '你的名字 / 昵称',
-                        hintText: '如:小樱、Aki、每天读一篇',
+                        hintText: '如:小樱、Aki',
                         border: OutlineInputBorder(),
                         isDense: true,
                       ),
@@ -584,8 +594,9 @@ class _CardEditSheetState extends State<_CardEditSheet> {
                     const SizedBox(height: Gap.xs),
                     TextField(
                       controller: _sign,
-                      maxLines: 2,
-                      maxLength: 40,
+                      inputFormatters: [
+                        LengthLimitingTextInputFormatter(40),
+                      ],
                       decoration: const InputDecoration(
                         labelText: '个性签名',
                         hintText: '如:每天 20 分钟,读原著',
@@ -598,7 +609,7 @@ class _CardEditSheetState extends State<_CardEditSheet> {
                     const SizedBox(height: Gap.sm),
 
                     // ── 头像 ──
-                    _section('头像', hint: '尺寸/形状/边框都能调,左边这块就是实际效果'),
+                    _section('头像'),
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
@@ -621,28 +632,26 @@ class _CardEditSheetState extends State<_CardEditSheet> {
                                       _draft.copyWith(avatarPath: null)),
                                   child: const Text('用文字头像'),
                                 ),
+                              // v2.11:文字头像预设从"单独一行"挪到这里 ——
+                              // 它本来就和"从相册选"是同一件事的两个选项
+                              //(选图 or 用文字),分两行只是白占 40px。
+                              for (final t in ProfileCardSettings.avatarTexts)
+                                _chip(
+                                  label: t,
+                                  selected: (_draft.avatarPath ?? '').isEmpty &&
+                                      _draft.avatarText == t,
+                                  onTap: () => _apply(_draft.copyWith(
+                                      avatarPath: null, avatarText: t)),
+                                ),
                             ],
                           ),
                         ),
                       ],
                     ),
                     const SizedBox(height: Gap.xs),
-                    Wrap(
-                      spacing: Gap.xs,
-                      runSpacing: Gap.xs,
-                      children: [
-                        for (final t in ProfileCardSettings.avatarTexts)
-                          _chip(
-                            label: t,
-                            selected: (_draft.avatarPath ?? '').isEmpty &&
-                                _draft.avatarText == t,
-                            onTap: () => _apply(_draft.copyWith(
-                                avatarPath: null, avatarText: t)),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: Gap.sm),
-                    _label('头像大小', muted),
+                    // v2.11:大小 / 形状 / 边框 三个标签合并成一行标题,
+                    // 三组 chip 依次排在下面(以前各占一行标题 = 白占 54px)
+                    _label('大小 · 形状 · 边框', muted),
                     Wrap(
                       spacing: Gap.xs,
                       runSpacing: Gap.xs,
@@ -655,13 +664,6 @@ class _CardEditSheetState extends State<_CardEditSheet> {
                             onTap: () => _apply(_draft
                                 .copyWith(avatarSize: s['size'] as double)),
                           ),
-                      ],
-                    ),
-                    _label('头像形状', muted),
-                    Wrap(
-                      spacing: Gap.xs,
-                      runSpacing: Gap.xs,
-                      children: [
                         for (final s in ProfileCardSettings.avatarShapes)
                           _chip(
                             label: s['label']!,
@@ -669,13 +671,6 @@ class _CardEditSheetState extends State<_CardEditSheet> {
                             onTap: () => _apply(
                                 _draft.copyWith(avatarShape: s['id'])),
                           ),
-                      ],
-                    ),
-                    _label('头像边框', muted),
-                    Wrap(
-                      spacing: Gap.xs,
-                      runSpacing: Gap.xs,
-                      children: [
                         for (final b in ProfileCardSettings.avatarBorders)
                           _chip(
                             label: b['label']!,
@@ -685,13 +680,11 @@ class _CardEditSheetState extends State<_CardEditSheet> {
                           ),
                       ],
                     ),
-                    const SizedBox(height: Gap.md),
+                    const SizedBox(height: Gap.sm),
 
                     // ── 背景 ──
                     _section('名片背景',
-                        hint: hasBgImage
-                            ? '正在用你自己的图,下面四项都是调它'
-                            : '渐变任选;点了「选图」就能换成自己的照片'),
+                        hint: hasBgImage ? '正在用你自己的图,下面四项都是调它' : null),
                     Wrap(
                       spacing: Gap.xs,
                       runSpacing: Gap.xs,
@@ -834,13 +827,10 @@ class _CardEditSheetState extends State<_CardEditSheet> {
                         ),
                       ),
                     ] else
-                      Padding(
-                        padding: const EdgeInsets.only(top: Gap.xs),
-                        child: Text(
-                          '想用自己的照片当底?点上面的「选图」,选完就能调缩放、位置、明暗、模糊。',
-                          style: TextStyle(fontSize: 11, color: muted),
-                        ),
-                      ),
+                      // v2.11(用户 10/5:"去掉…多余的描述,要精美简洁"):
+                      // 这一整段说明文案删掉了 —— 上面就是「选图」格子,
+                      // 选完四项滑条自己出现,不需要一句解释。
+                      const SizedBox.shrink(),
                   ],
                 ),
               ),

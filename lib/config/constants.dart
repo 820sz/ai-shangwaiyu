@@ -115,7 +115,10 @@ class AppConstants {
 
   // ── 数据库 ──
   static const String dbName = 'readflow.db';
-  static const int dbVersion = 17;
+
+  /// 18(v2.11):`materials.cover_url` —— 封面/配图地址落库。
+  /// 之前是 17(v2.10:书架表 + materials.title_cn)。
+  static const int dbVersion = 18;
 
   // ── 收藏夹 ──
   /// 收藏来源(v2.8 扩展:用户第 10 条"收藏夹要体现不同功能区收藏进来的东西")

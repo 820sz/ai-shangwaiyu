@@ -13,6 +13,20 @@ import 'package:flutter/material.dart';
 import '../config/design_tokens.dart';
 import 'waiting.dart';
 
+/// 卡片的视觉变体(v2.11,G 批"全局 UI 升级"的地基)。
+///
+/// **为什么加这个而不是加更多圆角/间距档位**:体检结论是"全 App 只有一种容器、
+/// 它没有型号" —— 约 51 处 `AppCard` 用同一组圆角/内边距/底色,于是同一屏里所有
+/// "块"必然同宽同角同节奏,用户看到的就是"清一色的竖列功能块"。
+/// 缺的是**变体维度**(语义),不是更多数值。
+///
+/// 4 个变体各自的语义(只用这 4 个,别再随手加):
+/// - [plain]  :常规内容卡(列表项、说明块)—— 保持 v2.5 的样子不变;
+/// - [plain] 的紧凑版是 [compact]:信息密度高的行(书架书脊、导入列表);
+/// - [hero]   :**一屏只有一个**的主角卡(今日精读、当前任务)—— 大圆角 + 浮起 + 轻微染底;
+/// - [accent] :强调但不需要"主角"地位(进行中、已选中)。
+enum AppCardVariant { plain, compact, hero, accent }
+
 /// 卡片:统一圆角、内边距、外边距与点击反馈
 class AppCard extends StatelessWidget {
   final Widget child;
@@ -22,6 +36,13 @@ class AppCard extends StatelessWidget {
   final Color? color;
   final bool dense;
 
+  /// 视觉变体(默认 [AppCardVariant.plain] = v2.5 的老样子,老调用点不受影响)
+  final AppCardVariant variant;
+
+  /// 变体内部用的 Key:测试要能精确找到"卡片自己的内边距",
+  /// 而不是 `Card` 内部的 margin padding(两者都是 `Padding`,不区分会断错对象)。
+  static const Key paddingKey = Key('app_card_padding');
+
   const AppCard({
     super.key,
     required this.child,
@@ -30,18 +51,46 @@ class AppCard extends StatelessWidget {
     this.margin,
     this.color,
     this.dense = false,
+    this.variant = AppCardVariant.plain,
   });
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final isHero = variant == AppCardVariant.hero;
+    final isCompact = variant == AppCardVariant.compact;
+    final isAccent = variant == AppCardVariant.accent;
+
+    final effectivePadding = padding ??
+        (isCompact || dense ? Insets.tile : Insets.card);
+    // 层级:**只让主角卡浮起来**,其余沿用主题给的那一档(当前是 1)。
+    // 这里踩过一次坑并已回退:曾把 plain 硬压成 0,结果全 App 的普通卡片
+    // 一下子都变平了 —— "统一视觉"不等于"顺手改掉 51 处老调用点的观感"。
+    final elevation = isHero ? AppElevation.raised : null;
+    final radius = isHero
+        ? const BorderRadius.all(Radius.circular(Radii.sheet))
+        : Radii.cardRadius;
+    final bg = color ??
+        (isHero
+            // 主角卡:在 surface 上叠一点 primary —— 亮暗两套都成立,不硬编码色值
+            ? Color.alphaBlend(
+                cs.primary.withAlpha(AppSurface.raisedTintAlpha), cs.surface)
+            : isAccent
+                ? Color.alphaBlend(
+                    cs.primary.withAlpha(AppSurface.accentTintAlpha), cs.surface)
+                : null);
+
     final content = Padding(
-      padding: padding ?? (dense ? Insets.tile : Insets.card),
+      key: paddingKey,
+      padding: effectivePadding,
       child: child,
     );
     return Card(
-      color: color,
+      color: bg,
+      elevation: elevation,
       margin: margin ?? const EdgeInsets.only(bottom: Gap.xs),
-      shape: RoundedRectangleBorder(borderRadius: Radii.cardRadius),
+      shape: RoundedRectangleBorder(borderRadius: radius),
       clipBehavior: Clip.antiAlias,
       child: onTap == null
           ? content
@@ -102,6 +151,13 @@ class AppSectionTitle extends StatelessWidget {
 }
 
 /// 入口行:图标 + 标题 + 副标题 + 右箭头(全 App 的"进入某个功能"统一长这样)
+///
+/// v2.11 加了第二种版式 [AppActionTileStyle.grid]:把"大图标 + 标题"排成
+/// 两列小方块(材料中心的"按你的水平找材料"用的就是它)。
+/// 为什么不再加第三、第四种:体检发现这一种版式被用了 20 次(光"我的"页 13 个),
+/// 全屏都是"图标-标题-箭头"三件套 —— 缺的是**第二种**,不是第十种。
+enum AppActionTileStyle { row, grid }
+
 class AppActionTile extends StatelessWidget {
   final IconData icon;
   final String title;
@@ -110,6 +166,9 @@ class AppActionTile extends StatelessWidget {
   final Widget? trailing;
   final Color? iconColor;
   final bool highlight;
+
+  /// 版式(默认 [AppActionTileStyle.row] = 原来的行式)
+  final AppActionTileStyle style;
 
   /// 不可用态(v2.5):置灰 + 不可点。
   /// 为什么单独给一个开关:调用方常常是"忙碌中"临时禁用(例如备份导出),
@@ -126,6 +185,7 @@ class AppActionTile extends StatelessWidget {
     this.iconColor,
     this.highlight = false,
     this.enabled = true,
+    this.style = AppActionTileStyle.row,
   });
 
   @override
@@ -133,6 +193,40 @@ class AppActionTile extends StatelessWidget {
     final theme = Theme.of(context);
     final muted = theme.colorScheme.onSurfaceVariant;
     final dim = !enabled;
+    if (style == AppActionTileStyle.grid) {
+      return AppCard(
+        onTap: dim ? null : onTap,
+        variant: AppCardVariant.plain,
+        color: highlight ? theme.colorScheme.primary.withAlpha(12) : null,
+        padding: const EdgeInsets.symmetric(vertical: Gap.sm, horizontal: Gap.xs),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: theme.colorScheme.primary.withAlpha(20),
+                borderRadius: BorderRadius.circular(Radii.control),
+              ),
+              child: Icon(icon,
+                  size: 20, color: dim ? muted : (iconColor ?? theme.colorScheme.primary)),
+            ),
+            const SizedBox(height: Gap.xs),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w500,
+                color: dim ? muted : null,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     final card = AppCard(
       onTap: dim ? null : onTap,
       color: highlight ? theme.colorScheme.primary.withAlpha(12) : null,

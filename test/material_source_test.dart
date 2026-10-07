@@ -478,6 +478,51 @@ void main() {
     });
   });
 
+  // ─────────────────────────────────────────────────────────────
+  // v2.11(用户 10/5 第 2 条):"**很多材料明明链接点开里面自己就有配图啊**!
+  // 把原材料的原插图作为材料的封面不就行了吗?" —— 这条链路以前是断的:
+  // `imageOf` 只认 media RSS 三件套,而 NPR 的 feed 一个都没有(实测 0 命中),
+  // 头图是内嵌在 `<content:encoded>` 的 `<img>` 里,于是封面全是程序化色块。
+  // ─────────────────────────────────────────────────────────────
+  group('FeedParser.imageOf — 内嵌 <img> 兜底(实测值,来自 feeds.npr.org)', () {
+    test('NPR 式:单引号属性 + 追踪像素 → 必须拿到真头图,且跳过 pixel', () {
+      // 下面这段 XML 是 feed 里的**原文形状**(单引号!双引号正则会 0 命中)
+      const raw = '''
+        <description>short</description>
+        <content:encoded><![CDATA[<img src='https://npr.brightspotcdn.com/dims3/default/strip/false/crop/2000x1084+0+18/resize/2000x1084!/?url=http%3A%2F%2Fnpr-brightspot.s3.amazonaws.com%2F83%2F73%2F3a307a1b4a229daf6ff87a9f126f%2Fcopy-of-6-book-covers-5.jpg' alt='undefined'/><img src='https://media.npr.org/include/images/tracking/npr-rss-pixel.png?story=nx-s1-5991463' />]]></content:encoded>
+      ''';
+      final got = FeedParser.imageOf(raw);
+      expect(got, contains('npr.brightspotcdn.com'));
+      expect(got, isNot(contains('pixel')), reason: '追踪像素图不能当封面(会是一张糊图)');
+    });
+
+    test('media RSS 三件套仍然优先(老行为不能回归)', () {
+      expect(
+        FeedParser.imageOf(
+          '<media:content url="https://x.example/real.jpg" type="image/jpeg"/>'
+          "<img src='https://x.example/later.jpg'/>",
+        ),
+        equals('https://x.example/real.jpg'),
+      );
+    });
+
+    test('正文里第一张就是像素图时,继续往后找真图', () {
+      expect(
+        FeedParser.imageOf(
+          "<img src='https://x.example/1x1.png' width='1' height='1'/>"
+          "<img src='https://x.example/hero.jpg'/>",
+        ),
+        equals('https://x.example/hero.jpg'),
+      );
+    });
+
+    test('没有 http 图(相对路径/空)→ null,交给程序化封面', () {
+      expect(FeedParser.imageOf("<img src='/images/local.jpg'/>"), isNull);
+      expect(FeedParser.imageOf('<img src=""/>'), isNull);
+      expect(FeedParser.imageOf(''), isNull);
+    });
+  });
+
   group('FeedParser.audioOf', () {
     test('enclosure 优先,type 必须像音频', () {
       expect(
@@ -656,6 +701,122 @@ void main() {
       );
       expect(MaterialSourceService.gutenbergIdOf('https://example.com/book'), isNull);
       expect(MaterialSourceService.gutenbergIdOf(''), isNull);
+    });
+
+    // ─────────────────────────────────────────────────────────────
+    // v2.11 修(用户 10/5 真机反馈:"材料中心存在部分文章打不开"截图:
+    // 「打不开这条原文:【Project Gutenberg(公版书)】书籍 id 不合法:0」)
+    //
+    // 根因:材料中心的「今日推荐/今日精读」条目来自 `listItems()` 的 RSS,
+    // 而 RSS 里 `<link>` 是**整条 URL**(实测 today.rss 12/12 形如
+    // https://www.gutenberg.org/ebooks/79727),上游把它原样塞进 `sourceId2`;
+    // 打开时却走 `int.tryParse(sourceId2) ?? 0` → 0 → fetchGutenberg(0) 抛错。
+    //
+    // 修法:打开前按源**规范化**,复用已有的 [gutenbergIdOf] / [arxivIdOf]。
+    // 下面这些用例就是"同一份数据,三种来源写法都要能打开"的合同。
+    // ─────────────────────────────────────────────────────────────
+    group('命中规范化:打开原文前把各种写法的 sourceId2 收敛成抓取器认的 id', () {
+      test('Gutenberg:URL 写法也要能回出书号(截图里那条就是这个)', () {
+        expect(
+          MaterialSourceService.normalizeSourceId2(
+            'gutenberg',
+            'https://www.gutenberg.org/ebooks/79727',
+          ),
+          equals('79727'),
+        );
+        expect(
+          MaterialSourceService.normalizeSourceId2(
+            'gutenberg',
+            'https://www.gutenberg.org/cache/epub/1342/pg1342.txt',
+          ),
+          equals('1342'),
+        );
+        // 站内检索解析出来的纯书号:原样保留
+        expect(
+          MaterialSourceService.normalizeSourceId2('gutenberg', '1342'),
+          equals('1342'),
+        );
+      });
+
+      test('Gutenberg:认不出书号时返回空串(让界面说人话,不要抛 FormatException)', () {
+        expect(
+          MaterialSourceService.normalizeSourceId2(
+            'gutenberg',
+            'https://example.com/not-a-book',
+          ),
+          isEmpty,
+        );
+      });
+
+      test('arXiv:带版本号/完整链接都收敛成纯编号', () {
+        expect(
+          MaterialSourceService.normalizeSourceId2(
+            'arxiv',
+            'https://arxiv.org/abs/1706.03762v5',
+          ),
+          equals('1706.03762'),
+        );
+        expect(
+          MaterialSourceService.normalizeSourceId2('arxiv', '2609.25006v1'),
+          equals('2609.25006'),
+        );
+      });
+
+      test('其它源(RSS/网页):原样返回,不做任何猜测', () {
+        expect(
+          MaterialSourceService.normalizeSourceId2(
+            'npr',
+            'https://www.npr.org/2026/10/06/nx-s1-5991463/story',
+          ),
+          equals('https://www.npr.org/2026/10/06/nx-s1-5991463/story'),
+        );
+      });
+
+      test('抓取路由:同一条 URL 命中必须落到"公版书全文"而不是被当成书号 0', () {
+        final plan = MaterialSourceService.hitFetchPlanFor(
+          sourceId: 'gutenberg',
+          sourceId2: 'https://www.gutenberg.org/ebooks/79727',
+          url: 'https://www.gutenberg.org/ebooks/79727',
+        );
+        expect(plan.bookId, equals(79727));
+        expect(plan.sourceId, equals('gutenberg'));
+      });
+
+      test('抓取路由:纯书号命中(站内检索那条链路)保持不变', () {
+        final plan = MaterialSourceService.hitFetchPlanFor(
+          sourceId: 'gutenberg',
+          sourceId2: '1342',
+          url: 'https://www.gutenberg.org/ebooks/1342',
+        );
+        expect(plan.bookId, equals(1342));
+      });
+
+      test('抓取路由:arXiv 完整链接也能落到摘要抓取', () {
+        final plan = MaterialSourceService.hitFetchPlanFor(
+          sourceId: 'arxiv',
+          sourceId2: 'https://arxiv.org/abs/1706.03762v5',
+          url: 'https://arxiv.org/abs/1706.03762v5',
+        );
+        expect(plan.arxivId, equals('1706.03762'));
+      });
+
+      test('抓取路由:RSS 等其它源不改判,仍走通用网页', () {
+        final plan = MaterialSourceService.hitFetchPlanFor(
+          sourceId: 'npr',
+          sourceId2: 'https://www.npr.org/x',
+          url: 'https://www.npr.org/x',
+        );
+        expect(plan.bookId, isNull);
+        expect(plan.arxivId, isNull);
+        expect(plan.url, equals('https://www.npr.org/x'));
+      });
+
+      test('回归锁定:旧的 int.tryParse 写法在这条 URL 上必然得到 0(这就是那句报错的来源)', () {
+        // 这一行是"根因本身":它证明了为什么旧代码会走到 fetchGutenberg(0)。
+        // 一旦有人把 openHit 改回 int.tryParse(...) ?? 0,这条用例会立刻变红。
+        expect(int.tryParse('https://www.gutenberg.org/ebooks/79727'), isNull);
+        expect(int.tryParse('https://www.gutenberg.org/ebooks/79727') ?? 0, equals(0));
+      });
     });
 
     test('wikipediaApiUrl:转义条目名并要纯文本正文', () {

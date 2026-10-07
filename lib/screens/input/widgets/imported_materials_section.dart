@@ -5,6 +5,7 @@ import '../../../config/theme.dart';
 import '../../../services/database.dart';
 import '../../../services/learner_model_store.dart';
 import '../../../services/material_library.dart';
+import '../../../services/material_source.dart';
 import '../../../widgets/app_ui.dart';
 import '../../../widgets/material_cover.dart';
 import '../../../widgets/waiting.dart';
@@ -372,6 +373,11 @@ class _ImportedMaterialsSectionState extends State<ImportedMaterialsSection> {
             MaterialCover(
               seed: m.title,
               kind: m.kind,
+              // v2.11:导入列表以前也没传图(导入的链接材料同样可能有头图)
+              imageUrl: MaterialSourceService.coverFor(
+                storedCoverUrl: m.coverUrl,
+                sourceUrl: m.url,
+              ),
               width: 52,
               height: 52,
               radius: Radii.control,

@@ -283,6 +283,12 @@ class DatabaseService {
       chapters INTEGER DEFAULT 0,
       audio_url TEXT,
       transcript_ref TEXT,
+      -- v2.11(dbVersion 18):封面/配图地址。用户 10/5 原话:
+      -- "不需要 ai 生图啊,很多材料明明链接点开里面自己就有配图啊!
+      --  把原材料的原插图作为材料的封面不就行了吗?"
+      -- 所以入库时把**源头自带的图**存下来(公版书封面、RSS 头图、文章 og:image),
+      -- 列表/书架/材料库才有真图可显示 —— 不落库的话重启就退化成色块。
+      cover_url TEXT,
       difficulty_json TEXT,
       created_at TEXT,
       cached_at TEXT
@@ -592,6 +598,23 @@ class DatabaseService {
       await _ensureTable(db, 'tutor_conversations', _tutorConversationsTableSql);
       await _ensureColumn(db, 'tutor_messages', 'conversation_id', 'INTEGER');
     }
+    if (oldV < 16 || oldV < 17) {
+      // v2.9 / v2.10 的两列以前**只在 _onOpen 自检里补**(见那里的注释)。
+      // 在这里也写一遍:自检是"尽力而为 + 静默",而版本迁移是显式的 ——
+      // 老库跨版本升级时不该依赖"下次打开才补上"。
+      // 两处都是幂等的(_ensureColumn 自己检查存在性)。
+      await _ensureColumn(db, 'materials', 'origin', 'TEXT');
+      await _ensureColumn(db, 'materials', 'group_name', 'TEXT');
+      await _ensureColumn(db, 'materials', 'title_cn', 'TEXT');
+    }
+    if (oldV < 18) {
+      // v2.11(用户 10/5 第 2 条):封面/配图地址落库。
+      // 用户原话:"不需要 ai 生图啊,很多材料明明链接点开里面自己就有配图啊!
+      // 把原材料的原插图作为材料的封面不就行了吗?"
+      // 纯加列、不动既有数据 —— 老材料 cover_url 为空,界面回落程序化封面,
+      // 显示行为与以前完全一致(不会因为升级而"多出一堆图"或"图错位")。
+      await _ensureColumn(db, 'materials', 'cover_url', 'TEXT');
+    }
   }
 
   /// 打开后自检(v1.9.0,审查 P0-2 的兜底):
@@ -639,6 +662,8 @@ class DatabaseService {
       // v2.10:书架表 + 材料中文标题缓存
       await _ensureTable(db, 'bookshelf', _bookshelfTableSql, repaired);
       await _ensureColumn(db, 'materials', 'title_cn', 'TEXT', repaired);
+      // v2.11:封面/配图地址(老库补列;新库由建表 SQL 带出来)
+      await _ensureColumn(db, 'materials', 'cover_url', 'TEXT', repaired);
       await _createIndexes(db);
       // v2.0 不变式:每个生词都有一条复习状态(word_review)。
       // 放在自检里而不是只放迁移里:这样"迁移后新增的词"也有状态,
@@ -1589,6 +1614,7 @@ class DatabaseService {
     'chapters',
     'audio_url',
     'transcript_ref',
+    'cover_url',
     'difficulty_json',
     'created_at',
     'cached_at',
@@ -1923,6 +1949,7 @@ class DatabaseService {
                m.origin AS origin,
                m.group_name AS group_name,
                m.title_cn AS title_cn,
+               m.cover_url AS cover_url,
                p.position AS position,
                p.percent AS percent,
                p.minutes AS minutes,
@@ -3025,6 +3052,7 @@ class DatabaseService {
                m.est_minutes AS est_minutes,
                m.coverage AS coverage,
                m.url AS url,
+               m.cover_url AS cover_url,
                p.percent AS percent,
                p.position AS position,
                p.minutes AS minutes,

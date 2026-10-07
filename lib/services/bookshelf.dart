@@ -32,6 +32,11 @@ class BookshelfBook {
   /// 来源 id(bbc_le / gutenberg / arxiv …)→ 取口音/来源名
   final String source;
 
+  /// 封面/配图地址(v2.11):库里 `materials.cover_url`。
+  /// 老材料(升级前入库的)为空 → 界面回落程序化封面;公版书即使为空,
+  /// 也可以在渲染时按 `url` 里的书号现算(PG 封面地址可推导)。
+  final String? coverUrl;
+
   /// 阅读进度:**统一成 0~100**
   ///
   /// 为什么要在这一层归一:库里 `material_progress.percent` 有两套口径 ——
@@ -72,6 +77,7 @@ class BookshelfBook {
     this.titleEn = '',
     this.kind = 'article',
     this.source = '',
+    this.coverUrl,
     this.percent = 0,
     this.minutes = 0,
     this.wordCount = 0,
@@ -136,6 +142,7 @@ class BookshelfBook {
       titleEn: _asString(row['title_en']),
       kind: _kindOf(row['kind']),
       source: _asString(row['source']),
+      coverUrl: _coverOf(row),
       percent: percent,
       minutes: _asInt(row['minutes']),
       wordCount: _asInt(row['word_count']),
@@ -189,6 +196,17 @@ class BookshelfBook {
   }
 
   static String _asString(Object? v) => v is String ? v : (v == null ? '' : '$v');
+
+  /// 封面地址(容错:空串/`"null"`/非 http 一律当"没有图")。
+  ///
+  /// 为什么这里就要挡住非 http:`MaterialCover` 只认 http(s),
+  /// 脏值(false:// 或本地路径)塞进去只会白跑一次 errorBuilder。
+  static String? _coverOf(Map<String, Object?> row) {
+    final s = _asString(row['cover_url']).trim();
+    if (s.isEmpty || s.toLowerCase() == 'null') return null;
+    if (!s.startsWith('http://') && !s.startsWith('https://')) return null;
+    return s;
+  }
 
   /// 时间字段容错:解析不出就 null(界面据此隐藏那一行,而不是显示 1970)
   static DateTime? _asDate(Object? v) {

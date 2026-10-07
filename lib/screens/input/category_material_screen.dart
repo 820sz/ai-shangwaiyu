@@ -241,9 +241,29 @@ class _CategoryMaterialScreenState extends State<CategoryMaterialScreen> {
     );
     try {
       final service = MaterialSourceService.instance;
+      // v2.11:这里以前写死 `int.parse(hit.sourceId2)` —— 遇到"链接写法"的命中
+      // (RSS 列表、AI 点名的作品)会抛 FormatException,用户看到一串英文红字。
+      // 统一走 [MaterialSourceService.normalizeSourceId2]:书号从任意写法里抠出来,
+      // 抠不到就交给 [fetchDocument],由它给中文提示(它内部也用同一个解析函数)。
+      final resolved = MaterialSourceService.normalizeSourceId2(
+        hit.sourceId,
+        hit.sourceId2,
+      );
       final doc = switch (hit.sourceId) {
-        'gutenberg' => await service.fetchGutenberg(int.parse(hit.sourceId2)),
-        'arxiv' => await service.fetchArxiv(hit.sourceId2),
+        'gutenberg' => resolved.isEmpty
+            ? await service.fetchDocument(
+                hit.sourceId,
+                url: hit.url,
+                id: hit.sourceId2,
+              )
+            : await service.fetchGutenberg(int.parse(resolved)),
+        'arxiv' => resolved.isEmpty
+            ? await service.fetchDocument(
+                hit.sourceId,
+                url: hit.url,
+                id: hit.sourceId2,
+              )
+            : await service.fetchArxiv(resolved),
         _ => await service.fetchDocument(hit.sourceId, url: hit.url),
       };
       // 标题补成「中文(英文)」再入库(用户第 2(2) 条):书架/阅读器/材料文件夹
@@ -339,6 +359,8 @@ class _CategoryMaterialScreenState extends State<CategoryMaterialScreen> {
       license: doc.license,
       language: doc.language,
       audioUrl: doc.audioUrl,
+      // v2.11:改标题不能把配图丢掉(见 material_import_flow._retitle 的同款注释)
+      coverUrl: doc.coverUrl,
       chunks: doc.chunks,
       plainText: doc.plainText,
     );

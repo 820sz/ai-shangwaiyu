@@ -109,6 +109,11 @@ class MaterialDoc {
 
   final String? audioUrl;
 
+  /// 封面/配图地址(v2.11):源头自带的图 —— RSS 的 `<content:encoded>` 头图、
+  /// 文章页的 `og:image`。**空的表示"这个源没有现成配图"**,
+  /// 由 `MaterialLibrary` 入库时决定要不要按书号补公版书封面。
+  final String? coverUrl;
+
   final List<MaterialChunk> chunks;
 
   /// 全文纯文本(交给 `text_difficulty.dart` 做难度分析)
@@ -124,6 +129,7 @@ class MaterialDoc {
     required this.license,
     this.language = 'en',
     this.audioUrl,
+    this.coverUrl,
     required this.chunks,
     required this.plainText,
   });
@@ -133,6 +139,26 @@ class MaterialDoc {
       plainText.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length;
 
   bool get hasAudio => (audioUrl ?? '').isNotEmpty;
+}
+
+/// 一条命中"该让谁去抓"的结论(纯数据,见 [MaterialSourceService.hitFetchPlanFor])。
+///
+/// 三个字段只会有一个生效:公版书给 [bookId]、arXiv 给 [arxivId]、其余给 [url]。
+/// 这样调用方不必再自己判断"这个 id 是书号还是链接"。
+class HitFetchPlan {
+  /// 命中的内容源(与 [MaterialSource.id] 对齐)
+  final String sourceId;
+
+  /// 公版书书号(已从任意写法里抠出来)
+  final int? bookId;
+
+  /// arXiv 编号(已去掉版本号)
+  final String? arxivId;
+
+  /// 通用网页抓取用的链接
+  final String? url;
+
+  const HitFetchPlan({required this.sourceId, this.bookId, this.arxivId, this.url});
 }
 
 /// 抓取/解析失败。**中文可读**,给界面直接显示。
@@ -383,6 +409,106 @@ class MaterialSourceService {
     }
   }
 
+  /// 把「命中里拿到的 sourceId2」规范化成抓取器认识的 id(纯函数)。
+  ///
+  /// **为什么需要它(v2.11,用户 10/5 真机:"材料中心存在部分文章打不开")**:
+  /// 同一个 `sourceId2` 字段在不同来源里写法完全不同 —— 站内检索解析出来的是
+  /// 纯书号(`original_search.parseGutenbergSearchPage` 给的是 `1342`),
+  /// 而 RSS 列表里的 `<link>` 是**整条 URL**(实测 Gutenberg today.rss 12/12 都是
+  /// `https://www.gutenberg.org/ebooks/79727`),今天的推荐/今日精读两条链路
+  /// 又直接把 `FeedItem.link` 塞进了 `sourceId2`。
+  ///
+  /// 旧实现在打开时写的是 `int.tryParse(sourceId2) ?? 0` → URL 解析不出来 →
+  /// 0 → `fetchGutenberg(0)` 抛「书籍 id 不合法:0」(用户截图里那句)。
+  /// 但仓库里**本来就有** [gutenbergIdOf] / [arxivIdOf] 两个能从任意写法里抠 id 的
+  /// 纯函数(`fetchDocument` 走的就是它们)—— 问题只是这条链路没用上。
+  ///
+  /// 认不出来时返回**空串**而不是抛异常:调用方(openHit)据此给出人话提示,
+  /// 而不是让一个 `FormatException` 变成用户看不懂的红字。
+  static String normalizeSourceId2(String sourceId, String sourceId2) {
+    final raw = sourceId2.trim();
+    switch (sourceId) {
+      case 'gutenberg':
+        final bookId = gutenbergIdOf(raw);
+        return bookId == null ? '' : '$bookId';
+      case 'arxiv':
+        return arxivIdOf(raw) ?? '';
+      default:
+        // RSS / 网页 / 维基:条目 id 本来就是 URL 或 guid,不做任何猜测
+        return raw;
+    }
+  }
+
+  /// 打开一条命中时,**该用哪个抓取器**(纯函数,决定一次网络往返的去向)。
+  ///
+  /// 为什么单独抽出来:这段判断以前内联在 `MaterialImportFlow.openHit()` 的
+  /// `switch` 里,**没有测试面** —— 于是"RSS 链接被当成书号"这种 bug 只能靠真机撞。
+  /// 抽成纯函数后,路由表可以被单测钉住(见 `test/material_source_test.dart`)。
+  ///
+  /// 路由规则(与 [MaterialImport.fromAnyUrl] / [fetchDocument] 的能力对齐):
+  /// - `gutenberg` 且能认出书号 → 走全文 TXT;
+  /// - `gutenberg` 但认不出(理论上不该发生)→ 退回通用网页抓取,
+  ///   由抓取器自己给出人话错误;
+  /// - `arxiv` 且能认出编号 → 走摘要页;认不出 → 通用网页(起码能给出人话错误);
+  /// - 其它源 → 通用网页 / [fetchAnyUrl]。
+  static HitFetchPlan hitFetchPlanFor({required String sourceId, required String sourceId2, required String url}) {
+    final id = normalizeSourceId2(sourceId, sourceId2);
+    final link = url.trim();
+    if (sourceId == 'gutenberg') {
+      if (id.isNotEmpty) {
+        return HitFetchPlan(sourceId: 'gutenberg', bookId: int.tryParse(id));
+      }
+      return HitFetchPlan(sourceId: 'gutenberg', url: link.isNotEmpty ? link : sourceId2.trim());
+    }
+    if (sourceId == 'arxiv') {
+      return id.isEmpty
+          ? HitFetchPlan(sourceId: 'arxiv', url: link.isNotEmpty ? link : sourceId2.trim())
+          : HitFetchPlan(sourceId: 'arxiv', arxivId: id);
+    }
+    return HitFetchPlan(sourceId: sourceId, url: link);
+  }
+
+  /// 一条材料"最终该显示哪张封面"(纯函数,可单测)。
+  ///
+  /// 取值顺序:
+  /// 1. **库里存的**(v2.11 入库时从原材料的头图/og:image 抓来的)——
+  ///    这是用户要的"原插图",优先级最高;
+  /// 2. **按公版书书号现算**(老数据没有 cover_url,但 `url` 是
+  ///    `…/ebooks/<id>`,封面地址可推导 → 一次网络往返都不用就补上);
+  /// 3. 都没有 → null,界面回落程序化封面(`MaterialCover` 保证不留白块)。
+  ///
+  /// 为什么要抽出来:材料库卡、书架预览、"查看封面"、导入列表四处都要这套
+  /// 判断,写四遍必然有一处漏(上一版就是"有图但没传参").
+  static String? coverFor({
+    String? storedCoverUrl,
+    String sourceUrl = '',
+    String? itemImageUrl,
+  }) {
+    for (final raw in [storedCoverUrl, itemImageUrl]) {
+      final u = (raw ?? '').trim();
+      if (u.startsWith('http://') || u.startsWith('https://')) return u;
+    }
+    final id = gutenbergIdOf(sourceUrl);
+    if (id != null) return gutenbergCoverUrlOf('$id');
+    return null;
+  }
+
+  /// 公版书官方封面地址(纯函数)。
+  ///
+  /// 实测(2026-10):`cache/epub/<id>/pg<id>.cover.medium.jpg` 12/12 全部
+  /// **200 + image/jpeg**(含 1/2/3/11/55/1000 这些老书/短书),平均 <0.5 秒,
+  /// 所以"不是每本书都有封面"这个担心不成立 —— 但**无封面的书确实会 404**,
+  /// 界面必须靠 `Image.network` 的 errorBuilder 回落程序化封面。
+  ///
+  /// ⚠️ 注意:这是 PG **自动排版生成**的封面(排印文字 + 底部日期条),
+  /// **不是原书插图**。真正的原插图在 `<id>-h.htm` 的 `images/` 里,
+  /// 但那个页面 650KB、实测偶发 EOF 截断、最长 60 秒 —— 不能进正常打开流程。
+  static String? gutenbergCoverUrlOf(String bookId) {
+    final id = int.tryParse(bookId.trim());
+    if (id == null || id <= 0) return null;
+    return 'https://www.gutenberg.org/cache/epub/$id/pg$id.cover.medium.jpg';
+  }
+
   /// 公版书全文 TXT 地址(纯函数)
   static String gutenbergTextUrl(int bookId) =>
       'https://www.gutenberg.org/cache/epub/$bookId/pg$bookId.txt';
@@ -474,7 +600,11 @@ class MaterialSourceService {
     for (final it in items) {
       if (it.link.trim().isEmpty) continue;
       if (!seen.add(it.link)) continue;
-      out.add(it);
+      // v2.11:公版书的封面**按书号现算**(用户 10/5:"很多材料明明链接点开里面
+      // 自己就有配图啊")。Gutenberg 的 today.rss 是 RSS 0.91,**没有 media RSS**,
+      // 所以 FeedParser 抽不到任何图(<image> 也没有),必须在这里补。
+      // 实测 `cache/epub/<id>/pg<id>.cover.medium.jpg` 12/12 全部 200。
+      out.add(sourceId == 'gutenberg' ? _withGutenbergCover(it) : it);
       if (out.length >= limit) break;
     }
     if (out.isEmpty) {
@@ -484,6 +614,27 @@ class MaterialSourceService {
       );
     }
     return out;
+  }
+
+  /// 给一条公版书条目补官方封面地址(v2.11,纯函数)。
+  ///
+  /// 为什么按书号现算而不是抓页面:书目页要 2.2 秒一次网络往返,
+  /// 而封面地址是可推导的 —— 列表渲染时**零额外请求**就能有图。
+  /// 拿不到书号(源站改版)就原样返回,界面回落程序化封面。
+  static FeedItem _withGutenbergCover(FeedItem it) {
+    if ((it.imageUrl ?? '').isNotEmpty) return it;
+    final id = gutenbergIdOf(it.link);
+    if (id == null) return it;
+    return FeedItem(
+      title: it.title,
+      link: it.link,
+      summary: it.summary,
+      published: it.published,
+      audioUrl: it.audioUrl,
+      guid: it.guid,
+      author: it.author,
+      imageUrl: gutenbergCoverUrlOf('$id'),
+    );
   }
 
   // ─────────────────────────── 详情页 ───────────────────────────
@@ -1210,9 +1361,97 @@ class MaterialSourceService {
       url: abs,
       license: source.license,
       language: 'en',
+      // v2.11:文章页自己的配图(用户 10/5:"很多材料明明链接点开里面自己就有配图")
+      coverUrl: articleCoverUrl(html, abs),
       chunks: chunks,
       plainText: chunks.map((c) => c.text).join('\n\n'),
     );
+  }
+
+  /// 从文章页 HTML 里取封面图(纯函数,可单测)。
+  ///
+  /// 三级取值,按"离文章内容近"排序:
+  /// 1. `og:image` —— 站点给社交卡选的图,几乎总是正文头图;
+  /// 2. `twitter:image` —— 有些站点只配这一个;
+  /// 3. 正文第一张 `<img>`(滤掉追踪像素)。
+  ///
+  /// ⚠️ 已知坑(实测 NPR 2026-10):`og:image` 拿到的是 CDN 带参数的地址
+  /// (`…/dims3/…?url=<S3 原址>`),**直连 403**;把 `?url=` 的值 URL-decode 出来
+  /// 才是真图地址(实测 200 image/jpeg 337KB)。所以这里做一次 **CDN 拆包**。
+  ///
+  /// ⚠️ 另一个坑:`og:image` 用的属性名是 `property=`(不是 `name=`),
+  /// 老的 [_metaOf] 只认 `name=`,直接复用会一条都取不到。
+  static String? articleCoverUrl(String html, String pageUrl) {
+    if (html.trim().isEmpty) return null;
+    for (final key in const ['og:image', 'twitter:image', 'twitter:image:src']) {
+      final raw = _metaPropertyOf(html, key);
+      if (raw.isEmpty) continue;
+      final u = _unwrapImageCdn(_absolutizeAgainst(raw, pageUrl));
+      if (u != null) return u;
+    }
+    return FeedParser.firstContentImage(html, baseUrl: pageUrl);
+  }
+
+  /// 取 `<meta property="…" content="…">`(也兼容写成 `name="og:image"` 的站点)。
+  static String _metaPropertyOf(String html, String property) {
+    final attrRe = RegExp(r'''(\w[\w:-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')''');
+    for (final m in RegExp(r'<meta\b[^>]*>', caseSensitive: false).allMatches(html)) {
+      final tag = m.group(0)!;
+      String? key;
+      String? content;
+      for (final a in attrRe.allMatches(tag)) {
+        final k = (a.group(1) ?? '').toLowerCase();
+        final v = (a.group(2) ?? a.group(3) ?? '').trim();
+        if (k == 'property' || k == 'name') {
+          key ??= v.toLowerCase();
+        } else if (k == 'content') {
+          content ??= v;
+        }
+      }
+      if (key == null || content == null || content.isEmpty) continue;
+      if (key == property.toLowerCase()) {
+        return HtmlText.decodeEntities(content).trim();
+      }
+    }
+    return '';
+  }
+
+  /// CDN 拆包:把 `…/dims3/…?url=<URL-encoded 原址>` 还原成原址。
+  ///
+  /// **为什么必须做**(实测):NPR 的 `npr.brightspotcdn.com/dims3/…format/jpeg/?url=…`
+  /// 直连返回 **403**,而把 `url=` 参数 URL-decode 出来的 S3 原址是 200。
+  /// 拆不出来(没有 `url=` 参数)就原样返回 —— 不猜。
+  static String? _unwrapImageCdn(String? url) {
+    final raw = (url ?? '').trim();
+    if (raw.isEmpty) return null;
+    final m = RegExp(r'[?&]url=([^&]+)').firstMatch(raw);
+    if (m == null) return raw;
+    try {
+      final inner = Uri.decodeComponent(m.group(1)!);
+      var u = inner.trim();
+      // CDN 里存的往往是 http 原址(NPR 实测:解码出来是 http://…s3.amazonaws.com/…)。
+      // 升级成 https:App 走 HttpsURLConnection,Dart 侧对明文 http 也会被
+      // Android 的 cleartext 策略挡掉(表现为图永远加载失败、只剩程序化封面)。
+      // 只动协议头,不动路径 —— 不会改变指向的资源。
+      if (u.startsWith('http://')) u = 'https://${u.substring(7)}';
+      if (u.startsWith('https://') && !u.contains(' ')) return u;
+    } catch (_) {
+      // decode 失败(不合法百分号编码)→ 保持原样
+    }
+    return raw;
+  }
+
+  /// 把可能相对的图片地址拼成绝对地址(纯函数)。
+  ///
+  /// 复用 [HtmlText.resolveUrl];解析失败就返回 null,
+  /// 由调用方继续尝试下一级(don't 猜)。
+  static String? _absolutizeAgainst(String raw, String pageUrl) {
+    final u = raw.trim();
+    if (u.isEmpty) return null;
+    if (u.startsWith('http://') || u.startsWith('https://')) return u;
+    if (u.startsWith('//')) return 'https:$u';
+    final abs = HtmlText.resolveUrl(u, pageUrl);
+    return (abs.startsWith('http') ? abs : null);
   }
 
   /// 去掉标题尾部的站点名(纯函数,可单测)。

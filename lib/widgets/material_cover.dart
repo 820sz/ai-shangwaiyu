@@ -441,6 +441,9 @@ class MaterialCover extends StatelessWidget {
             final colors = coverPalette(seed, brightness);
             final hasImage = coverHasImage(imageUrl);
             final large = coverIsLarge(h);
+            // v2.11:按**真实渲染尺寸 × 设备像素比**解码(见下面 Image.network 的注释)
+            final dpr = MediaQuery.devicePixelRatioOf(context);
+            final decodeW = (math.max(w, h) * dpr).round();
 
             return Stack(
               fit: StackFit.expand,
@@ -451,6 +454,13 @@ class MaterialCover extends StatelessWidget {
                   Image.network(
                     imageUrl!.trim(),
                     fit: BoxFit.cover,
+                    // v2.11:小卡按**设备像素**解码,别把 2000px 的原图整张读进内存。
+                    // 为什么必须给:列表里同时有十几张封面,而项目里**没有**
+                    // 磁盘缓存依赖(见 pubspec 血泪教训:加插件后 APK 可能构建不过),
+                    // 只能靠 Flutter 默认的内存 ImageCache —— 不限制解码尺寸时,
+                    // 一张 2000×1084 的头图 decoded 后是 ~8MB,十几张就把缓存冲爆,
+                    // 表现为"滚动时图反复消失重下"。
+                    cacheWidth: decodeW > 0 ? decodeW : null,
                     // 加载中/失败都返回透明占位:露出的就是下层程序化封面,
                     // 既不会白块,也不必把封面重画一遍
                     loadingBuilder: (context, child, progress) =>

@@ -43,11 +43,12 @@ class OriginalHit {
 
   /// Gutenberg 公版书封面(已实测可达:200 / 31KB;没有封面的书返回 404 →
   /// 由 [MaterialCover] 的 errorBuilder 回落程序化封面)
-  static String? gutenbergCoverUrl(String bookId) {
-    final id = int.tryParse(bookId.trim());
-    if (id == null || id <= 0) return null;
-    return 'https://www.gutenberg.org/cache/epub/$id/pg$id.cover.medium.jpg';
-  }
+  ///
+  /// v2.11:实现挪到 [MaterialSourceService.gutenbergCoverUrlOf] —— 材料库/书架
+  /// 也要按书号现算封面,不能只有"检索结果"这一条链路有。这里保留原入口,
+  /// 免得改一堆调用点(行为完全一致)。
+  static String? gutenbergCoverUrl(String bookId) =>
+      MaterialSourceService.gutenbergCoverUrlOf(bookId);
 }
 
 /// 检索进度事件(v2.8,用户第 6(4) 条)。

@@ -6,6 +6,7 @@ import 'database.dart';
 import 'learner_context.dart';
 import 'material_prefs.dart';
 import 'material_source.dart';
+import 'original_search.dart';
 import 'text_difficulty.dart';
 import 'word_frequency.dart';
 
@@ -105,6 +106,11 @@ class ShelfItem {
 
   /// 中文标题(v2.10:标题中文化要落库,任何界面都能显示中文)
   final String titleCn;
+
+  /// 封面/配图地址(v2.11:入库时存下**源头自带的图** —— 公版书封面、
+  /// RSS 头图、文章 og:image)。为空时界面回落程序化封面。
+  final String? coverUrl;
+
   final String cefr;
   final int wordCount;
   final double? coverage;
@@ -124,6 +130,7 @@ class ShelfItem {
     this.group,
     this.origin = '',
     this.titleCn = '',
+    this.coverUrl,
     required this.cefr,
     required this.wordCount,
     required this.coverage,
@@ -223,6 +230,11 @@ class MaterialLibrary {
         'url': doc.url,
         'license': doc.license,
         'language': doc.language,
+        // v2.11:封面/配图 —— 入库时把源头自带的图存下来(公版书封面、RSS 头图、
+        // 文章 og:image)。用户 10/5 原话:"很多材料明明链接点开里面自己就有配图啊,
+        // 把原材料的原插图作为材料的封面不就行了吗?" 不落库的话,重启后
+        // 材料库/书架又只剩程序化色块。空的写 null,让界面回落程序化封面。
+        'cover_url': _coverUrlOf(doc),
         // v2.10:来路(材料导入 vs 材料中心的公开源)
         'origin': originOf(doc.sourceId),
         'word_count': analysis.wordCount,
@@ -323,6 +335,9 @@ class MaterialLibrary {
           : '${r['group_name']}'.trim(),
       origin: '${r['origin'] ?? ''}',
       titleCn: (r['title_cn'] as String?)?.trim() ?? '',
+      coverUrl: (r['cover_url'] as String?)?.trim().isEmpty ?? true
+          ? null
+          : '${r['cover_url']}'.trim(),
       cefr: '${r['cefr'] ?? ''}',
       wordCount: _asInt(r['word_count']),
       coverage: cov,
@@ -338,8 +353,27 @@ class MaterialLibrary {
     );
   }
 
+  /// 入库时要落库的封面地址(v2.11,纯函数)。
+  ///
+  /// 优先级:
+  /// 1. 文档自己带的图(抓取时从 RSS 头图 / 文章 og:image 拿到的);
+  /// 2. 公版书:**按书号现算**官方封面 —— 实测 `cache/epub/<id>/pg<id>.cover.medium.jpg`
+  ///    12/12 全部 200 + image/jpeg(含 1/2/3/11/55/1000),无 404 风险;
+  ///    ⚠️ 这是 PG **自动排版生成**的封面(不是原书插图),但它是"有脸"的成本最低来源;
+  /// 3. 拿不到就 null → 界面回落程序化封面(`MaterialCover`),永不白块。
+  static String? _coverUrlOf(MaterialDoc doc) {
+    final own = (doc.coverUrl ?? '').trim();
+    if (own.startsWith('http')) return own;
+    if (doc.sourceId == 'gutenberg') {
+      final id = MaterialSourceService.gutenbergIdOf(doc.sourceId2);
+      if (id != null) return OriginalHit.gutenbergCoverUrl('$id');
+    }
+    return null;
+  }
+
   static int _asInt(Object? v) =>
       v is int ? v : (v is num ? v.toInt() : int.tryParse('$v') ?? 0);
+
   static double _asDouble(Object? v) =>
       v is double ? v : (v is num ? v.toDouble() : double.tryParse('$v') ?? 0);
 

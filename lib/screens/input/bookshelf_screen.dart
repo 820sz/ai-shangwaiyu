@@ -487,6 +487,9 @@ class _CoverSheet extends StatelessWidget {
             MaterialCover(
               seed: book.title,
               kind: book.kind,
+              // v2.11:书架长按「查看封面」是全 App 唯一"该给大图"的地方 ——
+              // 这里以前没传 imageUrl,于是永远只有程序化色块。
+              imageUrl: book.coverUrl,
               width: double.infinity,
               height: 240,
               levelLabel: 'Lv$level',
