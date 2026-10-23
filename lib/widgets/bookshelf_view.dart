@@ -121,19 +121,34 @@ class _BookshelfViewState extends State<BookshelfView> {
               ),
               const SizedBox(height: Gap.xxs),
             ],
-            for (var i = 0; i < rows.length; i++) ...[
-              _ShelfRow(
-                books: rows[i],
-                perShelf: perShelf,
-                selectedId: _selectedId,
-                // 只有最后一层留空位:前面几层放满了,用户看到的是"这架还能放"
-                fillEmpty: i == rows.length - 1 && !empty,
-                onTapBook: _select,
-                onLongPressBook: widget.onLongPressBook,
-                onTapEmptySlot: widget.onTapEmptySlot,
+            // v2.12(用户 10/23 给的样图"书架是 3D 立体轮播"):
+            // 给整架加**轻微 3D 透视** —— 不做转盘(成本高、误触多),只俯视一点:
+            // 书脊有了纵深、搁板有了厚度方向,视觉上从"平面贴图"变成"一个真架子"。
+            // `Transform` 默认 `transformHitTests: true`,点击会做逆变换,位置仍然准。
+            Transform(
+              alignment: Alignment.center,
+              transform: Matrix4.identity()
+                ..setEntry(3, 2, 0.0012)
+                ..rotateX(0.045),
+              child: Column(
+                children: [
+                  for (var i = 0; i < rows.length; i++) ...[
+                    _ShelfRow(
+                      books: rows[i],
+                      perShelf: perShelf,
+                      selectedId: _selectedId,
+                      // 只有最后一层留空位:前面几层放满了,用户看到的是"这架还能放"
+                      fillEmpty: i == rows.length - 1 && !empty,
+                      onTapBook: _select,
+                      onLongPressBook: widget.onLongPressBook,
+                      onTapEmptySlot: widget.onTapEmptySlot,
+                    ),
+                    if (i != rows.length - 1)
+                      const SizedBox(height: SpineMetrics.rowSpacing),
+                  ],
+                ],
               ),
-              if (i != rows.length - 1) const SizedBox(height: SpineMetrics.rowSpacing),
-            ],
+            ),
             if (empty) ...[
               const SizedBox(height: Gap.md),
               Text(

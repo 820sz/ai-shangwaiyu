@@ -28,6 +28,14 @@ import 'waiting.dart';
 enum AppCardVariant { plain, compact, hero, accent }
 
 /// 卡片:统一圆角、内边距、外边距与点击反馈
+///
+/// v2.12 重写(前端全面升级):
+/// - **真阴影**:M3 的 `Card.elevation` 在浅色下是"表面染色"不是投影,
+///   做不出样图里那种柔和浮起感。这里改成 `Container` + [AppShadow](两段阴影),
+///   深色下自动没有阴影(靠亮度差,见 AppShadow 注释);
+/// - **圆角 16 → 20**(hero 24),与样图的大卡一致;
+/// - 不再用 `Card`:它自带的 elevation/tint 会和我们的阴影打架,
+///   统一成 Material + InkWell(水波纹仍在)。
 class AppCard extends StatelessWidget {
   final Widget child;
   final VoidCallback? onTap;
@@ -36,12 +44,14 @@ class AppCard extends StatelessWidget {
   final Color? color;
   final bool dense;
 
-  /// 视觉变体(默认 [AppCardVariant.plain] = v2.5 的老样子,老调用点不受影响)
+  /// 视觉变体(默认 [AppCardVariant.plain])
   final AppCardVariant variant;
 
-  /// 变体内部用的 Key:测试要能精确找到"卡片自己的内边距",
-  /// 而不是 `Card` 内部的 margin padding(两者都是 `Padding`,不区分会断错对象)。
+  /// 变体内部用的 Key:测试要能精确找到"卡片自己的内边距"
   static const Key paddingKey = Key('app_card_padding');
+
+  /// 卡片表面(测试用:断言颜色/阴影)
+  static const Key surfaceKey = Key('app_card_surface');
 
   const AppCard({
     super.key,
@@ -63,14 +73,10 @@ class AppCard extends StatelessWidget {
     final isAccent = variant == AppCardVariant.accent;
 
     final effectivePadding = padding ??
-        (isCompact || dense ? Insets.tile : Insets.card);
-    // 层级:**只让主角卡浮起来**,其余沿用主题给的那一档(当前是 1)。
-    // 这里踩过一次坑并已回退:曾把 plain 硬压成 0,结果全 App 的普通卡片
-    // 一下子都变平了 —— "统一视觉"不等于"顺手改掉 51 处老调用点的观感"。
-    final elevation = isHero ? AppElevation.raised : null;
-    final radius = isHero
-        ? const BorderRadius.all(Radius.circular(Radii.sheet))
-        : Radii.cardRadius;
+        (isHero
+            ? Insets.hero
+            : (isCompact || dense ? Insets.tile : Insets.card));
+    final radius = isHero ? Radii.heroRadius : Radii.cardRadius;
     final bg = color ??
         (isHero
             // 主角卡:在 surface 上叠一点 primary —— 亮暗两套都成立,不硬编码色值
@@ -79,22 +85,36 @@ class AppCard extends StatelessWidget {
             : isAccent
                 ? Color.alphaBlend(
                     cs.primary.withAlpha(AppSurface.accentTintAlpha), cs.surface)
-                : null);
+                : (theme.cardTheme.color ?? cs.surface));
 
     final content = Padding(
       key: paddingKey,
       padding: effectivePadding,
       child: child,
     );
-    return Card(
-      color: bg,
-      elevation: elevation,
+
+    return Container(
       margin: margin ?? const EdgeInsets.only(bottom: Gap.xs),
-      shape: RoundedRectangleBorder(borderRadius: radius),
-      clipBehavior: Clip.antiAlias,
-      child: onTap == null
-          ? content
-          : InkWell(onTap: onTap, child: content),
+      // 阴影画在容器上:深色下 AppShadow 返回空列表(层级靠表面亮度差)
+      decoration: BoxDecoration(
+        borderRadius: radius,
+        boxShadow: isHero ? AppShadow.md(context) : AppShadow.sm(context),
+      ),
+      child: Material(
+        key: surfaceKey,
+        color: bg,
+        borderRadius: radius,
+        clipBehavior: Clip.antiAlias,
+        child: onTap == null
+            ? content
+            : InkWell(
+                onTap: onTap,
+                // 水波纹用主色的低透明度:既有反馈,又不改变卡面颜色
+                splashColor: cs.primary.withAlpha(18),
+                highlightColor: cs.primary.withAlpha(10),
+                child: content,
+              ),
+      ),
     );
   }
 }

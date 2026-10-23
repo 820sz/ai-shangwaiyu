@@ -24,6 +24,7 @@ import '../../services/word_frequency.dart';
 import '../../widgets/app_ui.dart';
 import '../../widgets/bookshelf_view.dart';
 import '../../widgets/collapsible_section.dart';
+import '../../widgets/design_kit.dart';
 import '../../widgets/material_cover.dart';
 import '../../widgets/waiting.dart';
 import 'category_material_screen.dart';
@@ -95,48 +96,12 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
   /// 区块的展开/收起/隐藏(v2.9,用户 3(1) 条)
   final _sectionPrefs = SectionPrefsNotifier(UiSectionPrefs.load());
 
-  /// 当前显示的功能分组(v2.11 材料中心的信息架构)。
+  /// (v2.12 移除)`_group` 三组分段切换。
   ///
-  /// 0 = 找材料(个性化偏好 + 题材发现 + 按水平找)、
-  /// 1 = 在读(书架 + 今日推荐)、2 = 我的东西(材料库)。
-  /// 为什么用"分组切换"而不是继续 7 段竖排:用户 10/5 的原话是
-  /// "材料中心更是没有欲望的竖列呈现" —— 7 个同形标题行首尾相连,
-  /// 首屏全是横杠。分组后首屏只见"主角卡 + 一组内容",每块的空间也变大了。
-  /// 注意:分组**不是把功能藏起来** —— 切一下就全在,而且每个区块自身的
-  /// 折叠/隐藏机制(v2.9)原样保留。
-  int _group = 0;
-
-  /// 分组切换器:一枚 `SegmentedButton`(Material 3,自带选中态与动效)
-  Widget _buildGroupSwitcher(ThemeData theme) {
-    return SegmentedButton<int>(
-      segments: const [
-        ButtonSegment(
-          value: 0,
-          icon: Icon(Icons.travel_explore_outlined, size: 16),
-          label: Text('找材料'),
-        ),
-        ButtonSegment(
-          value: 1,
-          icon: Icon(Icons.auto_stories_outlined, size: 16),
-          label: Text('在读'),
-        ),
-        ButtonSegment(
-          value: 2,
-          icon: Icon(Icons.library_books_outlined, size: 16),
-          label: Text('我的东西'),
-        ),
-      ],
-      selected: {_group},
-      showSelectedIcon: false,
-      style: ButtonStyle(
-        visualDensity: VisualDensity.compact,
-        textStyle: WidgetStatePropertyAll(
-          TextStyle(fontSize: AppFont.caption, fontWeight: FontWeight.w600),
-        ),
-      ),
-      onSelectionChanged: (s) => setState(() => _group = s.first),
-    );
-  }
+  /// 上一版把页面分成「找材料 / 在读 / 我的东西」三组,用户 10/23 的原话是
+  /// "分类逻辑还是一坨屎,难用死了,压根看不出功能分类之间的意义" ——
+  /// 因为**维度不是用户的任务**:三组名字都是系统视角。现在改为
+  /// 顶部**内容领域页签** + 纵向杂志式信息流(见 build 注释)。
 
   @override
   void initState() {
@@ -825,44 +790,80 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
             return c == null || _prefs.band.contains(c);
           }).toList()
         : _shelf;
+    // 内容领域页签(v2.12):直接用 [MaterialTopic.all] —— 这套题材是 v2.8 就为
+    // "参考软件顶部那种题材 tab"定好的(科学与技术/商业与政治/…),之前却被埋在
+    // 「发现更多」区块里的多选 chip 后面,用户看不到。现在提到页面顶部当导航。
+    final topicTabs = _availableTopics.take(8).toList();
+    var tabIndex = topicTabs.indexWhere((t) => _selectedTopics.contains(t.id));
+    if (tabIndex < 0) tabIndex = 0;
     return SectionPrefsScope(
       notifier: _sectionPrefs,
       child: Scaffold(
-        appBar: AppBar(
-          title: const Text('材料中心'),
-          actions: [
-            IconButton(
-              tooltip: '区块管理(恢复被隐藏的功能区)',
-              onPressed: _showSectionManager,
-              icon: const Icon(Icons.view_agenda_outlined),
-            ),
-            IconButton(
-              tooltip: '导入材料(文件 / 图片 / 链接 / 粘贴)',
-              onPressed: _import,
-              icon: const Icon(Icons.add_circle_outline),
-            ),
-          ],
-        ),
-        body: ListView(
-          // 记住滚动位置:收起/展开后不会跳回顶部
-          key: const PageStorageKey<String>('material_center'),
-          padding: Insets.page,
-          children: [
-            // ── v2.11 信息架构(用户 10/5:"材料中心更是没有欲望的竖列呈现")──
+        // v2.12(前端全面升级):去掉 AppBar —— 标题变成内容的一部分(大标题 + 一句话),
+        // 右上的两个操作(区块管理 / 导入)跟着标题走。样图的发现页也是这种结构。
+        body: SafeArea(
+          bottom: false,
+          child: ListView(
+            // 记住滚动位置:收起/展开后不会跳回顶部
+            key: const PageStorageKey<String>('material_center'),
+            padding: Insets.page,
+            children: [
+            // ── v2.12 信息架构(用户 10/5 骂"分类逻辑是一坨屎")──
             //
-            // 改动:以前是 **7 个折叠区块首尾相连**(标题行由同一份代码渲染 →
-            // 一眼扫过去是 7 条一模一样的横杠)。现在:
-            //   ① 「今日精读」提到最上面当**主角**(hero 卡,不再藏进折叠区);
-            //   ② 其余 6 个区块收进 **3 组分段切换**,一次只显示一组 ——
-            //      首屏看得见的东西变少,每个区块的纵向空间变大;
-            //   ③ 每个区块**本身仍然可折叠/可隐藏**(v2.9 的机制原样保留),
-            //      分段只是"分层",不是"把功能藏起来":切一下就全在。
-            //
-            // 分组依据是"用户此刻想干什么",不是按功能名硬分:
-            //   找材料(个性化偏好 + 题材发现 + 按水平找)、
-            //   在读的(书架 + 今日推荐)、
-            //   我的东西(材料库)。
-            _buildGroupSwitcher(theme),
+            // 上一版我按自己的功能名把页面分成「找材料 / 在读 / 我的东西」三组
+            // 分段切换 —— 用户看不出意义,因为**分类维度不是用户的任务**。
+            // 这一版改成:
+            //   ① 顶部**内容领域页签**(科学与技术/商业与政治/…,来自 MaterialTopic)——
+            //      这就是样图里"分类逻辑清晰"的那种 tab,点一下直接按题材找;
+            //   ② 去掉三组分段切换,所有区块**纵向杂志式排列**(每段形态不同:
+            //      大图卡 → 横滑卡流 → 题材结果 → 网格 → 书架 → 横卡列表),
+            //      靠形态差异和编号标题产生节奏,而不是靠"折叠横杠";
+            //   ③ 每个区块自身的折叠/隐藏机制(v2.9)原样保留。
+            // ① 页面标题 + 操作(替代 AppBar)
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '材料中心',
+                        style: AppFont.displayStyle.copyWith(
+                          color: theme.colorScheme.onSurface,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        '选一篇,今天就读它',
+                        style: AppFont.metaStyle.copyWith(color: muted),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  tooltip: '区块管理(恢复被隐藏的功能区)',
+                  onPressed: _showSectionManager,
+                  icon: const Icon(Icons.view_agenda_outlined),
+                ),
+                IconButton(
+                  tooltip: '导入材料(文件 / 图片 / 链接 / 粘贴)',
+                  onPressed: _import,
+                  icon: const Icon(Icons.add_circle_outline),
+                ),
+              ],
+            ),
+            const SizedBox(height: Gap.sm),
+            // ② 内容领域页签:点一下 = 按该题材检索(复用 v2.8 的 _loadTopics)
+            AppContentTabs(
+              tabs: [for (final t in topicTabs) t.label],
+              index: tabIndex,
+              horizontalPadding: EdgeInsets.zero,
+              onChanged: (i) {
+                if (i < 0 || i >= topicTabs.length) return;
+                _loadTopics([topicTabs[i]]);
+              },
+            ),
             const SizedBox(height: Gap.xs),
             AppStagger(
               index: 1,
@@ -875,7 +876,7 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
                 child: _buildDailyCard(theme, muted),
               ),
             ),
-            if (_group == 0) ...[
+            ...[
               AppStagger(
                 index: 0,
                 child: CollapsibleSection(
@@ -905,7 +906,7 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
                 ),
               ),
             ],
-            if (_group == 1) ...[
+            ...[
               AppStagger(
                 index: 3,
                 child: CollapsibleSection(
@@ -935,11 +936,10 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
               ),
             ),
             ],
-            if (_group == 1)
-              AppStagger(
-                index: 5,
-                child: CollapsibleSection(
-                  id: 'feed',
+            AppStagger(
+              index: 5,
+              child: CollapsibleSection(
+                id: 'feed',
                   title: '今日推荐',
                   icon: Icons.rss_feed,
                   subtitle:
@@ -992,8 +992,7 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
                   ),
                 ),
               ),
-            if (_group == 2)
-              AppStagger(
+            AppStagger(
               index: 6,
               child: CollapsibleSection(
                 id: 'shelf',
@@ -1031,6 +1030,7 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
             ),
             const SizedBox(height: Gap.lg),
           ],
+          ),
         ),
       ),
     );
@@ -1978,89 +1978,54 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
 
   // ───────────────── ⑤ 材料库卡片 ─────────────────
 
+  /// 材料库的一张卡(v2.12:改成**横卡**形态 —— 左文右图 + 竖排 Lv 徽标)。
+  ///
+  /// 为什么换形态:旧版是"76 小图 + 标题 + 三行小字 + 两个按钮"的竖排卡,
+  /// 和今日推荐/发现卡几乎一样(用户说的"清一色")。用户给的样图里,
+  /// 发现页是**左文右图**的横卡:标题占左侧、日期/标签在左下、右侧方形缩略图 +
+  /// 竖排 Lv —— 这种排布扫读效率最高(文字左边对齐成一条线)。
+  /// 同时**去掉卡上的两个按钮**:整卡可点就够了,按钮只会让卡片变高、变吵。
   Widget _buildShelfCard(ThemeData theme, ShelfItem s) {
-    final muted = theme.colorScheme.onSurfaceVariant;
     final cov = s.coverage;
     final fit = cov == null ? '' : _prefs.band.fitLabel(cov);
     final lv = MaterialLevel.of(s.cefr, kind: s.kind);
-    final meta = [
+    final metaText = [
       '${s.wordCount} 词',
       '约 ${s.estMinutes} 分钟',
-      s.progressLabel,
-      if (s.pickedWords > 0) '已收 ${s.pickedWords} 词',
     ].join(' · ');
-    return Padding(
-      padding: const EdgeInsets.only(bottom: Gap.xs),
-      child: AppCard(
-        onTap: () => _openReader(s.id),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            MaterialCover(
-              seed: s.title,
-              kind: s.kind,
-              // v2.11:材料库卡的封面 —— 库里存的 cover_url 优先,老数据按
-              // `url` 里的公版书书号现算(见 MaterialSourceService.coverFor)
-              imageUrl: MaterialSourceService.coverFor(
-                storedCoverUrl: s.coverUrl,
-                sourceUrl: s.url,
-              ),
-              width: 76,
-              height: 76,
-              radius: Radii.control,
-              levelLabel: 'Lv$lv',
-            ),
-            const SizedBox(width: Gap.sm),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(s.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodyLarge?.copyWith(
-                        fontSize: 15,
-                        height: 1.3,
-                        fontWeight: FontWeight.w600,
-                      )),
-                  const SizedBox(height: 2),
-                  Text(meta,
-                      style: theme.textTheme.bodySmall
-                          ?.copyWith(color: muted, fontSize: 11.5)),
-                  const SizedBox(height: 4),
-                  Wrap(
-                    spacing: Gap.xs,
-                    runSpacing: 2,
-                    children: [
-                      if (cov != null)
-                        _meta(theme, Icons.speed,
-                            '已知 ${(cov * 100).toStringAsFixed(0)}%'),
-                      if (fit.isNotEmpty)
-                        _chip(theme, fit, accent: fit.startsWith('符合')),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      FilledButton.tonal(
-                        onPressed: () => _openReader(s.id),
-                        child: const Text('继续读'),
-                      ),
-                      const SizedBox(width: Gap.xxs),
-                      if (s.url.trim().isNotEmpty)
-                        TextButton.icon(
-                          onPressed: () => _openExternal(s.url),
-                          icon: const Icon(Icons.link, size: 15),
-                          label: const Text('原文链接'),
-                        ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
+    return AppWideCard(
+      title: s.title,
+      subtitle: metaText,
+      dateText: s.progressLabel,
+      tags: [
+        if (cov != null) AppTag('已知 ${(cov * 100).toStringAsFixed(0)}%'),
+        if (fit.isNotEmpty)
+          AppTag(
+            fit,
+            tone: fit.startsWith('符合')
+                ? AppTagTone.primary
+                : AppTagTone.neutral,
+          ),
+        if (s.pickedWords > 0) AppTag('已收 ${s.pickedWords} 词'),
+      ],
+      imageUrl: MaterialSourceService.coverFor(
+        storedCoverUrl: s.coverUrl,
+        sourceUrl: s.url,
       ),
+      seed: s.title,
+      kind: s.kind,
+      level: '$lv',
+      onTap: () => _openReader(s.id),
+      trailing: s.url.trim().isEmpty
+          ? null
+          : IconButton(
+              tooltip: '打开原文链接',
+              onPressed: () => _openExternal(s.url),
+              icon: const Icon(Icons.open_in_new, size: 16),
+              visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            ),
     );
   }
 }

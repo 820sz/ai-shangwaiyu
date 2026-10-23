@@ -493,17 +493,11 @@ class _MaterialRecommendationDetailScreenState
           const SizedBox(height: 12),
 
           if (_generating && _content.trim().isEmpty)
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.all(24),
-                child: Column(
-                  children: [
-                    CircularProgressIndicator(),
-                    SizedBox(height: 12),
-                    Text('AI 正在生成学习内容…', style: TextStyle(fontSize: 13)),
-                  ],
-                ),
-              ),
+            // 学习内容是长文本:用 AppLoading(默认走骨架屏)铺出正文将占据的形状,
+            // 标签还会说明"正在生成什么";流式内容一到就原地替换,不再是转圈。
+            const AppLoading(
+              label: 'AI 正在生成学习内容…',
+              skeletonLines: 6,
             ),
 
           if (_error != null) ...[

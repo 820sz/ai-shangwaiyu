@@ -7,6 +7,7 @@ import '../../providers/article_provider.dart';
 import '../../services/reader_settings.dart';
 import '../../widgets/reader_text.dart';
 import '../../widgets/word_action_sheet.dart';
+import '../../widgets/waiting.dart';
 import 'exercise_screen.dart';
 
 class ArticleReaderScreen extends StatefulWidget {
@@ -301,11 +302,11 @@ class _ArticleReaderScreenState extends State<ArticleReaderScreen> {
 
           // 生成新练习
           if (provider.generating)
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.all(16),
-                child: CircularProgressIndicator(),
-              ),
+            // 整块"练习"在生成:骨架屏先占住题目将要出现的位置,
+            // 生成完原地换成练习卡(原来这里是屏幕中央一个转圈)。
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: SkeletonLines(lines: 5, seed: 1),
             )
           else
             SizedBox(

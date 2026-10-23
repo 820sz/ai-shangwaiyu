@@ -7,6 +7,7 @@ import '../../services/drill_catalog.dart';
 import '../../services/drill_planner.dart';
 import '../../services/learner_model_store.dart';
 import '../../widgets/app_ui.dart';
+import '../../widgets/design_kit.dart';
 import '../../widgets/waiting.dart';
 import '../writing/write_review_screen.dart';
 import '../writing/writing_logs_screen.dart';
@@ -175,21 +176,45 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
     final level = DrillPlanner.levelOf(_model);
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('输出'),
-        actions: [
-          TextButton.icon(
-            onPressed: () => _openPlan(),
-            icon: const Icon(Icons.tune, size: 16),
-            label: const Text('练习中心'),
-          ),
-        ],
-      ),
-      body: ListView(
-        padding: Insets.page,
-        children: [
-          // ── ① 按什么练:目标 + 水平(点开进练习中心改)──
-          AppStagger(
+      // v2.12:去掉 AppBar —— 大标题 + 一行说明成为内容的一部分(与输入页/材料中心同一套)
+      body: SafeArea(
+        bottom: false,
+        child: ListView(
+          padding: Insets.page,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: Gap.xs, bottom: Gap.sm),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '练习',
+                          style: AppFont.displayStyle.copyWith(
+                            color: theme.colorScheme.onSurface,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          '用你生词本里的真实词与句出题',
+                          style: AppFont.metaStyle.copyWith(color: muted),
+                        ),
+                      ],
+                    ),
+                  ),
+                  TextButton.icon(
+                    onPressed: _openPlan,
+                    icon: const Icon(Icons.tune, size: 16),
+                    label: const Text('练习中心'),
+                  ),
+                ],
+              ),
+            ),
+            // ── ① 按什么练:目标 + 水平(点开进练习中心改)──
+            AppStagger(
             index: 0,
             child: AppCard(
               onTap: () => _openPlan(),
@@ -282,9 +307,9 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
           ),
 
           // ── ② 练(每个入口都挂当前进度)──
-          AppSectionTitle(
+          AppSectionHeader(
             title: '练',
-            subtitle: '用你生词本里的真实词与句出题',
+            indexLabel: '01',
             trailing: TextButton(
               onPressed: () => _openPlan(),
               child: const Text('练习中心'),
@@ -326,9 +351,9 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
           ),
 
           // ── ④ 写 ──
-          const AppSectionTitle(
+          const AppSectionHeader(
             title: '写',
-            subtitle: '写完让 AI 按目标当场批改',
+            indexLabel: '02',
           ),
           AppStagger(
             index: 4,
@@ -356,8 +381,9 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
             ),
           ),
           const SizedBox(height: Gap.lg),
-        ],
-      ),
+            ],
+          ),
+        ),
     );
   }
 

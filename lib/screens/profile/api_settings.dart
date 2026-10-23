@@ -6,6 +6,7 @@ import '../../config/design_tokens.dart';
 import '../../services/api_endpoint.dart';
 import '../../services/doubao_api.dart';
 import '../../widgets/app_ui.dart';
+import '../../widgets/waiting.dart';
 
 /// 全屏 API 设置页 — 主/副双槽位:
 /// 主 = 多模态(识图/全文翻译/素材推荐/追问默认)
@@ -434,12 +435,11 @@ class _ModelRow extends StatelessWidget {
               style: ElevatedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(horizontal: 12),
               ),
+              // v2.10:按钮内联 loading 不再转圈。这个按钮只有 40 高、还和左侧
+              // 输入框挤在同一个 Row 里,骨架屏/时间线都放不下;三点跳动(空标签
+              // 只占约 21×4)最接近原来 16×16 的占位,不会把输入框挤窄。
               child: loading
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
+                  ? const ThinkingDots(label: '', compact: true)
                   : const Text('选择', style: TextStyle(fontSize: 13)),
             ),
           ),

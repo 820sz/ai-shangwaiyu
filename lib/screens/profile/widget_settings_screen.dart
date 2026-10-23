@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../config/design_tokens.dart';
 import '../../services/widget_payload.dart';
 import '../../services/widget_service.dart';
+import '../../widgets/waiting.dart';
 
 /// 桌面小组件设置页(v2.2)。
 ///
@@ -130,7 +131,13 @@ class _WidgetSettingsScreenState extends State<WidgetSettingsScreen> {
                   ),
                   if (_busy) ...[
                     const SizedBox(height: 12),
-                    const Center(child: CircularProgressIndicator()),
+                    // v2.10:这里等的是"点按钮后的短操作"(请求钉到桌面 /
+                    // 推送一次小组件),不是内容加载 —— 铺骨架屏会让人误以为
+                    // 下面马上要出现卡片。三点跳动占高最小,不会把卡片撑高;
+                    // 两个按钮此刻已被 _busy 置灰,反馈已经足够。
+                    const Center(
+                      child: ThinkingDots(label: '正在处理…', compact: true),
+                    ),
                   ],
                   if (_message != null) ...[
                     const SizedBox(height: 10),

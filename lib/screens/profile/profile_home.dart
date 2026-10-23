@@ -19,6 +19,7 @@ import '../../services/widget_service.dart';
 import '../../widgets/profile_name_card.dart';
 import '../../utils/crash_logger.dart';
 import '../../widgets/app_ui.dart';
+import '../../widgets/design_kit.dart';
 import '../../widgets/stats_chart.dart';
 import '../../widgets/update_dialog.dart';
 import '../../services/update_service.dart';
@@ -102,7 +103,7 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
             // 用户实测:"词汇量测试占据这么大个 UI,把它合并进「学习」里的一项就行"。
             // 于是从"占半屏的大卡片 + 两个按钮"改成**学习组里的一行**:
             // 副标题直接报当前基线(不点也能看到),点开才让你选速测/完整版。
-            const AppSectionTitle(title: '学习'),
+            const AppSectionHeader(title: '学习', indexLabel: '01'),
             AppStagger(
               index: 1,
               child: Column(
@@ -142,7 +143,7 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
             ),
 
             // ── 数据与回顾 ──
-            const AppSectionTitle(title: '数据与回顾'),
+            const AppSectionHeader(title: '数据与回顾', indexLabel: '02'),
             AppStagger(
               index: 2,
               child: Column(
@@ -197,7 +198,7 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
             ),
 
             // ── 设置与数据管理 ──
-            const AppSectionTitle(title: '设置与数据管理'),
+            const AppSectionHeader(title: '设置与数据管理', indexLabel: '03'),
             AppStagger(
               index: 3,
               child: Column(
@@ -277,32 +278,49 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
   }
 
   /// 顶部三个关键数字(总词汇量 / 连续天数 / 已完成练习)
+  ///
+  /// v2.12:从"三张独立小卡"改成**一张数据面板卡**(三列 + 细分隔线)。
+  /// 为什么:三张小卡并排时每张都很窄,数字不够突出;合成一张面板后
+  /// 数字可以做到 26 号(w800),符合"战绩一眼看懂"的要求。
   Widget _buildStatsRow(ThemeData theme, StatsProvider stats) {
-    return Row(
-      children: [
-        _StatCard(
-          icon: Icons.menu_book,
-          value: '${stats.totalVocab}',
-          label: '总词汇量',
-          color: theme.colorScheme.primary,
-        ),
-        const SizedBox(width: Gap.xs),
-        _StatCard(
-          icon: Icons.local_fire_department,
-          value: '${stats.streakDays}',
-          label: '连续天数',
-          color: AppTheme.warningColor(context),
-        ),
-        const SizedBox(width: Gap.xs),
-        _StatCard(
-          icon: Icons.fitness_center,
-          value: '${stats.totalExercises}',
-          label: '已完成练习',
-          color: AppTheme.successColor(context),
-        ),
-      ],
+    return AppCard(
+      padding: const EdgeInsets.symmetric(horizontal: Gap.md, vertical: Gap.md),
+      child: Row(
+        children: [
+          Expanded(
+            child: AppStat(
+              value: '${stats.totalVocab}',
+              label: '总词汇量',
+              valueColor: theme.colorScheme.primary,
+            ),
+          ),
+          _statDivider(theme),
+          Expanded(
+            child: AppStat(
+              value: '${stats.streakDays}',
+              label: '连续天数',
+              valueColor: AppTheme.warningColor(context),
+            ),
+          ),
+          _statDivider(theme),
+          Expanded(
+            child: AppStat(
+              value: '${stats.totalExercises}',
+              label: '已完成练习',
+              valueColor: AppTheme.successColor(context),
+            ),
+          ),
+        ],
+      ),
     );
   }
+
+  Widget _statDivider(ThemeData theme) => Container(
+        width: 1,
+        height: 34,
+        margin: const EdgeInsets.symmetric(horizontal: Gap.xs),
+        color: theme.colorScheme.outlineVariant.withAlpha(90),
+      );
 
   /// 错误档案:回来后刷新副标题(用户刚在里面标了「已改正」)
   Future<void> _openErrorArchive() async {
@@ -546,48 +564,6 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
             child: const Text('关闭'),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _StatCard extends StatelessWidget {
-  final IconData icon;
-  final String value;
-  final String label;
-  final Color color;
-
-  const _StatCard({
-    required this.icon,
-    required this.value,
-    required this.label,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Expanded(
-      child: AppCard(
-        padding: const EdgeInsets.symmetric(
-            vertical: Gap.md, horizontal: Gap.xs),
-        child: Column(
-          children: [
-            Icon(icon, color: color, size: 24),
-            const SizedBox(height: Gap.xxs + 2),
-            Text(
-              value,
-              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-            ),
-            Text(
-              label,
-              // P2-31:次要文字对比度不足 → 用主题的次要文字色(深浅色都达 AA)
-              style: TextStyle(
-                  fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
-            ),
-          ],
-        ),
       ),
     );
   }

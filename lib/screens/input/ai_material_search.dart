@@ -14,6 +14,7 @@ import '../../services/doubao_api.dart';
 import '../../services/learner_model_store.dart';
 import '../../services/learner_profile_store.dart';
 import '../../services/material_recommend_service.dart';
+import '../../widgets/waiting.dart';
 import 'learner_profile_screen.dart';
 import 'learner_preferences_screen.dart';
 import 'material_recommendation_detail_screen.dart';
@@ -322,11 +323,10 @@ class _AiMaterialSearchScreenState extends State<AiMaterialSearchScreen> {
                 child: FilledButton.icon(
                   onPressed: _generating ? null : () => _generate(replace: true),
                   icon: _generating
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
+                      // 铁律:界面里不许出现转圈。按钮内联位只有 16×16,
+                      // 塞骨架屏会缩成一坨看不清的灰块,所以这里用三点跳动;
+                      // 按钮文案同时已变成"AI 正在推荐…",状态说明不会丢。
+                      ? const ThinkingDots(label: '', compact: true)
                       : const Icon(Icons.auto_awesome, size: 18),
                   label: Text(
                     _generating
@@ -388,11 +388,11 @@ class _AiMaterialSearchScreenState extends State<AiMaterialSearchScreen> {
           ],
           const SizedBox(height: 16),
           if (_loadingSaved)
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.all(24),
-                child: CircularProgressIndicator(),
-              ),
+            // 整块「推荐清单」正在读取:骨架屏先铺出卡片将要占据的位置,
+            // 数据一到原地替换,比屏幕中央一个圈更可感(也不再转圈)。
+            const Padding(
+              padding: EdgeInsets.all(24),
+              child: SkeletonLines(lines: 6, seed: 1),
             )
           else if (_saved.isEmpty)
             Center(

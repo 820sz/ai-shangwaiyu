@@ -5,6 +5,7 @@ import '../../../models/article.dart';
 import '../../../providers/article_provider.dart';
 import '../../../providers/vocab_provider.dart';
 import '../../../widgets/app_ui.dart';
+import '../../../widgets/waiting.dart';
 import '../../output/article_reader.dart';
 
 /// 特色功能 · AI 生词定制文章(v1.8.0:从「输出」页迁到「输入」页)。
@@ -104,11 +105,9 @@ class _AiArticleSectionState extends State<AiArticleSection> {
             child: FilledButton.icon(
               onPressed: articleProv.generating ? null : _generate,
               icon: articleProv.generating
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
+                  // 按钮内联位 16×16,骨架屏放这里只会是一条脏灰线;
+                  // 用三点跳动,文案同时已变成"AI 正在写…",状态不会被误解。
+                  ? const ThinkingDots(label: '', compact: true)
                   : const Icon(Icons.auto_awesome, size: 18),
               label: Text(articleProv.generating ? 'AI 正在写…' : '生成文章'),
             ),

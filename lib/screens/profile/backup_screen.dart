@@ -8,6 +8,7 @@ import '../../providers/vocab_provider.dart';
 import '../../services/backup_service.dart';
 import '../../services/export_service.dart';
 import '../../widgets/app_ui.dart';
+import '../../widgets/waiting.dart';
 
 /// 备份与导出(v2.2「生产力」)。
 ///
@@ -339,7 +340,14 @@ class _BackupScreenState extends State<BackupScreen> {
           ],
           if (_busy) ...[
             const SizedBox(height: Gap.md),
-            const Center(child: CircularProgressIndicator()),
+            // v2.10:整块加载态不再转圈。备份/恢复是"批量读写、但算不出百分比"
+            // 的动作,用 ProgressStageBar 的未知进度流动条(value: null)说明
+            // "确实还在动";这里并没有内容要出现,所以不用骨架屏(那会假装
+            // 马上有卡片加载出来)。
+            const ProgressStageBar(
+              stage: '正在处理备份…',
+              detail: '数据正在读写,请勿退出 App',
+            ),
           ],
           const SizedBox(height: Gap.lg),
           Text(

@@ -6,6 +6,7 @@ import '../../models/learner_model.dart';
 import '../../services/learner_model_store.dart';
 import '../../services/vocab_estimator.dart';
 import '../../services/word_frequency.dart';
+import '../../widgets/waiting.dart';
 
 /// 词汇量测试(v2.0)：「速测」与「完整版」两个模式。
 ///
@@ -285,7 +286,14 @@ class _PlacementTestScreenState extends State<PlacementTestScreen> {
   }
 
   Widget _buildBody() {
-    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_loading) {
+      // 刚进页/重测时整页在等题库就绪:骨架屏铺出内容形状,
+      // 不再让用户盯着屏幕中间的一个转圈(铁律)。
+      return const Padding(
+        padding: EdgeInsets.all(24),
+        child: SkeletonLines(lines: 6, seed: 1),
+      );
+    }
     if (_error != null) {
       return Center(
         child: Padding(
@@ -406,7 +414,12 @@ class _PlacementTestScreenState extends State<PlacementTestScreen> {
     final theme = Theme.of(context);
     final muted = theme.colorScheme.onSurfaceVariant;
     if (item == null) {
-      return const Center(child: CircularProgressIndicator());
+      // 章节切换的瞬间 currentItem 可能为空:用 3 行骨架占位(接近"题干+选项"),
+      // 比转圈更接近真实内容,也不会造成布局跳动。
+      return const Padding(
+        padding: EdgeInsets.all(24),
+        child: SkeletonLines(lines: 3, seed: 2),
+      );
     }
     final reduce = MediaQuery.of(context).disableAnimations;
     return Padding(

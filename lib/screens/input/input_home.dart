@@ -64,52 +64,122 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final cs = theme.colorScheme;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('输入')),
-      body: SingleChildScrollView(
-        // v2.7(第 1 条):这里以前是 `EdgeInsets.only(bottom: Gap.lg)` —— **没有左右边距**,
-        // 于是上面的 AppCard 是通栏的,而下面 AI 文章 / 我的学习材料各自硬写
-        // `Card(margin: horizontal 16)`,同一页出现两套卡片几何(外边距 0/16、
-        // 圆角 16/12、左内容边距 14/32)。用户说的"ui 大小不统一"就是这个。
-        // 现在统一走页面标准边距,四张卡同一套几何。
-        padding: Insets.page,
-        child: Column(
-          children: [
-            // ── 主行动:拍照识文(v2.5,U1)──
-            // 训记的本质是"一进来就能开始":这一页的第一屏先给**一个动作**,
-            // 其余(材料中心 / AI 文章 / 我的材料)按重要性往下排。
-            AppStagger(index: 0, child: _buildCaptureSectionCard(theme)),
-
-            // ── 材料中心(v2.0;唯一的"找材料"入口)──
-            AppStagger(index: 1, child: _buildMaterialCenterCard(theme)),
-
-            // ── AI 生词定制文章 ──
-            const AppStagger(index: 2, child: AiArticleSection()),
-
-            // ── 材料导入（v2.9,用户第 5 条:外部导入的材料本体，可分类、可阅读）──
-            const AppStagger(index: 3, child: ImportedMaterialsSection()),
-
-            // ── 我的词汇本（v2.9,用户第 5 条:原来这块本质就是词汇本）──
-            const AppStagger(index: 4, child: MyMaterialsSection()),
-          ],
+      // v2.12(前端全面升级):**去掉 AppBar**。
+      // 旧版顶上是居中的「输入」二字,像一条工具条,把页面切碎了;
+      // 样图(扇贝)的做法是让标题成为内容的一部分:大字号 + 一行日期/引导,
+      // 页面看起来"像一页纸"而不是"一个功能面板"。
+      body: SafeArea(
+        bottom: false,
+        child: SingleChildScrollView(
+          padding: Insets.page,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // ① 页面标题区
+              Padding(
+                padding: const EdgeInsets.only(top: Gap.xs, bottom: Gap.md),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '上传材料',
+                      style: AppFont.displayStyle.copyWith(color: cs.onSurface),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      _todayLine(),
+                      style: AppFont.metaStyle.copyWith(
+                        color: cs.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // ② 主行动:上传分析材料(hero 卡)
+              AppStagger(index: 0, child: _buildCaptureSectionCard(theme)),
+              const SizedBox(height: Gap.xxs),
+              // ③ 材料中心:第二层级的入口条
+              AppStagger(index: 1, child: _buildMaterialCenterCard(theme)),
+              // ④ 三个功能区块:各自是折叠卡(标题在它们自己身上,不重复加标题)
+              const SizedBox(height: Gap.sm),
+              const AppStagger(index: 2, child: AiArticleSection()),
+              const AppStagger(index: 3, child: ImportedMaterialsSection()),
+              const AppStagger(index: 4, child: MyMaterialsSection()),
+              const SizedBox(height: Gap.lg),
+            ],
+          ),
         ),
       ),
     );
   }
 
+  /// 标题下面那行日期/引导(样图「星期四 · 10月1日」的同款位置)。
+  String _todayLine() {
+    final now = DateTime.now();
+    const week = ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日'];
+    return '${now.month} 月 ${now.day} 日 · ${week[now.weekday - 1]} · 拍照 / 链接 / 找材料';
+  }
+
   /// 材料中心入口(v2.0):软件提供的真实材料渠道
   ///
-  /// v2.5(U1):改用统一的 `AppActionTile`(图标/标题/副标题/箭头全 App 一套),
-  /// 与学习助理页的入口卡长得一致 —— 以前每页各画一种,看起来"不是同一个 App"。
+  /// v2.12:从"一行入口"改成**带图标块的入口条** —— 图标块 + 标题 + 一行说明,
+  /// 与主行动卡构成两级层次(主行动是大卡,这是第二层级),而不是两张同规格卡。
   Widget _buildMaterialCenterCard(ThemeData theme) {
-    return AppActionTile(
-      icon: Icons.local_library_outlined,
-      title: '材料中心',
-      subtitle: '资料原文(公版书/论文/外刊)+ AI 整理 + 自备文本',
+    final cs = theme.colorScheme;
+    return AppCard(
+      variant: AppCardVariant.compact,
+      padding: const EdgeInsets.symmetric(
+        horizontal: Gap.md,
+        vertical: Gap.sm,
+      ),
       onTap: () => Navigator.push(
         context,
         MaterialPageRoute(builder: (_) => const MaterialCenterScreen()),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: cs.primary.withAlpha(14),
+              borderRadius: BorderRadius.circular(Radii.control),
+            ),
+            child: Icon(
+              Icons.local_library_outlined,
+              size: 22,
+              color: cs.primary,
+            ),
+          ),
+          const SizedBox(width: Gap.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '材料中心',
+                  style: AppFont.subheadStyle.copyWith(
+                    color: cs.onSurface,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '公版书 / 论文 / 外刊 · 找原文来读',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppFont.metaStyle.copyWith(
+                    color: cs.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Icon(Icons.chevron_right, size: 20, color: cs.outline),
+        ],
       ),
     );
   }
@@ -126,64 +196,80 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
   ///    (逐段翻译 / 点词 / 收藏 / 追问 / 底部动作栏,与材料中心同一套)。
   /// 两个入口都放在卡片顶部一行,平级、一眼能看出这是"两条路"。
   Widget _buildCaptureSectionCard(ThemeData theme) {
+    final cs = theme.colorScheme;
     return AppCard(
+      // v2.12:这一页的**唯一主行动**用 hero 卡(更大圆角 + 更重阴影 + 染底),
+      // 与下面的材料中心入口条、三个折叠区块拉开层级。
+      variant: AppCardVariant.hero,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // 标题行(带模型/思考档位的快捷入口,不占额外一行)
+          // 标题行(v2.12:图标块 + 标题 + 说明 —— 层级清楚,不再挤成一行)
           Row(
             children: [
-              Icon(Icons.upload_file, size: 18, color: theme.colorScheme.primary),
-              const SizedBox(width: Gap.xs),
-              Text(
-                '上传分析材料',
-                style: theme.textTheme.titleSmall
-                    ?.copyWith(fontWeight: FontWeight.w600),
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: cs.primary.withAlpha(16),
+                  borderRadius: BorderRadius.circular(Radii.control),
+                ),
+                child: Icon(
+                  Icons.document_scanner_outlined,
+                  size: 24,
+                  color: cs.primary,
+                ),
               ),
-              const SizedBox(width: Gap.xs),
+              const SizedBox(width: Gap.sm),
               Expanded(
-                child: Text(
-                  '拍照识词,或导入链接让 AI 帮你分析',
-                  style: theme.textTheme.bodySmall
-                      ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '上传分析材料',
+                      style: AppFont.subheadStyle.copyWith(
+                        color: cs.onSurface,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '拍照识词,或导入链接让 AI 帮你分析',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppFont.metaStyle.copyWith(
+                        color: cs.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
           ),
-          const SizedBox(height: Gap.sm),
+          const SizedBox(height: Gap.md),
 
-          // ① v2.10(用户 10/4 第 1 条):**"拍照识别"与"从相册选择"合并成一个入口**。
-          //
-          // 用户原话:"'输入'界面的上传分析材料——'拍照...'和'从相册选择'可以合并成一个 ui,
-          // 点进去后再提供选项。"
-          // 所以这里只留一个大按钮「上传图片」,点开底部弹层再选 拍照 / 相册(可多选)。
-          Row(
-            children: [
-              Expanded(
-                child: FilledButton.icon(
-                  onPressed: _pickImageSource,
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size(0, 52),
-                  ),
-                  icon: const Icon(Icons.add_photo_alternate_outlined, size: 18),
-                  label: const Text('上传图片', style: TextStyle(fontSize: 14)),
-                ),
-              ),
-              const SizedBox(width: Gap.xs),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: _importFromLink,
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size(0, 52),
-                  ),
-                  icon: const Icon(Icons.link, size: 18),
-                  label: const Text('外部链接导入',
-                      style: TextStyle(fontSize: 14)),
-                ),
-              ),
-            ],
+          // ① v2.10(用户 10/4 第 1 条):拍照与相册合并成一个入口。
+          // v2.12:**整宽主按钮**(样图的主按钮都是整宽) —— 一屏一个主行动,
+          // 不再让用户在两个并排按钮里先判断"我这算哪种"。
+          SizedBox(
+            width: double.infinity,
+            height: 52,
+            child: FilledButton.icon(
+              onPressed: _pickImageSource,
+              icon: const Icon(Icons.add_photo_alternate_outlined, size: 20),
+              label: const Text('拍照 / 从相册上传'),
+            ),
+          ),
+          const SizedBox(height: Gap.xs),
+          // ② 次行动:外部链接导入(整宽描边按钮,层级明显低于主行动)
+          SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: OutlinedButton.icon(
+              onPressed: _importFromLink,
+              icon: const Icon(Icons.link, size: 18),
+              label: const Text('导入外部链接'),
+            ),
           ),
 
           const SizedBox(height: Gap.xs),
@@ -325,8 +411,9 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
   }
 
   Widget _buildBookInput(ThemeData theme) {
+    // v2.12:同 _buildModelThinkingRow —— 双重缩进改由卡片统一管
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
+      padding: EdgeInsets.zero,
       child: Row(
         children: [
           Expanded(
@@ -407,8 +494,10 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
   }
 
   Widget _buildModelThinkingRow(ThemeData theme) {
+    // v2.12:原来是 horizontal: 20 —— 卡片自己的内边距已经是 20,
+    // 再加一层就变成 40 的缩进,参数行被挤到中间。现在交给卡片统一管。
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
+      padding: EdgeInsets.zero,
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [

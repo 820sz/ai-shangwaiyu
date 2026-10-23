@@ -6,6 +6,7 @@ import '../../config/theme.dart';
 import '../../services/database.dart';
 import '../../widgets/empty_state.dart';
 import '../../widgets/error_state.dart';
+import '../../widgets/waiting.dart';
 
 /// 错误档案页(v2.1)。
 ///
@@ -166,7 +167,12 @@ class _ErrorArchiveScreenState extends State<ErrorArchiveScreen> {
   Widget _buildBody() {
     // 三态:加载中 / 失败可重试 / 内容(内容里再分空态)
     if (_loading) {
-      return const Center(child: CircularProgressIndicator());
+      // v2.10:整页加载态不再转圈 —— 骨架屏先铺出"错误记录列表将要占据的
+      // 形状",数据一到原地替换(全项目统一等待 UI 的约定见 waiting.dart)。
+      return const Padding(
+        padding: EdgeInsets.fromLTRB(12, 12, 12, 0),
+        child: SkeletonLines(lines: 6, seed: 1),
+      );
     }
     if (_error != null) {
       return ErrorState(message: _error!, onRetry: _load);

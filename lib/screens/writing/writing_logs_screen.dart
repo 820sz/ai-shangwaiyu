@@ -6,6 +6,7 @@ import '../../services/database.dart';
 import '../../widgets/confirm_destructive.dart';
 import '../../widgets/empty_state.dart';
 import '../../widgets/error_state.dart';
+import '../../widgets/waiting.dart';
 import '../../widgets/writing_labels.dart';
 
 /// 写译记录(v1.6.0):按日期文件夹归档的写译练习轨迹,可查阅复盘。
@@ -105,9 +106,12 @@ class _WritingLogsScreenState extends State<WritingLogsScreen> {
     }
     final logs = _logs;
     if (logs == null) {
-      return const Center(
+      // 整页记录在读取:骨架屏先铺出"日期分组 + 条目"的形状,
+      // 读到后原地替换;key 必须保留,AnimatedSwitcher 靠它做切场。
+      return const Padding(
         key: ValueKey('logs-loading'),
-        child: CircularProgressIndicator(),
+        padding: EdgeInsets.all(16),
+        child: SkeletonLines(lines: 6, seed: 1),
       );
     }
     if (logs.isEmpty) {

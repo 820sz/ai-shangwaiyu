@@ -12,6 +12,7 @@ import '../../services/base_api.dart';
 import '../../services/database.dart';
 import '../../services/doubao_api.dart';
 import '../../widgets/app_ui.dart';
+import '../../widgets/design_kit.dart' show AppProgressRing;
 import '../../widgets/error_state.dart';
 import '../../widgets/writing_labels.dart';
 import '../input/widgets/follow_up_drawer.dart';
@@ -875,11 +876,17 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
             if (score != null)
               Positioned.fill(
                 child: IgnorePointer(
-                  child: CircularProgressIndicator(
+                  // 这个环画的是「已经出分」的确定值(不是等待态),所以不能用
+                  // 骨架屏/时间线 —— 那会把刚出来的分数盖住。铁律又不许出现
+                  // CircularProgressIndicator,于是复用 design_kit 里自绘的
+                  // AppProgressRing(它正是为这条规则准备的)。
+                  // centerText 传空:分数由下层 Container 显示,避免重复。
+                  child: AppProgressRing(
                     value: value / 100,
-                    strokeWidth: 3.5,
-                    backgroundColor: color.withAlpha(30),
-                    valueColor: AlwaysStoppedAnimation<Color>(color),
+                    centerText: '',
+                    size: 84,
+                    stroke: 3.5,
+                    color: color,
                   ),
                 ),
               ),

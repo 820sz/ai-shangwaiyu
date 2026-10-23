@@ -5,6 +5,7 @@ import '../../providers/stats_provider.dart';
 import '../../services/material_library.dart';
 import '../../widgets/error_state.dart';
 import '../../widgets/stats_chart.dart';
+import '../../widgets/waiting.dart';
 
 class StatsPageScreen extends StatefulWidget {
   const StatsPageScreen({super.key});
@@ -34,7 +35,12 @@ class _StatsPageScreenState extends State<StatsPageScreen> {
     if (stats.loading) {
       return Scaffold(
         appBar: appBar,
-        body: const Center(child: CircularProgressIndicator()),
+        // v2.10:整页加载态不再转圈 —— 骨架屏先占住统计卡片的位置。内边距
+        // 与下面真正的 ListView 一致(16),内容到达时位置不会跳。
+        body: const Padding(
+          padding: EdgeInsets.all(16),
+          child: SkeletonLines(lines: 6, seed: 2),
+        ),
       );
     }
 

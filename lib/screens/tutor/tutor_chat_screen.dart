@@ -8,6 +8,7 @@ import '../../services/api_endpoint.dart';
 import '../../services/database.dart';
 import '../../services/doubao_api.dart';
 import '../../services/tutor_engine.dart';
+import '../../widgets/waiting.dart';
 import '../input/widgets/follow_up_bubble.dart' show ThinkingBlock;
 import '../input/widgets/model_avatars.dart';
 
@@ -542,8 +543,13 @@ $evidence''';
       body: Column(
         children: [
           Expanded(
+            // 历史消息在读取:骨架屏先铺出对话气泡的形状,读到后原地替换。
+            // 这里是 Expanded(高度已确定),骨架按内容高度排在顶部,不会无限高。
             child: _loadingHistory
-                ? const Center(child: CircularProgressIndicator())
+                ? const Padding(
+                    padding: EdgeInsets.fromLTRB(14, 12, 14, 0),
+                    child: SkeletonLines(lines: 6, seed: 1),
+                  )
                 : ListView(
                     controller: _scrollCtrl,
                     padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
@@ -687,18 +693,10 @@ $evidence''';
                 borderRadius: BorderRadius.circular(12),
               ),
               child: t.text.isEmpty && streaming
-                  ? Row(
-                      children: [
-                        const SizedBox(
-                          width: 12,
-                          height: 12,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        ),
-                        const SizedBox(width: 8),
-                        Text('正在思考…',
-                            style: TextStyle(fontSize: 12, color: muted)),
-                      ],
-                    )
+                  // 流式还没吐字:三点跳动 + "正在思考…"。
+                  // 原来是一个 12×12 的转圈(太小且违反铁律);
+                  // 文案字号仍是 12,气泡高度不变。
+                  ? const ThinkingDots(label: '正在思考…')
                   : SelectableText(
                       t.text,
                       style: const TextStyle(fontSize: 13, height: 1.5),

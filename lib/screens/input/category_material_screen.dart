@@ -15,6 +15,7 @@ import '../../services/material_prefs.dart';
 import '../../services/material_source.dart';
 import '../../services/original_search.dart';
 import '../../widgets/app_ui.dart';
+import '../../widgets/design_kit.dart';
 import '../../widgets/material_cover.dart';
 import '../../widgets/search_timeline.dart';
 import 'ai_material_search.dart';
@@ -757,94 +758,38 @@ class _CategoryMaterialScreenState extends State<CategoryMaterialScreen> {
     );
   }
 
+  /// 一条检索命中(v2.12:改成**横卡**形态,与材料库/发现页统一)。
+  ///
+  /// 旧版式是"88 小图 + 标题 + 来源标签 + 备注 + 两个按钮"的竖卡 —— 同一屏里
+  /// 每张都一样高、按钮还占一行。新版用 `AppWideCard`:左文右图 + 竖排 Lv,
+  /// 整卡可点(= 软件内阅读),原文链接收进右上角图标按钮。
   Widget _buildHitCard(ThemeData theme, Color muted, OriginalHit hit) {
     final source = MaterialSourceService.sourceOf(hit.sourceId);
     final kind = MaterialLevel.kindOfSource(hit.sourceId);
     final lv = MaterialLevel.fallbackForKind(kind);
-    return Padding(
-      padding: const EdgeInsets.only(bottom: Gap.xs),
-      child: AppCard(
-        onTap: () => _open(hit),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // v2.8:配图(用户第 6(2) 条"别人都有文章图片")。
-            // 公版书用官方封面,RSS 用 media:content,其余程序化封面兜底
-            MaterialCover(
-              seed: hit.title,
-              kind: kind,
-              imageUrl: hit.imageUrl,
-              width: 88,
-              height: 88,
-              radius: Radii.control,
-              levelLabel: 'Lv$lv',
+    return AppWideCard(
+      title: _displayTitle(hit.title),
+      subtitle: hit.note.isEmpty ? null : hit.note,
+      dateText: source?.label ?? hit.sourceId,
+      tags: [
+        AppTag('原文', tone: AppTagTone.primary),
+        AppTag(MaterialLibrary.kindLabel(kind)),
+      ],
+      imageUrl: hit.imageUrl,
+      seed: hit.title,
+      kind: kind,
+      level: '$lv',
+      onTap: () => _open(hit),
+      trailing: hit.url.trim().isEmpty
+          ? null
+          : IconButton(
+              tooltip: '打开原文链接',
+              onPressed: () => _openExternalUrl(hit.url),
+              icon: const Icon(Icons.open_in_new, size: 16),
+              visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
             ),
-            const SizedBox(width: Gap.sm),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(_displayTitle(hit.title),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodyLarge?.copyWith(
-                        fontSize: 15,
-                        height: 1.3,
-                        fontWeight: FontWeight.w600,
-                      )),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 7, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: theme.colorScheme.primary.withAlpha(22),
-                          borderRadius:
-                              BorderRadius.circular(Radii.control - 4),
-                        ),
-                        child: Text(
-                          '原文 · ${source?.label ?? hit.sourceId}',
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w600,
-                            color: theme.colorScheme.primary,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  if (hit.note.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Text(hit.note,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodySmall
-                            ?.copyWith(color: muted, fontSize: 11)),
-                  ],
-                  const SizedBox(height: 6),
-                  // 第 2(1) 条:软件内读 + 原文链接**两条路都给**
-                  Row(
-                    children: [
-                      FilledButton.tonal(
-                        onPressed: () => _open(hit),
-                        child: const Text('软件内阅读'),
-                      ),
-                      const SizedBox(width: Gap.xxs),
-                      if (hit.url.trim().isNotEmpty)
-                        TextButton.icon(
-                          onPressed: () => _openExternalUrl(hit.url),
-                          icon: const Icon(Icons.open_in_new, size: 15),
-                          label: const Text('原文链接'),
-                        ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 

@@ -15,6 +15,8 @@ import '../../services/tutor_engine.dart';
 import '../../services/widget_service.dart';
 import '../../widgets/app_ui.dart';
 import '../../widgets/bottom_nav.dart';
+import '../../widgets/design_kit.dart';
+import '../../widgets/waiting.dart';
 import '../input/learner_preferences_screen.dart';
 import '../review/review_screen.dart';
 import 'placement_test_screen.dart';
@@ -193,7 +195,12 @@ class _TutorHomeScreenState extends State<TutorHomeScreen> {
     final theme = Theme.of(context);
     final muted = theme.colorScheme.onSurfaceVariant;
     if (_loading) {
-      return const Center(child: CircularProgressIndicator());
+      // v2.12:这里以前是裸 `CircularProgressIndicator` —— 违反项目铁律
+      // (界面里不许出现转圈,统一用等待三件套)。改成骨架屏,形状接近真实内容。
+      return const Padding(
+        padding: Insets.page,
+        child: SkeletonLines(lines: 6, seed: 0),
+      );
     }
     final snap = _snapshot;
     if (snap == null) {
@@ -244,9 +251,9 @@ class _TutorHomeScreenState extends State<TutorHomeScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const AppSectionTitle(
+                const AppSectionHeader(
                   title: '学习现状分析',
-                  subtitle: '基于你软件里的真实数据(不编造)',
+                  indexLabel: '01',
                 ),
                 if (findings.isEmpty)
                   const AppEmpty(
@@ -294,9 +301,9 @@ class _TutorHomeScreenState extends State<TutorHomeScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const AppSectionTitle(
+                const AppSectionHeader(
                   title: '学习任务',
-                  subtitle: '今天做完就算完成,不用想顺序',
+                  indexLabel: '02',
                 ),
                 _buildPrimaryAction(theme, muted, snap),
                 if (_taskRows.length > 1)

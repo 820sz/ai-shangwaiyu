@@ -9,6 +9,7 @@ import '../../../models/vocabulary.dart';
 import '../../../utils/material_group.dart';
 import '../../../utils/page_label.dart';
 import '../../../widgets/app_ui.dart';
+import '../../../widgets/waiting.dart';
 import '../../profile/vocab_list.dart';
 
 /// 板块:**我的词汇本**(v1.6.0 起叫「我的学习材料」;v2.9 改名)。
@@ -663,8 +664,13 @@ class _CategoryVocabSheetState extends State<_CategoryVocabSheet> {
         ),
         const Divider(height: 1),
         Expanded(
+          // 整块分类词表在加载:骨架屏按词条行铺出列表形状,
+          // 数据一到原地替换(弹层高度固定,骨架不会撑爆布局)。
           child: _loading
-              ? const Center(child: CircularProgressIndicator())
+              ? const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 12, 16, 0),
+                  child: SkeletonLines(lines: 6, seed: 1),
+                )
               : _items == null || _items!.isEmpty
                   ? Center(
                       child: Text('该分类暂无生词',

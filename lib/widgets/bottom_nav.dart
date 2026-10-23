@@ -48,18 +48,20 @@ class ReadFlowBottomNav extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
               _NavItem(
-                icon: Icons.camera_alt_outlined,
-                activeIcon: Icons.camera_alt,
-                label: '输入',
+                icon: Icons.auto_stories_outlined,
+                activeIcon: Icons.auto_stories,
+                // v2.12:底栏文案从"输入"(工程词)改成**用户语言**"材料" ——
+                // 这一页实际做的是"拍照 / 导入 / 找材料",叫输入会让用户猜。
+                label: '材料',
                 isActive: currentTab == ReadFlowTab.input,
-                // 已经在这一栏就不要再触发(否则"点了没反应"还烫一次手)
                 onTap: () => _select(context, ReadFlowTab.input),
                 indicatorColor: cs.primary,
               ),
               _NavItem(
-                icon: Icons.auto_stories_outlined,
-                activeIcon: Icons.auto_stories,
-                label: '输出',
+                icon: Icons.assignment_outlined,
+                activeIcon: Icons.assignment,
+                // "输出" → "练习":这一页实际是练习系统(练 + 写译)。
+                label: '练习',
                 isActive: currentTab == ReadFlowTab.output,
                 onTap: () => _select(context, ReadFlowTab.output),
                 indicatorColor: cs.primary,
@@ -75,7 +77,8 @@ class ReadFlowBottomNav extends StatelessWidget {
               _NavItem(
                 icon: Icons.assistant_outlined,
                 activeIcon: Icons.assistant,
-                label: '学习助理',
+                // "学习助理" → "助理":底栏宽度有限,四个字会挤;页面标题仍是全称。
+                label: '助理',
                 isActive: currentTab == ReadFlowTab.tutor,
                 onTap: () => _select(context, ReadFlowTab.tutor),
                 indicatorColor: cs.primary,

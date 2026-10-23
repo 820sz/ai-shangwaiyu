@@ -20,6 +20,7 @@ import '../../services/doubao_api.dart';
 import '../../services/tts_service.dart';
 import '../../services/vision_guard.dart';
 import '../../services/vision_image.dart';
+import '../../widgets/waiting.dart';
 import '../profile/api_settings.dart';
 import '../../utils/follow_up_context.dart';
 import 'widgets/word_list_tile.dart';
@@ -2241,11 +2242,9 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
           children: [
             Row(
               children: [
-                const SizedBox(
-                  width: 10,
-                  height: 10,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
+                // 流式状态行:原来是一个 10×10 的转圈,太小几乎看不清;
+                // 换成三点跳动,后面的动态文案(思考/生成 + 耗时)照旧保留。
+                const ThinkingDots(label: '', compact: true),
                 const SizedBox(width: 10),
                 Text(
                   hasReasoning
@@ -3360,11 +3359,9 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                             }
                           },
                     icon: completing
-                        ? const SizedBox(
-                            width: 14,
-                            height: 14,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
+                        // 按钮内联位只有 14×14,塞骨架屏会缩成一坨灰块;
+                        // 三点跳动 + 文案"补全中…"既说清状态,也不再违反铁律。
+                        ? const ThinkingDots(label: '', compact: true)
                         : const Icon(Icons.auto_awesome, size: 16),
                     label: Text(completing ? '补全中…' : '✨ AI 补全'),
                     style: OutlinedButton.styleFrom(

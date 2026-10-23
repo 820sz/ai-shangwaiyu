@@ -8,6 +8,7 @@ import '../../services/review_queue.dart';
 import '../../services/weekly_report.dart';
 import '../../widgets/empty_state.dart';
 import '../../widgets/error_state.dart';
+import '../../widgets/waiting.dart';
 
 /// 每周报告页(v2.1)。
 ///
@@ -225,7 +226,14 @@ class _WeeklyReportScreenState extends State<WeeklyReportScreen> {
 
   Widget _buildBody() {
     // 三态:加载中 / 失败可重试 / 内容(内容里再分空态)
-    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_loading) {
+      // v2.10:整页加载态不再转圈 —— 骨架屏先铺出报告各区块的形状;
+      // 内边距与下面真正的 ListView 完全一致,数据到达时布局不跳。
+      return const Padding(
+        padding: EdgeInsets.fromLTRB(12, 12, 12, 24),
+        child: SkeletonLines(lines: 6, seed: 3),
+      );
+    }
     if (_error != null) return ErrorState(message: _error!, onRetry: _load);
     final report = _report!;
     return RefreshIndicator(

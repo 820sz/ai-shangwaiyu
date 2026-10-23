@@ -7,6 +7,7 @@ import '../../../config/design_tokens.dart';
 import '../../../config/theme.dart';
 import '../../../models/bookmark.dart';
 import '../../../providers/bookmark_provider.dart';
+import '../../../widgets/waiting.dart';
 import 'follow_up_models.dart';
 
 /// 追问 AI 气泡:模型标签 + 可折叠思考过程 + Markdown 渲染正文。
@@ -134,25 +135,12 @@ class _AiFollowUpBubbleState extends State<AiFollowUpBubble> {
                       ),
                     )
                   else if (msg.streaming)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 6),
-                      child: Row(
-                        children: [
-                          const SizedBox(
-                            width: 14,
-                            height: 14,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            '正在思考…',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: theme.colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ],
-                      ),
+                    // 流式回答还没吐出第一个字:用三点跳动 + "正在思考…"。
+                    // 原来是一个 14×14 的转圈(太小,且违反项目铁律);
+                    // ThinkingDots 把文字和点画在同一行,高度与原 Text 基本一致。
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 6),
+                      child: ThinkingDots(label: '正在思考…'),
                     )
                   else
                     Text(
