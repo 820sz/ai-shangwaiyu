@@ -738,7 +738,7 @@ class MaterialSourceService {
     }
     if (title.isEmpty) title = _firstHeadingOf(body);
     if (title.isEmpty) title = _hostOf(url);
-    final text = _cleanArticleText(
+    final text = cleanArticleText(
       isHtml ? HtmlText.readableText(body) : body,
     );
     if (text.length < 120) {
@@ -1342,7 +1342,7 @@ class MaterialSourceService {
     final abs = _absolutize(url, source);
     final html = await _getText(abs, source);
     var title = stripSiteSuffix(HtmlText.titleOf(html), abs);
-    final text = _cleanArticleText(HtmlText.readableText(html));
+    final text = cleanArticleText(HtmlText.readableText(html));
     if (text.length < 120) {
       throw MaterialSourceException(
         sourceLabel: source.label,
@@ -1510,10 +1510,14 @@ class MaterialSourceService {
     return [core, host];
   }
 
-  /// 正文清理(纯函数):删掉页面里的时间戳/播放器控件残留行。
-  /// 播客/视频页的正文里常混进 `(00:00)`、`Media player`、`Download` 这类行,
-  /// 留着会污染词频与难度统计。只删**整行匹配**的,不误伤正文里的括号时间。
-  static String _cleanArticleText(String text) {
+  /// 正文清理(public 方便测试):删掉页面里的时间戳/播放器控件/**图片说明残留**行。
+  ///
+  /// v2.13(用户 10/23 截图):抓 NPR 文章时正文里混进了这些图片相关残留:
+  /// `hide caption`、`toggle caption`、`Tony Avelar/AP Photo`、单独一个 `i`。
+  /// 它们是"图片说明展开"按钮与图片来源署名,不是正文,
+  /// 却会污染阅读体验、词频与难度统计 —— 这里按**整行匹配**删掉。
+  /// 只删整行完全匹配的,不误伤正常句子。
+  static String cleanArticleText(String text) {
     final lines = text.split('\n');
     final out = <String>[];
     for (final raw in lines) {
@@ -1534,6 +1538,13 @@ class MaterialSourceService {
     // 它们不是链接也不是 <nav>,标签层拦不住,只能按文案整行丢
     r'accessibility links?|skip to main content|skip to content|'
     r'keyboard shortcuts?[^|]{0,40}|'
+    // v2.13:图片说明按钮 + 图片来源署名(用户截图里真实出现的残留)
+    r'(?:hide|show|toggle)\s+caption|view\s+caption|enlarge\s+this\s+image|'
+    r'.{0,40}/(?:AP|Getty|Reuters|AFP|Bloomberg|EPA|Shutterstock)\s+'
+    r'(?:Photo|Images?|File)|'
+    r'(?:photo|image)\s*(?:by|:)\s*.{0,60}|'
+    // 单独 1~2 个字母的行:图片占位/图标 alt 残留(截图里就有一个孤立的 "i")
+    r'[a-zA-Z]{1,2}|'
     r'copyright ©?.*|terms of use|privacy policy|advertisement)$',
     caseSensitive: false,
   );

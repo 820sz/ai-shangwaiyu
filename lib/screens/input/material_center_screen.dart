@@ -772,13 +772,8 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
     unawaited(_loadTopics(_topics.isEmpty ? [_availableTopics.first] : _topics));
   }
 
-  int get _fitCount {
-    if (_prefs.band.isAny) return _shelf.length;
-    return _shelf.where((s) {
-      final c = s.coverage;
-      return c != null && _prefs.band.contains(c);
-    }).length;
-  }
+  // (v2.13 移除)`_fitCount`:它只服务于折叠标题的副标题;现在区块直接展开,
+  // 筛选提示在材料库自己的筛选行里,不再需要这个计数。
 
   @override
   Widget build(BuildContext context) {
@@ -865,159 +860,129 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
               },
             ),
             const SizedBox(height: Gap.xs),
+            // ── v2.13(用户 10/23:"到底为什么还是'清一色的竖列展开收起'这种烂交互")──
+            //
+            // 上一版我只换了皮(配色/卡片/顶部 tab),**主体结构还是 7 个
+            // `CollapsibleSection`**:用户看到的是一串"标题 + 箭头",内容要点开才有 ——
+            // 这就是他说的"竖列展开收起"。这一版**彻底去掉折叠**:
+            // 每个区块 = 编号标题 + **内容直接展开**(大卡 / 横滑卡 / 网格 / 真书架 / 横卡列表),
+            // 一屏看下去全是内容,没有一条能收起的横杠。
+            // 「隐藏区块」的能力仍在顶部菜单里(低频操作,不占主流程)。
+
+            // 01 今日精读:直接就是大图卡
             AppStagger(
-              index: 1,
-              child: CollapsibleSection(
-                id: 'daily',
+              index: 0,
+              child: _sectionBlock(
                 title: '今日精读',
-                icon: Icons.local_fire_department_outlined,
-                subtitle: '每天一篇,打开前先告诉你它有多难',
-                collapsedHint: _daily == null ? '还没有可精读的条目' : _daily!.title,
+                indexLabel: '01',
                 child: _buildDailyCard(theme, muted),
               ),
             ),
-            ...[
-              AppStagger(
-                index: 0,
-                child: CollapsibleSection(
-                  id: 'prefs',
-                  title: '个性化找资源',
-                  icon: Icons.tune,
-                  subtitle: _prefs.summary,
-                  collapsedHint: _prefs.summary,
-                  trailing: TextButton(
-                    onPressed: _showPrefsSheet,
-                    child: const Text('调整'),
-                  ),
-                  child: _buildPrefsCard(theme, muted),
-                ),
-              ),
-              AppStagger(
-                index: 2,
-                child: CollapsibleSection(
-                  id: 'discover',
-                  title: '发现更多',
-                  icon: Icons.explore_outlined,
-                  subtitle: '按题材找:公版书 + 论文 + 外媒三路并行',
-                  collapsedHint: _selectedTopics.isEmpty
-                      ? '选题材后在这里出结果'
-                      : '已选 ${_selectedTopics.length} 个题材 · ${_topicHits.length} 篇材料',
-                  child: _buildDiscover(theme, muted),
-                ),
-              ),
-            ],
-            ...[
-              AppStagger(
-                index: 3,
-                child: CollapsibleSection(
-                  id: 'bookshelf',
-                  title: '书架',
-                  icon: Icons.collections_bookmark_outlined,
-                  subtitle: _shelfCount == 0
-                      ? '还没放书 —— 读过的材料可以摆上来'
-                      : '架上 $_shelfCount 本 · 点开继续读',
-                  collapsedHint: _shelfCount == 0 ? '空书架' : '$_shelfCount 本',
-                trailing: TextButton(
-                  onPressed: () => _openBookshelf(),
-                  child: const Text('去看看'),
-                ),
-                // 书架本体在独立页面(那里要画真的架子),这里给一个"当前架上"的真架子预览
-                child: _buildBookshelfPreview(theme, muted),
-              ),
-            ),
+
+            // 02 今日推荐:横滑封面卡
             AppStagger(
-              index: 4,
-              child: CollapsibleSection(
-                id: 'byLevel',
-                title: '按你的水平找材料',
-                icon: Icons.school_outlined,
-                subtitle: '中文说需求,AI 去公开源找原文',
-                child: _buildAiDiscoverGrid(theme),
-              ),
-            ),
-            ],
-            AppStagger(
-              index: 5,
-              child: CollapsibleSection(
-                id: 'feed',
-                  title: '今日推荐',
-                  icon: Icons.rss_feed,
-                  subtitle:
-                    '${MaterialSourceService.sourceOf(_sourceId)?.label ?? _sourceId} · 最新条目',
-                  collapsedHint:
-                      _items.isEmpty ? '还没有条目' : '${_items.length} 条最新条目',
-                  trailing: TextButton(
-                    onPressed: _probing ? null : _probeAll,
-                    child: Text(_probing ? '检测中…' : '检测可用源'),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _sourceStrip(theme),
-                      const SizedBox(height: Gap.xs),
-                      _sourceNote(theme, muted),
-                      const SizedBox(height: Gap.sm),
-                      if (_loadingItems)
-                        // 方案 B:骨架屏(与最终卡片同形状),不再是转圈
-                        const SkeletonLines(lines: 4, seed: 1)
-                      else if (_error != null)
-                        _errorCard(theme, muted)
-                      else if (_items.isEmpty)
-                        const AppEmpty(
-                          icon: Icons.article_outlined,
-                          title: '这个源暂时没有条目',
-                          hint: '换一个源试试,或点「检测可用源」',
-                        )
-                      else
-                        // v2.11:**横滑卡片流**(体检:全页只有一处横滑,其余清一色竖列)。
-                        // 为什么改成横滑而不是继续竖排六张:
-                        // 材料中心一屏里已经有 6 个竖列区块,"今日推荐"再竖排六张,
-                        // 一屏全是同宽同高的卡 —— 这是用户说的"没有欲望的竖列呈现"。
-                        // 横滑让"还能往右看"这件事本身变成吸引力,同时把纵向高度
-                        // 从 6 张卡(约 600px)压到 1 行(约 176px)。
-                        SizedBox(
-                          height: 176,
-                          child: ListView.separated(
-                            scrollDirection: Axis.horizontal,
-                            itemCount: _items.take(8).length,
-                            separatorBuilder: (_, _) =>
-                                const SizedBox(width: Gap.xs),
-                            itemBuilder: (_, i) => SizedBox(
-                              width: 232,
-                              child: _buildFeedCard(theme, _items[i]),
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-            AppStagger(
-              index: 6,
-              child: CollapsibleSection(
-                id: 'shelf',
-                title: '材料库',
-                icon: Icons.library_books_outlined,
-                subtitle: _prefs.band.isAny
-                    ? '按「今天最适合读」排序'
-                    : '按 ${_prefs.band.label} 排序 · 符合 $_fitCount 篇',
-                collapsedHint: '${shelf.length} 篇 · 点开继续读',
-                trailing: _prefs.band.isAny || _shelf.isEmpty
-                    ? null
-                    : FilterChip(
-                        label: const Text('只看符合'),
-                        selected: _onlyFit,
-                        onSelected: (v) => setState(() => _onlyFit = v),
-                      ),
+              index: 1,
+              child: _sectionBlock(
+                title: '今日推荐',
+                indexLabel: '02',
+                actionLabel: _probing ? '检测中…' : '检测可用源',
+                onAction: _probing ? null : _probeAll,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    _sourceStrip(theme),
+                    const SizedBox(height: Gap.xs),
+                    _sourceNote(theme, muted),
+                    const SizedBox(height: Gap.sm),
+                    if (_loadingItems)
+                      const SkeletonLines(lines: 4, seed: 1)
+                    else if (_error != null)
+                      _errorCard(theme, muted)
+                    else if (_items.isEmpty)
+                      const AppEmpty(
+                        icon: Icons.article_outlined,
+                        title: '这个源暂时没有条目',
+                        hint: '换一个源试试,或点「检测可用源」',
+                      )
+                    else
+                      SizedBox(
+                        height: 186,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: _items.take(8).length,
+                          separatorBuilder: (_, _) =>
+                              const SizedBox(width: Gap.sm),
+                          itemBuilder: (_, i) => SizedBox(
+                            width: 236,
+                            child: _buildFeedCard(theme, _items[i]),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+
+            // 03 发现更多:题材检索结果直接平铺
+            AppStagger(
+              index: 2,
+              child: _sectionBlock(
+                title: '发现更多',
+                indexLabel: '03',
+                child: _buildDiscover(theme, muted),
+              ),
+            ),
+
+            // 04 按你的水平找:两列网格直接展示
+            AppStagger(
+              index: 3,
+              child: _sectionBlock(
+                title: '按你的水平找材料',
+                indexLabel: '04',
+                child: _buildAiDiscoverGrid(theme),
+              ),
+            ),
+
+            // 05 书架:真书架直接摆出来
+            AppStagger(
+              index: 4,
+              child: _sectionBlock(
+                title: '书架',
+                indexLabel: '05',
+                actionLabel: '去看看',
+                onAction: _openBookshelf,
+                child: _buildBookshelfPreview(theme, muted),
+              ),
+            ),
+
+            // 06 材料库:横卡列表直接展示
+            AppStagger(
+              index: 5,
+              child: _sectionBlock(
+                title: '材料库',
+                indexLabel: '06',
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (!_prefs.band.isAny && _shelf.isNotEmpty) ...[
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: FilterChip(
+                          label: const Text('只看符合'),
+                          selected: _onlyFit,
+                          onSelected: (v) => setState(() => _onlyFit = v),
+                        ),
+                      ),
+                      const SizedBox(height: Gap.xs),
+                    ],
                     if (_loadingShelf)
                       const SkeletonLines(lines: 3, seed: 2)
                     else if (shelf.isEmpty)
                       AppEmpty(
                         icon: Icons.library_books_outlined,
-                        title: _onlyFit ? '没有符合 ${_prefs.band.label} 的材料' : '还没有材料',
+                        title: _onlyFit
+                            ? '没有符合 ${_prefs.band.label} 的材料'
+                            : '还没有材料',
                         hint: _onlyFit
                             ? '把「只看符合」取消,或换一个难度档'
                             : '从上面挑一份,或点右上角「+」导入',
@@ -1028,11 +993,51 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
                 ),
               ),
             ),
+
+            // 07 个性化找资源:低频设置,放最后(不再占首屏)
+            AppStagger(
+              index: 6,
+              child: _sectionBlock(
+                title: '个性化找资源',
+                indexLabel: '07',
+                actionLabel: '调整',
+                onAction: _showPrefsSheet,
+                child: _buildPrefsCard(theme, muted),
+              ),
+            ),
+
             const SizedBox(height: Gap.lg),
           ],
           ),
         ),
       ),
+    );
+  }
+
+  /// 一个"区块" = 编号标题 + **内容直接展开**(没有折叠)。
+  ///
+  /// v2.13:用户 10/23 的原话是"到底为什么还是'清一色的竖列展开收起'这种烂到没边的
+  /// 交互" —— 上一版每个区块都是 `CollapsibleSection`(一排"标题 + 箭头",内容要点开),
+  /// 他只是看到换了个颜色。现在区块默认全展开,标题只负责分段;
+  /// 「隐藏区块」仍可在顶部菜单里做(低频操作,不该占主流程)。
+  Widget _sectionBlock({
+    required String title,
+    required String indexLabel,
+    required Widget child,
+    String? actionLabel,
+    VoidCallback? onAction,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        AppSectionHeader(
+          title: title,
+          indexLabel: indexLabel,
+          actionLabel: actionLabel,
+          onAction: onAction,
+        ),
+        child,
+      ],
     );
   }
 
@@ -1512,7 +1517,9 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
   }
 
   /// 书架(v2.10,用户 10/4 第 4/5 条):材料中心里的一块,点开是独立书架页
-  int _shelfCount = 0;
+  ///
+  /// v2.13:去掉 `_shelfCount` —— 区块不再折叠,标题副标题里的"架上 N 本"没了,
+  /// 书架上是否为空直接看得到(真书架 + 空位)。
   List<Map<String, Object?>> _bookshelf = const [];
 
   Future<void> _loadBookshelf() async {
@@ -1521,7 +1528,6 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
       if (!mounted) return;
       setState(() {
         _bookshelf = rows;
-        _shelfCount = rows.length;
       });
     } catch (e) {
       debugPrint('读书架失败: $e');

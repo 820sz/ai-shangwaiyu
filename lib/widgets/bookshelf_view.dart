@@ -121,33 +121,29 @@ class _BookshelfViewState extends State<BookshelfView> {
               ),
               const SizedBox(height: Gap.xxs),
             ],
-            // v2.12(用户 10/23 给的样图"书架是 3D 立体轮播"):
-            // 给整架加**轻微 3D 透视** —— 不做转盘(成本高、误触多),只俯视一点:
-            // 书脊有了纵深、搁板有了厚度方向,视觉上从"平面贴图"变成"一个真架子"。
-            // `Transform` 默认 `transformHitTests: true`,点击会做逆变换,位置仍然准。
-            Transform(
-              alignment: Alignment.center,
-              transform: Matrix4.identity()
-                ..setEntry(3, 2, 0.0012)
-                ..rotateX(0.045),
-              child: Column(
-                children: [
-                  for (var i = 0; i < rows.length; i++) ...[
-                    _ShelfRow(
-                      books: rows[i],
-                      perShelf: perShelf,
-                      selectedId: _selectedId,
-                      // 只有最后一层留空位:前面几层放满了,用户看到的是"这架还能放"
-                      fillEmpty: i == rows.length - 1 && !empty,
-                      onTapBook: _select,
-                      onLongPressBook: widget.onLongPressBook,
-                      onTapEmptySlot: widget.onTapEmptySlot,
-                    ),
-                    if (i != rows.length - 1)
-                      const SizedBox(height: SpineMetrics.rowSpacing),
-                  ],
+            // v2.13:**回退 v2.12 的 3D 透视** —— 用户真机截图里,书脊顶部的文字
+            // ("颜/书")浮到了上方统计条下面:`Transform..rotateX` 会让 `_SpinePainter`
+            // 的绘制溢出书架区域,而我没做裁剪。
+            // 教训:3D 不是"加一个 Matrix4"就完事,它需要"裁剪 + 按透视重建阴影与光照";
+            // 半成品透视 = 渲染 bug。先回平面版(搁板厚度/书脊渐变/进度书签带本来就是自绘的,
+            // 平面也有层次);真正的 3D 等之后单独做(ClipRect + 透视阴影)。
+            Column(
+              children: [
+                for (var i = 0; i < rows.length; i++) ...[
+                  _ShelfRow(
+                    books: rows[i],
+                    perShelf: perShelf,
+                    selectedId: _selectedId,
+                    // 只有最后一层留空位:前面几层放满了,用户看到的是"这架还能放"
+                    fillEmpty: i == rows.length - 1 && !empty,
+                    onTapBook: _select,
+                    onLongPressBook: widget.onLongPressBook,
+                    onTapEmptySlot: widget.onTapEmptySlot,
+                  ),
+                  if (i != rows.length - 1)
+                    const SizedBox(height: SpineMetrics.rowSpacing),
                 ],
-              ),
+              ],
             ),
             if (empty) ...[
               const SizedBox(height: Gap.md),

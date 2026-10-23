@@ -1306,4 +1306,54 @@ facility: www.gutenberg.org.
       expect(e.toString(), equals('【arXiv】网络不可达'));
     });
   });
+
+  // ══════════════════════ 正文清理(图片说明残留) ══════════════════════
+
+  group('cleanArticleText:图片说明残留', () {
+    // 用户 2026-10-23 截图:抓 NPR 文章,正文里混进了这些行。
+    const raw = 'hyperlinks Facebook Pages can post through a subscription\n'
+        'Tony Avelar/AP Photo\n'
+        'hide caption\n'
+        'toggle caption\n'
+        'i\n'
+        'Why are companies doing this?: Attention is money for social '
+        'media sites. They want to keep you on the page.';
+
+    test('图片说明按钮与来源署名被清掉,正文保留', () {
+      final cleaned = MaterialSourceService.cleanArticleText(raw);
+      expect(cleaned, contains('hyperlinks Facebook Pages can post'));
+      expect(cleaned, contains('Why are companies doing this'));
+      // 这三类都是截图里真实出现的残留
+      expect(cleaned, isNot(contains('hide caption')));
+      expect(cleaned, isNot(contains('toggle caption')));
+      expect(cleaned, isNot(contains('AP Photo')));
+    });
+
+    test('孤立的单字母行被清掉(截图里那个 "i")', () {
+      final cleaned = MaterialSourceService.cleanArticleText(raw);
+      expect(cleaned.split('\n'), isNot(contains('i')));
+    });
+
+    test('其他图片署名格式也认(Getty Images / Photo by)', () {
+      final cleaned = MaterialSourceService.cleanArticleText(
+        'Normal paragraph here.\n'
+        'John Smith/Getty Images\n'
+        'Photo by Jane Doe\n'
+        'Another normal paragraph.',
+      );
+      expect(cleaned, contains('Normal paragraph here'));
+      expect(cleaned, contains('Another normal paragraph'));
+      expect(cleaned, isNot(contains('Getty Images')));
+      expect(cleaned, isNot(contains('Photo by')));
+    });
+
+    test('不误伤正常短句(正常段落里的词不会被当噪声)', () {
+      final cleaned = MaterialSourceService.cleanArticleText(
+        'It is a test.\nWe go now.\nThis is fine.',
+      );
+      expect(cleaned, contains('It is a test.'));
+      expect(cleaned, contains('We go now.'));
+      expect(cleaned, contains('This is fine.'));
+    });
+  });
 }
