@@ -6,21 +6,18 @@
 
 ## 0. 一句话现状
 
-**v2.12.0 前端全面升级第一批已发布、远端已同步、工作区干净。等用户真机验收视觉,
-然后再做第二批(收藏夹/统计/设置/阅读器/今日推荐横卡换形态),并处理已知测试假失败。**
+**v2.12.1 已发布(v2.12.0 是"换皮版",被用户当场否掉;v2.12.1 才是真改结构)。**
+用户 10/23 20:57 的原话:「到底为什么还是"清一色的竖列展开收起"这种烂到没边的交互」
+「本质还是一条蛆」。教训写在 §5。
 
 | 项 | 值 |
 |---|---|
-| 版本 | `pubspec.yaml` → **2.12.0+69** |
-| Release | **v2.12.0**,APK 26,763,608 B |
-| APK sha256 | `0fe4cd28e3f904e31d035616111e6b08c430ce24c44b7aabeb083ff027c5baef` |
-| release digest | `sha256:0fe4cd28…7c5baef` —— **与本地逐字一致** |
-| 远端 | master = `cf2c0a14a06305b2f254fb707416fc74c6410f9c`,tree `596690b5…`(**与本地一致**) |
-| 绿灯 | `flutter analyze` **0 error / 0 warning**(11 条存量 info) |
-| 全量测试 | **1044 passed + 1 skip + 1 failed**(失败项 = 已知 Hive 假失败,下同) |
-| 数据库 | dbVersion **18**(未变) |
-| 依赖 | **零新增** |
-| 本批提交 | `767fa47`(设计系统+组件库+输入页+材料中心)/ `66b9b9d`(输出/我的/助理/书架3D)/ `8b7070f`(转圈清零+底栏+分类页)/ `b294a6e`+`b0c6f84`(bump 与文档) |
+| 版本 | `pubspec.yaml` → **2.12.1+70** |
+| Release | **v2.12.1**,APK sha256 `61da96ce…0a05352`,digest 一致 |
+| 桌面 APK | `C:\Users\xi283\Desktop\ReadFlow-v2.12.1.apk` |
+| 远端 | master `3c7c8bd9`,tree `c73e8669…`(与本地一致) |
+| 绿灯 | `flutter analyze` 0 error / 0 warning(11 条存量 info) |
+| 全量测试 | v2.12.0 时 1044 passed + 1 skip + 1 known fail;v2.12.1 相关 220 passed + material_source 100 passed |
 
 ---
 
