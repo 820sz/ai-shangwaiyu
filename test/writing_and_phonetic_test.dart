@@ -89,5 +89,18 @@ void main() {
       expect(DoubaoApiService.parseWritingReview('not json'), isEmpty);
       expect(DoubaoApiService.parseWritingReview(''), isEmpty);
     });
+
+    // v2.13:直接批改手写图时模型会附带 transcript(识别原文),
+    // 结果页靠它补「我的原文」;文本批改没有该字段时补空串,不崩。
+    test('手写直批的 transcript 保留;文本批改缺该字段 → 空串', () {
+      final handwritten = DoubaoApiService.parseWritingReview(
+        '{"score":80,"transcript":"I go home yesterday.","issues":[]}',
+      );
+      expect(handwritten['transcript'], 'I go home yesterday.');
+      expect(
+        DoubaoApiService.parseWritingReview('{"score":80}')['transcript'],
+        '',
+      );
+    });
   });
 }

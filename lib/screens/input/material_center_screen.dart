@@ -28,6 +28,7 @@ import '../../widgets/design_kit.dart';
 import '../../widgets/material_cover.dart';
 import '../../widgets/waiting.dart';
 import 'category_material_screen.dart';
+import 'material_category_screen.dart';
 import 'bookshelf_screen.dart';
 import 'material_import_flow.dart';
 import 'material_reader_screen.dart';
@@ -586,12 +587,8 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
     }
   }
 
-  Future<void> _setBand(MaterialBand band) async {
-    setState(() => _prefs = _prefs.copyWith(band: band));
-    await _prefs.save();
-    if (!mounted) return;
-    await _loadShelf();
-  }
+  // (v2.13 移除)`_setBand`:难度选择收进了「我的需求」的调整弹层
+  // (`_showPrefsSheet`),首页不再单独排一行难度 chip。
 
   Future<void> _showPrefsSheet() async {
     var draft = _prefs;
@@ -849,29 +846,21 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
               ],
             ),
             const SizedBox(height: Gap.sm),
-            // ② 内容领域页签:点一下 = 按该题材检索(复用 v2.8 的 _loadTopics)
-            AppContentTabs(
-              tabs: [for (final t in topicTabs) t.label],
-              index: tabIndex,
-              horizontalPadding: EdgeInsets.zero,
-              onChanged: (i) {
-                if (i < 0 || i >= topicTabs.length) return;
-                _loadTopics([topicTabs[i]]);
-              },
-            ),
-            const SizedBox(height: Gap.xs),
-            // ── v2.13(用户 10/23:"到底为什么还是'清一色的竖列展开收起'这种烂交互")──
-            //
-            // 上一版我只换了皮(配色/卡片/顶部 tab),**主体结构还是 7 个
-            // `CollapsibleSection`**:用户看到的是一串"标题 + 箭头",内容要点开才有 ——
-            // 这就是他说的"竖列展开收起"。这一版**彻底去掉折叠**:
-            // 每个区块 = 编号标题 + **内容直接展开**(大卡 / 横滑卡 / 网格 / 真书架 / 横卡列表),
-            // 一屏看下去全是内容,没有一条能收起的横杠。
-            // 「隐藏区块」的能力仍在顶部菜单里(低频操作,不占主流程)。
 
-            // 01 今日精读:直接就是大图卡
+            // ── v2.13(用户 2026-10-20 的结构要求)──
+            // 「用户偏好需求 —— 提供材料(而不是现在的先给材料,"个性化找资源"在最下面),
+            //   所有的材料都要基于用户的"个性化"提供」
+            // 「只提供材料分类这种大功能分区,点进去后再提供单独的子分区」
+            // 所以这一版:**需求卡置顶** → 今日精读 → **大分类网格**(点进二级页)
+            // → 今日推荐 → 书架 → 材料库 → 更多找法(低频,收进弹层)。
+            // 内容领域 tab、发现更多、按水平找都不再占首页 —— 它们在分类页/弹层里。
+
+            // ② 我的需求(偏好前置:所有材料都按它来)
+            AppStagger(index: 0, child: _buildNeedsHero(theme, muted)),
+
+            // 01 今日精读:大图卡
             AppStagger(
-              index: 0,
+              index: 1,
               child: _sectionBlock(
                 title: '今日精读',
                 indexLabel: '01',
@@ -879,12 +868,22 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
               ),
             ),
 
-            // 02 今日推荐:横滑封面卡
+            // 02 按分类找材料:大分区网格(点进去才是子分区与列表)
             AppStagger(
-              index: 1,
+              index: 2,
+              child: _sectionBlock(
+                title: '按分类找材料',
+                indexLabel: '02',
+                child: _buildCategoryGrid(theme),
+              ),
+            ),
+
+            // 03 今日推荐:横滑封面卡
+            AppStagger(
+              index: 3,
               child: _sectionBlock(
                 title: '今日推荐',
-                indexLabel: '02',
+                indexLabel: '03',
                 actionLabel: _probing ? '检测中…' : '检测可用源',
                 onAction: _probing ? null : _probeAll,
                 child: Column(
@@ -923,44 +922,24 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
               ),
             ),
 
-            // 03 发现更多:题材检索结果直接平铺
-            AppStagger(
-              index: 2,
-              child: _sectionBlock(
-                title: '发现更多',
-                indexLabel: '03',
-                child: _buildDiscover(theme, muted),
-              ),
-            ),
-
-            // 04 按你的水平找:两列网格直接展示
-            AppStagger(
-              index: 3,
-              child: _sectionBlock(
-                title: '按你的水平找材料',
-                indexLabel: '04',
-                child: _buildAiDiscoverGrid(theme),
-              ),
-            ),
-
-            // 05 书架:真书架直接摆出来
+            // 04 书架:真书架直接摆出来
             AppStagger(
               index: 4,
               child: _sectionBlock(
                 title: '书架',
-                indexLabel: '05',
+                indexLabel: '04',
                 actionLabel: '去看看',
                 onAction: _openBookshelf,
                 child: _buildBookshelfPreview(theme, muted),
               ),
             ),
 
-            // 06 材料库:横卡列表直接展示
+            // 05 材料库:横卡列表直接展示
             AppStagger(
               index: 5,
               child: _sectionBlock(
                 title: '材料库',
-                indexLabel: '06',
+                indexLabel: '05',
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -994,21 +973,235 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
               ),
             ),
 
-            // 07 个性化找资源:低频设置,放最后(不再占首屏)
-            AppStagger(
-              index: 6,
-              child: _sectionBlock(
-                title: '个性化找资源',
-                indexLabel: '07',
-                actionLabel: '调整',
-                onAction: _showPrefsSheet,
-                child: _buildPrefsCard(theme, muted),
-              ),
-            ),
+            // 06 更多找法(低频入口:发现更多 + 按水平找,收进一个弹层)
+            AppStagger(index: 6, child: _buildMoreWaysCard(theme, muted)),
 
             const SizedBox(height: Gap.lg),
           ],
           ),
+        ),
+      ),
+    );
+  }
+
+  /// **我的需求**(置顶卡,v2.13)。
+  ///
+  /// 用户 2026-10-20 的两条要求一起落在这里:
+  /// ① 「用户偏好需求 —— 提供材料(而不是现在的先给材料,"个性化找资源"在最下面),
+  ///    所有的材料都要基于用户的"个性化"提供」→ 这张卡必须在**所有材料之前**;
+  /// ② 没设过偏好的人要给一句"先告诉我你要什么",而不是让他自己去找那个入口。
+  Widget _buildNeedsHero(ThemeData theme, Color muted) {
+    final cs = theme.colorScheme;
+    final configured = !_prefs.band.isAny ||
+        _prefs.kinds.isNotEmpty ||
+        _prefs.genres.trim().isNotEmpty ||
+        _prefs.extra.trim().isNotEmpty;
+    return AppCard(
+      variant: AppCardVariant.hero,
+      onTap: _showPrefsSheet,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: cs.primary.withAlpha(18),
+                  borderRadius: BorderRadius.circular(Radii.control),
+                ),
+                child: Icon(Icons.tune, size: 20, color: cs.primary),
+              ),
+              const SizedBox(width: Gap.xs),
+              Expanded(
+                child: Text(
+                  '我的需求',
+                  style: AppFont.subheadStyle.copyWith(
+                    color: cs.onSurface,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: _showPrefsSheet,
+                child: Text(configured ? '调整' : '现在设置'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            configured
+                ? _prefs.summary
+                : '先花 10 秒告诉我想读什么(难度 / 来源 / 题材),'
+                    '下面的材料都按它来 —— 不设也行,那就按通用推荐',
+            style: AppFont.metaStyle.copyWith(color: muted, height: 1.5),
+          ),
+          if (configured) ...[
+            const SizedBox(height: Gap.xs),
+            Wrap(
+              spacing: Gap.xs,
+              runSpacing: Gap.xs,
+              children: [
+                AppTag('难度 ${_prefs.band.label}'),
+                if (_prefs.genres.trim().isNotEmpty)
+                  AppTag('题材 ${_prefs.genres.trim()}'),
+                if (_prefs.kinds.isNotEmpty)
+                  AppTag('来源 ${_prefs.kinds.join(' / ')}'),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// **按分类找材料**:大分区网格(点进去才是子分区与列表,v2.13)
+  Widget _buildCategoryGrid(ThemeData theme) {
+    final cs = theme.colorScheme;
+    final topics = _availableTopics;
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      padding: EdgeInsets.zero,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        mainAxisSpacing: Gap.xs,
+        crossAxisSpacing: Gap.xs,
+        mainAxisExtent: 132,
+      ),
+      itemCount: topics.length,
+      itemBuilder: (_, i) {
+        final t = topics[i];
+        return AppCard(
+          variant: AppCardVariant.compact,
+          padding: const EdgeInsets.all(Gap.sm),
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => MaterialCategoryScreen(topic: t),
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 图形化标识:每个分类一个主色块 + 图标(不靠生图,靠代码)
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: cs.primary.withAlpha(18),
+                  borderRadius: BorderRadius.circular(Radii.control),
+                ),
+                child: Icon(t.icon, size: 19, color: cs.primary),
+              ),
+              const Spacer(),
+              Text(
+                t.label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: AppFont.subheadStyle.copyWith(
+                  color: cs.onSurface,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                t.description,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: AppFont.tagStyle.copyWith(
+                  color: cs.onSurfaceVariant,
+                  height: 1.3,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  /// 低频入口:AI 按需求找 + 按难度发现更多(收进弹层,首页不再堆内容)
+  Widget _buildMoreWaysCard(ThemeData theme, Color muted) {
+    final cs = theme.colorScheme;
+    return AppCard(
+      onTap: _showMoreWays,
+      child: Row(
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: cs.primary.withAlpha(14),
+              borderRadius: BorderRadius.circular(Radii.control),
+            ),
+            child: Icon(Icons.travel_explore, size: 20, color: cs.primary),
+          ),
+          const SizedBox(width: Gap.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '还有更多找法',
+                  style: AppFont.subheadStyle.copyWith(
+                    color: cs.onSurface,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '用中文说需求让 AI 去找 · 按难度发现更多',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppFont.metaStyle.copyWith(color: muted),
+                ),
+              ],
+            ),
+          ),
+          Icon(Icons.chevron_right, size: 20, color: cs.outline),
+        ],
+      ),
+    );
+  }
+
+  /// 更多找法弹层:发现更多 + 按水平找(内容不删,只是不再占首页)
+  Future<void> _showMoreWays() async {
+    final theme = Theme.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.88,
+        builder: (ctx, scroll) => ListView(
+          controller: scroll,
+          padding: Insets.page,
+          children: [
+            Text(
+              '按你的水平找材料',
+              style: AppFont.headingStyle.copyWith(
+                color: theme.colorScheme.onSurface,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: Gap.xs),
+            _buildAiDiscoverGrid(theme),
+            const SizedBox(height: Gap.md),
+            Text(
+              '发现更多(按题材检索)',
+              style: AppFont.headingStyle.copyWith(
+                color: theme.colorScheme.onSurface,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: Gap.xs),
+            _buildDiscover(theme, muted),
+            const SizedBox(height: Gap.lg),
+          ],
         ),
       ),
     );
@@ -1099,76 +1292,9 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
 
   // ───────────────── ⓪ 个性化找资源 ─────────────────
 
-  Widget _buildPrefsCard(ThemeData theme, Color muted) {
-    return AppCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.tune, size: 18, color: theme.colorScheme.primary),
-              const SizedBox(width: Gap.xs),
-              Expanded(
-                child: Text('个性化找资源',
-                    style: theme.textTheme.titleSmall
-                        ?.copyWith(fontWeight: FontWeight.w600)),
-              ),
-              if (_prefs.activeCount > 0)
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.primary.withAlpha(20),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(
-                    '${_prefs.activeCount} 项偏好',
-                    style: TextStyle(
-                      fontSize: 10,
-                      color: theme.colorScheme.primary,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              TextButton(
-                onPressed: _showPrefsSheet,
-                child: const Text('调整'),
-              ),
-            ],
-          ),
-          const SizedBox(height: Gap.xxs),
-          Text(
-            _prefs.summary,
-            style: theme.textTheme.bodySmall
-                ?.copyWith(color: muted, height: 1.4),
-          ),
-          const SizedBox(height: Gap.sm),
-          Text('难度', style: theme.textTheme.bodySmall?.copyWith(color: muted)),
-          const SizedBox(height: Gap.xxs),
-          Wrap(
-            spacing: Gap.xs,
-            runSpacing: Gap.xs,
-            children: [
-              for (final b in MaterialBand.values)
-                ChoiceChip(
-                  label: Text(b.label),
-                  selected: _prefs.band == b,
-                  onSelected: (_) => _setBand(b),
-                ),
-            ],
-          ),
-          if (!_prefs.band.isAny) ...[
-            const SizedBox(height: Gap.xxs),
-            Text(
-              _prefs.band.description,
-              style: theme.textTheme.bodySmall
-                  ?.copyWith(color: muted, fontSize: 11),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
+  // (v2.13 移除)`_buildPrefsCard`:偏好内容改为**置顶的需求卡**
+  // (`_buildNeedsHero`)+ 独立的「调整」弹层,不再作为第 7 个区块出现 ——
+  // 用户明确说"个性化找资源不该在最下面,材料要基于偏好提供"。
 
   // ───────────────── ① 今日精读大卡(v2.8) ─────────────────
 

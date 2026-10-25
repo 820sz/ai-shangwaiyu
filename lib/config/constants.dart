@@ -205,6 +205,16 @@ class AppConstants {
   static const String keyReaderFontScale = 'reader_font_scale';
   static const String keyReaderLineHeight = 'reader_line_height';
 
+  /// 写译批改的预设提示词(2026-10-20 用户要求可查看/修改/恢复默认)。
+  /// 未设置或空串 = 用 `WritingReviewSettings.defaultPrompt`;
+  /// 用户把提示词改回默认时会**删除**这个 key,而不是存一份默认文本 ——
+  /// 这样以后 App 升级默认提示词时,没自定义过的用户能跟着升级。
+  static const String keyWritingReviewPrompt = 'writing_review_prompt';
+
+  /// 写译批改的思考强度(独立于识图/追问的档位,因为批改是另一条链路)。
+  /// 存语义档位(disabled/low/...),按当前批改模型族取合法档位表。
+  static const String keyWritingReviewThinking = 'writing_review_thinking';
+
   // ── 生词类型 ──
   static const String wordTypeWord = 'word';
   static const String wordTypePhrase = 'phrase';

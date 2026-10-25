@@ -1,7 +1,7 @@
 name: readflow
 description: "AI英语阅读学习助手 - 拍照取词、生词归档、AI文章生成、回译练习"
 publish_to: 'none'
-version: 2.12.1+70
+version: 2.13.0+71
 
 environment:
   # 下限跟本机 Flutter stable SDK 走(审查 P2-23 顺手补约束说明);
@@ -70,5 +70,7 @@ flutter:
   assets:
     - assets/
     - assets/icons/
+    # v2.13:鲸鱼尾(全 App 的"AI 思考中"形象,用户指定)
+    - assets/images/
     # v2.0:词频表(难度分析/词汇量测试的地基,离线可算、零 API 成本)
     - assets/data/

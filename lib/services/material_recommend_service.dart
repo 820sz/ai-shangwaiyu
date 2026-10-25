@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import '../models/material_recommendation.dart';
 import '../models/vocabulary.dart';
+import 'translation_policy.dart';
 
 /// 「其他输入材料」的 AI 推荐逻辑(v1.8.0)。
 ///
@@ -101,12 +102,14 @@ ${blockLines.isEmpty ? '' : '\n【用户明确不想看的内容】\n${blockLine
 ## 📖 选段
 (3-5 段英文原文或典型例句,难度匹配用户水平;若非真实出版物原文,请写"根据该材料风格改写的精读选段")
 ## 🇨🇳 中文导读
-(每段选段对应的中文翻译或大意,逐段对应)
+(每段选段对应的中文翻译;若原文较长,可以写准确的中文大意,但要保留关键术语与限定,不得改变原意)
 ## 🔑 重点词与表达
 (6-10 条:英文 — 中文释义 — 一句话用法说明;优先覆盖用户生词本里的词)
 ## 🧭 怎么用这份材料
 (3-4 条具体的学习动作建议,例如"先盲听/先泛读一遍,再回来看重点词")
-要求:内容务实用得上,不要空话;英文难度贴近用户水平。''';
+要求:内容务实用得上,不要空话;英文难度贴近用户水平。
+
+${TranslationPolicy.discipline}''';
 
   /// 学习内容 user 提示词
   static String contentUserPrompt({

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../config/design_tokens.dart';
 import '../config/theme.dart';
+import 'whale_thinking.dart';
 
 /// 全 App 统一的"AI 干活时"等待 UI(v2.9)。
 ///
@@ -141,27 +142,13 @@ class _AiWaitingTimelineState extends State<AiWaitingTimeline>
               ),
             ),
           if (widget.running)
+            // v2.13:"还在继续…"前面原来是闪烁圆点,改成**鲸鱼尾**
+            // (用户指定:全 App 涉及"思考"的 UI 都用鲸鱼尾)
             Padding(
               padding: const EdgeInsets.only(top: 6),
-              child: Row(
-                children: [
-                  FadeTransition(
-                    opacity: Tween<double>(begin: 0.35, end: 1).animate(_pulse),
-                    child: Container(
-                      width: 7,
-                      height: 7,
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.primary,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: Gap.xs),
-                  Text(
-                    '还在继续…',
-                    style: TextStyle(fontSize: 11, color: muted),
-                  ),
-                ],
+              child: WhaleThinkingLine(
+                label: '还在继续…',
+                compact: widget.compact,
               ),
             ),
           if (widget.footer != null)
@@ -420,64 +407,18 @@ class _ProgressStageBarState extends State<ProgressStageBar> {
   }
 }
 
-/// 极简的"AI 正在思考"三点跳动(聊天/气泡里用;有内容时立刻被替换)
-class ThinkingDots extends StatefulWidget {
+/// **AI 正在思考**(v2.13:形象改成项目自定的「鲸鱼尾」)。
+///
+/// 以前是三个点跳动。用户 2026-10-25 指定:「ai 软件内涉及"思考"的 ui,
+/// 都改成我给的 gif 的鲸鱼尾」。所以这里保留**类名与参数不变**,
+/// 只把里面的形象换掉 —— 13 个调用点一行不用改,全部自动升级成鲸鱼尾。
+class ThinkingDots extends StatelessWidget {
   final String label;
   final bool compact;
 
   const ThinkingDots({super.key, this.label = '正在思考', this.compact = false});
 
   @override
-  State<ThinkingDots> createState() => _ThinkingDotsState();
-}
-
-class _ThinkingDotsState extends State<ThinkingDots>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _c = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 900),
-  )..repeat();
-
-  @override
-  void dispose() {
-    _c.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(widget.label,
-            style: TextStyle(
-                fontSize: widget.compact ? 11 : 12, color: muted)),
-        const SizedBox(width: 6),
-        for (var i = 0; i < 3; i++)
-          AnimatedBuilder(
-            animation: _c,
-            builder: (context, _) {
-              // 三个点错相跳动:0 / 0.33 / 0.66 的相位差
-              final t = (_c.value + i / 3) % 1.0;
-              final a = (t < 0.5 ? t * 2 : (1 - t) * 2).clamp(0.15, 1.0);
-              return Padding(
-                padding: const EdgeInsets.only(right: 3),
-                child: Opacity(
-                  opacity: a,
-                  child: Container(
-                    width: 4,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: muted,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                ),
-              );
-            },
-          ),
-      ],
-    );
-  }
+  Widget build(BuildContext context) =>
+      WhaleThinkingLine(label: label, compact: compact);
 }

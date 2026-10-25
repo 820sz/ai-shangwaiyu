@@ -6,6 +6,7 @@ import 'api_endpoint.dart';
 import 'base_api.dart';
 import 'database.dart';
 import 'doubao_api.dart';
+import 'translation_policy.dart';
 
 /// 一批翻译的结果(v2.10)。
 ///
@@ -63,7 +64,11 @@ class DeepseekApiService extends BaseApiService {
 3. 难度控制在用户水平（根据记忆信息判断）
 4. 题材以故事、科普、日常对话为宜，让读者有兴趣读下去
 5. 返回 JSON: {"title": "...", "content": "...", "translation": "..."}
-6. translation 为 content 的全文中文翻译，段落用空行分隔，与 content 段落一一对应
+6. translation 为 content 的全文中文翻译，段落用空行分隔，与 content 段落一一对应；
+   译文同样受下面的翻译纪律约束（它是给学习者对照阅读的，不能为了顺口损失信息）
+
+${TranslationPolicy.discipline}
+
 7. 只返回 JSON，不要有其他内容''';
 
     final userPrompt = '''
@@ -150,7 +155,10 @@ $vocabText
    arXiv 摘要页 `https://arxiv.org/abs/<id>`,或期刊/大学/机构官网的公开页面。
    **不确定数字 id 就把 url 写成空串** —— 编一个不存在的 id 会让用户点开 404。
 4. why 用中文,一句话,说清"为什么适合他"(题材/难度/篇幅),不要空话。
-5. 只输出 JSON。''';
+5. title_cn 是**翻译**,不是重新起名:书名/论文名用通用译名,学术术语不得改成
+   口语化说法;遵守下面的翻译纪律:
+${TranslationPolicy.discipline}
+6. 只输出 JSON。''';
     final userPrompt = '我想找:$userQuery\n$categoryHint$level$prefs$band';
     final response = await postWithReasoningFallback(
       '/v1/chat/completions',
@@ -192,7 +200,12 @@ $vocabText
   Future<Map<String, String>> translateTitles(List<String> titles) async {
     if (titles.isEmpty || !config.isConfigured) return const {};
     const systemPrompt = '''你给英语学习材料的标题配中文译名。返回 JSON:{"items":[{"en":"原标题","cn":"中文译名"}]}
-规则:中文用**通用译名**(书用常见中译本名,论文/文章意译);不确定就给直译,不要音译、不要留空;只输出 JSON。''';
+规则:中文用**通用译名**(书用常见中译本名,论文/文章意译);不确定就给直译,不要音译、不要留空。
+标题也是翻译,同样按下面的纪律来(尤其是学术标题里的术语与限定):
+
+${TranslationPolicy.discipline}
+
+只输出 JSON。''';
     final response = await postWithReasoningFallback(
       '/v1/chat/completions',
       BaseApiService.buildChatBody(
@@ -243,10 +256,18 @@ $vocabText
     if (paragraphs.isEmpty || !config.isConfigured) {
       return const TranslateOutcome(translations: [], note: 'AI 未配置');
     }
-    const systemPrompt = '''你是翻译助手。用户给一段英文(可能多段,用空行分隔),
-请逐段翻译成**通顺的中文**。返回 JSON:{"translations":["第一段译文","第二段译文",...]}
-规则:1. 段数必须与输入**完全一致**,顺序对应,不许合并或拆分;
-2. 不要逐词硬译,不要保留英文语序;
+    // v2.12.2(用户 2026-10-20):旧提示词第一句就是"请逐段翻译成**通顺的中文**",
+    // 模型于是把"通顺"当最高目标 —— 学术段落里的限定、否定、术语常被抹平。
+    // 现在把翻译纪律整段插进来,并明确它优先于"通顺/地道";段数与 JSON 结构
+    // 一个字都没动(调用方按固定结构解析)。
+    const systemPrompt = '''你是严谨的翻译助手。用户给一段英文(可能多段,用空行分隔),
+请逐段翻译成中文。返回 JSON:{"translations":["第一段译文","第二段译文",...]}
+
+${TranslationPolicy.discipline}
+
+本任务的附加规则:
+1. 段数必须与输入**完全一致**,顺序对应,不许合并或拆分;
+2. 不要逐词硬译,也不要为顺口保留英文语序;语序调整只服务于把原意说清楚;
 3. 只输出 JSON。''';
     // 输出预算按输入长度给:英文 1 字符≈0.25 token,中文译文≈0.5 token,再留 600 余量
     final chars = paragraphs.fold<int>(0, (a, s) => a + s.length);
@@ -300,7 +321,11 @@ $vocabText
 
 要求：
 1. 从文章中挑选5-8个有学习价值的句子（不要太长，15-30词为宜）
-2. 每个句子给出地道的中文翻译
+2. 每个句子给出**准确、可对照**的中文翻译 —— 它是判分参照,不是随手写的参考译文;
+   译文按下面的翻译纪律来（术语、限定、否定、时态都不能为了顺口而丢）
+
+${TranslationPolicy.discipline}
+
 3. 返回 JSON: {"sentences": [{"english": "...", "chinese": "..."}]}
 4. 只返回 JSON，不要有其他内容''';
 

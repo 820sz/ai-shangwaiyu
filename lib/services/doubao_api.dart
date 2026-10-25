@@ -6,7 +6,9 @@ import 'package:flutter/foundation.dart';
 import '../config/constants.dart';
 import 'api_endpoint.dart';
 import 'base_api.dart';
+import 'translation_policy.dart';
 import 'vision_image.dart';
+import 'writing_review_settings.dart';
 
 /// SSE 流式数据块
 class SseChunk {
@@ -201,9 +203,11 @@ class DoubaoApiService extends BaseApiService {
 
     final (String systemPrompt, String userPrompt) = switch (analysisMode) {
       AppConstants.analysisModeFullText => (
-        '''你是一个专业的翻译助手。用户发给你一张外语阅读材料的照片，请翻译照片中的所有文字内容。
+        '''你是一个严谨的翻译助手。用户发给你一张外语阅读材料的照片，请翻译照片中的所有文字内容。
 返回 JSON：{"paragraphs": [{"original": "原文段落", "translation": "中文翻译"}]}
-要求：保持原文段落结构，翻译准确流畅。只返回JSON。''',
+要求：保持原文段落结构；译文以准确、专业为先，流畅只服务于原意表达。
+${TranslationPolicy.discipline}
+只返回JSON。''',
         '请翻译这些阅读材料照片中的全文内容$bookHint$pageHint$countHint'
       ),
       // 校准重识别(v1.7.0;v2.6 重写):用户对上次识别不满意时的"认真重做一遍"。
@@ -215,12 +219,14 @@ class DoubaoApiService extends BaseApiService {
 {"lines_scanned":扫描的正文行数,"mark_count":找到的标记处数,"items":[{"word":"完整原文","translation":"中文释义","word_type":"word|phrase|sentence","part_of_speech":"词性(可选)","phonetic_uk":"英式IPA音标(仅单词可选)","phonetic_us":"美式IPA音标(仅单词可选)","original_sentence":"该词条所在的完整句子(照抄图上英文,必填)","line":"该词条所在整行原文(照抄,必填)","uncertain":true|false}]}
 
 作业流程(严格按顺序做,不要跳步)：
-1. **先把图转正**(横拍/竖拍/倒置都可能),再从正文第一行到最后一行**逐行**读过去。
+1. **先把图转正**(横拍/竖拍/倒置都可能;本地已尽力把内容横放的图转正),再从正文第一行到最后一行**逐行**读过去。
 2. 每读一行,就问自己"这一行有没有被笔或荧光笔碰过";有就记下来,继续往下。
-3. 标记类型包括:下划线(含很淡的铅笔线)、双下划线、波浪线、圈画、荧光笔(黄/绿/粉底纹)、方框、星号、箭头、书签贴/便签、页边手写批注、手写中文批注旁对应的英文。
-4. 标点、连字符、缩写、专有名词原样保留;看不清的字母按上下文补全,但不要编造不存在的词。
-5. 同一处内容重复标记只输出一次;同一个词在两处被标则输出两条。
-6. **输出前对账**:mark_count 必须与实际带标记的条目数一致;对不上就回去再扫一遍再输出。
+3. 标记类型包括:圈画、方框、星号、箭头、波浪线、双下划线、荧光笔(黄/绿/粉底纹)、书签贴/便签、页边手写批注、手写中文批注旁对应的英文。
+4. **下划线要单独盯**(用户实测:下划线漏识率明显高于圈框):线在词正下方 1~6 像素,常只有半截、颜色很淡;
+   逐词扫时视线要在每个词下方停一下,一行里两个词被划线就输出两个。
+5. 标点、连字符、缩写、专有名词原样保留;看不清的字母按上下文补全,但不要编造不存在的词。
+6. 同一处内容重复标记只输出一次;同一个词在两处被标则输出两条。
+7. **输出前对账**:mark_count 必须与实际带标记的条目数一致;对不上就回去再扫一遍再输出。
 
 识别纪律:
 1. **该找出来的必须找出来**:上一次漏掉的那些(淡线、半截线、圈在词上的圈、页边批注)这次都要收进来。
@@ -229,6 +235,9 @@ class DoubaoApiService extends BaseApiService {
 4. **original_sentence 必填(单词也要)**,line 也必填(照抄整行原文)。
 5. 中文批注单独成条,且为**中文 → 英文**结构:word=中文批注原文,translation=它对应的英文(**不要写中文**),original_sentence=被批注的英文原句。
 6. 不要输出完全没有标记的正文(大标题、页码、没被划到的句子)。
+
+translation 是中文释义,同样属于翻译任务,必须按下面的翻译纪律来:
+${TranslationPolicy.discipline}
 ${imageUris.length > 1 ? '7. 多图格式：{"items_by_image":[{"image_index":0,"items":[...]},...]}' : ''}
 无任何标记返回 {"lines_scanned":N,"mark_count":0,"items":[]}。只输出JSON。''',
         '请校准重识别这些照片中被标记(批注/圈画/划线/荧光笔等)的英语内容$bookHint$pageHint$countHint'
@@ -238,12 +247,18 @@ ${imageUris.length > 1 ? '7. 多图格式：{"items_by_image":[{"image_index":0,
 {"lines_scanned":扫描的正文行数,"mark_count":找到的标记处数,"items":[{"word":"完整原文","translation":"中文释义","word_type":"word|phrase|sentence","part_of_speech":"词性(可选)","phonetic_uk":"英式IPA音标(仅单词可选,如 /ˈleɪzi/)","phonetic_us":"美式IPA音标(仅单词可选)","original_sentence":"该词条所在的完整句子(照抄图上英文,必填)","line":"该词条所在整行原文(照抄,必填)","uncertain":true|false}]}
 
 **第一步:转正 + 逐行扫**
-照片可能是任何方向(横拍/竖拍/倒置)。先按文字方向把它转正,然后从正文第一行读到最后一行,
-**边读边记录每一行有没有被标记过** —— 这一步不要省,漏识几乎都发生在"没逐行看"。
+照片可能是任何方向(横拍/竖拍/倒置;本地已尽力把"内容横放"的图转正,若仍歪斜请按文字自然方向读)。
+从正文第一行读到最后一行,**边读边记录每一行有没有被标记过** —— 这一步不要省,漏识几乎都发生在"没逐行看"。
 
 **第二步:什么算标记(看到就算)**
-下划线(包括很淡的铅笔线、只画了一半的线)、双下划线、波浪线、圈画、荧光笔(黄/绿/粉底纹)、
-方框、星号、箭头、书签贴/便签、页边手写批注、以及手写的中文批注本身。
+圈画、方框、星号、箭头、波浪线、双下划线、荧光笔(黄/绿/粉底纹)、书签贴/便签、
+页边手写批注、以及手写的中文批注本身。
+
+⚠️ **下划线要单独盯(用户实测:下划线批注的漏识率明显高于圈框)**:
+下划线画在词/短语**正下方 1~6 像素**,常常只有半截、颜色很淡(铅笔灰可能只比纸面深一点点)。
+所以逐行扫的时候,**视线要在每个词的下方停一下**,不能只找"有没有圈";
+一行里如果有两个词被划线,两个都要输出。
+
 ⚠️ 淡色、断续、不规则的线**也算** —— 判断不了时**照样输出**,不要因为"不太确定"就丢掉。
 
 **第三步:输出前对账**
@@ -264,12 +279,16 @@ mark_count 要等于带标记的条目数;两个数对不上,回去再扫一遍�
    - translation = 它对应的**英文**(如 Socrates;整句批注就给整句英文),**不要写中文**;
    - original_sentence = 被批注的那句英文原文(照抄);
    - word_type:批注一个词写 word,批注整句写 sentence。
-7. **translation 要结合语境**(用户实测过"生硬翻译"):
+7. **translation 要结合语境、以准确为先**(用户实测过"生硬翻译"和"为了顺口改意思"):
    - 单词:先看它在这句话里的词性与含义再给中文(bank 河岸/银行、issue 问题/发行),
-     不要给词典第一个义项;
-   - 短语/句子:给整句通顺的中文,不要逐词硬译、不要保留英文语序。
-8. 单词给词性,并同时给 phonetic_uk(英式)与 phonetic_us(美式)音标;拿不准的音标宁可留空。
-9. 同一个词在不同位置被标了两次就输出两次(各自带自己的 line,系统会合并成"出现过 ×2");
+     不要给词典第一个义项;释义保持词条简短,只有学术术语确有歧义时才用括号
+     补原文,不要每条都补;
+   - 短语/句子:先保证原句的信息、限定、否定、时态不丢,再把它写成中文;
+     不要逐词硬译、不要保留英文语序,但也不许为了顺口改写原意或省略信息。
+8. **translation 是翻译任务,必须按下面的翻译纪律来**(词汇释义同样要专业、严谨):
+${TranslationPolicy.discipline}
+9. 单词给词性,并同时给 phonetic_uk(英式)与 phonetic_us(美式)音标;拿不准的音标宁可留空。
+10. 同一个词在不同位置被标了两次就输出两次(各自带自己的 line,系统会合并成"出现过 ×2");
    同一处重复标记只输出一次。${imageUris.length > 1 ? '多图格式：{"items_by_image":[{"image_index":0,"items":[...]},...]}' : ''}
 无任何标记返回 {"lines_scanned":N,"mark_count":0,"items":[]}。只输出JSON。''',
         '识别标记的英语内容$bookHint$pageHint$countHint$excludeHint'
@@ -407,10 +426,14 @@ mark_count 要等于带标记的条目数;两个数对不上,回去再扫一遍�
       messages: [
         {
           'role': 'system',
+          // v2.12.2(用户 2026-10-20):这里的"词义解释 + 例句中译"都是译文,
+          // 不能为了"150 字以内好读"就把词义讲成口语化近似说法。
           'content': '你是英语老师。用户点了一个词/短语,请**就这一处**讲清楚:'
               '①它在这里的意思(先判词性,不要给词典第一个义项)'
               '②常见搭配或用法 ③一个同类例句(英文 + 中文)。'
-              '中文讲解,总长 150 字以内,不要客套话,不要复述题目。',
+              '中文讲解,总长 150 字以内,不要客套话,不要复述题目。'
+              '词义与例句译文按下面的翻译纪律:'
+              '${TranslationPolicy.discipline}',
         },
         {
           'role': 'user',
@@ -654,11 +677,15 @@ mark_count 要等于带标记的条目数;两个数对不上,回去再扫一遍�
               // v2.4(B3,用户反馈"偶尔是生硬翻译出来的,并不是符合原句中词汇的意思"):
               // 翻译要**结合语境**,不能给词典第一个义项了事。
               'translation 的硬性要求:'
-              '① 如果是短语/句子,给**整句通顺**的中文,不要逐词硬译、不要保留英文语序;'
+              '① 如果是短语/句子,先保证原句的信息、限定、否定、时态不丢,再写成中文;'
+              '不要逐词硬译、不要保留英文语序,但也不许为了顺口改写原意;'
               '② 如果是单词,先判断它在这句话里的词性与含义,再给中文 —— '
               '同一个词在不同语境意思不同(bank 河岸/银行、issue 问题/发行),'
               '给错了等于白背;'
-              '③ 拿不准就先给最贴合语境的那个义项,不要罗列一堆义项。'
+              '③ 拿不准就先给最贴合语境的那个义项,不要罗列一堆义项;'
+              '单词释义保持词条简短,只有学术术语确有歧义时才用括号补原文;'
+              '④ translation 是翻译任务,必须按下面的翻译纪律来:'
+              '${TranslationPolicy.discipline}'
               '只输出 JSON。',
         },
         {'role': 'user', 'content': word},
@@ -782,17 +809,40 @@ mark_count 要等于带标记的条目数;两个数对不上,回去再扫一遍�
     return content;
   }
 
+  /// 写译批改使用的槽位(纯逻辑,可单测)。
+  ///
+  /// - 普通文本批改:优先副槽位(专项文本模型,便宜快),未配置用主槽位;
+  /// - 直接批改手写图([requireVision]):必须选**能看图**的模型 ——
+  ///   先看副槽位(DeepSeek 的 deepseek-flash 也能吃图),再回主槽位;
+  ///   两个都不能看图时仍返回主槽位,由调用方抛出"请换视觉模型"的清晰错误,
+  ///   而不是把 base64 图片发给纯文本模型换一个 400。
+  ///
+  /// 设置页的思考档位也用这个方法取模型,保证"设置里看到的档位"与
+  /// "实际批改请求的端点"是同一个。
+  static ApiEndpointConfig reviewWritingEndpoint({bool requireVision = false}) {
+    final secondary = ApiEndpointConfig.secondary;
+    final primary = ApiEndpointConfig.primary;
+    if (requireVision) {
+      if (secondary.isConfigured && modelSupportsImages(secondary.model)) {
+        return secondary;
+      }
+      if (modelSupportsImages(primary.model)) return primary;
+      return primary;
+    }
+    return secondary.isConfigured ? secondary : primary;
+  }
+
   /// 步骤2:AI 批改 — 文本输入 → {score, correction, summary, issues, error_summary}。
-  /// 优先副槽位(文本模型,便宜快),未配置则用主槽位。
-  /// [errorSummary] 要求模型在最后按「词汇/语法/表达优化/其他」四类汇总。
+  ///
+  /// [systemPrompt] 用户在「批改设置」里改过的提示词;空/未传用默认提示词。
+  /// [thinkingLevel] 用户在「批改设置」里选的思考强度;未传保持旧行为(disabled)。
   Future<Map<String, dynamic>> reviewWriting(
     String text, {
     ApiEndpointConfig? endpoint,
+    String? systemPrompt,
+    String? thinkingLevel,
   }) async {
-    final cfg = endpoint ??
-        (ApiEndpointConfig.secondary.isConfigured
-            ? ApiEndpointConfig.secondary
-            : config);
+    final cfg = endpoint ?? reviewWritingEndpoint();
     if (!cfg.isConfigured) {
       throw Exception('请先在设置中配置 API Key');
     }
@@ -800,27 +850,107 @@ mark_count 要等于带标记的条目数;两个数对不上,回去再扫一遍�
       cfg: cfg,
       temperature: 0,
       maxTokens: 8192, // 长作文 + 逐条点评需要空间(P2-18)
-      thinkingLevel: 'disabled',
+      thinkingLevel: thinkingLevel ?? WritingReviewSettings.defaultThinking,
       messages: [
-        {
-          'role': 'system',
-          'content':
-              '你是一名严谨耐心的英语写作老师。请批改用户提交的英文写作,返回 JSON:'
-              '{"score":整数0-100,"correction":"修改后的完整英文(保留原意,标点拼写语法修正)",'
-              '"issues":[{"original":"原文片段","correction":"修改后",'
-              '"type":"词汇|语法|表达优化|其他","reason":"错误原因与中文解释"}],'
-              '"error_summary":{"词汇":"这一类问题的汇总(没有则空串)","语法":"...",'
-              '"表达优化":"...","其他":"..."},'
-              '"summary":"总体评语(中文,60字内)"}。'
-              'error_summary 必须四个键齐全,用中文总结每一类错误的共性问题与改进方向(每条 40 字内),'
-              '没有该类错误就留空字符串。不输出JSON以外的任何内容。',
-        },
+        {'role': 'system', 'content': _writingReviewSystemPrompt(systemPrompt)},
         {'role': 'user', 'content': text},
       ],
     );
 
     final response = await postWithReasoningFallback(
         '/chat/completions', body, cfg: cfg);
+    return _parseWritingReviewResponse(response);
+  }
+
+  /// 直接批改手写稿(v2.13,用户 2026-10-20 第 1 条):
+  /// **不转电子档**,把照片直接交给视觉模型,边识别边按同一套批改要求出结构化结果。
+  ///
+  /// 为什么还要 transcript:结果页要显示「我的原文」、追问也要带上下文;
+  /// 更重要的是让用户能核对"模型有没有看错我的字" —— 这是直接批改相比
+  /// 先转写最容易出错、也最需要透明的一步。它只是附带字段,不改变批改结构。
+  ///
+  /// 提示词策略:用户设置的提示词**原样作为主体**,只在末尾追加一段
+  /// "本次输入是手写照片"的固定要求(见 [_handwrittenSuffix]) ——
+  /// 不把默认提示词硬拼回去,否则用户的自定义就失效了。
+  Future<Map<String, dynamic>> reviewWritingImages(
+    List<File> imageFiles, {
+    ApiEndpointConfig? endpoint,
+    String? systemPrompt,
+    String? thinkingLevel,
+  }) async {
+    if (imageFiles.isEmpty) throw Exception('没有可批改的手写稿图片');
+    final cfg = endpoint ?? reviewWritingEndpoint(requireVision: true);
+    if (!cfg.isConfigured) {
+      throw Exception('请先在设置中配置 API Key');
+    }
+    if (!modelSupportsImages(cfg.model)) {
+      throw Exception('当前批改模型不支持看图，请换视觉模型，或先「识别为电子档」');
+    }
+    final uris = await imageDataUrisFor(imageFiles);
+    final multi = uris.length > 1;
+    final body = BaseApiService.buildChatBody(
+      cfg: cfg,
+      temperature: 0,
+      maxTokens: 8192,
+      thinkingLevel: thinkingLevel ?? WritingReviewSettings.defaultThinking,
+      messages: [
+        {
+          'role': 'system',
+          'content': _writingReviewSystemPrompt(systemPrompt) +
+              _handwrittenSuffix(uris.length),
+        },
+        {
+          'role': 'user',
+          'content': [
+            for (final uri in uris)
+              {
+                'type': 'image_url',
+                'image_url': {
+                  'url': uri,
+                  // 手写连笔/涂改是低对比度细节:和转写一样要高清
+                  if (shouldSendDetailFlag(cfg.model)) 'detail': 'high',
+                },
+              },
+            {
+              'type': 'text',
+              'text': multi
+                  ? '请批改这些手写稿照片里的英文写作（按顺序阅读，合并成一篇）'
+                  : '请批改这张手写稿照片里的英文写作',
+            },
+          ],
+        },
+      ],
+    );
+    final response = await postWithReasoningFallback(
+        '/chat/completions', body, cfg: cfg);
+    return _parseWritingReviewResponse(response);
+  }
+
+  /// 批改用的系统提示词:用户设置优先;空/全空白回默认。
+  static String _writingReviewSystemPrompt(String? custom) {
+    final text = custom?.trim() ?? '';
+    return text.isEmpty ? WritingReviewSettings.defaultPrompt : text;
+  }
+
+  /// 直接批改手写稿时追加的固定要求。
+  ///
+  /// 单独写一段而不是改默认提示词:文本批改与手写批改共用同一份用户提示词,
+  /// 追加内容只对"这次输入是照片"生效,用户改提示词时不必自己再写一遍
+  /// "先识别再批改";同时要求 transcript,结果页才有原文可核对。
+  static String _handwrittenSuffix(int imageCount) {
+    final multi = imageCount > 1
+        ? '用户上传了 $imageCount 张手写英文照片，请按上传顺序阅读并合并成一篇。'
+        : '用户上传了一张手写英文照片。';
+    return '\n\n【本次输入是手写稿照片，不是电子文本】\n'
+        '$multi 请先准确识别照片里的英文（保持段落与换行），再按上面的要求批改。'
+        '识别时逐句看笔迹：连笔、涂改、看不清的词按上下文补全，不要编造不存在的词。'
+        '在原有 JSON 结构上额外返回 "transcript": "识别出的完整英文原文"'
+        '（多张照片按顺序合并，不要加“第N张”之类的标注）。'
+        '批改必须以照片里的真实内容为准，仍然只输出 JSON。';
+  }
+
+  /// 统一解析批改响应:取正文/思考通道 → 解析 JSON → 解析失败给可诊断错误。
+  static Map<String, dynamic> _parseWritingReviewResponse(Response response) {
     // v1.9.0:统一从"正文或思考通道"取文本(思考模型可能把 JSON 写在思考里)
     final content = BaseApiService.extractContentWithReasoning(response.data);
     final parsed = parseWritingReview(content);
@@ -876,6 +1006,7 @@ mark_count 要等于带标记的条目数;两个数对不上,回去再扫一遍�
         'score': score,
         'correction': s('correction'),
         'summary': s('summary'),
+        'transcript': s('transcript'), // 直接批改手写稿时附带的识别原文
         'issues': issues,
         'error_summary': errorSummary,
       };
@@ -959,10 +1090,16 @@ mark_count 要等于带标记的条目数;两个数对不上,回去再扫一遍�
       model: cfg.model,
     );
 
+    // v2.12.2(用户 2026-10-20):追问里最常见的两类请求就是"翻译这句/讲讲这个词
+    // 在这里怎么译"。旧提示词只说"简洁准确",模型会为了简洁把限定、术语压掉;
+    // 这里把翻译纪律挂到追问的 system 上 —— 与逐段翻译、词汇释义**同一份口径**。
+    const translationHint = '\n\n当用户要求翻译,或你在回答里给出中文译文、核对某个译法时,\n'
+        '必须遵守下面的翻译纪律:\n${TranslationPolicy.discipline}';
+
     final systemContent = context.trim().isEmpty
-        ? '你是英语学习助手。回答用户追问。简洁准确，根据材料量自行决定回答长度。'
+        ? '你是英语学习助手。回答用户追问。简洁准确，根据材料量自行决定回答长度。$translationHint'
         : '你是英语学习助手。基于图片识别结果回答用户追问。简洁准确，根据材料量自行决定回答长度。\n\n'
-            '识别材料上下文：\n$context';
+            '识别材料上下文：\n$context$translationHint';
 
     final body = BaseApiService.buildChatBody(
       cfg: cfg,

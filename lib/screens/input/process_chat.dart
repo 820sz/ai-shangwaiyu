@@ -21,6 +21,7 @@ import '../../services/tts_service.dart';
 import '../../services/vision_guard.dart';
 import '../../services/vision_image.dart';
 import '../../widgets/waiting.dart';
+import '../../widgets/whale_thinking.dart';
 import '../profile/api_settings.dart';
 import '../../utils/follow_up_context.dart';
 import 'widgets/word_list_tile.dart';
@@ -2170,22 +2171,26 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
+          // v2.13:识图等待态的形象改成**鲸鱼尾**(用户 2026-10-25 指定:
+          // 全 App 涉及"思考"的 UI 都用他给的那张鲸鱼尾)。
+          // 原来是自己画的三个跳动点,现在换成会游的尾巴 + 状态说明。
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              _thinkingDot(0),
-              const SizedBox(width: 6),
-              _thinkingDot(1),
-              const SizedBox(width: 6),
-              _thinkingDot(2),
+              const WhaleThinking(size: 34),
+              const SizedBox(width: 10),
+              Flexible(
+                child: Text(
+                  widget.analysisMode == AppConstants.analysisModeFullText
+                      ? 'AI 正在翻译图片中的文字…'
+                      : 'AI 正在识别图片中的标记内容…',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
             ],
-          ),
-          const SizedBox(height: 12),
-          Text(
-            widget.analysisMode == AppConstants.analysisModeFullText
-            ? 'AI 正在翻译图片中的文字…'
-            : 'AI 正在识别图片中的标记内容…',
-            style: TextStyle(fontSize: 13, color: theme.colorScheme.onSurfaceVariant),
           ),
           const SizedBox(height: 4),
           Text(
@@ -2197,27 +2202,8 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     );
   }
 
-  Widget _thinkingDot(int index) {
-    return TweenAnimationBuilder<double>(
-      tween: Tween(begin: 0.3, end: 1.0),
-      duration: const Duration(milliseconds: 600),
-      builder: (context, value, child) {
-        return Transform.scale(
-          scale: value,
-          child: Container(
-            width: 8,
-            height: 8,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: Theme.of(
-                context,
-              ).colorScheme.primary.withAlpha((150 * value).toInt()),
-            ),
-          ),
-        );
-      },
-    );
-  }
+  // (v2.13 移除)`_thinkingDot`:识图等待态改用鲸鱼尾(`WhaleThinking`)。
+  // 三个跳动的点是"老模型"的做法,用户明确要求换成他给的鲸鱼尾形象。
 
   // ── 流式中 ──
 
