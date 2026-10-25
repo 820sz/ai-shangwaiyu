@@ -507,8 +507,8 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
   /// 取消**某一段**:排队中的直接移出;在途的 cancel 掉那个请求。
   /// 只影响这一段 —— 其它段照常翻完(旧实现只能整批取消/整批失败)。
   void _cancelChunkTranslation(int index) {
-    _canceledChunks.add(index);
     if (_queue.remove(index)) {
+      _canceledChunks.add(index);
       _chunkJobEpoch.remove(index);
       _pendingChunks.remove(index);
       _runDone++;
@@ -518,9 +518,12 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     }
     final token = _chunkTokens.remove(index);
     if (token == null) {
+      // 请求刚好已经完成(骨架屏还没消失时点到了):不要把刚到的译文标成
+      // "已取消" —— 只把 pending 清掉,让译文正常显示。
       setState(() => _pendingChunks.remove(index));
       return;
     }
+    _canceledChunks.add(index);
     _chunkJobEpoch.remove(index);
     _pendingChunks.remove(index);
     // 立刻把并发槽位还给队列:不必等被 cancel 的请求真的收尾
