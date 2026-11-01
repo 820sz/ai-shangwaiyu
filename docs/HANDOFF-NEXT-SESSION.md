@@ -1,6 +1,10 @@
 # 交接文档 · 给下一个对话(2026-10-23 写,v2.12 前端全面升级后)
 
-> 一页纸。细节在 `PLAN.md` / `docs/FRONTEND-UPGRADE-PLAN.md` / `docs/HANDOFF-2.5.md`。
+> ⚠️ **如果这次任务是「前端升级」,请先读 `docs/HANDOFF-FRONTEND-UPGRADE.md`**
+> (2026-11-01 专为"换对话做前端升级"写的:项目现状 / 用户准确目标 / 病根诊断 /
+> 四层方案 / 分批 / 待用户批注的 4 个问题 / 代码地图 / 血的教训)。
+>
+> 本文是通用交接(命令/铁律/坑/发版),细节在 `PLAN.md` / `docs/FRONTEND-UPGRADE-PLAN.md` / `docs/HANDOFF-2.5.md`。
 
 ---
 
