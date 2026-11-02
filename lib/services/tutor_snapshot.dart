@@ -197,9 +197,15 @@ class TutorSnapshotService {
     final insights = buildTutorInsights(source);
     final suggestions = suggestTutorTasks(source);
 
-    // ⑥ 近 7 天任务复盘
+    // ⑥ 近 7 天任务复盘(+ v3 批 8 的按时率/按类型产出/连续跳过)
     var reviewStats = const <String, Object?>{};
     TutorReview review;
+    var recentTasks = const <Map<String, Object?>>[];
+    try {
+      recentTasks = await DatabaseService.listTutorTasks(limit: 100);
+    } catch (_) {
+      recentTasks = const <Map<String, Object?>>[];
+    }
     try {
       reviewStats = await DatabaseService.taskCompletionStats(
         since: at.subtract(const Duration(days: 7)),
@@ -214,6 +220,39 @@ class TutorSnapshotService {
     final avgActual = reviewStats['avgActualMinutes'];
     final avgActualMinutes =
         avgActual is num ? avgActual.toDouble() : null;
+
+    // 按时率:近 7 天完成、且同时有目标时长与实际用时的任务。
+    // 口径写清楚:实际 ≤ 目标 ×1.2 才算"按时"(留 20% 缓冲,不逼人卡秒)。
+    var onTimeDone = 0;
+    var doneWithTarget = 0;
+    final doneByGoalTag = <String, int>{};
+    final weekStart = at.subtract(const Duration(days: 7));
+    for (final task in recentTasks) {
+      final status =
+          '${task['status'] ?? (task['done_at'] != null ? 'done' : 'pending')}';
+      if (status != 'done') continue;
+      final doneAt = DateTime.tryParse('${task['done_at'] ?? ''}');
+      if (doneAt == null || doneAt.isBefore(weekStart)) continue;
+      final tag = '${task['goal_tag'] ?? ''}'.trim();
+      if (tag.isNotEmpty) {
+        doneByGoalTag[tag] = (doneByGoalTag[tag] ?? 0) + 1;
+      }
+      final actual = _int(task['actual_minutes']);
+      final target = _int(task['target_minutes']);
+      if (actual > 0 && target > 0) {
+        doneWithTarget++;
+        if (actual <= target * 1.2) onTimeDone++;
+      }
+    }
+    // 连续跳过:任务按新→旧排,数开头连续 skipped 的条数
+    var skipStreak = 0;
+    for (final task in recentTasks) {
+      final status =
+          '${task['status'] ?? (task['done_at'] != null ? 'done' : 'pending')}';
+      if (status != 'skipped') break;
+      skipStreak++;
+    }
+
     review = buildTutorReview(
       planned: planned,
       done: done,
@@ -227,6 +266,10 @@ class TutorSnapshotService {
           ? snapshot.outputAttempts30d
           : null,
       outputAvgScore: snapshot.outputAvgScore,
+      onTimeDone: onTimeDone,
+      doneWithTarget: doneWithTarget,
+      skipStreak: skipStreak,
+      doneByGoalTag: doneByGoalTag,
     );
 
     // ⑦ 今天的任务(日期用本地时区,和 plan_date 的写入口径一致)

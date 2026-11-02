@@ -257,7 +257,11 @@ class MaterialSourceService {
   // 全部为公开 RSS / 公开页面,无需 API key、无需登录。
   // 可达性实测(2026-09,中国大陆网络):NPR / Project Gutenberg / arXiv 直连正常;
   // BBC Learning English / VOA / TED(feedburner) / Wikipedia 超时不可达。
-  // 不可达不是代码问题,异常信息里会区分开(见 [_networkError])。
+  // v3 批 8(2026-11-02)复测并新增两个**实测可达**的公开 RSS:
+  //   NASA 新闻 2.3s / ScienceDaily 1.1s(均 200,大陆网络可直连);
+  //   Wikipedia(REST + action=query)/ BBC 6 Minute English 复测仍 15s 超时 ——
+  //   所以"维基"相关源保持原状(不删入口,也不把它标成实测可用),不硬编码失败文案。
+  // 不可达不是代码问题,异常信息里会区分开(见 [_networkError]).
   static const List<MaterialSource> sources = [
     MaterialSource(
       id: 'bbc_le',
@@ -325,6 +329,25 @@ class MaterialSourceService {
           '不下载或再分发 PDF',
       hasAudio: false,
     ),
+    // ── v3 批 8 新增(2026-11-02 实测可达,均为公开 RSS,无 API key)──
+    MaterialSource(
+      id: 'nasa',
+      label: 'NASA 新闻',
+      kind: 'news',
+      description: 'NASA 官方任务与科学报道:科普 + 技术类真实语料,信息密度适中',
+      license: 'NASA 内容多为美国政府作品(通常可公开使用),第三方素材除外;'
+          '仅个人学习,原文链接与署名请保留',
+      hasAudio: false,
+    ),
+    MaterialSource(
+      id: 'sciencedaily',
+      label: 'ScienceDaily(科学新闻)',
+      kind: 'news',
+      description: '大学与科研机构发布的科普新闻,科学英语高频,适合泛读与主题精读',
+      license: 'ScienceDaily 内容版权归原发布机构;仅个人学习使用,'
+          '请保留原文链接,勿再分发',
+      hasAudio: false,
+    ),
   ];
 
   /// 按 id 找源(找不到返回 null;不要抛,调用方要能优雅提示"未知来源")
@@ -345,12 +368,19 @@ class MaterialSourceService {
   /// 下次就默认落到那个源(见 `MaterialSourceStatus.preferredSourceId`)。
   static const String defaultSourceId = 'npr';
 
-  /// 实测可达的源(2026-09-24,中国大陆家庭宽带):
-  ///   npr 200/2.7s、arxiv 200/0.9s、gutenberg 200/26s(首包慢,已单独放宽超时);
-  ///   bbc_le / voa_le / ted / wikipedia 9 秒无响应。
+  /// 实测可达的源(2026-11-02,中国大陆网络复测):
+  ///   npr 200/1.4s、arxiv 200/1.9s、gutenberg 200/2.7s、
+  ///   nasa 200/2.3s、sciencedaily 200/1.1s;
+  ///   bbc_le / voa_le / ted / wikipedia 15 秒无响应(沿用 2026-09 结论)。
   /// 界面上给这些源打"实测可用"标记,是为了让用户**一眼知道该点哪个**,
   /// 不用靠一个个试错(试错成本是每次 9~20 秒的等待)。
-  static const Set<String> measuredReachable = {'npr', 'arxiv', 'gutenberg'};
+  static const Set<String> measuredReachable = {
+    'npr',
+    'arxiv',
+    'gutenberg',
+    'nasa',
+    'sciencedaily',
+  };
 
   /// 未知 sourceId 时的统一异常(带可选值,便于排查打错的 id)
   static MaterialSourceException unknownSource(String sourceId) =>
@@ -388,6 +418,10 @@ class MaterialSourceService {
         return 'https://en.wikipedia.org/api/rest_v1/page/random/summary';
       case 'arxiv':
         return 'https://rss.arxiv.org/rss/cs.CL';
+      case 'nasa':
+        return 'https://www.nasa.gov/feed/';
+      case 'sciencedaily':
+        return 'https://www.sciencedaily.com/rss/all.xml';
       default:
         return null;
     }

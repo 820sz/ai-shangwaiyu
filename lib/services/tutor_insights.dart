@@ -890,6 +890,11 @@ TutorReview buildTutorReview({
   int? plannedMinutes,
   int? outputCount,
   double? outputAvgScore,
+  // v3 批 8(E1-7):按时率 / 按类型产出 / 连续跳过
+  int? onTimeDone,
+  int? doneWithTarget,
+  int? skipStreak,
+  Map<String, int> doneByGoalTag = const <String, int>{},
 }) {
   // 负数是脏数据:按 0 处理,别让完成率变成负数
   final p = planned < 0 ? 0 : planned;
@@ -906,6 +911,12 @@ TutorReview buildTutorReview({
   final avg = _normalizeScore(outputAvgScore);
   final timeRatio =
       (actualM != null && plannedM != null) ? actualM / plannedM : null;
+  final onTime = (onTimeDone != null &&
+          doneWithTarget != null &&
+          doneWithTarget > 0)
+      ? onTimeDone / doneWithTarget
+      : null;
+  final streak = (skipStreak != null && skipStreak > 0) ? skipStreak : null;
 
   final metrics = <String, num>{
     'planned': p,
@@ -921,6 +932,8 @@ TutorReview buildTutorReview({
     'timeRatio': ?timeRatio,
     'outputCount': ?outputN,
     'outputAvgScore': ?avg,
+    'onTimeRate': ?onTime,
+    'skipStreak': ?streak,
   };
 
   final lines = <String>[];
@@ -959,7 +972,22 @@ TutorReview buildTutorReview({
     }
   }
 
-  // ④ 下周指导(必出;按完成率给可执行建议)
+  // ④ 按时率 / 按类型产出 / 连续跳过(v3 批 8 · E1-7,有数据才出)
+  if (onTime != null) {
+    lines.add('按时完成 ${_pct(onTime)}（${onTimeDone ?? 0}/${doneWithTarget ?? 0} 条'
+        '在目标时长内做完）');
+  }
+  if (doneByGoalTag.isNotEmpty) {
+    final entries = doneByGoalTag.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    final top = entries.take(3).map((e) => '${_goalLabel(e.key)} ${e.value}').join(' · ');
+    lines.add('按类型产出：$top');
+  }
+  if (streak != null && streak >= 2) {
+    lines.add('最近连续跳过 $streak 条任务 —— 计划可能排太满,先减量再谈加练');
+  }
+
+  // ⑤ 下周指导(必出;按完成率给可执行建议)
   if (completionRate == null) {
     lines.add('还没有已结算任务(0 条):先完成 1 条,复盘才有完成率与偏差可看');
   } else if (completionRate < 0.5) {
@@ -975,10 +1003,21 @@ TutorReview buildTutorReview({
   }
 
   return TutorReview(
-    lines: List<String>.unmodifiable(lines.take(4)),
+    lines: List<String>.unmodifiable(lines.take(6)),
     metrics: Map<String, num>.unmodifiable(metrics),
   );
 }
+
+/// 任务归属维度的中文名(复盘"按类型产出"行用)。
+String _goalLabel(String goalTag) => switch (goalTag) {
+      'vocab' => '写词',
+      'grammar' => '语法',
+      'reading' => '阅读',
+      'output' => '写作',
+      'habit' => '习惯',
+      'baseline' => '测基线',
+      _ => goalTag,
+    };
 
 // ═══════════════════════════════════════════════════════════════════════
 // 内部工具

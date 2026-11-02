@@ -130,6 +130,73 @@ class LearnerSnapshotLoader {
         .length;
     final streak = streakDays(dailyLogs, at);
 
+    // ── 任务侧信号(v3 批 8 · E1-8 诊断规则用)──
+    // 读不到就都是 0(规则不触发),绝不让快照整体失败。
+    var staleActiveTasks = 0;
+    var plannedTaskCount = 0;
+    var doneNoResultOutput = 0;
+    try {
+      final tasks = await DatabaseService.listTutorTasks(limit: 100);
+      for (final t in tasks) {
+        final status = '${t['status'] ?? (t['done_at'] != null ? 'done' : 'pending')}';
+        final planDate = DateTime.tryParse('${t['plan_date'] ?? ''}');
+        if (status == 'active') {
+          final started = DateTime.tryParse('${t['started_at'] ?? ''}') ??
+              DateTime.tryParse('${t['created_at'] ?? ''}') ??
+              planDate;
+          // "开始做了但三天没动静":进行中且 started_at 超过 3 天
+          if (started != null && at.difference(started).inDays >= 3) {
+            staleActiveTasks++;
+          }
+        }
+        if (status == 'done') {
+          // 只勾完成、没有结果回填(并且是输出类任务)→ 可能是"假完成"
+          final result = '${t['result_json'] ?? ''}'.trim();
+          if (result.isEmpty && '${t['goal_tag'] ?? ''}' == 'output') {
+            doneNoResultOutput++;
+          }
+        }
+        if (planDate != null &&
+            planDate.isAfter(at.subtract(const Duration(days: 7)))) {
+          plannedTaskCount++;
+        }
+      }
+    } catch (e) {
+      debugPrint('ReadFlow 快照读取任务信号失败(已降级): $e');
+    }
+
+    // 能力停滞:某维度最近两次快照几乎没变、且最近一次已超过 14 天。
+    // 只在 vocab/output 两个"最常被测量"的维度上判,避免 4 维全查拖慢加载。
+    var abilityStalledDays = 0;
+    try {
+      for (final dim in const ['vocab', 'output']) {
+        final latest = await _safe<Map<String, Object?>?>(
+          () => DatabaseService.latestAbility(dim),
+          fallback: null,
+        );
+        final prev = await _safe<Map<String, Object?>?>(
+          () => DatabaseService.previousAbility(dim),
+          fallback: null,
+        );
+        if (latest == null || prev == null) continue;
+        final latestAt = DateTime.tryParse('${latest['snapshot_at'] ?? ''}');
+        if (latestAt == null) continue;
+        final gap = at.difference(latestAt).inDays;
+        if (gap < 14) continue;
+        final a = _double(latest['value']);
+        final b = _double(prev['value']);
+        if (a == null || b == null) continue;
+        // 变化 < 2% 视为停滞(相对值);值太小时按绝对差 1 判
+        final base = b.abs() < 1 ? 1.0 : b.abs();
+        if ((a - b).abs() / base < 0.02) {
+          abilityStalledDays = gap;
+          break;
+        }
+      }
+    } catch (e) {
+      debugPrint('ReadFlow 快照读取能力停滞失败(已降级): $e');
+    }
+
     return LearnerSnapshot(
       model: model,
       now: at,
@@ -171,6 +238,11 @@ class LearnerSnapshotLoader {
       weakGrammarTags: weakTags,
       streakDays: streak,
       activeDays30d: activeDays,
+      // v3 批 8(E1-8):任务/能力信号
+      staleActiveTasks: staleActiveTasks,
+      plannedTaskCount: plannedTaskCount,
+      doneNoResultOutput: doneNoResultOutput,
+      abilityStalledDays: abilityStalledDays,
     );
   }
 

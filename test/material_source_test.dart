@@ -614,13 +614,14 @@ void main() {
   // ══════════════════════════ 内容源清单与 URL 组装 ══════════════════════════
 
   group('MaterialSourceService.sources — 清单完整性', () {
-    test('7 个源,id 唯一', () {
+    test('源清单 id 唯一、原有 7 个源都在(v3 批 8 可继续扩源)', () {
       final sources = MaterialSourceService.sources;
-      expect(sources.length, equals(7));
       final ids = sources.map((s) => s.id).toList();
+      // 不锁死数量:来源会随可达性实测继续增加;锁的是"老源别丢 + id 不重复"
+      expect(sources.length, greaterThanOrEqualTo(7));
       expect(
         ids,
-        equals([
+        containsAll(<String>[
           'bbc_le',
           'voa_le',
           'npr',

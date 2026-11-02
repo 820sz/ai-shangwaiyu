@@ -14,6 +14,7 @@ import '../../services/learner_model_store.dart';
 import '../../services/output_bank.dart';
 import '../../services/output_composer.dart';
 import '../../services/output_source.dart';
+import '../../services/sentence_practice.dart';
 import '../../widgets/app_page_route.dart';
 import '../../widgets/app_ui.dart';
 import '../../widgets/design_kit.dart';
@@ -23,6 +24,7 @@ import '../../widgets/waiting.dart';
 import '../review/review_screen.dart';
 import 'cloze_practice_screen.dart';
 import 'practice_flow_screen.dart';
+import 'sentence_practice_screen.dart';
 import 'word_bank_drill_screen.dart';
 
 /// 出题入口(v3 · 批 3):先选"从哪出题",再进练习器。
@@ -620,6 +622,72 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
                 ],
               ),
             ),
+            const SizedBox(height: Gap.xs),
+          ],
+          // v3 批 8(P1-5):写句阶三种题型自选 —— 改写/纠错/连词成句,
+          // 不再只有"从材料抽句回译"一条路。
+          if (widget.tier == OutputTier.sentence) ...[
+            for (final mode in const [
+              SentencePracticeMode.rewrite,
+              SentencePracticeMode.correction,
+              SentencePracticeMode.wordOrder,
+            ])
+              Padding(
+                padding: const EdgeInsets.only(bottom: Gap.xs),
+                child: AppCard(
+                  variant: AppCardVariant.compact,
+                  onTap: () => appPush(
+                    context,
+                    (_) => SentencePracticeScreen(mode: mode),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        switch (mode) {
+                          SentencePracticeMode.rewrite =>
+                            Icons.auto_fix_high_outlined,
+                          SentencePracticeMode.correction => Icons.spellcheck,
+                          SentencePracticeMode.wordOrder => Icons.shuffle,
+                        },
+                        size: 18,
+                        color: cs.primary,
+                      ),
+                      const SizedBox(width: Gap.xs),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              mode.label,
+                              style: AppFont.subheadStyle.copyWith(
+                                color: cs.onSurface,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              switch (mode) {
+                                SentencePracticeMode.rewrite =>
+                                  '给原句升级句式/合并从句；没配 AI 时自动变成离线对照',
+                                SentencePracticeMode.correction =>
+                                  '句子被故意改坏几处，把它改回正确英文',
+                                SentencePracticeMode.wordOrder =>
+                                  '词块打乱，按正确顺序点成一句话',
+                              },
+                              style: AppFont.tagStyle.copyWith(
+                                color: cs.onSurfaceVariant,
+                                height: 1.35,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Icon(Icons.chevron_right,
+                          size: 18, color: cs.outline),
+                    ],
+                  ),
+                ),
+              ),
             const SizedBox(height: Gap.xs),
           ],
           for (final src

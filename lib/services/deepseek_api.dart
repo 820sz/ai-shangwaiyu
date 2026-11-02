@@ -192,12 +192,17 @@ ${TranslationPolicy.discipline}
         cfg: config,
         temperature: 0.3,
         maxTokens: 2048,
+        // 批 8 · P2-3:检索计划输出短、结构固定 → JSON mode + 轻思考
+        // (low 对 3 条 query 足够,重思考只会让"找材料"多等几秒)
+        jsonMode: true,
+        thinkingLevel: BaseApiService.thinkingForTask('plan'),
         messages: [
           {'role': 'system', 'content': systemPrompt},
           {'role': 'user', 'content': userPrompt},
         ],
       ),
       cfg: config,
+      jsonMode: true,
     );
     final content = BaseApiService.extractContentWithReasoning(response.data);
     final parsed = _parseJsonResponse(content);
@@ -238,12 +243,15 @@ ${TranslationPolicy.discipline}
         cfg: config,
         temperature: 0.2,
         maxTokens: 2048,
+        // 批 8 · P2-3:标题译名是"固定 {"items":[...]}"结构 → JSON mode
+        jsonMode: true,
         messages: [
           {'role': 'system', 'content': systemPrompt},
           {'role': 'user', 'content': titles.take(20).join('\n')},
         ],
       ),
       cfg: config,
+      jsonMode: true,
     );
     final content = BaseApiService.extractContentWithReasoning(response.data);
     final parsed = _parseJsonResponse(content);
@@ -454,6 +462,60 @@ ${TranslationPolicy.discipline}
             })
         .where((m) => m['english']!.isNotEmpty && m['chinese']!.isNotEmpty)
         .toList();
+  }
+
+  // ═══════════════ 通用 JSON 补全(批 8:找材料补救的统一入口)═══════════════
+
+  /// 一次"只返回 JSON"的非流式补全。
+  ///
+  /// 为什么单独抽一个公开入口:批 8 的工具调用补救(找材料换关键词)需要和
+  /// 出题/评分同一套能力 —— 端点/路径判定、JSON mode、任务级思考档、参数不
+  /// 兼容时的自动降级。这些逻辑原本只埋在 output_composer 的私有方法里;
+  /// 抽到服务上后,后续其它 JSON 链路(材料卡/结构抽取)可直接复用,
+  /// 不会再出现"同一类重试逻辑抄两遍、只修一处"的老问题。
+  ///
+  /// 返回模型正文(可能带围栏/说明,由调用方的容错解析器处理);
+  /// 未配置/失败返回 null(调用方自行降级,不抛)。
+  Future<String?> completeJson({
+    required String system,
+    required String user,
+    int maxTokens = 2048,
+    double temperature = 0.3,
+    String? thinkingLevel,
+    bool jsonMode = true,
+    Duration receiveTimeout = const Duration(seconds: 90),
+  }) async {
+    if (!config.isConfigured) return null;
+    final cfg = config;
+    final path = cfg.isDeepSeekOfficial
+        ? '/v1/chat/completions'
+        : '/chat/completions';
+    try {
+      final response = await postWithReasoningFallback(
+        path,
+        BaseApiService.buildChatBody(
+          cfg: cfg,
+          temperature: temperature,
+          maxTokens: maxTokens,
+          jsonMode: jsonMode,
+          thinkingLevel: thinkingLevel,
+          messages: [
+            {'role': 'system', 'content': system},
+            {'role': 'user', 'content': user},
+          ],
+        ),
+        cfg: cfg,
+        jsonMode: jsonMode,
+        receiveTimeout: receiveTimeout,
+      );
+      final data = response.data is Map
+          ? Map<String, dynamic>.from(response.data as Map)
+          : const <String, dynamic>{};
+      return BaseApiService.extractContentWithReasoning(data);
+    } catch (e) {
+      debugPrint('ReadFlow JSON 补全失败: $e');
+      return null;
+    }
   }
 
   // ═══════════════ 通用 JSON 解析 ═══════════════

@@ -3,6 +3,7 @@ import 'dart:convert';
 import '../models/learner_model.dart';
 import '../models/vocabulary.dart';
 import 'database.dart';
+import 'input_prefs.dart';
 import 'learner_context.dart';
 import 'material_prefs.dart';
 import 'material_source.dart';
@@ -433,10 +434,73 @@ class MaterialLibrary {
     return sorted;
   }
 
-  /// 按 i+1 给书架排序:优先"正好合适且未读完"的材料
-  /// (纯函数,便于单测:列表顺序直接影响用户先读什么)
-  static List<ShelfItem> rankForToday(List<ShelfItem> items) {
-    final score = <ShelfItem, int>{};
+  /// 按**用户目标**排序(v3 批 8 · 拍板 #1 后半:目标要影响材料排序)。
+  ///
+  /// 为什么需要有这一层:书架原来只按难度档/进度排,用户选了"四六级"之后
+  /// 并没有看到"和考试相关的东西更靠前"。这里用**可解释的信号**加分:
+  /// - kind:exam(真题/考卷)命中考试目标 = 最大加分;news 命中"读外刊/看新闻";
+  /// - 标题/中文标题里出现目标关键词(四六级/cet/真题/雅思/托福/考研/外刊…);
+  /// - 已在读的继续加权(不让目标排序把在读材料挤下去)。
+  ///
+  /// 纯函数、稳定排序(同分保持传入顺序),便于单测与"关掉按目标优先"时复用。
+  static List<ShelfItem> rankForGoals(
+    List<ShelfItem> items,
+    List<String> examGoals,
+  ) {
+    if (examGoals.isEmpty || items.isEmpty) return items;
+    final goals = examGoals.map((g) => g.toLowerCase()).toList();
+    bool goalHas(Iterable<String> keys) => goals.any(
+          (g) => keys.any((k) => g.contains(k)),
+        );
+    final wantsExam = goalHas(const ['四六级', '四级', '六级', 'cet', '考研', '雅思', '托福']);
+    final wantsNews = goalHas(const ['外刊', '新闻', '阅读']);
+    final wantsAcademic = goalHas(const ['学术', '工作', '论文', '考研']);
+
+    int scoreOf(ShelfItem it) {
+      var s = 0;
+      final title = '${it.title} ${it.titleCn}'.toLowerCase();
+      final kind = it.kind.toLowerCase();
+      if (wantsExam && (kind == 'exam' || title.contains('真题') || title.contains('cet'))) {
+        s += 100;
+      }
+      if (wantsNews && (kind == 'news' || kind == 'article')) s += 40;
+      if (wantsAcademic && (kind == 'paper' || title.contains('论文'))) s += 40;
+      for (final keyword in const [
+        '四六级', '四级', '六级', 'cet', '考研', '雅思', '托福', '外刊', '真题',
+        'exam', 'news',
+      ]) {
+        if (title.contains(keyword)) {
+          s += 12;
+        }
+      }
+      // 在读材料不因"目标排序"沉底
+      if (it.percent > 0 && !it.finished) s += 8;
+      return s;
+    }
+
+    final indexed = <(int, ShelfItem)>[
+      for (var i = 0; i < items.length; i++) (i, items[i]),
+    ];
+    indexed.sort((a, b) {
+      final byScore = scoreOf(b.$2).compareTo(scoreOf(a.$2));
+      if (byScore != 0) return byScore;
+      return a.$1.compareTo(b.$1); // 同分保持原顺序(稳定)
+    });
+    return [for (final e in indexed) e.$2];
+  }
+
+  /// 列表去重(按 id,保留首次出现)—— 材料中心曾出现重复条目。
+  static List<ShelfItem> dedupeShelf(List<ShelfItem> items) {
+    final seen = <int>{};
+    final out = <ShelfItem>[];
+    for (final it in items) {
+      if (seen.add(it.id)) out.add(it);
+    }
+    return out;
+  }
+
+  /// 回译句/摘要段的原始选取逻辑等不在本文件;这里只放"排序/去重"这类纯函数。
+  static List<ShelfItem> rankForToday(List<ShelfItem> items) {    final score = <ShelfItem, int>{};
     for (final it in items) {
       var s = 0;
       if (it.finished) {
@@ -465,5 +529,210 @@ class MaterialLibrary {
       return b.id.compareTo(a.id);
     });
     return sorted;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // 目标影响排序(v3 批 8 · P1-6 / 用户批注 #1 后半)
+  // ═══════════════════════════════════════════════════════════════════
+
+  /// 考试目标 → 命中关键词表(用小写英文 + 中文同义词)。
+  ///
+  /// 为什么需要翻译同义词:材料元数据里既有中文也有英文(`考研`/`kaoyan`、
+  /// `四六级`/`cet-4`),只按目标原文匹配会漏掉一半;表只覆盖 App 访谈里
+  /// 出现过的目标,未知目标用目标原文本身兜底(不硬猜)。
+  static const Map<String, List<String>> goalKeywordTable = {
+    '四六级': ['四六级', '四级', '六级', 'cet-4', 'cet4', 'cet-6', 'cet6'],
+    '考研': ['考研', '研究生', 'kaoyan', 'postgraduate'],
+    '雅思': ['雅思', 'ielts'],
+    '托福': ['托福', 'toefl'],
+    '高考': ['高考', 'gaokao'],
+    '中考': ['中考'],
+    '出国': ['出国', '留学', 'abroad', 'overseas'],
+    '工作': ['工作', '职场', '商务', 'business', 'career', 'workplace'],
+    '日常': ['日常', '口语', '生活', 'daily', 'conversation'],
+  };
+
+  /// 目标 → 更该读的材料形态(kind):写作/应试类偏好新闻与教材书籍,
+  /// 学术目标偏好论文。只影响排序权重,不做硬过滤(用户仍能看到全部材料)。
+  static const Map<String, Set<String>> _goalKindAffinity = {
+    '四六级': {'news', 'book', 'podcast'},
+    '考研': {'paper', 'news', 'book'},
+    '雅思': {'news', 'podcast', 'book'},
+    '托福': {'paper', 'news', 'podcast'},
+    '高考': {'book', 'news'},
+    '中考': {'book', 'news'},
+    '出国': {'news', 'podcast', 'paper'},
+    '工作': {'news', 'podcast'},
+    '日常': {'podcast', 'news'},
+  };
+
+  /// 按"与考试目标的相关度"给材料库排序(纯函数,可单测)。
+  ///
+  /// 信号(从强到弱,全部来自本地元数据,不额外请求):
+  /// 1. **标题/分类里命中目标关键词**(含同义词)→ +40;
+  /// 2. **材料形态与目标匹配**(如考研→论文、四六级→外刊/书籍)→ +15;
+  /// 3. **难度档符合用户自选档** → +25(与"只看符合"是两回事:这里是软排序);
+  /// 4. 正在读的材料 +10(目标相关且已开始,最该继续);已读完 -15(不是目标问题,
+  ///    只是优先级让给没读的)。
+  ///
+  /// 没有目标时**保持原顺序**(只做去重)—— 不能凭空重排材料库,否则用户会
+  /// 觉得列表在随机跳。排序是稳定排序,同分按 id 倒序(与其它 rank 函数一致)。
+  static List<ShelfItem> rankShelfForGoals(
+    List<ShelfItem> items,
+    InputPreferences prefs,
+  ) {
+    final unique = dedupeBy(
+      items,
+      urlOf: (it) => it.url,
+      titleOf: (it) => '${it.titleCn} ${it.title}',
+    );
+    final goals = prefs.examGoals
+        .map(_goalHead)
+        .where((g) => g.isNotEmpty)
+        .toList(growable: false);
+    if (goals.isEmpty) return List<ShelfItem>.from(unique);
+
+    final keywords = <String>{};
+    final kinds = <String>{};
+    for (final goal in goals) {
+      keywords.add(goal.toLowerCase());
+      final table = goalKeywordTable.entries.where(
+        (e) => goal.toLowerCase().contains(e.key.toLowerCase()) ||
+            e.value.any((v) => goal.toLowerCase().contains(v)),
+      );
+      for (final entry in table) {
+        keywords.addAll(entry.value);
+        kinds.addAll(_goalKindAffinity[entry.key] ?? const <String>{});
+      }
+    }
+
+    final score = <ShelfItem, int>{};
+    for (final it in unique) {
+      var s = 0;
+      final haystack = '${it.title} ${it.titleCn} ${it.group ?? ''} '
+              '${it.kind} ${it.source} ${it.origin}'
+          .toLowerCase();
+      if (keywords.any((k) => k.length >= 2 && haystack.contains(k))) s += 40;
+      if (kinds.contains(it.kind)) s += 15;
+      final c = it.coverage;
+      if (c != null && !prefs.band.isAny && prefs.band.materialBand.contains(c)) {
+        s += 25;
+      }
+      if (it.finished) {
+        s -= 15;
+      } else if (it.percent > 0) {
+        s += 10;
+      }
+      score[it] = s;
+    }
+    final sorted = List<ShelfItem>.from(unique);
+    sorted.sort((a, b) {
+      final byScore = (score[b] ?? 0).compareTo(score[a] ?? 0);
+      if (byScore != 0) return byScore;
+      return b.id.compareTo(a.id);
+    });
+    return sorted;
+  }
+
+  /// 去掉目标串里的期限括号(`四六级(半年内)` → `四六级`),与偏好层的口径一致
+  static String _goalHead(String raw) {
+    var head = raw.trim();
+    final paren = head.indexOf(RegExp(r'[（(]'));
+    if (paren > 0) head = head.substring(0, paren).trim();
+    head = head.split(RegExp(r'[+＋、]')).first.trim();
+    return head;
+  }
+
+  /// 通用的"按链接/标题去重"(纯函数)。
+  ///
+  /// 为什么把去重放在这里:今日推荐(RSS 偶尔同一篇发两次)、材料库(同一材料
+  /// 从不同来路入库)、分类页(多组检索词命中同一篇)都需要它 —— 三处各写一遍
+  /// 就会出现"这里去了那里没去"的半吊子去重。
+  static List<T> dedupeBy<T>(
+    Iterable<T> items, {
+    required String Function(T) urlOf,
+    required String Function(T) titleOf,
+  }) {
+    final seen = <String>{};
+    final out = <T>[];
+    for (final item in items) {
+      final url = _dedupeKey(urlOf(item));
+      final title = _dedupeKey(titleOf(item));
+      final key = url.isNotEmpty ? 'u:$url' : (title.isNotEmpty ? 't:$title' : '');
+      // 没有链接也没有标题的条目无法判断是否重复:保留,宁可多不可误删
+      if (key.isEmpty || seen.add(key)) out.add(item);
+    }
+    return out;
+  }
+
+  static String _dedupeKey(String raw) {
+    var key = raw.trim().toLowerCase();
+    if (key.isEmpty) return '';
+    while (key.endsWith('/')) {
+      key = key.substring(0, key.length - 1);
+    }
+    return key;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // 今日推荐难度标签(元数据区间,不伪造精确覆盖率)
+  // ═══════════════════════════════════════════════════════════════════
+
+  /// 难度区间从低到高(A2→C1),用于"预计难度"标签。
+  static const List<String> difficultyBands = [
+    'A2~B1',
+    'B1~B2',
+    'B2~C1',
+    'C1+',
+  ];
+
+  /// 用**源元数据**给一条 feed 材料一个"预计难度区间"。
+  ///
+  /// 为什么只给区间:列表页拿不到正文,本地覆盖率要抓全文才能算(一次网络往返
+  /// 且可能失败)。这里只根据"材料形态 + 已知长度"给一个诚实的区间,并在 basis
+  /// 里写清依据,绝不冒充"实测覆盖率"。真正分析过的卡(`_dailyAnalysis`)继续
+  /// 显示真实认知率,不用这个。
+  static ({String label, String basis}) estimateDifficulty({
+    required String sourceId,
+    String kind = '',
+    String title = '',
+    String summary = '',
+    int? wordCount,
+  }) {
+    final k = kind.trim().isNotEmpty
+        ? kind.trim()
+        : (MaterialSourceService.sourceOf(sourceId)?.kind ?? 'article');
+    var idx = switch (k) {
+      // 论文摘要:学术英语,默认最高档
+      'paper' => 3,
+      // 公版书/百科:长句多、词汇跨度大
+      'book' || 'wiki' => 2,
+      // 播客:VOA 慢速英语降一档,其它口语材料按中档
+      'podcast' => sourceId == 'voa_le' ? 0 : 1,
+      // 外刊/新闻/文章(含 NASA、ScienceDaily 这类科普新闻)
+      _ => 1,
+    };
+    // 长度信号:有真实词数才参考 —— 短摘要往往只是"标题党",长文跨度更大
+    final wc = wordCount ?? 0;
+    if (wc > 0) {
+      if (wc < 300) {
+        idx -= 1;
+      } else if (wc > 1500) {
+        idx += 1;
+      }
+    }
+    final band = difficultyBands[idx.clamp(0, difficultyBands.length - 1)];
+    final kindText = kindLabel(k);
+    final lengthText = wc > 0 ? '$wc 词' : '未分析';
+    return (
+      label: '预计 $band',
+      basis: '$kindText · $lengthText',
+    );
+  }
+
+  /// 从摘要估算词数(纯函数):只用于难度标签的长度信号,不当作正文长度
+  static int excerptWordCount(String text) {
+    final matches = RegExp(r"[A-Za-z][A-Za-z'-]*").allMatches(text);
+    return matches.length;
   }
 }

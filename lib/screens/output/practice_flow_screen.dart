@@ -265,6 +265,9 @@ class _PracticeFlowScreenState extends State<PracticeFlowScreen> {
                       _metaChip(theme, '语法 · $g'),
                   ],
                 ),
+                // v3 批 8:四阶练习形态差异化 —— 每阶给与题型匹配的引导,
+                // 而不是四个阶都长成同一个文本框(D1-13)。
+                _buildTierGuidance(theme, cs, task),
                 if (task.sourceSpan.trim().isNotEmpty) ...[
                   const SizedBox(height: Gap.xs),
                   ExpansionTile(
@@ -298,12 +301,12 @@ class _PracticeFlowScreenState extends State<PracticeFlowScreen> {
                 children: [
                   TextField(
                     controller: _answerCtrl,
-                    minLines: 6,
-                    maxLines: 14,
+                    minLines: _editorMinLines(task),
+                    maxLines: _editorMaxLines(task),
                     style: AppFont.bodyStyle.copyWith(height: 1.5),
-                    decoration: const InputDecoration(
-                      hintText: '用英文写下你的答案…',
-                      border: OutlineInputBorder(),
+                    decoration: InputDecoration(
+                      hintText: _editorHint(task),
+                      border: const OutlineInputBorder(),
                     ),
                     onChanged: (_) => setState(() {}),
                   ),
@@ -392,6 +395,91 @@ class _PracticeFlowScreenState extends State<PracticeFlowScreen> {
       ),
     );
   }
+
+  // ── 四阶形态差异(批 8 · D1-13)────────────────────────────────
+
+  /// 每阶给"这个题型该怎么写"的引导,而不是四个阶都同一句提示。
+  Widget _buildTierGuidance(
+    ThemeData theme,
+    ColorScheme cs,
+    OutputTaskSpec task,
+  ) {
+    final muted = cs.onSurfaceVariant;
+    final (String title, String body) = switch (task.tier) {
+      OutputTier.sentence => (
+          '写句',
+          '先把主干(主谓宾)写对,再补修饰与连接词;写完读一遍,看时态与主谓是否一致。',
+        ),
+      OutputTier.paragraph => (
+          '写段',
+          '先列 2~3 个要点(或用题面给的提示),再连成一段:主题句 → 展开 → 收尾。',
+        ),
+      OutputTier.essay => (
+          '写篇',
+          '先花 2 分钟定结构(立场 → 两个理由配例子 → 收尾),再落笔;写按评分维度自检。',
+        ),
+      OutputTier.word => ('写词', '把词写对,再看它在句子里怎么用。'),
+    };
+    final dims = task.tier == OutputTier.essay
+        ? _rubricOf(task).dimensions.map((d) => d.label).toList()
+        : const <String>[];
+    return Padding(
+      padding: const EdgeInsets.only(top: Gap.xs),
+      child: Container(
+        padding: const EdgeInsets.all(Gap.xs),
+        decoration: BoxDecoration(
+          color: cs.primary.withAlpha(10),
+          borderRadius: BorderRadius.circular(Radii.control - 2),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '$title要点',
+              style: AppFont.tagStyle.copyWith(
+                color: cs.primary,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              body,
+              style: AppFont.tagStyle.copyWith(color: muted, height: 1.4),
+            ),
+            if (dims.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                '评分维度：${dims.join(' / ')}',
+                style: AppFont.tagStyle.copyWith(color: muted, height: 1.35),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 作答框高度按阶给:句子短、作文长(形态差异的一部分,不只是换文字)。
+  int _editorMinLines(OutputTaskSpec task) => switch (task.tier) {
+        OutputTier.word => 3,
+        OutputTier.sentence => 4,
+        OutputTier.paragraph => 8,
+        OutputTier.essay => 14,
+      };
+
+  int _editorMaxLines(OutputTaskSpec task) => switch (task.tier) {
+        OutputTier.word => 6,
+        OutputTier.sentence => 8,
+        OutputTier.paragraph => 18,
+        OutputTier.essay => 28,
+      };
+
+  String _editorHint(OutputTaskSpec task) => switch (task.tier) {
+        OutputTier.word => '写出英文单词…',
+        OutputTier.sentence => '写出英文句子（先主干，再修饰）…',
+        OutputTier.paragraph => '写一段英文（2~4 句，先要点后展开）…',
+        OutputTier.essay => '写一篇英文短文（先结构，再落笔）…',
+      };
 
   Widget _typeBadge(ThemeData theme, String type) {
     final cs = theme.colorScheme;

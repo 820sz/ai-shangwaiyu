@@ -176,6 +176,19 @@ class LearnerSnapshot {
   /// 注入"现在",让时间相关判断可测
   final DateTime now;
 
+  // 任务侧信号(v3 批 8 · E1-8):由快照加载器从 tutor_tasks/ability_snapshots 算
+  /// "开始做了但 3 天没动静"的任务数
+  final int staleActiveTasks;
+
+  /// 近 7 天计划任务总数(用于"计划过载"判断)
+  final int plannedTaskCount;
+
+  /// "只勾完成、没有结果回填"的输出类任务数
+  final int doneNoResultOutput;
+
+  /// 能力停滞天数(最近两次快照几乎没变且距今天数;0 = 未停滞/数据不足)
+  final int abilityStalledDays;
+
   const LearnerSnapshot({
     required this.model,
     required this.now,
@@ -204,6 +217,10 @@ class LearnerSnapshot {
     this.weakGrammarTags = const [],
     this.streakDays = 0,
     this.activeDays30d = 0,
+    this.staleActiveTasks = 0,
+    this.plannedTaskCount = 0,
+    this.doneNoResultOutput = 0,
+    this.abilityStalledDays = 0,
   });
 }
 
@@ -384,7 +401,62 @@ class TutorEngine {
       ));
     }
 
-    // ⑪ 一切正常 → 给"下一步该加码"的建议(而不是空着)
+    // ⑫ 任务停滞(v3 批 8 · E1-8):开始做了但三天没动静
+    if (s.staleActiveTasks > 0) {
+      out.add(TutorFinding(
+        id: 'task_stalled',
+        severity: FindingSeverity.warn,
+        title: '有 ${s.staleActiveTasks} 条任务开始了却一直没做完',
+        evidence: '这些任务标记为进行中已超过 3 天;计划被"挂着"会拖垮节奏感。',
+        action: '挑一条十分钟能完成的先收尾,其余降级到"今天跳过"(跳过会记进复盘)。',
+        priority: 70,
+      ));
+    }
+
+    // ⑬ 计划过载(v3 批 8):近 7 天计划条数超过每天可用时间能承载的量
+    final daily = (s.model.dailyMinutes?.value ?? defaultDailyMinutes) > 0
+        ? (s.model.dailyMinutes?.value ?? defaultDailyMinutes)
+        : defaultDailyMinutes;
+    final capacity = (daily / 10).floor() + 2;
+    if (s.plannedTaskCount > capacity) {
+      out.add(TutorFinding(
+        id: 'plan_overload',
+        severity: FindingSeverity.warn,
+        title: '近 7 天计划 ${s.plannedTaskCount} 条,超过你每天能承受的量',
+        evidence: '按每天 $daily 分钟估算,一天合理承载约 $capacity 条任务;'
+            '计划过密通常以"连续跳过"收场。',
+        action: '把任务砍到 $capacity 条以内,其余改成每周一次的长任务。',
+        priority: 60,
+      ));
+    }
+
+    // ⑭ 假完成(v3 批 8):输出类任务只勾了完成、没有结果回填
+    if (s.doneNoResultOutput > 0) {
+      out.add(TutorFinding(
+        id: 'task_done_no_result',
+        severity: FindingSeverity.info,
+        title: '有 ${s.doneNoResultOutput} 次写作任务只勾了完成,没有留下结果',
+        evidence: '没有作答结果的"完成"不会进输出统计,复盘时也看不出练了什么。',
+        action: '下次做写作任务时直接从任务卡进去写,提交后会自动回填结果。',
+        jump: TutorAction.writing,
+        priority: 45,
+      ));
+    }
+
+    // ⑮ 能力停滞(v3 批 8):某维度两周以上没变化
+    if (s.abilityStalledDays >= 14) {
+      out.add(TutorFinding(
+        id: 'ability_stalled',
+        severity: FindingSeverity.warn,
+        title: '有一项能力已经 ${s.abilityStalledDays} 天没有变化了',
+        evidence: '最近两次能力快照的数值几乎相同,说明当前练法对这项能力刺激不足。',
+        action: '换一种练法:例如词汇停滞就加"语境填空",输出停滞就加"改写/纠错"。',
+        jump: TutorAction.backTranslation,
+        priority: 55,
+      ));
+    }
+
+    // ⑯ 一切正常 → 给"下一步该加码"的建议(而不是空着)
     if (out.every((f) => f.severity == FindingSeverity.info)) {
       out.add(TutorFinding(
         id: 'healthy_next_step',

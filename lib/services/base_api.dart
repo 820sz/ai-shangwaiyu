@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'api_endpoint.dart';
 
 /// 共享 API HTTP 基类:连接复用 + 响应提取 + 思考参数降级重试。
@@ -73,6 +74,7 @@ abstract class BaseApiService {
     int maxTokens = 4096,
     String? thinkingLevel,
     bool includeThinking = true,
+    bool jsonMode = false,
   }) {
     final official = cfg.isDeepSeekOfficial;
     return {
@@ -82,10 +84,105 @@ abstract class BaseApiService {
       if (!official) 'temperature': temperature,
       if (includeThinking)
         ...cfg.buildThinkingParamsFor(thinkingLevel ?? cfg.thinking),
+      if (jsonMode) 'response_format': {'type': 'json_object'},
       if (official && stream) 'stream_options': {'include_usage': true},
       if (stream) 'stream': true,
     };
   }
+
+  /// 任务级思考档默认值(P2-3b)。
+  ///
+  /// 背景:全局配置的默认档是 `disabled`(识图/翻译等既有链路依赖这个默认,
+  /// 不能动)。但有三类任务的"质量/时延"诉求完全不同:
+  /// - **出题**:一次要吐完整 JSON(题干+参考答案+rubric 标签),轻思考容易漏字段;
+  /// - **评分**:要按 rubric 逐维找证据,不推敲就会"拍脑袋给分";
+  /// - **检索计划**:输出很短(3 条 query),重思考纯浪费时延与 token。
+  ///
+  /// 所以调用方显式传任务默认档(`output`/`scoring`/`plan`);**用户可见的思考
+  /// 开关与选项表都不改** —— 其它链路仍按用户设置走。用户显式配过档位时,
+  /// 想统一覆盖可以把这里换成"用户设置优先"的策略,当前按产品决定取任务档。
+  static const Map<String, String> taskThinkingDefaults = <String, String>{
+    'output': 'high',
+    'scoring': 'high',
+    'plan': 'low',
+  };
+
+  /// 任务默认思考档;未登记的任务返回 null(调用方应回落用户设置)。
+  static String? thinkingForTask(String task) => taskThinkingDefaults[task];
+
+  /// 给请求体加 JSON Output 标记(纯函数,可单测)。
+  ///
+  /// `response_format:{"type":"json_object"}` 是 DeepSeek/OpenAI 兼容端点的
+  /// 结构化输出开关;提示词里必须出现 "json" 字样(官方要求),本仓库四个
+  /// 启用点(出题/评分/检索计划/标题译名)的提示词都已写"只输出 JSON"。
+  static Map<String, dynamic> applyJsonMode(Map<String, dynamic> body) => {
+        ...body,
+        'response_format': {'type': 'json_object'},
+      };
+
+  /// 去掉 JSON Output 标记(纯函数:降级重试用)。
+  ///
+  /// 不改原 Map(调用方可能还要用它重试其它降级);没有该字段时原样返回。
+  static Map<String, dynamic> stripJsonMode(Map<String, dynamic> body) {
+    if (!body.containsKey('response_format')) return body;
+    return Map<String, dynamic>.from(body)..remove('response_format');
+  }
+
+  // ── JSON mode 兼容性缓存(进程内) ─────────────────────────────────────
+  //
+  // 为什么需要缓存:部分模型/网关不认 `response_format`,会直接 400。
+  // 如果每次调用都先撞一次 400 再降级,用户每次都要多等一个往返;记住
+  // (baseUrl + model) 后,后续同端点调用直接不带该字段,一次都不撞。
+
+  static final Set<String> _jsonModeUnsupported = <String>{};
+
+  static String _jsonModeKey(ApiEndpointConfig cfg) =>
+      '${cfg.baseUrl.trim()}|${cfg.model.trim()}';
+
+  /// 该端点是否已被证实不支持 JSON mode(进程内)。
+  static bool isJsonModeUnsupported(ApiEndpointConfig cfg) =>
+      _jsonModeUnsupported.contains(_jsonModeKey(cfg));
+
+  /// 记下"该端点不支持 JSON mode"(生产由降级重试自动调用)。
+  static void markJsonModeUnsupported(ApiEndpointConfig cfg) {
+    _jsonModeUnsupported.add(_jsonModeKey(cfg));
+  }
+
+  /// 判断 4xx 是否属于"JSON mode 不被支持"(纯函数,可单测)。
+  ///
+  /// 只在 400/422 且错误正文确实提到 response_format/json 时成立 ——
+  /// 401/403/429/500 等不能误判(否则会把"Key 错/限流"当成"不支持 JSON")。
+  static bool isJsonModeUnsupportedError(DioException e) {
+    final code = e.response?.statusCode;
+    if (code != 400 && code != 422) return false;
+    final d = e.response?.data;
+    String body;
+    if (d is Map) {
+      final error = d['error'];
+      body = error is Map
+          ? '${error['code'] ?? ''} ${error['message'] ?? ''}'
+          : '$d';
+    } else if (d is String) {
+      body = d;
+    } else {
+      body = e.message ?? '';
+    }
+    final s = body.toLowerCase();
+    if (s.contains('response_format') || s.contains('json_object')) return true;
+    return s.contains('json') &&
+        (s.contains('unsupported') ||
+            s.contains('not support') ||
+            s.contains('invalid'));
+  }
+
+  /// 清空 JSON mode 兼容性缓存(测试用;进程内缓存没有生产清理入口)
+  @visibleForTesting
+  static void resetJsonModeCacheForTest() => _jsonModeUnsupported.clear();
+
+  /// 标记端点不支持 JSON mode(测试用,等价于生产里降级时的那次记录)
+  @visibleForTesting
+  static void markJsonModeUnsupportedForTest(ApiEndpointConfig cfg) =>
+      markJsonModeUnsupported(cfg);
 
   /// 降级一次(纯函数,可单测):同时移除 `reasoning_effort` 并把
   /// `thinking` 置为 `disabled` —— 第一步就真正换掉两类不兼容参数,
@@ -136,6 +233,16 @@ abstract class BaseApiService {
   /// POST — 自适应降级重试(**最多 1 次**,v1.9.0 收敛):
   /// 只在"参数不兼容"类 4xx(见 [isReasoningError])且请求体确实含有
   /// 可降级字段时重试一次,并同时去掉 reasoning_effort、关闭 thinking。
+  ///
+  /// v2.21 批 8 增补 [jsonMode]:
+  /// - 传 true 表示本次请求体带/应带 `response_format`(通常由调用方用
+  ///   `buildChatBody(jsonMode: true)` 构建);
+  /// - 该端点若返回"不支持 JSON mode"的 4xx(见 [isJsonModeUnsupportedError]),
+  ///   自动**去掉 response_format 重试一次**,并把端点记入进程内缓存 ——
+  ///   之后同一端点不再带该字段(不再每次白撞 400);
+  /// - 降级只做一次:JSON 降级之后的请求如果再因思考参数失败,交给调用方
+  ///   处理(不再叠加第二次重试,避免"一次请求打三次")。
+  ///
   /// [cancelToken] 供调用方中途取消(流式看门狗/用户点取消)。
   /// [receiveTimeout] 覆盖本次请求的接收超时(默认 180s);阅读器逐段翻译传
   /// 45s —— 单段(≤600 字符)不值得让用户干等 3 分钟,超时即失败可重试。
@@ -143,6 +250,7 @@ abstract class BaseApiService {
     String path,
     Map<String, dynamic> body, {
     required ApiEndpointConfig cfg,
+    bool jsonMode = false,
     ResponseType? responseType,
     int retryDepth = 0,
     CancelToken? cancelToken,
@@ -152,6 +260,13 @@ abstract class BaseApiService {
     if (apiKey == null || apiKey.isEmpty) {
       throw Exception('请先在设置中配置 API Key');
     }
+    // 已知该端点不支持 JSON mode → 这次直接不带,省掉一次必然失败的往返
+    var wantsJson = jsonMode;
+    var requestBody = body;
+    if (wantsJson && isJsonModeUnsupported(cfg)) {
+      requestBody = stripJsonMode(requestBody);
+      wantsJson = false;
+    }
     try {
       return await _dioFor(cfg).post(path,
           options: Options(
@@ -160,14 +275,33 @@ abstract class BaseApiService {
             // null = 用 Dio 实例上的默认 180s;非 null 只覆盖本次请求
             receiveTimeout: receiveTimeout,
           ),
-          data: body,
+          data: requestBody,
           cancelToken: cancelToken);
     } on DioException catch (e) {
+      // ① JSON Output 不被该端点/模型支持:去掉 response_format 重试一次,
+      //    并记住该端点,后续同端点直接不带。
+      if (wantsJson &&
+          retryDepth < 1 &&
+          isJsonModeUnsupportedError(e)) {
+        markJsonModeUnsupported(cfg);
+        return postWithReasoningFallback(
+          path,
+          stripJsonMode(requestBody),
+          cfg: cfg,
+          jsonMode: false,
+          responseType: responseType,
+          retryDepth: retryDepth + 1,
+          cancelToken: cancelToken,
+          receiveTimeout: receiveTimeout,
+        );
+      }
+      // ② 思考/推理参数不兼容:同时去掉 reasoning_effort 并关思考(最多一次)
       if (!isReasoningError(e) || retryDepth >= 1) rethrow;
-      final degraded = degradeOnce(body);
+      final degraded = degradeOnce(requestBody);
       if (degraded == null) rethrow;
       return postWithReasoningFallback(path, degraded,
           cfg: cfg,
+          jsonMode: false,
           responseType: responseType,
           retryDepth: retryDepth + 1,
           cancelToken: cancelToken,

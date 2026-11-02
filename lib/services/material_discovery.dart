@@ -1,8 +1,12 @@
 import 'dart:async';
+import 'dart:convert';
 
 import '../models/learner_model.dart';
 import '../models/vocabulary.dart';
+import '../services/base_api.dart';
+import '../services/deepseek_api.dart';
 import '../services/deepseek_search.dart';
+import '../services/doubao_api.dart' show DoubaoApiService;
 import '../services/input_prefs.dart';
 import '../services/material_library.dart';
 import '../services/material_source.dart';
@@ -64,6 +68,12 @@ class DiscoveredCandidate {
   /// 权威度 0~4(只有官方搜索给;公开源记 -1 = 未知)
   final int authority;
 
+  /// 发布时间(只有官方搜索给;公开源没有 = null)。
+  ///
+  /// 批 8 加:两段式补救要把"真实候选 + 发布时间"交给模型判断时效
+  /// (用户找"最近的报道"时,模型看得见日期才会换更精准的检索词)。
+  final DateTime? date;
+
   /// 相关性 0~3(只有官方搜索给)
   final double rerankScore;
 
@@ -84,6 +94,7 @@ class DiscoveredCandidate {
     this.snippet = '',
     this.imageUrl,
     this.authority = -1,
+    this.date,
     this.rerankScore = 0,
     this.fromSearchApi = false,
     this.content,
@@ -107,6 +118,7 @@ class DiscoveredCandidate {
       snippet: snippet,
       imageUrl: imageUrl,
       authority: authority,
+      date: date,
       rerankScore: rerankScore,
       fromSearchApi: fromSearchApi,
       content: content ?? this.content,
@@ -146,6 +158,12 @@ class DiscoveryRun {
   /// 没有进入 items 的候选数(抓取失败/太短/与已有材料重复等)
   final int droppedCount;
 
+  /// 是否触发了"两段式补救"(批 8 · P2-4:第一轮候选不足 → 换关键词再搜一轮)
+  final bool refined;
+
+  /// 补救轮实际使用的新检索词(未触发 = 空;UI/诊断据此说明"为什么又搜了一次")
+  final List<String> refineQueries;
+
   const DiscoveryRun({
     required this.items,
     this.notes = const [],
@@ -154,6 +172,8 @@ class DiscoveryRun {
     this.searchApiAvailable = false,
     this.searchApiUnavailableReason = '',
     this.droppedCount = 0,
+    this.refined = false,
+    this.refineQueries = const <String>[],
   });
 
   bool get isEmpty => items.isEmpty;
@@ -164,11 +184,20 @@ class MaterialDiscovery {
   final DeepSeekSearchClient? _injectedClient;
   final MaterialSourceService _source;
 
+  /// 补救轮"换关键词"的执行者(**可注入**,单测不联网/不调模型)。
+  ///
+  /// 默认实现 [defaultMaterialRefine] 会调 DeepseekApiService(JSON mode +
+  /// 轻思考);测试/联调可注入假实现,只验证"什么时候触发、触发几次、拿到
+  /// 什么上下文"。
+  final MaterialRefineHandler _refine;
+
   MaterialDiscovery({
     DeepSeekSearchClient? searchClient,
     MaterialSourceService? sourceService,
+    MaterialRefineHandler? onRefine,
   })  : _injectedClient = searchClient,
-        _source = sourceService ?? MaterialSourceService.instance;
+        _source = sourceService ?? MaterialSourceService.instance,
+        _refine = onRefine ?? defaultMaterialRefine;
 
   /// 按需求找材料。
   ///
@@ -183,6 +212,11 @@ class MaterialDiscovery {
     int maxFetch = 5,
     bool usePublicSources = true,
     bool useSearchApi = true,
+    /// 用户原始中文需求(补救轮提示词要用它,而不是让模型只看英文 queries 猜);
+    /// 不传则退回偏好摘要([InputPreferences.promptHint])。
+    String userQuery = '',
+    /// 是否允许"两段式补救";默认允许,但只有第一轮候选不足时才真的触发。
+    bool enableRefine = true,
     void Function(String label)? onEvent,
   }) async {
     final notes = <String>[];
@@ -213,51 +247,53 @@ class MaterialDiscovery {
         .take(3)
         .toList();
 
-    // ── ① 公开源并发检索(可达性实测过的三个源,零 API 成本) ──
-    if (usePublicSources) {
-      for (final q in plan) {
-        onEvent?.call('在公开源里检索「$q」…');
-        try {
-          final result = await OriginalSearch.search(q, category: '其他');
-          if (result.notes.isNotEmpty) notes.addAll(result.notes.take(2));
-          addAll([
-            for (final hit in result.hits)
-              DiscoveredCandidate(
-                title: hit.title.trim().isEmpty ? hit.url : hit.title,
-                url: hit.url,
-                sourceLabel:
-                    MaterialSourceService.sourceOf(hit.sourceId)?.label ??
-                        hit.sourceId,
-                kind: MaterialSourceService.sourceOf(hit.sourceId)?.kind ??
-                    'article',
-                snippet: hit.note.trim(),
-                imageUrl: hit.imageUrl,
-              ),
-          ]);
-        } catch (e) {
-          notes.add('公开源检索失败:$e');
-        }
-      }
-    }
-
-    // ── ② DeepSeek 官方搜索(长尾/时效性内容的来源) ──
     final client = _injectedClient ?? DeepSeekSearchClient();
     final apiAvailable = client.available;
-    var apiRequests = 0;
-    var apiCost = 0.0;
-    if (useSearchApi) {
-      if (!apiAvailable) {
-        notes.add(
-          'DeepSeek 官方搜索未配置,本次只用公开源 —— ${client.unavailableReason}',
-        );
-      } else {
-        client.resetCost();
-        for (final q in plan.take(2)) {
+    // 成本口径:计费按"成功请求数"累计,第一轮开始前清零一次;补救轮的
+    // 请求自然累加在同一计数里(不做两套账,UI 上就是一个总花费)。
+    if (useSearchApi && apiAvailable) client.resetCost();
+    var refined = false;
+    var refineQueries = const <String>[];
+
+    // 一轮"公开源 + 官方搜索"的检索。抽成闭包是为了让**第一轮与补救轮
+    // 共用同一套收集/过滤/去重口径** —— 否则补救轮很容易漏掉黑名单过滤
+    // 或重复去重,导致"换关键词后又出现用户屏蔽过的材料"。
+    Future<void> collectRound(List<String> roundQueries) async {
+      // ① 公开源并发检索(可达性实测过的三个源,零 API 成本)
+      if (usePublicSources) {
+        for (final q in roundQueries) {
+          onEvent?.call('在公开源里检索「$q」…');
+          try {
+            final result = await OriginalSearch.search(q, category: '其他');
+            if (result.notes.isNotEmpty) notes.addAll(result.notes.take(2));
+            addAll([
+              for (final hit in result.hits)
+                DiscoveredCandidate(
+                  title: hit.title.trim().isEmpty ? hit.url : hit.title,
+                  url: hit.url,
+                  sourceLabel:
+                      MaterialSourceService.sourceOf(hit.sourceId)?.label ??
+                          hit.sourceId,
+                  kind: MaterialSourceService.sourceOf(hit.sourceId)?.kind ??
+                      'article',
+                  snippet: hit.note.trim(),
+                  imageUrl: hit.imageUrl,
+                ),
+            ]);
+          } catch (e) {
+            notes.add('公开源检索失败:$e');
+          }
+        }
+      }
+
+      // ② DeepSeek 官方搜索(长尾/时效性内容的来源)
+      if (useSearchApi && apiAvailable) {
+        for (final q in roundQueries.take(2)) {
           onEvent?.call('用 DeepSeek 搜索「$q」…');
           final hits = await client.search(q, count: 5, oriQuestion: q);
           final err = client.lastError;
           if (hits.isEmpty && err != null) notes.add('搜索失败:${err.message}');
-          addAll([
+          addAll(<DiscoveredCandidate>[
             for (final r in hits)
               DiscoveredCandidate(
                 title: r.title.trim().isEmpty ? r.url : r.title,
@@ -267,15 +303,69 @@ class MaterialDiscovery {
                     : 'DeepSeek 搜索 · ${r.siteName}',
                 snippet: r.summary.isNotEmpty ? r.summary : r.snippet,
                 authority: r.authority,
+                date: r.date,
                 rerankScore: r.rerankScore,
                 fromSearchApi: true,
               ),
           ]);
         }
-        apiRequests = client.requestCount;
-        apiCost = client.estimatedCostCny;
       }
     }
+
+    // 官方搜索不可用时给一次提示(不在每轮重复刷屏)
+    if (useSearchApi && !apiAvailable) {
+      notes.add(
+        'DeepSeek 官方搜索未配置,本次只用公开源 —— ${client.unavailableReason}',
+      );
+    }
+
+    await collectRound(plan);
+
+    // ── ③ 两段式补救(批 8 · P2-4)──
+    //
+    // 只有"第一轮真实候选 < 目标抓取数"才触发 —— 包括:公开源没搜到、
+    // 官方搜索没搜到、以及 **allowsMaterial 黑名单过滤后变少** 的情况
+    // (过滤发生在 addAll,所以 raw.length 已是过滤后的真实可用数)。
+    // 补救最多一轮:绝不递归,避免"模型一直换词、用户一直等"。
+    if (enableRefine &&
+        needsMaterialRefine(
+          candidateCount: raw.length,
+          targetCount: maxFetch,
+        )) {
+      onEvent?.call('换几个关键词再找…');
+      final refineInput = MaterialRefineInput(
+        userQuery: userQuery.trim().isNotEmpty
+            ? userQuery.trim()
+            : prefs.promptHint,
+        candidates: refineCandidateMaps(raw),
+        prefsHint: prefs.promptHint,
+      );
+      var proposed = const <String>[];
+      try {
+        proposed = await _refine(refineInput);
+      } catch (e) {
+        notes.add('换关键词失败:$e');
+      }
+      final fresh = <String>[];
+      for (final q in proposed) {
+        final text = q.trim();
+        if (text.isEmpty || plan.contains(text) || fresh.contains(text)) {
+          continue;
+        }
+        fresh.add(text);
+        if (fresh.length >= 3) break;
+      }
+      if (fresh.isNotEmpty) {
+        onEvent?.call('用新关键词再搜一轮…');
+        refineQueries = List<String>.unmodifiable(fresh);
+        refined = true;
+        await collectRound(fresh);
+        notes.add('第一轮候选不足,已用新检索词补搜一轮。');
+      }
+    }
+
+    final apiRequests = client.requestCount;
+    final apiCost = client.estimatedCostCny;
 
     if (raw.isEmpty) {
       notes.add('这些渠道都没有找到合适的材料。可以换个关键词,或降低/提高难度档再试。');
@@ -286,6 +376,8 @@ class MaterialDiscovery {
         estimatedCostCny: apiCost,
         searchApiAvailable: apiAvailable,
         searchApiUnavailableReason: client.unavailableReason,
+        refined: refined,
+        refineQueries: refineQueries,
       );
     }
 
@@ -332,6 +424,8 @@ class MaterialDiscovery {
       searchApiAvailable: apiAvailable,
       searchApiUnavailableReason: client.unavailableReason,
       droppedCount: dropped,
+      refined: refined,
+      refineQueries: refineQueries,
     );
   }
 
@@ -469,4 +563,208 @@ String plainTextFromMarkdown(String markdown) {
     if (t.length >= 2) out.add(t);
   }
   return out.join('\n\n');
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// 两段式补救(批 8 · P2-4):第一轮候选不足 → 模型换检索词 → 再搜一轮
+// ═══════════════════════════════════════════════════════════════════════
+//
+// 为什么需要"模型换词"而不是简单重搜:第一轮用的是 AI 一开始给的 2~3 条
+// 英文 query。如果候选不够,通常不是"源坏了",而是 query 太泛/方向偏了
+// (例如用户要"最近的 AI 芯片报道",query 却是 "AI"),再原样重搜一遍只会
+// 得到同样的结果。把**真实候选**交给模型,它才能看出"缺的是时效性/某类
+// 题材",从而换出更准的检索词。
+//
+// 边界(与整个发现流水线一致):模型**只准给检索词**,不准"回忆"资源;
+// 资源必须由真实检索系统返回(无 url 照样丢弃)。这样即使模型想编也编不出
+// 一张卡片 —— 它没有产出 url 的通道。
+
+/// 一次补救轮的输入:用户需求 + 第一轮真实候选(只喂必要字段,省 token)。
+class MaterialRefineInput {
+  /// 用户原始中文需求(空串时调用方会退回偏好摘要)
+  final String userQuery;
+
+  /// 第一轮真实候选(每项含 title/url/site/date/authority/snippet)
+  final List<Map<String, Object?>> candidates;
+
+  /// 用户偏好摘要(目标/难度/题材;没有 = 空串)
+  final String prefsHint;
+
+  const MaterialRefineInput({
+    required this.userQuery,
+    required this.candidates,
+    this.prefsHint = '',
+  });
+}
+
+/// 补救轮"换关键词"的执行者。生产默认为 [defaultMaterialRefine](调模型);
+/// 测试注入假实现,验证触发时机与上下文,不联网不花 token。
+typedef MaterialRefineHandler = Future<List<String>> Function(
+  MaterialRefineInput input,
+);
+
+/// 第一轮候选是否不足,需要补救(纯函数,可单测)。
+///
+/// [candidateCount] 必须是**黑名单过滤之后**的真实可用候选数(发现流水线里
+/// `raw.length` 就是);[targetCount] 是目标抓取数(通常是 maxFetch)。
+/// target <= 0 表示调用方没给目标 → 不触发,避免"任何输入都补救"。
+bool needsMaterialRefine({
+  required int candidateCount,
+  required int targetCount,
+}) {
+  if (targetCount <= 0) return false;
+  return candidateCount < targetCount;
+}
+
+/// 把候选转成"喂模型的精简 JSON 数组"(纯函数,可单测)。
+///
+/// 只给模型判断方向所需的字段;url 带上是为了让它知道"哪些出处已经有了",
+/// 但提示词明确禁止它复制/编造 url。
+List<Map<String, Object?>> refineCandidateMaps(
+  Iterable<DiscoveredCandidate> candidates, {
+  int limit = 8,
+}) {
+  final out = <Map<String, Object?>>[];
+  for (final c in candidates) {
+    if (out.length >= limit) break;
+    out.add(<String, Object?>{
+      'title': c.title,
+      'url': c.url,
+      'site': c.sourceLabel,
+      'date': c.date == null
+          ? ''
+          : c.date!.toIso8601String().substring(0, 10),
+      'authority': c.authority,
+      'snippet': c.snippet,
+    });
+  }
+  return out;
+}
+
+/// 丢掉没有 url 的候选(纯函数,可单测)。
+///
+/// 整个流水线的铁律:没有 url 就不是"可验证的真实材料",不能进卡片。
+/// 补救轮同样适用 —— 即使未来模型能直接返回资源候选,也先过这道闸。
+List<DiscoveredCandidate> dropCandidatesWithoutUrl(
+  Iterable<DiscoveredCandidate> candidates,
+) {
+  return <DiscoveredCandidate>[
+    for (final c in candidates)
+      if (dedupeKeyOf(c.url).isNotEmpty) c,
+  ];
+}
+
+/// 构建"换检索词"提示词(纯函数,可单测)。
+///
+/// 纪律写死在三处:①只输出 JSON;②只准给检索词,不准编资源/链接;
+/// ③候选足够时返回空数组(不为了"显得有用"硬凑一堆词)。
+({String system, String user}) buildRefinePrompt({
+  required String userQuery,
+  required List<Map<String, Object?>> candidates,
+  String prefsHint = '',
+}) {
+  const system = '''你是英语学习材料的检索助手。用户第一轮检索没有找到足够材料,
+请帮他换更准的英文检索词。返回 JSON:{"queries":["英文检索词1","英文检索词2"]}
+
+规则:
+1. 只输出 3 条以内的**英文**检索关键词,越具体越好(如 "stoicism meditations aurelius",
+   而不是 "philosophy");不要输出解释、不要编号列表之外的文字;
+2. 只能基于"用户需求 + 下面给出的真实候选"调整检索词:从候选的题材/标题/日期里
+   判断缺什么方向,或补足第一轮没覆盖的方向;
+3. **不要编造资源**:不要返回作者、书名、链接或 URL —— 你只负责给检索词,
+   真实资源由检索系统去找;
+4. 如果候选里已经有足够的方向,返回 {"queries":[]}(空数组);
+5. 只输出 JSON。''';
+
+  final buf = StringBuffer()
+    ..writeln('用户需求:${userQuery.trim().isEmpty ? '(未提供,按偏好判断)' : userQuery.trim()}');
+  final prefs = prefsHint.trim();
+  if (prefs.isNotEmpty) buf.writeln('用户偏好:$prefs');
+  buf.writeln('第一轮找到的真实候选(只用于判断"缺什么方向";不要复制它们的链接):');
+  if (candidates.isEmpty) {
+    buf.writeln('- (第一轮没有返回任何候选)');
+  } else {
+    for (var i = 0; i < candidates.length; i++) {
+      final c = candidates[i];
+      buf.writeln(
+        '${i + 1}. title=${c['title'] ?? ''} | url=${c['url'] ?? ''} '
+        '| site=${c['site'] ?? ''} | date=${c['date'] ?? ''} '
+        '| authority=${c['authority'] ?? -1} | snippet=${c['snippet'] ?? ''}',
+      );
+    }
+  }
+  buf.writeln('请给出更可能搜到有效材料的英文检索词(JSON)。');
+  return (system: system, user: buf.toString());
+}
+
+/// 解析模型返回的检索词(纯函数,可单测;容错优先)。
+///
+/// 兼容:标准 `{"queries":[...]}`、裸数组 `[...]`、`{"queries":"a, b"}`、
+/// ```json 围栏/前置说明;模型偶尔"不听话"直接给行文本时按行兜底。
+/// 过滤:去编号/引号/空串/非英文行(检索系统只认英文),去重,最多 3 条。
+List<String> parseRefineQueries(String content) {
+  final text = content.trim();
+  if (text.isEmpty) return const <String>[];
+
+  final jsonStr = DoubaoApiService.extractJsonBlock(text);
+  Object? decoded;
+  if (jsonStr.isNotEmpty) {
+    try {
+      decoded = jsonDecode(jsonStr);
+    } catch (_) {
+      decoded = null;
+    }
+  }
+  final raw = <Object?>[];
+  if (decoded is List) {
+    raw.addAll(decoded);
+  } else if (decoded is Map) {
+    final q = decoded['queries'] ??
+        decoded['search_queries'] ??
+        decoded['keywords'];
+    if (q is List) {
+      raw.addAll(q);
+    } else if (q is String) {
+      raw.addAll(q.split(RegExp(r'[,，、\n]')));
+    }
+  }
+  if (raw.isEmpty) {
+    raw.addAll(text.split(RegExp(r'[\n,，、]+')));
+  }
+
+  final out = <String>[];
+  for (final item in raw) {
+    var s = '$item'.trim();
+    s = s.replaceAll(RegExp(r'^[-*\d.)、\s]+'), '').trim();
+    s = s.replaceAll(RegExp(r'''^[`"']+|[`"']+$'''), '').trim();
+    if (s.isEmpty || s.length > 120) continue;
+    // 非英文行(中文说明/JSON 残片)不是检索词
+    if (!RegExp(r'[A-Za-z]').hasMatch(s)) continue;
+    if (s.startsWith('{') || s.startsWith('[')) continue;
+    if (out.contains(s)) continue;
+    out.add(s);
+    if (out.length >= 3) break;
+  }
+  return out;
+}
+
+/// 生产默认的补救实现:用 JSON mode + 轻思考让模型换检索词。
+///
+/// 失败/未配置/解析不出 → 空列表(调用方按"没补救成功"处理,不中断主流程)。
+Future<List<String>> defaultMaterialRefine(MaterialRefineInput input) async {
+  final prompt = buildRefinePrompt(
+    userQuery: input.userQuery,
+    candidates: input.candidates,
+    prefsHint: input.prefsHint,
+  );
+  final content = await DeepseekApiService().completeJson(
+    system: prompt.system,
+    user: prompt.user,
+    maxTokens: 1024,
+    temperature: 0.3,
+    // 换检索词和"检索计划"同类:输出短、要快 → 任务级轻思考
+    thinkingLevel: BaseApiService.thinkingForTask('plan'),
+  );
+  if (content == null) return const <String>[];
+  return parseRefineQueries(content);
 }

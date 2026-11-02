@@ -17,6 +17,7 @@ import '../writing/writing_logs_screen.dart';
 import 'drill_plan_screen.dart';
 // DrillMode 枚举定义在 drill_screen.dart;四阶卡片的进度摘要按模式取
 import 'drill_screen.dart' show DrillMode;
+import 'practice_history_screen.dart';
 import 'practice_setup_screen.dart';
 import 'widgets/output_tier_card.dart';
 
@@ -103,6 +104,53 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
     );
     if (!mounted) return;
     await _load();
+  }
+
+  /// 练习中心入口(v3 批 8, D1-14):旧版 drill 链路降为"旧版计划",
+  /// 四阶练习是默认推荐 —— 老链路数据不删,但主入口不再把它当唯一选择。
+  Future<void> _openPracticeCenter() async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) {
+        final theme = Theme.of(ctx);
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(Gap.md, 0, Gap.md, Gap.xs),
+                child: Text(
+                  '练习中心',
+                  style: theme.textTheme.titleMedium
+                      ?.copyWith(fontWeight: FontWeight.w700),
+                ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.grid_view_outlined),
+                title: const Text('四阶练习（推荐）'),
+                subtitle: const Text('写词 / 写句 / 写段 / 写篇，可从材料和目标出题，按 rubric 批改'),
+                onTap: () => Navigator.pop(ctx, 'tier'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.event_note_outlined),
+                title: const Text('旧版练习计划'),
+                subtitle: const Text('按水平排练习计划（保留历史进度，不再新增题型）'),
+                onTap: () => Navigator.pop(ctx, 'legacy'),
+              ),
+              const SizedBox(height: Gap.xs),
+            ],
+          ),
+        );
+      },
+    );
+    if (!mounted || choice == null) return;
+    if (choice == 'tier') {
+      await _openPractice(OutputTier.word);
+    } else {
+      await _openPlan();
+    }
   }
 
   /// 进四阶练习器(写词/写句/写段/写篇):先选"从哪出题",再逐题写 + 按 rubric 批改。
@@ -258,7 +306,7 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
                     ),
                   ),
                   TextButton.icon(
-                    onPressed: () => _openPlan(),
+                    onPressed: _openPracticeCenter,
                     icon: const Icon(Icons.tune, size: 16),
                     label: const Text('练习中心'),
                   ),
@@ -405,6 +453,14 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
                 TextButton(
                   onPressed: () => _openPlan(mode: DrillMode.translation),
                   child: const Text('写句 · 回译练习计划'),
+                ),
+                // v3 批 8(D1-8):题库浏览 —— 历史题组可原样重练,不再"做完就走"
+                TextButton(
+                  onPressed: () => appPush(
+                    context,
+                    (_) => const PracticeHistoryScreen(),
+                  ),
+                  child: const Text('题库'),
                 ),
               ],
             ),

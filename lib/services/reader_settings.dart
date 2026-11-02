@@ -23,7 +23,11 @@ class ReaderSettings {
   static const List<double> fontScales = [0.85, 1.0, 1.15, 1.3, 1.5];
 
   /// 标准档(默认)
-  static const double defaultFontScale = 1.0;
+  ///
+  /// v3 批 8(C1-11 用户点名"字号默认偏大"):默认从 100% 下调到 85% 档 ——
+  /// 16 × 0.85 ≈ 13.6 号,长文连续阅读更稳;想大一点在阅读设置里调回即可
+  /// (设置入口一直是显式的,不改用户已保存的选择)。
+  static const double defaultFontScale = 0.85;
 
   /// 行距档位与名字
   static const List<double> lineHeights = [1.5, 1.7, 2.0];

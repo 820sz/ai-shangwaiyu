@@ -86,6 +86,9 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
   /// 测验准确率),不能在 build 里做;null = 还没算完 / 没有建议,两种都**不占位**。
   BandAdvice? _bandAdvice;
   bool _onlyFit = false;
+
+  /// v3 批 8(拍板 #1):材料库是否"按目标优先"排序(有目标才生效,用户可关)。
+  bool _goalFirst = true;
   Map<String, SourceHealth> _health = const {};
   bool _probing = false;
 
@@ -807,12 +810,17 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final muted = theme.colorScheme.onSurfaceVariant;
-    final shelf = (_onlyFit && !_prefs.band.isAny)
+    // v3 批 8:去重(v3 曾出现重复条目)+ 按目标优先排序(拍板 #1 后半)。
+    var shelf = (_onlyFit && !_prefs.band.isAny)
         ? _shelf.where((s) {
             final c = s.coverage;
             return c == null || _prefs.band.contains(c);
           }).toList()
         : _shelf;
+    shelf = MaterialLibrary.dedupeShelf(shelf);
+    if (_goalFirst && _inputPrefs.examGoals.isNotEmpty) {
+      shelf = MaterialLibrary.rankForGoals(shelf, _inputPrefs.examGoals);
+    }
     // 内容领域页签(v2.12):直接用 [MaterialTopic.all] —— 这套题材是 v2.8 就为
     // "参考软件顶部那种题材 tab"定好的(科学与技术/商业与政治/…),之前却被埋在
     // 「发现更多」区块里的多选 chip 后面,用户看不到。现在提到页面顶部当导航。
@@ -974,6 +982,24 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // v3 批 8:目标优先排序开关(有目标且库里有材料才出现)
+                    if (_inputPrefs.examGoals.isNotEmpty && _shelf.isNotEmpty) ...[
+                      Wrap(
+                        spacing: Gap.xs,
+                        runSpacing: Gap.xs,
+                        alignment: WrapAlignment.end,
+                        children: [
+                          FilterChip(
+                            label: Text(
+                              '按目标优先·${_inputPrefs.examGoals.take(2).join('/')}',
+                            ),
+                            selected: _goalFirst,
+                            onSelected: (v) => setState(() => _goalFirst = v),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: Gap.xs),
+                    ],
                     if (!_prefs.band.isAny && _shelf.isNotEmpty) ...[
                       Align(
                         alignment: Alignment.centerRight,

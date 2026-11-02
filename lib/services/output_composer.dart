@@ -956,6 +956,10 @@ class OutputComposer {
       maxTokens: 4096,
       temperature: 0.4,
       purpose: '出题(材料·${finalTier.id})',
+      // 批 8 · P2-3:出题要吐完整 JSON(题干/参考/rubric 标签),用 JSON mode
+      // 降低"围栏/夹带说明"导致的解析失败;思考档按任务取模型默认 high。
+      jsonMode: true,
+      thinkingLevel: BaseApiService.thinkingForTask('output'),
     );
     if (content == null) return null;
     final tasks = parseTaskList(
@@ -1044,6 +1048,9 @@ class OutputComposer {
       maxTokens: 4096,
       temperature: 0.3,
       purpose: '出题(真题·$examType/$section)',
+      // 真题出题同样走 JSON mode + 默认思考档(见 P2-3)
+      jsonMode: true,
+      thinkingLevel: BaseApiService.thinkingForTask('output'),
     );
     if (content == null) return null;
 
@@ -1099,6 +1106,9 @@ class OutputComposer {
       // 评分要稳定:温度低,避免同一篇作文两次评分差太多
       temperature: 0.2,
       purpose: '评分(${rubric.id})',
+      // 评分必须逐维给证据,轻思考容易"拍脑袋给分" → JSON mode + high
+      jsonMode: true,
+      thinkingLevel: BaseApiService.thinkingForTask('scoring'),
     );
     if (content == null) return null;
     return parseScoringResult(content, rubric: rubric);
@@ -1116,6 +1126,8 @@ class OutputComposer {
     required int maxTokens,
     required double temperature,
     required String purpose,
+    bool jsonMode = false,
+    String? thinkingLevel,
   }) async {
     try {
       if (!_api.isConfigured) {
@@ -1132,12 +1144,15 @@ class OutputComposer {
           cfg: cfg,
           temperature: temperature,
           maxTokens: maxTokens,
+          jsonMode: jsonMode,
+          thinkingLevel: thinkingLevel,
           messages: [
             {'role': 'system', 'content': prompt.system},
             {'role': 'user', 'content': prompt.user},
           ],
         ),
         cfg: cfg,
+        jsonMode: jsonMode,
         // 出题/评分都是"一次算完才返回":90s 覆盖长 JSON 生成,
         // 又比默认 180s 早失败(用户不用干等 3 分钟)
         receiveTimeout: const Duration(seconds: 90),

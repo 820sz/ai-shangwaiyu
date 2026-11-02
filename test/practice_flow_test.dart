@@ -61,7 +61,8 @@ void main() {
     expect(find.text('第 1/1 题'), findsOneWidget);
     expect(find.textContaining('她花了整整一个下午'), findsOneWidget);
     expect(find.textContaining('不少于 10 词'), findsOneWidget);
-    expect(find.textContaining('用英文写下你的答案'), findsOneWidget);
+    // 批 8 起四阶作答提示按阶不同(句子阶是"写出英文句子…"),断言按当前阶的文案
+    expect(find.textContaining('写出英文句子'), findsOneWidget);
     expect(find.textContaining('提交批改'), findsOneWidget);
   });
 
