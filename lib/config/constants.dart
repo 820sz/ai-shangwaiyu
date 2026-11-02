@@ -116,9 +116,14 @@ class AppConstants {
   // ── 数据库 ──
   static const String dbName = 'readflow.db';
 
-  /// 18(v2.11):`materials.cover_url` —— 封面/配图地址落库。
-  /// 之前是 17(v2.10:书架表 + materials.title_cn)。
-  static const int dbVersion = 18;
+  /// 22(v2.18.0):**助理数据层** —— 新表 `ability_snapshots`(能力项时间序列:
+  /// vocab/grammar/reading/output/habit × 数值/单位/来源/置信度/证据)与
+  /// `task_events`(任务状态变化的只追加审计);`tutor_tasks` 扩列
+  /// (origin/status/started_at/actual_minutes/note/parent_id/goal_tag)支撑
+  /// "可编辑任务 + 状态机 + 追踪复盘"。老任务按 `done_at` 非空回填
+  /// `status='done'`(只加列不删旧列,周报/小组件读取不受影响)。
+  /// 之前是 21(v2.17.0:输出模块数据层 exercise_sets/exercise_items/rubrics/output_attempts)。
+  static const int dbVersion = 22;
 
   // ── 收藏夹 ──
   /// 收藏来源(v2.8 扩展:用户第 10 条"收藏夹要体现不同功能区收藏进来的东西")

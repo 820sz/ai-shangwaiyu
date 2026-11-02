@@ -131,6 +131,25 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
   bool _missedPassRunning = false;
   int _missedFound = 0;
 
+  /// B0-3:第二遍复查的**取消信号**。
+  ///
+  /// 为什么要它:复查是"整图解码→切块→再编码",追加图片是"整图解码→压缩→
+  /// 方向检测",两者同时在 UI/后台解码,就是用户看到的"卡一下然后闪退"
+  /// (native OOM/ANR,CrashLogger 抓不到)。追加/旋转重试开始时置 true,
+  /// 复查在每个 await 后检查并尽快退出;复查是加分项,取消不影响已有结果。
+  bool _missedPassCancelRequested = false;
+
+  /// B0-3:追加图片是否在进行中 —— 防连点把两次 picker / 两轮流识别叠起来
+  bool _appending = false;
+
+  /// B0-6:用户手动"方向不对?旋转重试"累计的顺时针 90° 数(0~3)。
+  /// 只影响**发给模型的像素**(VisionImagePrep.quarterTurns),源文件与缩略图不动。
+  int _quarterTurns = 0;
+
+  /// B0-6:整组替换结果时是否保留手动补充的词(photoPath == null)。
+  /// 旋转重试会把旧结果整组换掉,但用户自己敲进去的词不该被"转个方向"顺手清掉。
+  bool _preserveManualOnReplace = false;
+
   /// 首轮识别时模型自报的扫描对账(v2.6):"扫了 42 行 · 自报找到 18 处标记"
   String? _scanNote;
 
@@ -165,8 +184,10 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
   /// 而每条业务上都是"一页/几页材料" —— 10 张足够,再多了分两轮更稳。
   static const int _maxImages = 10;
 
-  /// 单次追加最多几张:4 张一次请求,内存与耗时都可控
-  static const int _maxPerAppend = 4;
+  /// 单次追加最多几张:**B0-3 从 4 收紧到 2**。
+  /// 追加发生在内存最紧张的时段(首轮图/缩略图/结果列表/第二遍复查都还在),
+  /// 请求体与解码峰值随张数线性涨 —— 2 张足够,要更多再点一次(分次添加)。
+  static const int _maxPerAppend = 2;
 
   /// 图片锚点:补齐缺少的下标(不重建已有 key)。
   ///
@@ -481,6 +502,11 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
       final images = _streamStartIndex == 0
           ? _images
           : _images.sublist(_streamStartIndex);
+      // B0-3:真机复现时靠这条日志看内存曲线(追加前后各一条,配合 adb logcat)
+      debugPrint(
+        'ReadFlow 识别开始: ${images.length} 张 · 旋转 ${_quarterTurns * 90}° · '
+        'RSS≈${_rssMb()}MB',
+      );
       final stream = _api.extractVocabularyStream(
         images,
         sourceBook: widget.sourceBook,
@@ -488,6 +514,8 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         analysisMode: widget.analysisMode,
         // 重新识别(校准):强化提示词 + 高清图(v1.7.0/v1.8.0)
         calibrate: _recalibrateMode,
+        // B0-6:用户手动旋转的角度(整批生效)
+        quarterTurns: _quarterTurns,
       );
 
       _subscription = stream.listen(
@@ -659,8 +687,11 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     if (_missedPassRunning || _images.isEmpty || !mounted) return;
     if (widget.analysisMode != AppConstants.analysisModeMarked) return;
     _missedPassRunning = true;
+    _missedPassCancelRequested = false; // 新一轮复查:清掉上一轮的取消信号
     final known = {for (final v in _results) v.word.toLowerCase()};
     var added = 0;
+    var cancelled = false;
+    debugPrint('ReadFlow 高清复查:开始 · RSS≈${_rssMb()}MB');
     try {
       // 只复检最近两页:时间与流量可控(每页 4 块,4 张图一次请求)
       final targets = _images.length <= 2
@@ -668,8 +699,27 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
           : <int>[0, _images.length - 1];
       for (final imgIdx in targets) {
         if (!mounted) break;
+        // B0-3:追加/旋转重试一旦开始,复查立刻让路(两者都是整图解码,绝不并发)
+        if (_missedPassCancelRequested) {
+          cancelled = true;
+          break;
+        }
         final bytes = await _images[imgIdx].readAsBytes();
-        final tiles = VisionImagePrep.tiles(bytes);
+        if (_missedPassCancelRequested) {
+          cancelled = true;
+          break;
+        }
+        // B0-3:切块(整图解码+裁剪+编码)放后台 isolate —— 旧实现在 UI isolate
+        // 同步跑,是"追加图片时卡一下"的直接原因之一
+        final tiles = await VisionImagePrep.tilesInBackground(
+          bytes,
+          // B0-6:旋转重试后,复查必须按同一角度切,否则等于拿歪图再认一遍
+          quarterTurns: _quarterTurns,
+        );
+        if (_missedPassCancelRequested) {
+          cancelled = true;
+          break;
+        }
         final buf = StringBuffer();
         await for (final chunk in _api.extractMissedStream(
           tiles,
@@ -678,6 +728,10 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
           sourcePage: widget.sourcePage,
         )) {
           if (!chunk.isReasoning) buf.write(chunk.text);
+        }
+        if (_missedPassCancelRequested) {
+          cancelled = true;
+          break;
         }
         final maps = DoubaoApiService.parseResponse(
           buf.toString(),
@@ -703,6 +757,11 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
       debugPrint('ReadFlow 复查漏识失败(不影响首轮): $e');
     } finally {
       _missedPassRunning = false;
+      debugPrint('ReadFlow 高清复查:结束(补 $added 条)· RSS≈${_rssMb()}MB');
+    }
+    if (cancelled) {
+      debugPrint('ReadFlow 高清复查:已为追加/旋转让路(B0-3 内存互斥)');
+      return;
     }
     if (!mounted || added == 0) return;
     setState(() => _missedFound += added);
@@ -876,7 +935,13 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
             _selected.clear();
           } else if (_streamStartIndex == 0) {
             // 首次识别:整组替换,默认不选中(长按才选中)
-            _results = results;
+            // B0-6:旋转重试走的就是这条"整组替换"分支 —— 手动补充的词
+            // (photoPath == null)必须保留,否则"转个方向"就把用户敲的词清掉了
+            final manual = _preserveManualOnReplace
+                ? _results.where((v) => v.photoPath == null).toList()
+                : const <Vocabulary>[];
+            _preserveManualOnReplace = false;
+            _results = [...results, ...manual];
             _selected.clear();
           } else {
             // 追加识别:新结果接在旧结果后;新词默认不选中,旧选中保留
@@ -1653,6 +1718,8 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
   /// 2. **限数量**:总张数与单次追加都设上限,避免请求体无限膨胀(服务端也会拒)。
   /// 3. **兜底**:识别启动失败不再让异常冒到 zone(那会直接崩),而是转成可重试的错误态。
   Future<void> _addMoreImages() async {
+    // B0-3:连点守卫 —— 旧实现没有它,快速点两下会叠出两次 picker + 两轮流识别
+    if (_appending) return;
     if (_phase != _StreamPhase.results) return;
     if (_images.length >= _maxImages) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1665,53 +1732,144 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     }
     final room = _maxImages - _images.length;
     final limit = room < _maxPerAppend ? room : _maxPerAppend;
-    List<XFile> picked;
-    try {
-      // maxWidth 2600 与识图管线的最长边一致(再大也会被 VisionImagePrep 压回去,
-      // 白白吃内存);imageQuality 92 保住淡色划线的可辨识度
-      picked = await ImagePicker().pickMultiImage(
-        imageQuality: 92,
-        maxWidth: 2600,
-        limit: limit,
-      );
-    } catch (e) {
-      debugPrint('ReadFlow 追加图片选择失败: $e');
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('选择图片失败:$e'), behavior: SnackBarBehavior.floating),
-      );
-      return;
+    _appending = true;
+    // B0-3:追加前**等**正在跑的第二遍高清复查真正退出 —— 它正在整图解码切块,
+    // 与新图的压缩/方向检测并发就是 OOM 的最后一根稻草。复查只是"补漏加分项",
+    // 取消不影响已有结果(想要补漏,追加完可以点「重新识别」)。
+    if (_missedPassRunning) {
+      debugPrint('ReadFlow 追加图片:通知高清复查让路(B0-3 内存互斥)');
     }
-    if (picked.isEmpty || !mounted) return;
-    final newFiles = picked.take(limit).map((x) => File(x.path)).toList();
+    await _waitMissedPassExit();
+    if (!mounted) return;
+    try {
+      List<XFile> picked;
+      try {
+        // B0-3:原 maxWidth 2600 + imageQuality 92,像素≈首页 1024 入口的 6.4 倍,
+        // 是"结果出现后追加图片概率闪退"的主因(服务端收图前还会再压一次,
+        // 大图只是白吃一遍解码内存)。现在与首页拍照/相册统一为 1600/q85。
+        picked = await ImagePicker().pickMultiImage(
+          imageQuality: 85,
+          maxWidth: 1600,
+          limit: limit,
+        );
+      } catch (e) {
+        debugPrint('ReadFlow 追加图片选择失败: $e');
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('选择图片失败:$e'), behavior: SnackBarBehavior.floating),
+        );
+        return;
+      }
+      if (picked.isEmpty || !mounted) return;
+      final newFiles = picked.take(limit).map((x) => File(x.path)).toList();
+      if (picked.length > limit) {
+        // 少数 ROM 会无视 picker 的 limit:多出来的不静默丢,明确告知
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '一次最多追加 $_maxPerAppend 张,已取前 ${newFiles.length} 张,可分次添加',
+            ),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+      debugPrint('ReadFlow 追加图片: +${newFiles.length} 张 · RSS≈${_rssMb()}MB');
+      setState(() {
+        _streamStartIndex = _images.length; // 从新图开始识别
+        _images.addAll(newFiles);
+        _phase = _StreamPhase.connecting;
+        _reasoningText = '';
+        _contentText = '';
+        _thinkingStartAt = null;
+        _thinkingSeconds = 0;
+        _thinkingExpanded = false;
+        // 新图在结果区占位:先建好锚点,结果回来时不用重建旧 key
+        _ensureImageKeys();
+      });
+      try {
+        _startStreaming();
+      } catch (e, st) {
+        // 追加失败不能把整个会话带走:回到结果态 + 明确提示(旧结果仍然在)
+        debugPrint('ReadFlow 追加图片识别启动失败: $e\n$st');
+        if (!mounted) return;
+        setState(() {
+          _phase = _StreamPhase.results;
+          _streamStartIndex = 0;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('追加识别启动失败:$e'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } finally {
+      _appending = false;
+    }
+  }
+
+  /// **方向不对?旋转重试**(B0-6)。
+  ///
+  /// 为什么需要:EXIF 只能救"拍照时手机记录了方向"的图;翻拍/截图里常见
+  /// "像素本身就是横的"——v2.13 的 `detectRotation` 只能自动认 90°,
+  /// 且投影法分不出 0°/180°、90°/270°(见 vision_image.dart 的局限说明)。
+  /// 用户肉眼一眼就知道"转一下就行",所以给一键入口。
+  ///
+  /// 做法:把**发给模型的像素**顺时针转 90° 后整批重识别(quarterTurns 传进
+  /// 预处理),连点按 90→180→270→0 循环,转错了还能转回来。
+  /// 为什么不旋转源文件:只改预处理不写临时文件/不改 `_images`,少一条
+  /// "临时文件清理 + 会话恢复找不到文件"的坑;代价是缩略图仍显示原图,
+  /// 用顶部"已转 N°"与识别结果自己判断。
+  Future<void> _rotateAndRetry() async {
+    if (_phase != _StreamPhase.results || _images.isEmpty) return;
+    if (_appending) return;
+    // B0-3:整批重识别同样是整图解码,先等正在跑的第二遍复查真正退出
+    await _waitMissedPassExit();
+    if (!mounted) return;
+    final next = (_quarterTurns + 1) % 4;
     setState(() {
-      _streamStartIndex = _images.length; // 从新图开始识别
-      _images.addAll(newFiles);
+      _quarterTurns = next;
+      _preserveManualOnReplace = true; // 整组替换分支保留手动补充的词
+      _recalibrateMode = false; // 走普通识别,不套"校准重识别"的强化提示词
+      _streamStartIndex = 0; // 全部图片重跑
       _phase = _StreamPhase.connecting;
       _reasoningText = '';
       _contentText = '';
       _thinkingStartAt = null;
       _thinkingSeconds = 0;
       _thinkingExpanded = false;
-      // 新图在结果区占位:先建好锚点,结果回来时不用重建旧 key
-      _ensureImageKeys();
+      _errorMessage = null;
+      _queryTargetIndex = null;
     });
-    try {
-      _startStreaming();
-    } catch (e, st) {
-      // 追加失败不能把整个会话带走:回到结果态 + 明确提示(旧结果仍然在)
-      debugPrint('ReadFlow 追加图片识别启动失败: $e\n$st');
-      if (!mounted) return;
-      setState(() {
-        _phase = _StreamPhase.results;
-        _streamStartIndex = 0;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
         SnackBar(
-          content: Text('追加识别启动失败:$e'),
+          content: Text(
+            next == 0
+                ? '已恢复原方向,正在重新识别…'
+                : '已顺时针旋转 ${next * 90}°,正在重新识别…',
+          ),
           behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 2),
         ),
       );
+    _startStreaming();
+  }
+
+  /// B0-3:让第二遍高清复查**真正退出**再开始新的整图解码(取消信号 + 最多等 2s)。
+  ///
+  /// 为什么要等而不只是发取消:复查的 `tilesInBackground` 一旦进了 isolate 就
+  /// 没法从外面中断,只发信号仍会出现"复查在 decode、追加也在 decode"的窗口;
+  /// 等它退出能把"两者绝不并发整图解码"真正落地。
+  /// 最多等 2s:复查若卡在网络请求上(不是解码),继续等没有收益 ——
+  /// 它拿到响应后会看到取消信号并在切块前退出。
+  Future<void> _waitMissedPassExit() async {
+    if (!_missedPassRunning) return;
+    _missedPassCancelRequested = true;
+    final sw = Stopwatch()..start();
+    while (_missedPassRunning && sw.elapsedMilliseconds < 2000) {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
     }
   }
 
@@ -1749,6 +1907,8 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
       ),
     );
     if (ok != true || !mounted) return;
+    // B0-3:整批重识别与追加同理 —— 先等正在跑的第二遍复查真正退出(内存互斥)
+    await _waitMissedPassExit();
     setState(() {
       _recalibrateMode = true;
       _streamStartIndex = 0; // 全部图片重跑
@@ -1871,54 +2031,42 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                 ),
               ],
               const SizedBox(height: 4),
-              // 图片计数 + 追加图片按钮（结果态可点，独立一行不混排）
+              // 图片计数 + 「方向不对?旋转」(B0-6) + 「追加图片」(结果态可点,独立一行)
               Row(
                 children: [
-                  Text(
-                    '共 $count 张图片',
-                    style: TextStyle(fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
-                  ),
-                  const Spacer(),
-                  // 追加图片:圈画/全文翻译模式都支持(v1.4.0 问题 10)
-                  if (_phase == _StreamPhase.results)
-                    GestureDetector(
-                      onTap: _addMoreImages,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 3,
-                        ),
-                        decoration: BoxDecoration(
-                          // 语义色面板用"半透明色相"而不是 50/100 号色阶:
-                          // 浅色下观感与 blue[50] 几乎一致,深色下自动变成
-                          // 深底上的淡蓝色调,不会变成一块近白的亮斑
-                          color: theme.colorScheme.primary.withAlpha(28),
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(
-                            color: theme.colorScheme.primary.withAlpha(80),
-                          ),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.add,
-                              size: 13,
-                              color: theme.colorScheme.primary,
-                            ),
-                            const SizedBox(width: 2),
-                            Text(
-                              '追加图片',
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: theme.colorScheme.primary,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                        ),
+                  Expanded(
+                    child: Text(
+                      _quarterTurns == 0
+                          ? '共 $count 张图片'
+                          : '共 $count 张图片 · 已顺时针转 ${_quarterTurns * 90}°',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: theme.colorScheme.onSurfaceVariant,
                       ),
                     ),
+                  ),
+                  if (_phase == _StreamPhase.results) ...[
+                    // B0-6:横置图一键旋转重试 —— 把发给模型的像素顺时针转 90°
+                    // 后**整批**重识别,连点按 90→180→270→0 循环(转错能转回来)
+                    _imageChipButton(
+                      theme: theme,
+                      icon: Icons.rotate_right,
+                      label: _quarterTurns == 0
+                          ? '方向不对?旋转'
+                          : '转 ${_quarterTurns * 90}°',
+                      onTap: _rotateAndRetry,
+                      tooltip: '图片方向不对?点一下整批转 90° 重新识别(可循环)',
+                    ),
+                    const SizedBox(width: 6),
+                    // 追加图片:圈画/全文翻译模式都支持(v1.4.0 问题 10)
+                    _imageChipButton(
+                      theme: theme,
+                      icon: Icons.add,
+                      label: _appending ? '选择中…' : '追加图片',
+                      onTap: _appending ? null : _addMoreImages,
+                      tooltip: '一次最多追加 $_maxPerAppend 张,可分次添加',
+                    ),
+                  ],
                 ],
               ),
               // 页码条：p1/p2/pn — 点击跳到对应图片的识别结果分组
@@ -1970,6 +2118,62 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         ),
       ],
     );
+  }
+
+  /// 图片区的小动作按钮(「追加图片」/「方向不对?旋转」)。
+  ///
+  /// 为什么抽出来:两个按钮并排,样式必须完全一致;原实现只有「追加图片」一个,
+  /// 样式内联在 builder 里,再加一个就会复制一份魔数(圆角/透明度/字号)。
+  /// [onTap] 为 null = 禁用态(如追加选择进行中)。
+  Widget _imageChipButton({
+    required ThemeData theme,
+    required IconData icon,
+    required String label,
+    required VoidCallback? onTap,
+    String? tooltip,
+  }) {
+    final color = theme.colorScheme.primary;
+    final chip = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        // 语义色面板用"半透明色相"而不是 50/100 号色阶:
+        // 浅色下观感与 blue[50] 几乎一致,深色下自动变成深底上的淡蓝色调,
+        // 不会变成一块近白的亮斑
+        color: color.withAlpha(28),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withAlpha(80)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 13, color: color),
+          const SizedBox(width: 2),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              color: color,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+    final tappable = GestureDetector(onTap: onTap, child: chip);
+    return tooltip == null
+        ? tappable
+        : Tooltip(message: tooltip, child: tappable);
+  }
+
+  /// 当前进程常驻内存(MB),**仅用于真机复现时的日志对照**(B0-3 验证点):
+  /// 追加/复查前后各打一条,配合 `adb logcat` 就能看出内存峰值是否真的降了。
+  /// 取不到(测试环境/平台不支持)返回 -1 —— 日志绝不影响主流程。
+  int _rssMb() {
+    try {
+      return ProcessInfo.currentRss ~/ (1024 * 1024);
+    } catch (_) {
+      return -1;
+    }
   }
 
   // ═══════════════ AI 区域（阶段分发） ═══════════════
@@ -2425,19 +2629,33 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                 ),
               ],
             ),
-            // 第二行：类型标签 + 词性
+            // 第二行：类型标签 + 词性 + 音标(B0-4)
+            //
+            // 为什么音标单独一个 Container 而不用 _typeChip:
+            // _typeChip 带 maxLines:1 + ellipsis,"英 /ˈʃedjuːl/ · 美 /ˈskedʒuːl/"
+            // 这种长音标会被截成"英 /ˈʃ…";这里不限行,Wrap 会自动把整块换到下一行。
+            // 音标全链路早已打通(提示词要求/解析保留/Vocabulary 字段/SQLite 三列/
+            // 其它 5 处 UI 都显示),唯一缺的就是识图结果这张默认(详细模式)卡片 ——
+            // 所以这里只补渲染,零 DB 迁移、不动数据链路。
             if (item.wordType != 'word' ||
-                (item.partOfSpeech != null &&
-                    item.partOfSpeech!.isNotEmpty)) ...[
+                (item.partOfSpeech?.isNotEmpty ?? false) ||
+                item.displayPhonetic != null) ...[
               const SizedBox(height: 4),
               Wrap(
                 spacing: 6,
                 runSpacing: 4,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
                   _typeChip(item.wordType, barColor),
-                  if (item.partOfSpeech != null &&
-                      item.partOfSpeech!.isNotEmpty)
+                  if (item.partOfSpeech?.isNotEmpty ?? false)
                     _typeChip(item.partOfSpeech!, theme.colorScheme.onSurfaceVariant),
+                  // displayPhonetic 已处理"英/美双显"与空值:两边都有 → "英 /a/ · 美 /b/",
+                  // 只有一边 → 只显示那一边且不加标签,都空 → null(整块不渲染,不留空占位)
+                  if (item.displayPhonetic != null)
+                    _phoneticChip(
+                      item.displayPhonetic!,
+                      theme.colorScheme.onSurfaceVariant,
+                    ),
                 ],
               ),
             ],
@@ -2516,8 +2734,34 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     );
   }
 
-  Widget _buildResultsContent(ThemeData theme) {
-    final words = _results.where((v) => v.wordType == 'word').length;
+  /// 音标 chip(B0-4,2026-11-01 用户:"识图词汇卡片需要增加音标,在词性 ui 旁边")。
+  ///
+  /// 为什么不直接复用 [_typeChip]:
+  /// - `_typeChip` 带 `maxLines:1 + ellipsis`,"英 /ˈʃedjuːl/ · 美 /ˈskedʒuːl/"
+  ///   这种长音标会被截成"英 /ˈʃ…";
+  /// - 音标要用斜体与词性标签区分(两种信息);
+  /// - 底色沿用"半透明色相"(`color.withAlpha(18)`)而不是写死浅色 ——
+  ///   深色模式下自动变成深底上的淡色调,也不会被 theme_test 的硬编码闸门拦
+  ///   (闸门禁止对 onSurfaceVariant 这类文字色直接调透明度)。
+  Widget _phoneticChip(String text, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withAlpha(18),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 10,
+          fontStyle: FontStyle.italic,
+          color: color,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildResultsContent(ThemeData theme) {    final words = _results.where((v) => v.wordType == 'word').length;
     final phrases = _results.where((v) => v.wordType == 'phrase').length;
     final sentences = _results.where((v) => v.wordType == 'sentence').length;
 

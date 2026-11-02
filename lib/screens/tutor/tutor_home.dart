@@ -10,8 +10,9 @@ import '../../providers/stats_provider.dart';
 import '../../providers/vocab_provider.dart';
 import '../../services/database.dart';
 import '../../services/learner_model_store.dart';
-import '../../services/learner_snapshot_loader.dart';
 import '../../services/tutor_engine.dart';
+import '../../services/tutor_insights.dart';
+import '../../services/tutor_snapshot.dart';
 import '../../services/widget_service.dart';
 import '../../widgets/app_ui.dart';
 import '../../widgets/bottom_nav.dart';
@@ -46,6 +47,9 @@ class _TutorHomeScreenState extends State<TutorHomeScreen> {
   List<Map<String, Object?>> _taskRows = const [];
   final Set<int> _doneTaskIds = {};
 
+  /// 助理工作台数据(v3 批 4):五维现状 + 任务建议 + 复盘都由它一次性组装。
+  TutorDashboard? _dash;
+
   /// 最近一条对话摘要(v2.4:对话搬到独立窗口,这里只做入口卡副标题)
   String _lastChatLine = '';
 
@@ -72,33 +76,44 @@ class _TutorHomeScreenState extends State<TutorHomeScreen> {
     try {
       final vocab = context.read<VocabProvider>().vocabularies;
       final logs = context.read<StatsProvider>().dailyLogs;
-      final snap = await LearnerSnapshotLoader.load(
+      // v3 批 4:一次组装「五维现状 + 任务建议 + 复盘」——
+      // 数据来源统一在 TutorSnapshotService 里降级,页面不再各查各的。
+      final dash = await TutorSnapshotService.load(
         vocab: vocab,
         dailyLogs: logs,
       );
+      final snap = dash.snapshot;
 
-      // 今日任务:没有就按诊断生成一次并落库(每天一份,不覆盖已有)
-      var rows = await DatabaseService.getTutorTasks(snap.now);
-      if (rows.isEmpty) {
-        for (final t in TutorEngine.planTasks(snap)) {
+      // 今日任务:没有就按**五维建议**落库一次(每天一份,不覆盖已有)。
+      // 旧实现用 TutorEngine.planTasks(行为债规则);v3 改成 insight 驱动,
+      // 每条任务自带"为什么"(reason)与 goalTag,复盘能按维度聚合。
+      var rows = dash.todayTasks;
+      if (rows.isEmpty && dash.suggestions.isNotEmpty) {
+        for (final s in dash.suggestions) {
           await DatabaseService.insertTutorTask(
             planDate: snap.now,
-            kind: t.kind,
-            title: t.title,
-            targetMinutes: t.targetMinutes,
+            kind: s.action,
+            title: s.title,
+            targetMinutes: s.minutes,
+            origin: 'auto',
+            goalTag: s.goalTag,
             payload: {
-              'reason': t.reason,
-              'jump': t.jump?.name,
-              'jumpArg': t.jumpArg,
+              'reason': s.reason,
+              'jump': s.action,
+              'jumpArg': null,
             },
           );
         }
-        rows = await DatabaseService.getTutorTasks(snap.now);
+        rows = await DatabaseService.listTutorTasks(
+          planDate: _dateKey(snap.now),
+          limit: 30,
+        );
       }
 
       final msgs = await DatabaseService.getTutorMessages(limit: 20);
       if (!mounted) return;
       setState(() {
+        _dash = dash;
         _snapshot = snap;
         _taskRows = rows;
         // 只留最后一条做入口卡副标题(完整对话在独立窗口里)
@@ -116,6 +131,11 @@ class _TutorHomeScreenState extends State<TutorHomeScreen> {
         SnackBar(content: Text('诊断数据读取失败:$e')),
       );
     }
+  }
+
+  static String _dateKey(DateTime at) {
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${at.year}-${two(at.month)}-${two(at.day)}';
   }
 
   // ── 跳转 ──
@@ -245,24 +265,43 @@ class _TutorHomeScreenState extends State<TutorHomeScreen> {
           if (snap.model.missingFields.isNotEmpty) _buildProfileForm(theme),
           const SizedBox(height: Gap.md),
 
-          // ── ② 学习现状分析以及规划 ─────────────────────────────
+          // ── ② 现状分析:五维(词汇 / 语法 / 阅读 / 输出 / 习惯)──────────
+          //
+          // v3 批 4(用户 11/01):"学习现状分析意义不大……而是分析更精准更专业,
+          // 想'词汇量xxx''语法xxx',然后每个大现状问题下对应的才是具体问题表现"。
+          // 所以这里不再是"11 条互相独立的行为债提醒",而是**五个维度**:
+          // 每个维度先给一个可核对的数字/状态,再给依据与下一步动作;
+          // 没采到数据的维度显示"待测 + 怎么测",绝不编数字。
           AppStagger(
             index: 1,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const AppSectionHeader(
-                  title: '学习现状分析',
+                  title: '现状分析',
                   indexLabel: '01',
                 ),
-                if (findings.isEmpty)
-                  const AppEmpty(
-                    icon: Icons.check_circle_outline,
-                    title: '目前没有发现明显问题',
-                    hint: '继续按计划走就好;想知道下一步,点下面「让 AI 排规划」',
-                  )
-                else
-                  for (final f in findings) _buildFindingCard(theme, f),
+                ..._buildInsightCards(theme, muted),
+                // 旧诊断规则(行为债)不删:它们仍能发现"攒了一堆到期词"这类事,
+                // 但降为"更多提醒",不再占据五维的位置。
+                if (findings.isNotEmpty) ...[
+                  const SizedBox(height: Gap.xs),
+                  Theme(
+                    data: theme.copyWith(dividerColor: Colors.transparent),
+                    child: ExpansionTile(
+                      tilePadding: EdgeInsets.zero,
+                      childrenPadding: EdgeInsets.zero,
+                      title: Text(
+                        '更多提醒(${findings.length})',
+                        style: theme.textTheme.titleSmall
+                            ?.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                      children: [
+                        for (final f in findings) _buildFindingCard(theme, f),
+                      ],
+                    ),
+                  ),
+                ],
                 const SizedBox(height: Gap.xs),
                 Row(
                   children: [
@@ -295,17 +334,29 @@ class _TutorHomeScreenState extends State<TutorHomeScreen> {
           ),
           const SizedBox(height: Gap.sm),
 
-          // ── ③ 学习任务(②的结论落成今天能做的事)────────────────
+          // ── ③ 学习任务(②的结论落成今天能做的事;可编辑、可自定义)──────
           AppStagger(
             index: 2,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const AppSectionHeader(
-                  title: '学习任务',
-                  indexLabel: '02',
+                Row(
+                  children: [
+                    const Expanded(
+                      child: AppSectionHeader(
+                        title: '学习任务',
+                        indexLabel: '02',
+                      ),
+                    ),
+                    TextButton.icon(
+                      onPressed: _addCustomTask,
+                      icon: const Icon(Icons.add, size: 16),
+                      label: const Text('自己加一条'),
+                    ),
+                  ],
                 ),
                 _buildPrimaryAction(theme, muted, snap),
+                // 其余任务:每一条都能 开始 / 完成 / 跳过 / 编辑 / 撤销
                 if (_taskRows.length > 1)
                   Theme(
                     data: theme.copyWith(dividerColor: Colors.transparent),
@@ -321,9 +372,19 @@ class _TutorHomeScreenState extends State<TutorHomeScreen> {
                       ],
                     ),
                   ),
+                // 助理建议:只显示还没加进今天的(加过的会出现在任务列表里)
+                ..._buildSuggestionCards(theme, muted),
               ],
             ),
           ),
+          const SizedBox(height: Gap.sm),
+
+          // ── ④ 复盘(近 7 天:计划 vs 实际,每条结论都带数字)────────────
+          if (_dash != null && _dash!.review.metrics.isNotEmpty)
+            AppStagger(
+              index: 3,
+              child: _buildReviewCard(theme, muted, _dash!.review),
+            ),
           const SizedBox(height: Gap.sm),
 
           // ── ④ 与 AI 聊聊(自由对话;它同样影响 ②③)────────────
@@ -355,7 +416,11 @@ class _TutorHomeScreenState extends State<TutorHomeScreen> {
     final model = snap.model;
     final done = (model.extras['interview_at'] as String?) != null;
     final items = <String>[
-      if ((model.goal?.value ?? '').isNotEmpty) '目标 ${model.goal!.value}',
+      // v3 批 4:访谈改成多选目标后,优先显示多选清单(旧数据只有 goal 单值)
+      if (model.goals.isNotEmpty)
+        '目标 ${model.goals.join(' / ')}'
+      else if ((model.goal?.value ?? '').isNotEmpty)
+        '目标 ${model.goal!.value}',
       if ((model.dailyMinutes?.value ?? 0) > 0) '每天 ${model.dailyMinutes!.value} 分钟',
       if ((model.interests?.value ?? const []).isNotEmpty)
         '题材 ${model.interests!.value.join('、')}',
@@ -659,58 +724,559 @@ class _TutorHomeScreenState extends State<TutorHomeScreen> {
     await _refresh();
   }
 
+  // ── 五维现状 / 任务建议 / 复盘(v3 批 4)──────────────────────────
+
+  Color _severityColor(int severity) => switch (severity) {
+        2 => AppTheme.dangerColor(context),
+        1 => AppTheme.warningColor(context),
+        _ => AppTheme.successColor(context),
+      };
+
+  /// 语义跳转 id → 实际页面(见 [TutorActionJumps])。
+  ///
+  /// 为什么不在 insights 层硬编码页面类:页面会拆分/改名,而逻辑层不该跟着改。
+  void _jumpByActionId(String id) {
+    switch (id) {
+      case TutorActionJumps.placement:
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => const PlacementTestScreen(full: false),
+          ),
+        ).then((_) {
+          if (!mounted) return;
+          _model = LearnerModelStore.load();
+          _refresh();
+        });
+      case TutorActionJumps.review:
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const ReviewScreen()),
+        ).then((_) {
+          if (mounted) _refresh();
+        });
+      case TutorActionJumps.output:
+        AppTabs.maybeOf(context)?.switchTo(ReadFlowTab.output);
+      case TutorActionJumps.reading:
+        AppTabs.maybeOf(context)?.switchTo(ReadFlowTab.input);
+      case TutorActionJumps.prefs:
+        _openPreferences();
+    }
+  }
+
+  List<Widget> _buildInsightCards(ThemeData theme, Color muted) {
+    final dash = _dash;
+    if (dash == null || dash.insights.isEmpty) return const [];
+    return [
+      for (final insight in dash.insights.take(6))
+        Padding(
+          padding: const EdgeInsets.only(bottom: Gap.xs),
+          child: _buildInsightCard(theme, muted, insight),
+        ),
+    ];
+  }
+
+  /// 一个维度一张卡:维度名 + 可核对的值 + 依据 + 动作。
+  ///
+  /// "待测"维度的排版故意**更轻**(弱色、没有大数字):它不是一个"结果",
+  /// 而是一个入口 —— 用户点进去测一次,下一次打开就变成真数字。
+  Widget _buildInsightCard(
+    ThemeData theme,
+    Color muted,
+    TutorInsight insight,
+  ) {
+    final cs = theme.colorScheme;
+    final color = _severityColor(insight.severity);
+    final label = TutorDimensions.labelOf(insight.dimension);
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: insight.measured
+                        ? color.withAlpha(20)
+                        : cs.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(Radii.control - 4),
+                  ),
+                  child: Text(
+                    label,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: insight.measured ? color : muted,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    insight.title,
+                    style: theme.textTheme.bodyMedium
+                        ?.copyWith(fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            if (insight.measured && insight.valueText.isNotEmpty)
+              Text(
+                insight.valueText,
+                style: theme.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  color: color,
+                  fontSize: 20,
+                ),
+              ),
+            if (insight.measured && insight.valueText.isNotEmpty)
+              const SizedBox(height: 2),
+            Text(
+              insight.evidence,
+              style: theme.textTheme.bodySmall?.copyWith(color: muted),
+            ),
+            if (insight.actionLabel != null && insight.actionJump != null)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(
+                  onPressed: () => _jumpByActionId(insight.actionJump!),
+                  child: Text(insight.actionLabel!),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 助理建议:还没加进今天的,给一条"加入今天"。
+  List<Widget> _buildSuggestionCards(ThemeData theme, Color muted) {
+    final dash = _dash;
+    if (dash == null || dash.suggestions.isEmpty) return const [];
+    final existing = _taskRows.map((r) => '${r['title'] ?? ''}').toSet();
+    final pending = dash.suggestions
+        .where((s) => !existing.contains(s.title))
+        .toList();
+    if (pending.isEmpty) return const [];
+    return [
+      const SizedBox(height: Gap.xs),
+      Text(
+        '助理建议',
+        style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+      ),
+      for (final s in pending)
+        Card(
+          margin: const EdgeInsets.only(top: 6),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 8, 8, 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        s.title,
+                        style: theme.textTheme.bodyMedium
+                            ?.copyWith(fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${s.minutes} 分钟 · ${s.reason}',
+                        style: theme.textTheme.bodySmall
+                            ?.copyWith(color: muted, height: 1.35),
+                      ),
+                    ],
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => _addSuggestedTask(s),
+                  child: const Text('加入今天'),
+                ),
+              ],
+            ),
+          ),
+        ),
+    ];
+  }
+
+  Future<void> _addSuggestedTask(TaskSuggestion suggestion) async {
+    try {
+      await DatabaseService.insertTutorTask(
+        planDate: DateTime.now(),
+        kind: suggestion.action,
+        title: suggestion.title,
+        targetMinutes: suggestion.minutes,
+        origin: 'auto',
+        goalTag: suggestion.goalTag,
+        payload: {
+          'reason': suggestion.reason,
+          'jump': suggestion.action,
+          'jumpArg': null,
+        },
+      );
+      await _refresh();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('加入失败:$e')));
+    }
+  }
+
+  /// 自定义任务:用户说了算("支持用户编辑自定义"是用户点名的要求)。
+  Future<void> _addCustomTask() async {
+    final titleCtrl = TextEditingController();
+    final minCtrl = TextEditingController(text: '15');
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('加一条自己的任务'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: titleCtrl,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: '做什么',
+                hintText: '例如:把昨天的作文重写一遍',
+              ),
+            ),
+            const SizedBox(height: Gap.xs),
+            TextField(
+              controller: minCtrl,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: '预计分钟',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('加入今天')),
+        ],
+      ),
+    );
+    final title = titleCtrl.text.trim();
+    final minutes = int.tryParse(minCtrl.text.trim()) ?? 15;
+    titleCtrl.dispose();
+    minCtrl.dispose();
+    if (ok != true || title.isEmpty) return;
+    try {
+      await DatabaseService.insertTutorTask(
+        planDate: DateTime.now(),
+        kind: 'custom',
+        title: title,
+        targetMinutes: minutes.clamp(1, 600),
+        origin: 'custom',
+        status: 'pending',
+      );
+      await _refresh();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('添加失败:$e')));
+    }
+  }
+
+  /// 任务操作面板(开始 / 完成 / 跳过 / 撤销 / 编辑)。
+  Future<void> _openTaskActions(Map<String, Object?> row) async {
+    final id = row['id'];
+    if (id is! int) return;
+    final status = '${row['status'] ?? (row['done_at'] != null ? 'done' : 'pending')}';
+    final payload = row['payload'];
+    final jumpName = payload is Map ? '${payload['jump'] ?? ''}' : '';
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) {
+        final theme = Theme.of(ctx);
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(Gap.md, 0, Gap.md, Gap.xs),
+                child: Text(
+                  '${row['title'] ?? '任务'}',
+                  style: theme.textTheme.titleMedium
+                      ?.copyWith(fontWeight: FontWeight.w700),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (status != 'done' && status != 'active')
+                ListTile(
+                  leading: const Icon(Icons.play_arrow),
+                  title: const Text('开始做'),
+                  subtitle: const Text('标记为进行中,并跳到对应页面'),
+                  onTap: () => Navigator.pop(ctx, 'active'),
+                ),
+              if (status != 'done')
+                ListTile(
+                  leading: const Icon(Icons.check_circle_outline),
+                  title: const Text('标记完成'),
+                  onTap: () => Navigator.pop(ctx, 'done'),
+                ),
+              if (status == 'done')
+                ListTile(
+                  leading: const Icon(Icons.undo),
+                  title: const Text('撤销完成'),
+                  onTap: () => Navigator.pop(ctx, 'pending'),
+                ),
+              if (status != 'skipped' && status != 'done')
+                ListTile(
+                  leading: const Icon(Icons.skip_next),
+                  title: const Text('今天跳过'),
+                  subtitle: const Text('跳过会记进复盘(算未完成),不会被忽略'),
+                  onTap: () => Navigator.pop(ctx, 'skipped'),
+                ),
+              ListTile(
+                leading: const Icon(Icons.edit_outlined),
+                title: const Text('编辑标题 / 时长'),
+                onTap: () => Navigator.pop(ctx, 'edit'),
+              ),
+              const SizedBox(height: Gap.xs),
+            ],
+          ),
+        );
+      },
+    );
+    if (action == null || !mounted) return;
+    if (action == 'edit') {
+      await _renameTask(id, row);
+      return;
+    }
+    try {
+      await DatabaseService.updateTutorTaskStatus(id, action);
+      await _refresh();
+      if (action == 'active' && jumpName.isNotEmpty) {
+        _jumpByActionId(jumpName);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('更新失败:$e')));
+    }
+  }
+
+  Future<void> _renameTask(int id, Map<String, Object?> row) async {
+    final titleCtrl = TextEditingController(text: '${row['title'] ?? ''}');
+    final minCtrl =
+        TextEditingController(text: '${_intOf(row['target_minutes'] ?? 15)}');
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('编辑任务'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: titleCtrl,
+              autofocus: true,
+              decoration: const InputDecoration(labelText: '做什么'),
+            ),
+            const SizedBox(height: Gap.xs),
+            TextField(
+              controller: minCtrl,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: '预计分钟'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('保存')),
+        ],
+      ),
+    );
+    final title = titleCtrl.text.trim();
+    final minutes = int.tryParse(minCtrl.text.trim()) ?? 15;
+    titleCtrl.dispose();
+    minCtrl.dispose();
+    if (ok != true || title.isEmpty) return;
+    try {
+      await DatabaseService.updateTutorTaskFields(
+        id,
+        title: title,
+        targetMinutes: minutes.clamp(1, 600),
+      );
+      await _refresh();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('保存失败:$e')));
+    }
+  }
+
+  /// 复盘卡:近 7 天计划 vs 实际。每条结论都带数字(逻辑层保证)。
+  Widget _buildReviewCard(ThemeData theme, Color muted, TutorReview review) {
+    final cs = theme.colorScheme;
+    final metrics = review.metrics;
+    final planned = metrics['planned'] ?? 0;
+    final done = metrics['done'] ?? 0;
+    final rate = metrics['completionRate'];
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.fact_check_outlined, size: 18, color: cs.primary),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  '近 7 天复盘',
+                  style: theme.textTheme.titleSmall
+                      ?.copyWith(fontWeight: FontWeight.w700),
+                ),
+              ),
+              Text(
+                '计划 $planned · 完成 $done',
+                style: theme.textTheme.bodySmall?.copyWith(color: muted),
+              ),
+            ],
+          ),
+          const SizedBox(height: Gap.xs),
+          if (rate != null) ...[
+            ClipRRect(
+              borderRadius: BorderRadius.circular(3),
+              child: LinearProgressIndicator(
+                value: (rate / 100).clamp(0.0, 1.0),
+                minHeight: 6,
+                backgroundColor: cs.outlineVariant.withAlpha(80),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '完成率 ${rate.toStringAsFixed(0)}%',
+              style: theme.textTheme.labelSmall?.copyWith(color: muted),
+            ),
+            const SizedBox(height: Gap.xs),
+          ],
+          for (final line in review.lines) ...[
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 5),
+                  child: Container(
+                    width: 4,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: cs.primary,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    line,
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(color: muted, height: 1.45),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+          ],
+        ],
+      ),
+    );
+  }
+
   Widget _buildTaskCard(ThemeData theme, Map<String, Object?> row) {
     final muted = theme.colorScheme.onSurfaceVariant;
     final id = row['id'];
-    final done = row['done_at'] != null ||
+    final status = '${row['status'] ?? (row['done_at'] != null ? 'done' : 'pending')}';
+    final done = status == 'done' ||
         (id is int && _doneTaskIds.contains(id));
     final payload = row['payload'];
     final reason = payload is Map ? '${payload['reason'] ?? ''}' : '';
     final jumpName = payload is Map ? '${payload['jump'] ?? ''}' : '';
     final jumpArg = payload is Map ? payload['jumpArg'] as String? : null;
     final action = _parseAction(jumpName);
+    final (String statusLabel, Color statusColor) = switch (status) {
+      'done' => ('已完成', AppTheme.successColor(context)),
+      'active' => ('进行中', theme.colorScheme.primary),
+      'skipped' => ('已跳过', muted),
+      'expired' => ('已过期', AppTheme.warningColor(context)),
+      _ => ('待做', muted),
+    };
 
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 6, 6, 6),
-        child: Row(
-          children: [
-            IconButton(
-              tooltip: done ? '点一下取消完成' : '标记完成',
-              // 完成态**不再禁用**:再点一下就是取消完成(A5)
-              onPressed: () => done ? _reopenTask(row) : _completeTask(row),
-              icon: Icon(
-                done ? Icons.check_circle : Icons.radio_button_unchecked,
-                color: done ? AppTheme.successColor(context) : muted,
+      margin: const EdgeInsets.only(top: 6),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => _openTaskActions(row),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 6, 6, 6),
+          child: Row(
+            children: [
+              IconButton(
+                tooltip: done ? '点一下撤销完成' : '标记完成',
+                // 完成态**不再禁用**:再点一下就是撤销完成(A5)
+                onPressed: () => done ? _reopenTask(row) : _completeTask(row),
+                icon: Icon(
+                  done ? Icons.check_circle : Icons.radio_button_unchecked,
+                  color: done ? AppTheme.successColor(context) : muted,
+                ),
               ),
-            ),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '${row['title'] ?? ''}',
-                    style: theme.textTheme.bodyLarge?.copyWith(
-                      fontWeight: FontWeight.w600,
-                      decoration: done ? TextDecoration.lineThrough : null,
-                      color: done ? muted : null,
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '${row['title'] ?? ''}',
+                            style: theme.textTheme.bodyLarge?.copyWith(
+                              fontWeight: FontWeight.w600,
+                              decoration:
+                                  done ? TextDecoration.lineThrough : null,
+                              color: done ? muted : null,
+                            ),
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: statusColor.withAlpha(20),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            statusLabel,
+                            style: theme.textTheme.labelSmall
+                                ?.copyWith(color: statusColor),
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '约 ${_intOf(row['target_minutes'])} 分钟'
-                    '${reason.isEmpty ? '' : ' · $reason'}',
-                    style: theme.textTheme.bodySmall?.copyWith(color: muted),
-                  ),
-                ],
+                    const SizedBox(height: 2),
+                    Text(
+                      '约 ${_intOf(row['target_minutes'])} 分钟'
+                      '${reason.isEmpty ? '' : ' · $reason'}',
+                      style: theme.textTheme.bodySmall?.copyWith(color: muted),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            if (action != null)
-              TextButton(
-                onPressed: () => _jump(action, jumpArg),
-                child: const Text('开始'),
-              ),
-          ],
+              if (action != null)
+                TextButton(
+                  onPressed: () => _jump(action, jumpArg),
+                  child: const Text('开始'),
+                ),
+            ],
+          ),
         ),
       ),
     );

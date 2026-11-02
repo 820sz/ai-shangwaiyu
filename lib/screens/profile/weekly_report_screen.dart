@@ -1,13 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../models/learning_record.dart';
 import '../../services/database.dart';
 import '../../services/fsrs.dart';
 import '../../services/learner_model_store.dart';
+import '../../services/output_feedback.dart';
 import '../../services/review_queue.dart';
 import '../../services/weekly_report.dart';
 import '../../widgets/empty_state.dart';
 import '../../widgets/error_state.dart';
+import '../../widgets/graphics/graphics.dart';
+import '../../widgets/stats_chart.dart';
 import '../../widgets/waiting.dart';
 
 /// 每周报告页(v2.1)。
@@ -34,6 +38,14 @@ class _WeeklyReportScreenState extends State<WeeklyReportScreen> {
   /// 这份报告是"补算"的旧周期(null = 就是当前这 7 天)
   DateTime? _asOf;
 
+  /// 近 35 天的每日学习日志(周报顶部两张图用)。
+  ///
+  /// 为什么单独取一份而不是塞进 [WeeklyReport]:报告是给"结论"的模型,
+  /// 顶部图是"原始数据"的可视化;把逐日数组塞进报告模型会让 builder 多背
+  /// 一个只给渲染用的字段。这里只读 `daily_log`(新收词 + 练习量),
+  /// 复习结果按词存 `word_review`、没有逐日历史,所以不画复习曲线。
+  List<LearningRecord> _dailyLogs = const [];
+
   @override
   void initState() {
     super.initState();
@@ -49,10 +61,19 @@ class _WeeklyReportScreenState extends State<WeeklyReportScreen> {
       _error = null;
     });
     try {
-      final report = await _buildReport(_asOf ?? DateTime.now());
+      final anchor = _asOf ?? DateTime.now();
+      final report = await _buildReport(anchor);
+      // 顶部两张图要"逐日"数据:范围覆盖热力图的 5 周(35 天)并**止于报告末日**,
+      // 这样回看「上一个 7 天」时图上的日期与报告区间对得上,而不是画今天的。
+      final end = DateTime(anchor.year, anchor.month, anchor.day);
+      final logs = await DatabaseService.getDailyLogsInRange(
+        end.subtract(const Duration(days: 34)),
+        end,
+      );
       if (!mounted) return;
       setState(() {
         _report = report;
+        _dailyLogs = logs;
         _loading = false;
       });
     } catch (e) {
@@ -79,6 +100,42 @@ class _WeeklyReportScreenState extends State<WeeklyReportScreen> {
     final buckets = await DatabaseService.getReviewBuckets(now: now);
     final reviews = await DatabaseService.getWordReviews();
     final tasks = await DatabaseService.getTutorTasks(now);
+
+    // v3 批 3 收尾:本周输出练习(写作/翻译/回译)聚合 —— 以前周报只有输入侧,
+    // 用户"天天写译、周报里一个字都没有"(数据孤岛)。这里读最近 7 天,
+    // 并对上一周同一窗口再读一次,用于"较上周 ±x%"。
+    final output = await OutputFeedback.outputSnapshot(days: 7, now: to);
+    final prevOutput = await OutputFeedback.outputSnapshot(
+      days: 7,
+      now: from.subtract(const Duration(milliseconds: 1)),
+    );
+    final outputAttempts = (output['attempts'] as num?)?.toInt() ?? 0;
+    final outputAvgScore = (output['avgScore'] as num?)?.toDouble();
+    final outputPrevAvgScore = (prevOutput['avgScore'] as num?)?.toDouble();
+    final outputDimensions = <String, double>{};
+    final dimRaw = output['dimensionAvg'];
+    if (dimRaw is Map) {
+      for (final entry in dimRaw.entries) {
+        if (entry.value is num) {
+          outputDimensions['${entry.key}'] = (entry.value as num).toDouble();
+        }
+      }
+    }
+    final outputErrorTags = <ErrorTagBrief>[];
+    final tagRaw = output['topErrorTags'];
+    if (tagRaw is Map) {
+      for (final entry in tagRaw.entries) {
+        if (entry.value is num && (entry.value as num) > 0) {
+          outputErrorTags.add(ErrorTagBrief(
+            tag: '${entry.key}',
+            count: (entry.value as num).toInt(),
+          ));
+        }
+      }
+    }
+    // 有输出练习的那几天也算活跃(以前"只做了输出"会被周报当成没学习)
+    final lastOutRaw = '${output['lastAt'] ?? ''}'.trim();
+    final lastOutputAt = lastOutRaw.isEmpty ? null : DateTime.tryParse(lastOutRaw);
 
     // ── 活跃日:把各数据源里"有动作"的自然日并起来 ──
     // 为什么这么拼:没有任何一个接口直接给逐日活跃度(getReadingStats 只有
@@ -151,6 +208,13 @@ class _WeeklyReportScreenState extends State<WeeklyReportScreen> {
       }
     }
 
+    // 只做了输出练习的那天同样是活跃日(数据孤岛修好后,输出也该算学习)
+    if (lastOutputAt != null &&
+        !lastOutputAt.isBefore(from) &&
+        !lastOutputAt.isAfter(to)) {
+      activeDates.add(_startOfDay(lastOutputAt));
+    }
+
     final model = LearnerModelStore.load();
 
     return WeeklyReportBuilder.build(
@@ -178,6 +242,12 @@ class _WeeklyReportScreenState extends State<WeeklyReportScreen> {
         reviewBuckets: buckets,
         forecast: _forecastFor(reviews, now),
         dailyMinutes: model.dailyMinutes?.value,
+        // 输出侧(写作/翻译/回译):次数、rubric 均分与上周对比、维度均分、错误热点
+        outputAttempts: outputAttempts,
+        outputAvgScore: outputAvgScore,
+        outputPrevAvgScore: outputPrevAvgScore,
+        outputDimensions: outputDimensions,
+        outputErrorTags: outputErrorTags,
       ),
     );
   }
@@ -244,10 +314,32 @@ class _WeeklyReportScreenState extends State<WeeklyReportScreen> {
           _buildRange(report),
           const SizedBox(height: 12),
           if (!report.isActive) _buildEmptyHint(),
+          // v2.13(图形资产系统 · 批 1):周报顶部先把"这周的数据形状"画出来,
+          // 再给文字结论 —— 图看趋势、数字看事实、句子看结论。
+          _Section(
+            icon: Icons.bar_chart,
+            title: '近 7 天收词',
+            child: _buildWeekBars(report),
+          ),
+          _Section(
+            icon: Icons.grid_on_outlined,
+            title: '近 5 周打卡(35 天)',
+            child: _buildHeatmap(report),
+          ),
           _Section(
             icon: Icons.insights,
             title: '本周概览',
             child: _buildOverview(report),
+          ),
+          // v3 批 3 收尾:输出侧(写作/翻译/回译)也进周报 —— 以前只有输入,
+          // 用户天天写译却在这页看不见自己的产出。
+          _Section(
+            icon: Icons.edit_note,
+            title: '本周输出',
+            child: _buildBullets(
+              report.outputLines,
+              fallback: '本周没有输出练习(写作 / 翻译 / 回译)',
+            ),
           ),
           _Section(
             icon: Icons.emoji_events_outlined,
@@ -292,6 +384,110 @@ class _WeeklyReportScreenState extends State<WeeklyReportScreen> {
       ),
     );
   }
+
+  /// 近 7 天"每日新收词"柱状图(左旧右新,末端 = 报告末日)。
+  ///
+  /// 为什么用"新收词"当输入量:它是 `daily_log` 里**逐日真实存在**的输入指标
+  /// (阅读词数/时长在周报里只有周合计,没有逐日拆分 —— 不为了画图去猜)。
+  /// 整周为 0 时不画一排 0 柱,直接给空态,避免被读成"系统评了 0 分"。
+  Widget _buildWeekBars(WeeklyReport report) {
+    final theme = Theme.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant;
+    const days = 7;
+    final anchor = DateTime(report.to.year, report.to.month, report.to.day);
+    final series = dailySeriesOf(
+      _dailyLogs,
+      days: days,
+      pick: (r) => r.newWordsCount,
+      now: anchor,
+    );
+    final total = series.fold<double>(0, (sum, v) => sum + v).round();
+    if (total <= 0) {
+      return const ChartEmptyHint(label: '暂无数据', hint: '这 7 天没有新收词记录');
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SparkBars(
+          values: series,
+          height: 60,
+          semanticLabel: '近 7 天每日新收词,合计 $total 个',
+        ),
+        const SizedBox(height: 6),
+        Row(
+          children: [
+            for (var i = days - 1; i >= 0; i--)
+              Expanded(
+                child: Text(
+                  _mdLabel(anchor.subtract(Duration(days: i))),
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.labelSmall?.copyWith(color: muted),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Text(
+          '每根柱 = 当天新收词数(共 $total 个)· 左旧右新',
+          style: theme.textTheme.bodySmall?.copyWith(color: muted),
+        ),
+      ],
+    );
+  }
+
+  /// 近 5 周(35 天)学习热力图。
+  ///
+  /// 为什么是 35 天而不是 30 天:[HeatmapCalendar] 是"周 × 7"网格,30 天没法
+  /// 整除;硬凑 30 天要么补 5 个假 0(看起来像"那 5 天没学")、要么截半周
+  /// (网格错位)。取 35 天 = 完整的 5 周,每个格子都是真实记录。
+  Widget _buildHeatmap(WeeklyReport report) {
+    final theme = Theme.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant;
+    const weeks = 5;
+    const gap = 4.0;
+    final anchor = DateTime(report.to.year, report.to.month, report.to.day);
+    final counts = dailySeriesOf(
+      _dailyLogs,
+      days: weeks * 7,
+      pick: (r) => r.totalActivity,
+      now: anchor,
+    ).map((v) => v.round()).toList(growable: false);
+    final total = counts.fold<int>(0, (sum, v) => sum + v);
+    if (total <= 0) {
+      return const ChartEmptyHint(label: '暂无数据', hint: '这 5 周还没有收词或练习记录');
+    }
+    final levels = HeatmapCalendar.tiersOf(counts);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        LayoutBuilder(
+          builder: (ctx, constraints) {
+            // 组件宽度 = weeks*cell + (weeks-1)*gap:用卡片宽度反推单格边长,
+            // 夹在 [12,24] —— 5 周只有 5 列,太小会缩在角落、太大又像马赛克。
+            final raw = (constraints.maxWidth - (weeks - 1) * gap) / weeks;
+            final cell = raw.clamp(12.0, 24.0);
+            return Center(
+              child: HeatmapCalendar(
+                levels: levels,
+                weeks: weeks,
+                cell: cell,
+                gap: gap,
+                semanticLabel: '近 5 周学习热力图:颜色越深当天新收词与练习越多',
+              ),
+            );
+          },
+        ),
+        const SizedBox(height: 8),
+        Text(
+          '颜色越深 = 当天新收词 + 练习量越多(复习结果按词存,没有逐日历史,不在此图)',
+          style: theme.textTheme.bodySmall?.copyWith(color: muted),
+        ),
+      ],
+    );
+  }
+
+  /// 图上的日期短标签(如 11/3)
+  String _mdLabel(DateTime d) => '${d.month}/${d.day}';
 
   Widget _buildRange(WeeklyReport report) {
     final theme = Theme.of(context);

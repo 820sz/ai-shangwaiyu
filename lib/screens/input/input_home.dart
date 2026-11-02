@@ -12,8 +12,13 @@ import '../../models/saved_session.dart';
 import '../../services/doubao_api.dart';
 import '../../services/api_endpoint.dart';
 import '../../services/learner_model_store.dart';
+import '../../services/material_library.dart';
+import '../../services/material_prefs.dart';
 import '../../widgets/app_ui.dart';
+import '../../widgets/material_cover.dart';
+import '../../widgets/waiting.dart';
 import 'material_import_flow.dart';
+import 'material_discover_screen.dart';
 import 'material_reader_screen.dart';
 import 'process_chat.dart';
 import 'widgets/ai_article_section.dart';
@@ -35,6 +40,18 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
   String _sourceBook = '';
   String _sourcePage = '';
   bool _showBookInput = false;
+
+  /// 材料架上"正在读"的材料(v3 批 2)。
+  ///
+  /// 为什么输入首页要加载这个:用户 11/01 的批注是"输入 = 读 + 听",而这一页
+  /// 以前第一屏是"上传图片" —— 一个"工具入口"占了输入的主位。现在第一屏回答
+  /// "今天输入什么":有在读的继续读,没有的去材料中心按难度找。
+  List<ShelfItem> _shelf = const [];
+  bool _shelfLoading = true;
+
+  /// 输入偏好(难度档等)。用户 11/01:难度要能自选,并且全 App 同步 ——
+  /// 这里就是"同步"的入口之一(材料中心、推荐、题目都读同一个 prefs)。
+  MaterialPrefs _prefs = MaterialPrefs.load();
 
   /// 多图累积
   final List<File> _pendingImages = [];
@@ -58,6 +75,61 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       context.read<VocabProvider>().loadVocabularies();
+      _loadShelf();
+    });
+  }
+
+  /// 加载"在读材料"(失败静默:首页不能因为一次书架查询失败就白屏)。
+  Future<void> _loadShelf() async {
+    try {
+      final items = await MaterialLibrary.shelf(limit: 30);
+      if (!mounted) return;
+      setState(() {
+        _shelf = items;
+        _shelfLoading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _shelfLoading = false);
+    }
+  }
+
+  /// 正在读的那一份:读过一点、还没读完;没有就返回 null(空态)。
+  ShelfItem? get _continueItem {
+    for (final item in _shelf) {
+      if (!item.finished && item.percent > 0) return item;
+    }
+    return null;
+  }
+
+  /// 打开阅读器,回来刷新进度(继续读卡的百分比要立刻变)。
+  Future<void> _openShelfItem(ShelfItem item) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => MaterialReaderScreen(materialId: item.id),
+      ),
+    );
+    if (!mounted) return;
+    _loadShelf();
+  }
+
+  void _openMaterialCenter() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const MaterialCenterScreen()),
+    ).then((_) {
+      if (mounted) _loadShelf();
+    });
+  }
+
+  /// AI 按需求找材料(v3 批 2):需求→检索计划→公开源+官方搜索→抓正文算难度。
+  void _openAiDiscover() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const MaterialDiscoverScreen()),
+    ).then((_) {
+      if (mounted) _loadShelf();
     });
   }
 
@@ -80,12 +152,12 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
             children: [
               // ① 页面标题区
               Padding(
-                padding: const EdgeInsets.only(top: Gap.xs, bottom: Gap.md),
+                padding: const EdgeInsets.only(top: Gap.xs, bottom: Gap.sm),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '上传材料',
+                      '输入',
                       style: AppFont.displayStyle.copyWith(color: cs.onSurface),
                     ),
                     const SizedBox(height: 6),
@@ -98,16 +170,19 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
                   ],
                 ),
               ),
-              // ② 主行动:上传分析材料(hero 卡)
-              AppStagger(index: 0, child: _buildCaptureSectionCard(theme)),
-              const SizedBox(height: Gap.xxs),
-              // ③ 材料中心:第二层级的入口条
-              AppStagger(index: 1, child: _buildMaterialCenterCard(theme)),
-              // ④ 三个功能区块:各自是折叠卡(标题在它们自己身上,不重复加标题)
+              // ② 我的需求(目标 + 难度档):输入的第一件事是"我想读多难"
+              AppStagger(index: 0, child: _buildNeedBar(theme)),
               const SizedBox(height: Gap.sm),
-              const AppStagger(index: 2, child: AiArticleSection()),
-              const AppStagger(index: 3, child: ImportedMaterialsSection()),
-              const AppStagger(index: 4, child: MyMaterialsSection()),
+              // ③ 今天输入什么:继续读 / 去材料中心(输入这一栏的主行动)
+              AppStagger(index: 1, child: _buildTodayReading(theme)),
+              const SizedBox(height: Gap.sm),
+              // ④ 其他输入方式(拍照识词 / 链接导入):v3 起降为第二层级
+              AppStagger(index: 2, child: _buildCaptureSectionCard(theme)),
+              // ⑤ 原有功能区块:各自是折叠卡(标题在它们自己身上,不重复加标题)
+              const SizedBox(height: Gap.sm),
+              const AppStagger(index: 3, child: AiArticleSection()),
+              const AppStagger(index: 4, child: ImportedMaterialsSection()),
+              const AppStagger(index: 5, child: MyMaterialsSection()),
               const SizedBox(height: Gap.lg),
             ],
           ),
@@ -120,39 +195,36 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
   String _todayLine() {
     final now = DateTime.now();
     const week = ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日'];
-    return '${now.month} 月 ${now.day} 日 · ${week[now.weekday - 1]} · 拍照 / 链接 / 找材料';
+    return '${now.month} 月 ${now.day} 日 · ${week[now.weekday - 1]} · 读和听，才是输入';
   }
 
-  /// 材料中心入口(v2.0):软件提供的真实材料渠道
+  /// 我的需求条(v3 批 2)。
   ///
-  /// v2.12:从"一行入口"改成**带图标块的入口条** —— 图标块 + 标题 + 一行说明,
-  /// 与主行动卡构成两级层次(主行动是大卡,这是第二层级),而不是两张同规格卡。
-  Widget _buildMaterialCenterCard(ThemeData theme) {
+  /// 用户 11/01 的流程要求是「**需求在前、材料在后**」:先知道自己为什么学、
+  /// 想读多难,材料才有意义。这一条永远在"今天读什么"上面,给出当前摘要;
+  /// 点开可改难度档(i+1 舒适 / i+10 挑战 / i+100 快速正反馈)。
+  Widget _buildNeedBar(ThemeData theme) {
     final cs = theme.colorScheme;
+    final goal = LearnerModelStore.load().goal?.value;
+    final goalText =
+        (goal != null && goal.trim().isNotEmpty) ? goal.trim() : '未设目标';
     return AppCard(
       variant: AppCardVariant.compact,
       padding: const EdgeInsets.symmetric(
         horizontal: Gap.md,
         vertical: Gap.sm,
       ),
-      onTap: () => Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => const MaterialCenterScreen()),
-      ),
+      onTap: _showNeedSheet,
       child: Row(
         children: [
           Container(
-            width: 44,
-            height: 44,
+            width: 38,
+            height: 38,
             decoration: BoxDecoration(
               color: cs.primary.withAlpha(14),
               borderRadius: BorderRadius.circular(Radii.control),
             ),
-            child: Icon(
-              Icons.local_library_outlined,
-              size: 22,
-              color: cs.primary,
-            ),
+            child: Icon(Icons.tune, size: 19, color: cs.primary),
           ),
           const SizedBox(width: Gap.sm),
           Expanded(
@@ -160,7 +232,7 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '材料中心',
+                  '我的需求',
                   style: AppFont.subheadStyle.copyWith(
                     color: cs.onSurface,
                     fontWeight: FontWeight.w700,
@@ -168,7 +240,7 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  '公版书 / 论文 / 外刊 · 找原文来读',
+                  '$goalText · 难度 ${_prefs.band.label}（${_prefs.band.description}）',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: AppFont.metaStyle.copyWith(
@@ -184,6 +256,211 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
     );
   }
 
+  /// 难度档选择弹层(v3 批 2,用户 11/01:"需要让用户自选难度并软件同步调整")。
+  ///
+  /// 为什么给每档写"体验描述"而不是只给 i+1/i+10/i+100:这几个符号对老用户
+  /// 是黑话。用户自己说"我喜欢 i+100,因为短期能获得效果形成正反馈" ——
+  /// 所以 i+100 的文案要写成"费劲但爽",而不是"硬啃/不推荐"。
+  Future<void> _showNeedSheet() async {
+    final cs = Theme.of(context).colorScheme;
+    final picked = await showModalBottomSheet<MaterialBand>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(Gap.md, 0, Gap.md, Gap.xs),
+              child: Text(
+                '我想读多难？',
+                style: Theme.of(ctx)
+                    .textTheme
+                    .titleMedium
+                    ?.copyWith(fontWeight: FontWeight.w700),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: Gap.md),
+              child: Text(
+                '难度档会同步给材料推荐、阅读器难度标签和练习题目；随时可以改。',
+                style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                    ),
+              ),
+            ),
+            const SizedBox(height: Gap.xs),
+            for (final band in MaterialBand.values)
+              ListTile(
+                leading: Icon(
+                  _prefs.band == band
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_unchecked,
+                  color: _prefs.band == band ? cs.primary : null,
+                ),
+                title: Text(band.label),
+                subtitle: Text(band.description),
+                onTap: () => Navigator.pop(ctx, band),
+              ),
+            const SizedBox(height: Gap.xs),
+          ],
+        ),
+      ),
+    );
+    if (picked == null || !mounted || picked == _prefs.band) return;
+    setState(() => _prefs = _prefs.copyWith(band: picked));
+    await _prefs.save();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('难度档已切到 ${picked.label}：${picked.description}')),
+    );
+  }
+
+  /// 今天输入什么:有在读材料就"继续读",没有就引导去材料中心按难度找。
+  ///
+  /// 用户 11/01:"输入 = 读 + 听";所以这一栏的主行动必须先是"接着读"。
+  Widget _buildTodayReading(ThemeData theme) {
+    final cs = theme.colorScheme;
+    if (_shelfLoading) {
+      return const AppCard(child: SkeletonLines(lines: 3));
+    }
+    final item = _continueItem;
+    if (item == null) {
+      return AppCard(
+        variant: AppCardVariant.hero,
+        onTap: _openMaterialCenter,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '今天读什么？',
+              style: AppFont.titleStyle.copyWith(
+                color: cs.onSurface,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '按你的目标和难度档，从外刊 / 公版书 / 论文里找真实材料来读',
+              style: AppFont.metaStyle.copyWith(
+                color: cs.onSurfaceVariant,
+                height: 1.45,
+              ),
+            ),
+            const SizedBox(height: Gap.md),
+            Row(
+              children: [
+                Expanded(
+                  flex: 3,
+                  child: SizedBox(
+                    height: 48,
+                    child: FilledButton.icon(
+                      onPressed: _openMaterialCenter,
+                      icon: const Icon(Icons.explore_outlined, size: 18),
+                      label: const Text('去材料中心找材料'),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: Gap.xs),
+                Expanded(
+                  flex: 2,
+                  child: SizedBox(
+                    height: 48,
+                    child: OutlinedButton(
+                      onPressed: _openAiDiscover,
+                      child: const Text('AI 帮找'),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      );
+    }
+    final title = item.titleCn.isNotEmpty ? item.titleCn : item.title;
+    return AppCard(
+      variant: AppCardVariant.hero,
+      onTap: () => _openShelfItem(item),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          MaterialCover(
+            seed: title,
+            kind: item.kind,
+            imageUrl: item.coverUrl,
+            width: 84,
+            height: 112,
+            levelLabel: item.cefr.isEmpty ? null : item.cefr,
+          ),
+          const SizedBox(width: Gap.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '继续读',
+                  style: AppFont.tagStyle.copyWith(
+                    color: cs.primary,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.4,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppFont.subheadStyle.copyWith(
+                    color: cs.onSurface,
+                    fontWeight: FontWeight.w800,
+                    height: 1.35,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  _shelfMeta(item),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppFont.metaStyle.copyWith(
+                    color: cs.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: Gap.sm),
+                Row(
+                  children: [
+                    FilledButton(
+                      onPressed: () => _openShelfItem(item),
+                      child: const Text('接着读'),
+                    ),
+                    const SizedBox(width: Gap.xs),
+                    TextButton(
+                      onPressed: _openMaterialCenter,
+                      child: const Text('换一份'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 继续读卡的元信息:只报真实数据(没有覆盖率就不写)。
+  String _shelfMeta(ShelfItem item) {
+    final parts = <String>[];
+    if (item.percent > 0) parts.add('已读 ${item.percent.round()}%');
+    final coverage = item.coverage;
+    if (coverage != null && coverage > 0) {
+      parts.add('覆盖率 ${(coverage * 100).round()}%');
+    }
+    if (item.estMinutes > 0) parts.add('约 ${item.estMinutes} 分钟');
+    return parts.isEmpty ? '还没开始读' : parts.join(' · ');
+  }
+
   /// 拍照识文卡片(v2.6 重做;v2.7 升级为「上传分析材料」,用户第 3 条)。
   ///
   /// 用户原话:'"拍照识文"功能也要优化,现在的使用场景只能用于手写或者照片 ——
@@ -194,29 +471,31 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
   /// 1. **拍照识别** = 原来的拍照/相册取词(识图结果页的模型/保存/追问原样保留);
   /// 2. **外部链接导入** = 贴一个公开链接 → 抓正文 → 在软件内的阅读器里读
   ///    (逐段翻译 / 点词 / 收藏 / 追问 / 底部动作栏,与材料中心同一套)。
-  /// 两个入口都放在卡片顶部一行,平级、一眼能看出这是"两条路"。
+  ///
+  /// v3(批 2):从"本页唯一主行动(hero)"降为**第二层级的工具卡** ——
+  /// 输入这一栏的主行动现在是"今天读什么"(见 [_buildTodayReading])。
+  /// 用户 11/01 的原话是"输入 = 读 + 听",识图只是把纸面/屏幕变成材料的**手段**,
+  /// 不该占住首屏最重的位置。
   Widget _buildCaptureSectionCard(ThemeData theme) {
     final cs = theme.colorScheme;
     return AppCard(
-      // v2.12:这一页的**唯一主行动**用 hero 卡(更大圆角 + 更重阴影 + 染底),
-      // 与下面的材料中心入口条、三个折叠区块拉开层级。
-      variant: AppCardVariant.hero,
+      variant: AppCardVariant.plain,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // 标题行(v2.12:图标块 + 标题 + 说明 —— 层级清楚,不再挤成一行)
+          // 标题行:图标块 + 标题 + 说明 —— 层级清楚,不挤成一行
           Row(
             children: [
               Container(
-                width: 44,
-                height: 44,
+                width: 40,
+                height: 40,
                 decoration: BoxDecoration(
-                  color: cs.primary.withAlpha(16),
+                  color: cs.primary.withAlpha(14),
                   borderRadius: BorderRadius.circular(Radii.control),
                 ),
                 child: Icon(
                   Icons.document_scanner_outlined,
-                  size: 24,
+                  size: 21,
                   color: cs.primary,
                 ),
               ),
@@ -226,7 +505,7 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '上传分析材料',
+                      '拍照 / 导入材料',
                       style: AppFont.subheadStyle.copyWith(
                         color: cs.onSurface,
                         fontWeight: FontWeight.w700,
@@ -234,7 +513,7 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '拍照识词,或导入链接让 AI 帮你分析',
+                      '把纸面/屏幕上的内容变成可读、可练的材料',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: AppFont.metaStyle.copyWith(
@@ -650,10 +929,15 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
       return;
     }
     try {
+      // B0-3(2026-11-01):从 1024/q50 提到 **1600/q85**,与结果页「追加图片」
+      // 入口统一(那边原来 2600/q92,像素≈6.4 倍,是追加闪退的根因之一)。
+      // 为什么是 1600 而不是 2600:v2.13 的「自动方向检测」每张图要整图解码,
+      // 1600 的解码内存约为 2600 的 38%,而 1024 对淡色划线/手写确实偏低 ——
+      // 1600 是"识别率"与"内存峰值"的中点。预处理已移到后台 isolate 并串行。
       final XFile? photo = await _picker.pickImage(
         source: ImageSource.camera,
-        imageQuality: 50,
-        maxWidth: 1024,
+        imageQuality: 85,
+        maxWidth: 1600,
       );
       if (photo != null && mounted) {
         setState(() => _pendingImages.add(File(photo.path)));
@@ -675,9 +959,12 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
       return;
     }
     try {
+      // B0-3:与拍照、结果页「追加图片」三方统一为 1600/q85(理由见 _takePhoto)。
+      // 上限 _maxImages(代码实为 10 张)保持不变 —— 张数由产品决定,
+      // 内存由"预处理移 isolate + 严格串行"兜底(见 vision_image.dart)。
       final List<XFile> images = await _picker.pickMultiImage(
-        imageQuality: 50,
-        maxWidth: 1024,
+        imageQuality: 85,
+        maxWidth: 1600,
         limit: _maxImages - _pendingImages.length,
       );
       if (images.isNotEmpty && mounted) {

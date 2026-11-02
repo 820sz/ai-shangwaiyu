@@ -49,6 +49,12 @@ void main() {
     List<RecentMaterial> recentMaterials = const [],
     Map<String, double> quizAccuracy = const {},
     List<ErrorTagStat> errorTags = const [],
+    int outputAttempts30d = 0,
+    double? outputAvgScore,
+    DateTime? outputLastAt,
+    int writeLogs30d = 0,
+    int drillLogs30d = 0,
+    List<String> weakGrammarTags = const [],
     int streakDays = 0,
     int activeDays30d = 0,
   }) =>
@@ -72,6 +78,12 @@ void main() {
         recentMaterials: recentMaterials,
         quizAccuracy: quizAccuracy,
         errorTags: errorTags,
+        outputAttempts30d: outputAttempts30d,
+        outputAvgScore: outputAvgScore,
+        outputLastAt: outputLastAt,
+        writeLogs30d: writeLogs30d,
+        drillLogs30d: drillLogs30d,
+        weakGrammarTags: weakGrammarTags,
         streakDays: streakDays,
         activeDays30d: activeDays30d,
       );
@@ -157,6 +169,25 @@ void main() {
         quizAccuracy: const {'back_translation': 0.7},
       ));
       expect(ids(f), isNot(contains('input_only')));
+    });
+
+    // v2.18.0(批 3 收尾):"输入有、输出也有"必须三张输出表都算数 ——
+    // 旧实现只看 quiz_results,所以写译批改/练习记录都判不出来(用户明明
+    // 天天写译,助理仍报"只有输入没有输出")。
+    test('rubric 作答 / 写出篇数 / 练习次数 任一 >0 → 不再误报 input_only', () {
+      for (final s in [
+        snap(readingWords30d: 5000, outputAttempts30d: 1, outputAvgScore: 72),
+        snap(readingWords30d: 5000, writeLogs30d: 1),
+        snap(readingWords30d: 5000, drillLogs30d: 1),
+      ]) {
+        expect(ids(TutorEngine.diagnose(s)), isNot(contains('input_only')),
+            reason: '输出维度有数据就不该报"没有输出"');
+      }
+    });
+
+    test('四个输出数据源都为空时仍保留旧行为(提示存在)', () {
+      final f = TutorEngine.diagnose(snap(readingWords30d: 5000));
+      expect(ids(f), contains('input_only'));
     });
 
     test('收了 50+ 词却零复习记录 → no_review_system', () {

@@ -6,6 +6,7 @@ import '../../config/theme.dart';
 import '../../services/splash_settings.dart';
 import '../../services/theme_controller.dart';
 import '../../widgets/app_ui.dart';
+import '../../widgets/design_kit.dart';
 
 /// 外观设置(v2.2 深色模式)。
 ///
@@ -33,59 +34,82 @@ class _AppearanceScreenState extends State<AppearanceScreen> {
         builder: (context, mode, _) => ListView(
           padding: Insets.page,
           children: [
-            Text(
-              '「跟随系统」会随手机的深色开关自动切换(系统设了夜间自动切换时也生效)。',
-              style: theme.textTheme.bodySmall?.copyWith(color: muted),
-            ),
-            const SizedBox(height: Gap.xs),
-            // Flutter 3.32+ 用 RadioGroup 统一管理组值(RadioListTile 的
-            // groupValue/onChanged 已废弃)
-            RadioGroup<ThemeMode>(
-              groupValue: mode,
-              onChanged: (v) {
-                if (v != null) ThemeController.set(v);
-              },
-              child: Column(
-                children: [
-                  for (final entry in AppConstants.themeModeOptions.entries)
-                    RadioListTile<ThemeMode>(
-                      value: AppTheme.themeModeOf(entry.key),
-                      title: Text(entry.value),
-                      subtitle: entry.key == 'dark'
-                          ? Text(
-                              '深底浅字,夜间/弱光下更省眼',
-                              style: theme.textTheme.bodySmall
-                                  ?.copyWith(color: muted),
-                            )
-                          : null,
-                      contentPadding: EdgeInsets.zero,
-                    ),
-                ],
+            // ── 01 主题模式 ──
+            const AppSectionHeader(indexLabel: '01', title: '主题模式'),
+            AppCard(
+              padding: EdgeInsets.zero,
+              child: RadioGroup<ThemeMode>(
+                groupValue: mode,
+                onChanged: (v) {
+                  if (v != null) ThemeController.set(v);
+                },
+                child: Column(
+                  children: [
+                    for (final entry in AppConstants.themeModeOptions.entries)
+                      RadioListTile<ThemeMode>(
+                        value: AppTheme.themeModeOf(entry.key),
+                        title: Text(
+                          entry.value,
+                          style: AppFont.bodyStyle.copyWith(
+                            color: theme.colorScheme.onSurface,
+                          ),
+                        ),
+                        subtitle: entry.key == 'dark'
+                            ? Text(
+                                '深底浅字,夜间/弱光下更省眼',
+                                style: AppFont.tagStyle.copyWith(
+                                  color: muted,
+                                  height: 1.35,
+                                ),
+                              )
+                            : Text(
+                                entry.key == 'system'
+                                    ? '随手机的深色开关自动切换(系统设了夜间自动切换也生效)'
+                                    : '始终使用浅色页面',
+                                style: AppFont.tagStyle.copyWith(
+                                  color: muted,
+                                  height: 1.35,
+                                ),
+                              ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: Gap.md,
+                        ),
+                      ),
+                  ],
+                ),
               ),
             ),
-            const SizedBox(height: Gap.sm),
-            const _ThemePreview(),
-            const SizedBox(height: Gap.md),
 
-            // ── 开屏文案(v2.5,M3):用户可自定义 ──
+            // ── 02 预览 ──
+            const AppSectionHeader(indexLabel: '02', title: '预览'),
+            const _ThemePreview(),
+
+            // ── 03 开屏文案 ──
+            const AppSectionHeader(indexLabel: '03', title: '开屏文案'),
             const _SplashTaglineCard(),
-            const SizedBox(height: Gap.md),
+
+            // ── 04 说明 ──
+            const AppSectionHeader(indexLabel: '04', title: '说明'),
             AppCard(
               color: theme.colorScheme.surfaceContainerHighest,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('说明',
-                      style: theme.textTheme.titleSmall
-                          ?.copyWith(fontWeight: FontWeight.w700)),
-                  const SizedBox(height: Gap.xxs + 2),
                   Text(
                     '· 深色模式改的是「全局配色」(页面、卡片、正文、阅读页都跟着变),'
-                    '不是只换个背景色;\n'
+                    '不是只换个背景色;',
+                    style: AppFont.tagStyle.copyWith(color: muted, height: 1.5),
+                  ),
+                  const SizedBox(height: Gap.xxs),
+                  Text(
                     '· 彩色标签(生词类型、掌握度、图表)在两种模式下都保留颜色 —— '
-                    '它们承担"区分"的信息,不能变成灰;\n'
+                    '它们承担"区分"的信息,不能变成灰;',
+                    style: AppFont.tagStyle.copyWith(color: muted, height: 1.5),
+                  ),
+                  const SizedBox(height: Gap.xxs),
+                  Text(
                     '· 主题偏好会记在本机,重装/换机后需要重新选一次。',
-                    style: theme.textTheme.bodySmall?.copyWith(color: muted),
+                    style: AppFont.tagStyle.copyWith(color: muted, height: 1.5),
                   ),
                 ],
               ),
@@ -134,8 +158,10 @@ class _SplashTaglineCardState extends State<_SplashTaglineCard> {
                 isDense: true,
               ),
             ),
-            Text('留空 = 用默认文案「${SplashSettings.defaultTagline}」',
-                style: const TextStyle(fontSize: 11)),
+            Text(
+              '留空 = 用默认文案「${SplashSettings.defaultTagline}」',
+              style: const TextStyle(fontSize: 11),
+            ),
           ],
         ),
         actions: [
@@ -165,21 +191,12 @@ class _SplashTaglineCardState extends State<_SplashTaglineCard> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final muted = theme.colorScheme.onSurfaceVariant;
-    return AppCard(
-      // ListTile 自带内容边距(水平 16),卡片不再叠加内边距,避免双重缩进
-      padding: EdgeInsets.zero,
+    return AppActionTile(
+      icon: Icons.auto_awesome_motion_outlined,
+      title: '开屏文案',
+      subtitle: '启动时显示在 logo 下方:$_tagline',
+      trailing: const Icon(Icons.edit_outlined, size: 18),
       onTap: _edit,
-      child: ListTile(
-        leading: Icon(Icons.auto_awesome_motion_outlined,
-            color: theme.colorScheme.primary),
-        title: const Text('开屏文案'),
-        subtitle: Text('启动时显示在 logo 下方:$_tagline',
-            style: TextStyle(fontSize: 12, color: muted)),
-        trailing: const Icon(Icons.edit_outlined, size: 18),
-        onTap: _edit,
-      ),
     );
   }
 }
@@ -201,29 +218,38 @@ class _ThemePreview extends StatelessWidget {
               Expanded(
                 child: Text(
                   '预览:Prefrontal cortex',
-                  style: theme.textTheme.titleMedium
-                      ?.copyWith(fontWeight: FontWeight.w700),
+                  style: AppFont.subheadStyle.copyWith(
+                    color: theme.colorScheme.onSurface,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
-              Icon(Icons.volume_up_outlined,
-                  size: 18, color: theme.colorScheme.primary),
+              Icon(
+                Icons.volume_up_outlined,
+                size: 18,
+                color: theme.colorScheme.primary,
+              ),
             ],
           ),
-          const SizedBox(height: Gap.xxs + 2),
+          const SizedBox(height: Gap.xxs),
           Text(
             '/ˌpriːˈfrʌntəl ˈkɔːteks/ n. 前额叶皮层',
-            style: theme.textTheme.bodySmall?.copyWith(color: muted),
+            style: AppFont.tagStyle.copyWith(color: muted, height: 1.4),
           ),
           const SizedBox(height: Gap.sm),
           Text(
             'The prefrontal cortex handles planning and self-control.',
-            style: theme.textTheme.bodyMedium,
+            style: AppFont.bodyStyle.copyWith(
+              color: theme.colorScheme.onSurface,
+            ),
           ),
           const SizedBox(height: Gap.sm),
-          Row(
+          // 一排按钮用 Wrap:窄屏/大字号下自动换行,不会把第二个按钮挤出屏幕
+          Wrap(
+            spacing: Gap.xs,
+            runSpacing: Gap.xs,
             children: [
               FilledButton(onPressed: () {}, child: const Text('认识')),
-              const SizedBox(width: Gap.xs),
               OutlinedButton(onPressed: () {}, child: const Text('模糊')),
             ],
           ),

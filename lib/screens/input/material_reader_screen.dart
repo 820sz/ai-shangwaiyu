@@ -14,13 +14,16 @@ import '../../providers/bookmark_provider.dart';
 import '../../providers/vocab_provider.dart';
 import '../../services/audio_service.dart';
 import '../../services/backup_service.dart';
+import '../../services/base_api.dart';
 import '../../services/database.dart';
 import '../../services/deepseek_api.dart';
 import '../../services/external_link.dart';
 import '../../services/material_library.dart';
 import '../../services/material_blocks.dart' as blocks;
 import '../../services/reader_settings.dart';
+import '../../services/reader_units.dart';
 import '../../services/reading_quiz.dart';
+import '../../services/translation_diagnostics.dart';
 import '../../widgets/app_ui.dart';
 import '../../widgets/audio_player_bar.dart';
 import '../../widgets/material_blocks.dart';
@@ -46,7 +49,19 @@ import 'widgets/sub_category_input.dart';
 ///    (导师与统计都读这份数据)。
 class MaterialReaderScreen extends StatefulWidget {
   final int materialId;
-  const MaterialReaderScreen({super.key, required this.materialId});
+
+  /// 翻译服务(默认真实实现)。
+  ///
+  /// 为什么做成可注入:翻译这条链路历史上"修了好几轮都没修好",根因之一是
+  /// 它**完全不可测**(`DeepseekApiService()` 直接 new 在 State 里,测试无法替换)。
+  /// 默认值保持原行为,现有调用方一行都不用改;widget 测试可传 fake 子类。
+  final DeepseekApiService? translateApi;
+
+  const MaterialReaderScreen({
+    super.key,
+    required this.materialId,
+    this.translateApi,
+  });
 
   @override
   State<MaterialReaderScreen> createState() => _MaterialReaderScreenState();
@@ -58,6 +73,23 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
 
   Map<String, Object?>? _material;
   List<Map<String, Object?>> _chunks = const [];
+
+  /// 翻译单元(真段落):在 [_load] 里由 [_chunks] 拆出。
+  ///
+  /// 为什么必须单独一层:正文按 **2500 词一块**入库,"块"不是"段"。旧实现把
+  /// 块当段 → 典型文章只有 1 段 → 进度分母恒 1(进度条永远是死的)、一次请求
+  /// 发整篇 → 模型回 N 段与 1 段对不上 → 只翻出第一段。翻译、进度、逐段对照
+  /// 全部改按**真段落**走(拆分规则见 services/reader_units.dart)。
+  List<ReaderUnit> _units = const [];
+
+  /// 块下标 → 该块第一个单元下标(空块指向下一个有段落的块;见
+  /// [chunkFirstUnitIndices])。续读跳转、"可见块展开成单元"都用它。
+  List<int> _firstUnitOfChunk = const [];
+
+  /// 翻译 API(可注入,见 [MaterialReaderScreen.translateApi] 的注释)
+  late final DeepseekApiService _api =
+      widget.translateApi ?? DeepseekApiService();
+
   MaterialAnalysis? _analysis;
 
   bool _loading = true;
@@ -90,41 +122,49 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
   /// 是否显示译文(关闭只隐藏,不清已翻好的内容 —— 再打开立刻回来)
   bool _showTranslation = false;
 
-  /// 段索引 → 中文译文。译文只存内存:材料正文才是事实源,译文是"读的辅助",
-  /// 下次打开重翻即可(写库要改表结构,不在本次范围)。
+  /// 单元(真段落)下标 → 中文译文。译文只存内存:材料正文才是事实源,
+  /// 译文是"读的辅助",下次打开重翻即可(写库要改表结构,不在本次范围)。
   final Map<int, String> _translations = {};
 
-  /// 段索引 → 失败原因(该段可单独重试;没有失败 = 空)
+  /// 单元下标 → 附加提示(如"只翻好了前 1/1 段(可能被截断)")。
+  /// 与 [_chunkErrors] 分开:错误是"这段没翻出来"(可重试),note 是
+  /// "翻出来了但可能不完整" —— 两者 UI 完全不同,旧实现把 note 静默丢弃了。
+  final Map<int, String> _translationNotes = {};
+
+  /// 单元下标 → 失败原因(该段可单独重试;没有失败 = 空)
   final Map<int, String> _chunkErrors = {};
 
   /// 用户主动取消了这一段的翻译(不是失败 —— 不重试、也不自动重翻;
   /// 段落下面给一行「已取消 · 重试」,想翻再点)
   final Set<int> _canceledChunks = {};
 
-  /// 正在排队/在途的段。**用集合而不是布尔**:判断"这一段是否在等译文"是
-  /// 逐段 UI(骨架屏 / 取消按钮)的唯一依据。
+  /// 正在排队/在途的段(**单元下标**)。用集合而不是布尔:判断"这一段是否在等
+  /// 译文"是逐段 UI(骨架屏 / 取消按钮)的唯一依据。
   final Set<int> _pendingChunks = {};
 
-  /// 待翻队列(严格按用户看到的顺序)
+  /// 待翻队列(严格按用户看到的顺序;单元下标)
   final List<int> _queue = [];
 
-  /// 在途请求(并发上限 [_translateConcurrency]);键 = 段索引
+  /// 在途请求(并发上限 [_translateConcurrency];键 = 单元下标)
   final Map<int, CancelToken> _chunkTokens = {};
 
-  /// 每一段的作业代号:取消/重排后旧请求回来时,靠它丢弃过期结果
+  /// 每一个单元的作业代号:取消/重排后旧请求回来时,靠它丢弃过期结果
   final Map<int, int> _chunkJobEpoch = {};
   int _epochSeq = 0;
 
-  /// 在途请求(键 = 段索引,值 = 本次作业号)。
+  /// 在途请求(键 = 单元下标,值 = 本次作业号)。
   /// 用 Map 而不是单纯计数:取消某段/停止整轮后旧请求晚回来时,
   /// 靠作业号判断"这个并发位还是不是它的",不会把新任务的槽位一起吞掉。
   final Map<int, int> _activeJobs = {};
   int _jobSeq = 0;
 
-  /// 本轮「一轮翻译」的段数与已完成数(进度条 = 已完成 / 本轮总数)
-  int _runTotal = 0;
-  int _runDone = 0;
-  DateTime? _runStartedAt;
+  /// 本轮翻译的进度状态机(分母 = 本轮入队的**真段落数**,典型文章 6~10)。
+  /// 抽成纯类是为了可单测:旧实现"最后一段完成时先清零再渲染"导致 100% 那
+  /// 一帧从未被渲染(进度条永远是 0%)—— 顺序 bug 必须由单测锁住。
+  final TranslationRunState _run = TranslationRunState();
+
+  /// 100% 的进度条保留 2 秒再收:让用户确认"这一轮真的结束了"。
+  Timer? _runResetTimer;
 
   /// 用户点了「取消」之后暂停"随读随翻";点「继续翻后文/整章」会重新打开
   bool _autoTranslate = true;
@@ -136,10 +176,10 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
   /// 列表的 key(用它的视口矩形判断段落是否真的可见,而不是按滚动比例猜)
   final GlobalKey _listKey = GlobalKey();
 
-  /// 每个段落的 key(同上)
-  final Map<int, GlobalKey> _chunkKeys = {};
+  /// 每个**段落单元**的 key(同上;列表项已经是单元而不是块)
+  final Map<int, GlobalKey> _unitKeys = {};
 
-  /// 点译文追问时,把追问范围钉在这一段;null = 整篇
+  /// 点译文追问时,把追问范围钉在这一段(单元下标);null = 整篇
   int? _followUpChunk;
 
   /// 一次「继续翻后文」翻多少段
@@ -206,19 +246,19 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
           '我的已知词覆盖率 ${(a.knownTokenRatio * 100).toStringAsFixed(1)}%');
     }
     final at = _followUpChunk;
-    if (at != null && at >= 0 && at < _chunks.length) {
+    if (at != null && at >= 0 && at < _units.length) {
       String clip(String s, int max) =>
           s.length <= max ? s : '${s.substring(0, max)}…';
-      final row = _chunks[at];
-      final original = '${row['text'] ?? ''}'.trim();
-      final subtitle = '${row['title'] ?? ''}'.trim();
-      final previous = at > 0 ? '${_chunks[at - 1]['text'] ?? ''}'.trim() : '';
-      final next = at + 1 < _chunks.length
-          ? '${_chunks[at + 1]['text'] ?? ''}'.trim()
-          : '';
+      // v2.13.1:追问的"这一段"= 翻译单元(真段落),不是 2500 词的正文块 ——
+      // 否则用户点一段译文追问,喂给模型的会是整块(甚至整章)。
+      final unit = _units[at];
+      final original = unit.text.trim();
+      final subtitle = '${_chunks[unit.chunkIndex]['title'] ?? ''}'.trim();
+      final previous = at > 0 ? _units[at - 1].text.trim() : '';
+      final next = at + 1 < _units.length ? _units[at + 1].text.trim() : '';
       final translation = _translations[at];
       final body = StringBuffer()
-        ..writeln('这次追问只针对第 ${at + 1}/${_chunks.length} 段。');
+        ..writeln('这次追问只针对第 ${at + 1}/${_units.length} 段。');
       if (subtitle.isNotEmpty) body.writeln('小标题:$subtitle');
       if (previous.isNotEmpty) {
         body
@@ -275,8 +315,8 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
       _stopTranslation(notify: false);
       return;
     }
-    if (_chunks.isEmpty) return;
-    if (!DeepseekApiService().isConfigured) {
+    if (_units.isEmpty) return;
+    if (!_api.isConfigured) {
       _toast('还没有配置 API Key —— 到「我的 → API 设置」填一个就能翻译');
       return;
     }
@@ -296,21 +336,21 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     );
   }
 
-  /// 哪些段落**真的在屏幕里**:用列表视口与每个段落的 RenderBox 求交,
-  /// 而不是按滚动比例猜 —— 一本书的段落高度差别很大,比例法会把没读到的段
+  /// 哪些**段落单元**真的在屏幕里:用列表视口与每个单元的 RenderBox 求交,
+  /// 而不是按滚动比例猜 —— 段落高度差别很大,比例法会把没读到的段
   /// 当成"当前段"(旧实现"选取的范围也是乱的"就有这个原因)。
   ///
   /// [limit] 限制这次最多翻几段:打开翻译先给眼前最多 5 段,
   /// 避免一开就排队几十个请求。
-  List<int> _visibleChunkIndices({int limit = _visibleBatch}) {
+  List<int> _visibleUnitIndices({int limit = _visibleBatch}) {
     final viewport = _listKey.currentContext?.findRenderObject();
     if (viewport is! RenderBox || !viewport.hasSize) {
-      return _fallbackVisible(limit);
+      return _fallbackVisibleUnits(limit);
     }
     final top = viewport.localToGlobal(Offset.zero).dy;
     final bottom = top + viewport.size.height;
     final hits = <int>[];
-    for (final entry in _chunkKeys.entries) {
+    for (final entry in _unitKeys.entries) {
       final ctx = entry.value.currentContext;
       if (ctx == null) continue;
       final box = ctx.findRenderObject();
@@ -320,21 +360,25 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
       hits.add(entry.key);
     }
     hits.sort();
-    if (hits.isEmpty) return _fallbackVisible(limit);
+    if (hits.isEmpty) return _fallbackVisibleUnits(limit);
     return hits.take(limit).toList();
   }
 
-  /// 首帧 / 视口还没挂上时的兜底:从"读到第几段"往后取几段
-  List<int> _fallbackVisible(int limit) {
-    if (_chunks.isEmpty) return const [];
-    final start = _lastChunkIndex.clamp(0, _chunks.length - 1);
-    final end = (start + limit).clamp(0, _chunks.length);
+  /// 首帧 / 视口还没挂上时的兜底:从"读到第几块"映射到单元,再往后取几段
+  List<int> _fallbackVisibleUnits(int limit) {
+    if (_units.isEmpty) return const [];
+    final chunkCount = _chunks.length;
+    final chunk = chunkCount <= 0 ? 0 : _lastChunkIndex.clamp(0, chunkCount - 1);
+    final start =
+        (_firstUnitOfChunk.length > chunk ? _firstUnitOfChunk[chunk] : 0)
+            .clamp(0, _units.length);
+    final end = (start + limit).clamp(0, _units.length);
     return [for (var i = start; i < end; i++) i];
   }
 
-  GlobalKey _chunkKey(int index) => _chunkKeys.putIfAbsent(
+  GlobalKey _unitKey(int index) => _unitKeys.putIfAbsent(
         index,
-        () => GlobalKey(debugLabel: 'reader-chunk-$index'),
+        () => GlobalKey(debugLabel: 'reader-unit-$index'),
       );
 
   /// 这一段还能不能翻:已有译文 / 已排队 / 已失败 / 空段都不重复发请求。
@@ -342,22 +386,29 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
   /// 失败段必须由用户点「重试」才重翻 —— 否则随读随翻会在同一个坏段上死循环,
   /// 把额度烧光(旧实现就有"越滚越错、一直失败"的观感)。
   bool _canTranslate(int index) {
-    if (index < 0 || index >= _chunks.length) return false;
+    if (index < 0 || index >= _units.length) return false;
     if (_translations.containsKey(index)) return false;
     if (_pendingChunks.contains(index)) return false;
     if (_chunkErrors.containsKey(index)) return false;
     if (_canceledChunks.contains(index)) return false;
-    return '${_chunks[index]['text'] ?? ''}'.trim().isNotEmpty;
+    return _units[index].text.trim().isNotEmpty;
   }
 
-  /// 把若干段放进翻译队列。
+  /// 把若干**段落单元**放进翻译队列。
   ///
   /// 为什么改成**逐段请求**而不是旧实现的一批 3~4 段:
   /// - 旧实现一段失败/截断,整批都标红(用户看到的是"全错了");
   /// - 逐段请求后,每段有自己的成功/失败/取消状态,重试只重试这一条;
   /// - 代价是请求数变多,所以并发 2 路 + 只翻眼前几段,整体等待反而更短。
   void _enqueueTranslation(List<int> indices) {
-    if (!_showTranslation || _chunks.isEmpty) return;
+    if (!_showTranslation || _units.isEmpty) return;
+    // 上一轮已经收尾(可能还停在"100% 保留 2 秒"的展示期)→ 这是新一轮:
+    // 必须先重置分母,否则新一批会被加进上一轮的总数里,进度永远到不了 100%。
+    final idle = _activeJobs.isEmpty && _queue.isEmpty;
+    if (idle) {
+      _runResetTimer?.cancel();
+      _runResetTimer = null;
+    }
     final fresh = <int>[];
     for (final i in indices) {
       if (!_canTranslate(i)) continue;
@@ -367,11 +418,11 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
       fresh.add(i);
     }
     if (fresh.isEmpty) return;
-    if (_runTotal == 0) {
-      _runStartedAt = DateTime.now();
-      _runDone = 0;
+    if (idle) {
+      _run.begin(fresh.length);
+    } else {
+      _run.add(fresh.length);
     }
-    _runTotal += fresh.length;
     setState(() {});
     _pumpTranslationQueue();
   }
@@ -394,22 +445,43 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
           _activeJobs.remove(index);
           if (_chunkJobEpoch[index] == epoch) {
             _chunkJobEpoch.remove(index);
-            _runDone++;
+            _run.completeOne();
           }
         }
         _pumpTranslationQueue();
       });
     }
-    // 本轮真的结束了:把进度状态清干净(而不是留一个 100% 的条骗人)
-    if (_activeJobs.isEmpty && _queue.isEmpty && _runTotal > 0) {
-      _runTotal = 0;
-      _runDone = 0;
-      _runStartedAt = null;
+    // 本轮真的结束了:**先把 100% 渲染出来,再收条**。
+    //
+    // 旧实现这里直接把 _runTotal/_runDone 清零再 setState → `done/total`
+    // 从未被 build 过,用户看到的进度条从出现到消失只有 0%(「进度永远是死的」
+    // 的直接原因)。现在交给 TranslationRunState:markFinished 让这一帧是
+    // 100%,2 秒后再由定时器清空。
+    if (_activeJobs.isEmpty && _queue.isEmpty && _run.visible) {
+      _run.markFinished();
+      _scheduleRunReset();
     }
     setState(() {});
   }
 
-  /// 翻一段。一个请求只负责一段 —— 失败、取消、重试都只影响这一段。
+  /// 一轮完成后,把 100% 的进度条保留 2 秒。
+  ///
+  /// 只在"本轮仍是最新"时清空:若 2 秒内用户又点了「继续翻后文」,新任务会
+  /// 取消这个定时器(见 [_enqueueTranslation]),不会把新一轮的进度清掉。
+  void _scheduleRunReset() {
+    if (_runResetTimer != null) return;
+    _runResetTimer = Timer(const Duration(seconds: 2), () {
+      _runResetTimer = null;
+      if (!mounted) return;
+      if (_activeJobs.isNotEmpty || _queue.isNotEmpty) return;
+      setState(() {
+        _run.clear();
+      });
+    });
+  }
+
+  /// 翻一段(这里的 index = **段落单元**下标,不是正文块)。
+  /// 一个请求只负责一段 —— 失败、取消、重试都只影响这一段。
   ///
   /// [epoch] 是这段的作业代号:用户取消/重翻后,旧请求晚回来的结果会被丢弃,
   /// 不会覆盖新译文(旧实现"取消后仍在翻译、结果又跳出来"的根因之一)。
@@ -419,8 +491,12 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     final token = CancelToken();
     _chunkTokens[index] = token;
     try {
-      final outcome = await DeepseekApiService().translateParagraphsRich(
-        ['${_chunks[index]['text'] ?? ''}'],
+      // v2.13.1:一次只发**一个真段落**(≤600 字符)。旧实现发整块(最多
+      // 6000 词)并只声明 1 段 → 模型按空行回 N 段 → 段数对不上 → 只抢救
+      // 第一段,note 被静默丢弃。段落级请求让"段数对账"变成 1:1,且失败只
+      // 影响这一段、45s 超时可控。
+      final outcome = await _api.translateParagraphsRich(
+        [_units[index].text],
         cancelToken: token,
       );
       if (!mounted) return;
@@ -436,7 +512,18 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
         _translations[index] = text;
         _chunkErrors.remove(index);
         _pendingChunks.remove(index);
+        // note 非空 = 模型给的段数与输入对不上(可能被截断)。旧实现静默丢掉
+        // 它,用户以为"整段都翻好了";现在段落下面会显示一行提示。
+        final note = outcome.note?.trim() ?? '';
+        if (note.isEmpty) {
+          _translationNotes.remove(index);
+        } else {
+          _translationNotes[index] = note;
+        }
       });
+      // v2.16.0:译文落库(失败静默 —— 译文已经在界面上了,写库失败只影响
+      // "下次进来还在不在",不能反过来把这一段标成失败)。
+      await _persistTranslation(index);
     } on DioException catch (e) {
       // 取消不是"翻译失败":直接丢掉,不弹错误、不标红
       if (CancelToken.isCancel(e) || token.isCancelled) return;
@@ -446,7 +533,7 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     } catch (e) {
       if (token.isCancelled) return;
       if (_chunkJobEpoch[index] != epoch) return;
-      _markChunkError(index, '$e');
+      _markChunkError(index, _humanError(e));
     } finally {
       if (identical(_chunkTokens[index], token)) {
         _chunkTokens.remove(index);
@@ -456,17 +543,43 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
 
   void _markChunkError(int index, String message) {
     if (!mounted) return;
+    // v2.16.0:失败原因进**进程内**诊断缓存(最多 3 条),“我的 → 诊断信息”
+    // 可查 —— 用户说"翻译失败"时不用再靠猜;消息已脱敏,不含 key。
+    TranslationDiagnostics.recordFailure(message);
     setState(() {
       _chunkErrors[index] = message;
+      _translationNotes.remove(index);
       _pendingChunks.remove(index);
     });
   }
 
-  String _humanError(Object e) {
-    final s = '$e';
-    if (s.length > 120) return '${s.substring(0, 120)}…';
-    return s;
+  /// 把一段译文落库(v2.16.0)。失败只记调试日志,不影响界面。
+  ///
+  /// 写 [sourceText] 快照:下次进阅读器加载时用它比对"这条译文还对得上当前
+  /// 这一段吗";材料重新导入/切段变化后对不上 → 不显示(见
+  /// `DatabaseService.alignTranslationsToUnits`)。
+  Future<void> _persistTranslation(int index) async {
+    if (index < 0 || index >= _units.length) return;
+    final text = _translations[index]?.trim() ?? '';
+    if (text.isEmpty) return;
+    final unit = _units[index];
+    try {
+      await DatabaseService.saveMaterialTranslation(
+        widget.materialId,
+        unitIndex: index,
+        chunkIndex: unit.chunkIndex,
+        sourceText: unit.text,
+        translatedText: text,
+        model: DeepseekApiService.activeConfig.model,
+      );
+    } catch (e) {
+      debugPrint('ReadFlow 译文落库失败(不影响阅读): $e');
+    }
   }
+
+  /// 把异常翻成人话:网络超时/鉴权失败/429/端点不匹配都有中文指引
+  /// (旧实现只截断英文 DioException,用户看不懂"最近一次:..."是什么)。
+  String _humanError(Object e) => BaseApiService.friendlyError(e);
 
   /// 停止翻译:清空队列 + cancel 在途请求 + 清掉本轮进度。
   ///
@@ -488,9 +601,9 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     _chunkJobEpoch.clear();
     _activeJobs.clear();
     _pendingChunks.clear();
-    _runTotal = 0;
-    _runDone = 0;
-    _runStartedAt = null;
+    _runResetTimer?.cancel();
+    _runResetTimer = null;
+    _run.clear();
     if (mounted) setState(() {});
     if (notify && had) {
       _toast('已停止 —— 翻好的 ${_translations.length} 段都保留着');
@@ -511,7 +624,8 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
       _canceledChunks.add(index);
       _chunkJobEpoch.remove(index);
       _pendingChunks.remove(index);
-      _runDone++;
+      // 取消也是一种"已处理":进度分子 +1,否则本轮永远差一格到 100%。
+      _run.completeOne();
       setState(() {});
       _pumpTranslationQueue();
       return;
@@ -528,7 +642,7 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     _pendingChunks.remove(index);
     // 立刻把并发槽位还给队列:不必等被 cancel 的请求真的收尾
     _activeJobs.remove(index);
-    _runDone++;
+    _run.completeOne();
     try {
       token.cancel('取消这一段');
     } catch (_) {}
@@ -538,21 +652,22 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
 
   /// 本轮进度(只在真的在翻时显示)。
   ///
-  /// 分母 = 本轮入队的真实段数;分子 = 已完成(成功/失败/取消都算完成)——
-  /// 旧实现分母被人为压成 `min(段数, 60)`,界面上同时出现两套数字
-  /// (用户原话"选取的范围也是乱的");现在只有这一套口径。
+  /// 分母 = 本轮入队的**真段落数**(典型文章 6~10,不再恒 1);分子 = 已完成
+  /// (成功/失败/取消都算"已处理")。分母/进度值都来自 [TranslationRunState] ——
+  /// 完成时它会先把分子补到分母,保证 100% 那一帧真的被渲染出来。
   Widget? _buildTranslationProgress() {
-    if (_runTotal <= 0) return null;
-    final done = _runDone.clamp(0, _runTotal);
-    final detail = StringBuffer('已翻 ${_translations.length}/${_chunks.length} 段');
+    if (!_run.visible) return null;
+    final total = _run.total;
+    final done = _run.done;
+    final detail = StringBuffer('已翻 ${_translations.length}/$_units.length 段');
     if (_chunkErrors.isNotEmpty) {
       detail.write(' · ${_chunkErrors.length} 段待重试');
     }
     return ProgressStageBar(
-      stage: '正在翻译 · 已完成 $done/$_runTotal 段',
-      value: done / _runTotal,
+      stage: '正在翻译 · 已完成 $done/$total 段',
+      value: _run.progress,
       detail: detail.toString(),
-      startedAt: _runStartedAt,
+      startedAt: _run.startedAt,
       onCancel: _cancelAllTranslation,
     );
   }
@@ -565,30 +680,32 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
   ///   而且这些按钮只在翻完后出现,不逼用户先做选择题。
   Widget _buildTranslationTray(ThemeData theme) {
     final cs = theme.colorScheme;
-    final busy = _activeJobs.isNotEmpty || _queue.isNotEmpty || _runTotal > 0;
+    // "100% 保留 2 秒"期间也算 busy:进度条要留在屏幕上给用户看见完成。
+    final busy = _activeJobs.isNotEmpty || _queue.isNotEmpty || _run.visible;
     final failed = _chunkErrors.length;
     final done = _translations.length;
+    final unitCount = _units.length;
     // 兜底:理论上 busy 就一定有 runTotal;万一状态错位,也显示"正在翻译"
     // 而不是在任务还在跑的时候露出「继续翻后文」让人重复点。
     final progress = busy
         ? (_buildTranslationProgress() ??
             ProgressStageBar(
               stage: '正在翻译…',
-              detail: '已翻 $done/${_chunks.length} 段',
-              startedAt: _runStartedAt,
+              detail: '已翻 $done/$unitCount 段',
+              startedAt: _run.startedAt,
               onCancel: _cancelAllTranslation,
             ))
         : null;
 
     final String status;
     if (failed > 0) {
-      status = '已翻 $done/${_chunks.length} 段 · $failed 段没翻出来';
+      status = '已翻 $done/$unitCount 段 · $failed 段没翻出来';
     } else if (!_autoTranslate) {
-      status = '已翻 $done/${_chunks.length} 段 · 随读随翻已暂停';
+      status = '已翻 $done/$unitCount 段 · 随读随翻已暂停';
     } else if (done == 0) {
       status = '随读随翻 · 先翻当前屏';
     } else {
-      status = '已翻 $done/${_chunks.length} 段 · 点译文可问 AI';
+      status = '已翻 $done/$unitCount 段 · 点译文可问 AI';
     }
 
     return Container(
@@ -674,6 +791,21 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
                 ),
               ),
             ),
+          // v2.16.0:标注翻译**实际**走哪个槽位/模型。
+          // 阅读器底部「模型」菜单改的是主槽位,而翻译在副槽位已配置时走副槽位
+          // —— 不标出来,用户会以为"换了模型没用"(这正是历史上被反复吐槽的点)。
+          Padding(
+            padding: const EdgeInsets.only(left: Gap.lg, bottom: 2),
+            child: Text(
+              '翻译使用:${DeepseekApiService.targetSummary}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall?.copyWith(
+                fontSize: AppFont.tag,
+                color: cs.onSurfaceVariant,
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -681,9 +813,10 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
 
   /// 单段重试(失败卡上的「重试」)。只重发这一段,不碰其它段。
   void _retryChunk(int index) {
-    if (index < 0 || index >= _chunks.length) return;
+    if (index < 0 || index >= _units.length) return;
     setState(() {
       _chunkErrors.remove(index);
+      _translationNotes.remove(index);
       _canceledChunks.remove(index);
       _showTranslation = true;
     });
@@ -695,6 +828,7 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
   void _retranslateChunk(int index) {
     setState(() {
       _translations.remove(index);
+      _translationNotes.remove(index);
       _chunkErrors.remove(index);
       _canceledChunks.remove(index);
       _showTranslation = true;
@@ -707,8 +841,8 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
   /// 为什么先看当前屏:用户在读哪一段,结果就应该出现在哪一段下面,
   /// 而不是从"上次翻到的地方"继续、把结果翻在屏幕外。
   void _translateNext() {
-    if (_chunks.isEmpty) return;
-    if (!DeepseekApiService().isConfigured) {
+    if (_units.isEmpty) return;
+    if (!_api.isConfigured) {
       _toast('还没有配置 API Key —— 到「我的 → API 设置」填一个就能翻译');
       return;
     }
@@ -724,7 +858,7 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     if (resume) {
       setState(() {});
     }
-    final visible = _visibleChunkIndices(limit: _visibleBatch);
+    final visible = _visibleUnitIndices(limit: _visibleBatch);
     final targets = <int>[
       for (final i in visible)
         if (_canTranslate(i)) i,
@@ -733,10 +867,10 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
       // 当前屏都翻好了 → 从当前屏最后一段的下一段往后翻。
       // 不能从"全局最远一段"往后:那样会跳过用户正在读的中间段;
       // 也不能只看紧邻 3 段:中间可能已经翻过,后面还有没翻的。
-      var start = visible.isEmpty ? _lastChunkIndex + 1 : visible.last + 1;
+      var start = visible.isEmpty ? _unitIndexOfCurrentChunk() : visible.last + 1;
       if (start < 0) start = 0;
       for (var i = start;
-          i < _chunks.length && targets.length < _translateBatch;
+          i < _units.length && targets.length < _translateBatch;
           i++) {
         if (_canTranslate(i)) targets.add(i);
       }
@@ -748,13 +882,22 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     _enqueueTranslation(targets);
   }
 
-  /// 「整章」:从当前读到的位置往后 20 段(没有章节信息时,这是"一章"的近似)。
+  /// 当前读到的块 → 该块第一个单元下标(续读/整章的起点)
+  int _unitIndexOfCurrentChunk() {
+    if (_firstUnitOfChunk.isEmpty) return 0;
+    final chunk = _chunks.isEmpty
+        ? 0
+        : _lastChunkIndex.clamp(0, _chunks.length - 1);
+    return _firstUnitOfChunk[chunk].clamp(0, _units.length);
+  }
+
+  /// 「整章」:从当前读到的位置往后 20 **段**(没有章节信息时,这是"一章"的近似)。
   ///
   /// 这是用户明确点的批量操作,所以一次性入队;进度条显示真实完成数,
   /// 随时可取消,取消后已翻好的保留。
   void _translateChapter() {
-    if (_chunks.isEmpty) return;
-    if (!DeepseekApiService().isConfigured) {
+    if (_units.isEmpty) return;
+    if (!_api.isConfigured) {
       _toast('还没有配置 API Key —— 到「我的 → API 设置」填一个就能翻译');
       return;
     }
@@ -770,8 +913,8 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     if (resume) {
       setState(() {});
     }
-    final start = _lastChunkIndex.clamp(0, _chunks.length - 1);
-    final end = (start + 19).clamp(0, _chunks.length - 1);
+    final start = _unitIndexOfCurrentChunk().clamp(0, _units.length - 1);
+    final end = (start + 19).clamp(0, _units.length - 1);
     final targets = <int>[
       for (var i = start; i <= end; i++)
         if (_canTranslate(i)) i,
@@ -807,7 +950,7 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
   /// [_cancelAllTranslation])。
   void _scheduleVisibleTranslation() {
     if (!_showTranslation || !_autoTranslate) return;
-    if (!DeepseekApiService().isConfigured) return;
+    if (!_api.isConfigured) return;
     _visibleTimer?.cancel();
     _visibleTimer = Timer(const Duration(milliseconds: 450), () {
       if (!mounted || !_showTranslation || !_autoTranslate) return;
@@ -817,7 +960,7 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
 
   void _enqueueVisible({required int limit}) {
     final targets = <int>[
-      for (final i in _visibleChunkIndices(limit: limit))
+      for (final i in _visibleUnitIndices(limit: limit))
         if (_canTranslate(i)) i,
     ];
     if (targets.isEmpty) return;
@@ -826,11 +969,11 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
 
   /// 点译文 → 就这一段追问(带原段 + 页面上的译文 + 相邻两段)。
   ///
-  /// 复用页面已有的 `FollowUpController`:把 [_followUpChunk] 钉在这一段,
-  /// `_buildFollowUpContext` 就会只喂这一段的上下文;问完再点底部「追问」
+  /// 复用页面已有的 `FollowUpController`:把 [_followUpChunk] 钉在这一段(单元
+  /// 下标),`_buildFollowUpContext` 就会只喂这一段的上下文;问完再点底部「追问」
   /// 会自动清掉这个钉选,回到整篇范围。
   void _askAboutChunk(int index) {
-    if (index < 0 || index >= _chunks.length) return;
+    if (index < 0 || index >= _units.length) return;
     setState(() => _followUpChunk = index);
     showFollowUpDrawer(
       context: context,
@@ -959,6 +1102,10 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     _chunkJobEpoch.clear();
     _activeJobs.clear();
     _pendingChunks.clear();
+    // "100% 保留 2 秒"的收条定时器:离开页面必须取消,否则它会在已 dispose
+    // 的 State 上 setState(虽然有 mounted 守卫,取消掉更干净)
+    _runResetTimer?.cancel();
+    _runResetTimer = null;
     // 退出即落盘:用户不需要记着"点保存",进度丢失是最劝退的体验之一
     // (force: 退出这一次不管节流窗口,该存就存)
     _persist(finished: _finished, force: true);
@@ -966,13 +1113,19 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
   }
 
   void _onScroll() {
-    // 用滚动位置粗估"读到第几块"(每块高度不一,按比例足够用)
+    // 用滚动位置粗估"读到第几块"(每块高度不一,按比例足够用)。
+    // v2.13.1:列表项已从"块"变成"段落单元",所以比例要按**单元**算,
+    // 再映射回块 —— 否则块索引会整体跑偏(进度/续读位置跟着错)。
     if (!_scrollCtrl.hasClients) return;
     final max = _scrollCtrl.position.maxScrollExtent;
     if (max <= 0 || _chunks.isEmpty) return;
     final ratio = (_scrollCtrl.offset / max).clamp(0, 1);
-    final idx = (ratio * (_chunks.length - 1)).round();
-    _lastChunkIndex = idx;
+    if (_units.isEmpty) {
+      _lastChunkIndex = (ratio * (_chunks.length - 1)).round();
+    } else {
+      final unitIdx = (ratio * (_units.length - 1)).round();
+      _lastChunkIndex = _units[unitIdx.clamp(0, _units.length - 1)].chunkIndex;
+    }
     // v2.9(第 4 条):滚动即自动留存进度(节流在 _persist 里)
     _persist(finished: _finished);
     // v2.12.2:开了翻译就"随读随翻"当前屏(滚动停 450ms 才触发,见
@@ -1055,15 +1208,23 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
   /// 接着上次读:滚到上次的段(不静默跳转 —— 用户点了「继续」才跳)
   void _scrollToChunk(int index) {
     if (_chunks.length <= 1) return;
-    final idx = index.clamp(0, _chunks.length - 1);
+    final chunk = index.clamp(0, _chunks.length - 1);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      _lastChunkIndex = idx;
-      _lastPersistIndex = idx;
+      _lastChunkIndex = chunk;
+      _lastPersistIndex = chunk;
       if (!_scrollCtrl.hasClients) return;
       final max = _scrollCtrl.position.maxScrollExtent;
       if (max <= 0) return;
-      _scrollCtrl.jumpTo(max * (idx / (_chunks.length - 1)).clamp(0.0, 1.0));
+      // 列表项 = 段落单元:把块映射成"该块第一个单元",再按单元比例跳
+      if (_units.isEmpty || _units.length <= 1) {
+        _scrollCtrl.jumpTo(0);
+        return;
+      }
+      final unit = _firstUnitOfChunk.length > chunk
+          ? _firstUnitOfChunk[chunk].clamp(0, _units.length - 1)
+          : 0;
+      _scrollCtrl.jumpTo(max * (unit / (_units.length - 1)).clamp(0.0, 1.0));
     });
   }
 
@@ -1166,11 +1327,44 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
       final minutes = _intOf(progress?['minutes']);
       final hasProgress = progress != null &&
           (position > 0 || percent > 0 || minutes > 0);
+      // v2.13.1:把正文块拆成**真段落单元**(翻译/进度/逐段对照的最小单元)。
+      // 拆分是纯函数、一次 O(文本长度),在加载时做一次即可。
+      var units = splitUnits(chunks);
+      if (units.isEmpty && chunks.isNotEmpty) {
+        // 极端兜底:整篇连一个非空段都没有 —— 仍按块建空单元,
+        // 保证列表/标题/AI 内容块还能渲染(不能因为"没文字"白屏)
+        units = [
+          for (var i = 0; i < chunks.length; i++)
+            ReaderUnit(chunkIndex: i, paraIndex: 0, text: ''),
+        ];
+      }
+      final firstUnitOfChunk = chunkFirstUnitIndices(units, chunks.length);
+      // v2.16.0(阅读器翻译根治第一段):读回**已落库译文** —— "翻过一次就永久在"。
+      // 必须用记录里的 source_text 快照做防错位:材料重新导入/切段变化后 unit
+      // 下标会漂移,内容对不上的条目不显示(宁可重翻,也不能把 A 段译文挂到 B 段)。
+      final savedTranslations =
+          await DatabaseService.loadMaterialTranslationRecords(widget.materialId);
+      final restored = DatabaseService.alignTranslationsToUnits(
+        savedTranslations,
+        [for (final u in units) u.text],
+      );
+      if (!mounted) return;
       setState(() {
         _material = material;
         _chunks = chunks;
+        _units = units;
+        _firstUnitOfChunk = firstUnitOfChunk;
         _analysis = analysis;
         _blockList = savedBlocks;
+        // 已落库译文直接填进 _translations:这些段 _canTranslate=false →
+        // **不重复翻**,也不会计入本轮进度分母(分母=本轮真正入队的段数)。
+        _translations
+          ..clear()
+          ..addAll(restored);
+        // 重新加载时段数/内容可能变了,上一轮的内存态(错误/取消/提示)全部失效
+        _chunkErrors.clear();
+        _canceledChunks.clear();
+        _translationNotes.clear();
         _lookups = _intOf(progress?['lookups']);
         _picked = _intOf(progress?['picked_words']);
         _lastChunkIndex = position;
@@ -1974,12 +2168,15 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
                       child: ListView.builder(
                         // v2.12.2:用列表视口的真实矩形判断"哪几段可见"
                         // (设备/字号/行距不同,按滚动比例猜会把范围翻错)
+                        // v2.13.1:列表项 = **段落单元**(翻译/可见性/译文的最小
+                        // 单元),不再是 2500 词的正文块 —— 这样每一段原文下面
+                        // 才能单独出现译文与进度。
                         key: _listKey,
                         controller: _scrollCtrl,
                         padding: const EdgeInsets.fromLTRB(
                             Gap.md, Gap.sm, Gap.md, 80),
-                        itemCount: _chunks.length,
-                        itemBuilder: (_, index) => _buildChunk(theme, index),
+                        itemCount: _units.length,
+                        itemBuilder: (_, index) => _buildUnit(theme, index),
                       ),
                     ),
                     // ── 翻译控制条(v2.12.2 重做)──
@@ -2074,6 +2271,7 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     final cs = theme.colorScheme;
     final translation = _translations[index];
     final error = _chunkErrors[index];
+    final note = _translationNotes[index];
     final pending = _pendingChunks.contains(index);
 
     if (error != null) {
@@ -2220,14 +2418,32 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
                       bottom: 2,
                       right: Gap.xxs,
                     ),
-                    child: Text(
-                      translation,
-                      style: TextStyle(
-                        fontSize:
-                            ReaderSettings.baseFontSize * _fontScale * 0.86,
-                        height: _lineHeight * 0.95,
-                        color: cs.onSurfaceVariant,
-                      ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          translation,
+                          style: TextStyle(
+                            fontSize: ReaderSettings.baseFontSize *
+                                _fontScale *
+                                0.86,
+                            height: _lineHeight * 0.95,
+                            color: cs.onSurfaceVariant,
+                          ),
+                        ),
+                        // v2.13.1:模型段数对不上时的提示(**不能再静默丢弃**)——
+                        // 旧实现只取第一段译文、note 直接扔掉,用户以为整段都翻好了。
+                        if (note != null && note.trim().isNotEmpty) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            '可能不完整:$note',
+                            style: TextStyle(
+                              fontSize: AppFont.tag,
+                              color: AppTheme.warningColor(context),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
                 ),
@@ -2281,70 +2497,85 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     );
   }
 
-  Widget _buildChunk(ThemeData theme, int index) {
-    final row = _chunks[index];
-    final chunkTitle = row['title'];
-    final text = '${row['text'] ?? ''}';
+  /// 渲染一个**段落单元**(列表项 = 真段落,不再是 2500 词的正文块)。
+  ///
+  /// 块独有的东西只出现在块的边界上:
+  /// - 块标题(`chunk.title`)挂在该块第一个单元上方;
+  /// - AI 内容块(表格/导图…)挂在该块最后一个单元之后。
+  /// 中间每个单元就是"一段原文 + 段下译文" —— 用户才能真正逐段英中对照。
+  Widget _buildUnit(ThemeData theme, int index) {
+    final unit = _units[index];
+    final chunkIndex = unit.chunkIndex;
+    final chunkTitle = _chunks[chunkIndex]['title'];
+    final isFirstOfChunk = _firstUnitOfChunk.length > chunkIndex &&
+        _firstUnitOfChunk[chunkIndex] == index;
+    final isLastOfChunk =
+        index + 1 >= _units.length || _units[index + 1].chunkIndex != chunkIndex;
     // 正文样式由**阅读设置**决定(字号乘数 × 基准号 + 行距档位),
     // 系统无障碍字号仍由 MediaQuery 叠加,不在这里覆盖
     final bodyStyle = (theme.textTheme.bodyLarge ?? const TextStyle()).copyWith(
       fontSize: ReaderSettings.baseFontSize * _fontScale,
       height: _lineHeight,
     );
-    // v2.9(第 3(5) 条):这一段挂着的 AI 内容块(表格/导图/时间线/要点/自测)
+    // v2.9(第 3(5) 条):这个块挂着的 AI 内容块(表格/导图/时间线/要点/自测)
     final chunkBlocks = [
       for (final b in _blockList)
-        if (b.chunkIndex == index) b,
+        if (b.chunkIndex == chunkIndex) b,
     ];
-    // 正在生成的那一个(只在本段头部显示一次等待时间线,不重复)
+    // 正在生成的那一个(只在块末尾显示一次等待时间线,不重复)
     final waitingKey = _blockWaiting;
     final waitingHere = waitingKey != null &&
-        waitingKey.startsWith('$index:') &&
-        chunkBlocks.every((b) => _blockKey(index, b.kind) != waitingKey);
+        waitingKey.startsWith('$chunkIndex:') &&
+        chunkBlocks.every((b) => _blockKey(chunkIndex, b.kind) != waitingKey);
     final waitingKind = waitingHere
         ? blocks.MaterialBlockKind.byId(waitingKey.split(':').last)
         : null;
     return Padding(
-      // 每个段落挂一个稳定 key:滚动停下的"可见段"判断要拿它的 RenderBox
-      key: _chunkKey(index),
-      padding: const EdgeInsets.only(bottom: Gap.lg),
+      // 每个单元挂一个稳定 key:滚动停下的"可见段"判断要拿它的 RenderBox
+      key: _unitKey(index),
+      // 段间距比块间距小:同一块里的段落读起来是一个整体
+      padding: EdgeInsets.only(bottom: isLastOfChunk ? Gap.lg : Gap.md),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (chunkTitle is String && chunkTitle.trim().isNotEmpty) ...[
+          if (isFirstOfChunk &&
+              chunkTitle is String &&
+              chunkTitle.trim().isNotEmpty) ...[
             Text(chunkTitle.trim(),
                 style: theme.textTheme.titleSmall
                     ?.copyWith(fontWeight: FontWeight.w700)),
             const SizedBox(height: Gap.sm),
           ],
-          TappablePassage(
-            text: text,
-            onWordTap: _onWordTap,
-            onSelectionAction: _onSelectionAction,
-            style: bodyStyle,
-          ),
-          // 逐段译文(v2.12.2 重做):紧贴原段下方,不挪版面、不弹浮层。
+          if (unit.text.isNotEmpty)
+            TappablePassage(
+              text: unit.text,
+              onWordTap: _onWordTap,
+              onSelectionAction: _onSelectionAction,
+              style: bodyStyle,
+            ),
+          // 逐段译文(v2.12.2 重做):紧贴**这一段**原文下方,不挪版面、不弹浮层。
           // 成功 / 失败 / 在途三种状态各占一个很轻的槽位,详见 _buildTranslationArea。
           if (_showTranslation) _buildTranslationArea(theme, index),
-          // ── AI 内容块(第 3(5) 条):插在本段之后,与正文用留白 + 卡片分开 ──
-          if (waitingHere && waitingKind != null) ...[
+          // ── AI 内容块(第 3(5) 条):插在块末尾,与正文用留白 + 卡片分开 ──
+          if (isLastOfChunk && waitingHere && waitingKind != null) ...[
             const SizedBox(height: Gap.sm),
             MaterialBlockWaiting(kind: waitingKind),
           ],
-          for (final b in chunkBlocks) ...[
-            const SizedBox(height: Gap.xxs),
-            if (_blockErrors[_blockKey(index, b.kind)] != null)
-              MaterialBlockErrorCard(
-                message: _blockErrors[_blockKey(index, b.kind)]!,
-                onRetry: () => _regenerateBlock(b),
-              )
-            else
-              MaterialBlockView(
-                block: b,
-                onDelete: () => _deleteBlock(b),
-                onRegenerate: () => _regenerateBlock(b),
-              ),
-          ],
+          if (isLastOfChunk)
+            for (final b in chunkBlocks) ...[
+              const SizedBox(height: Gap.xxs),
+              if (_blockErrors[_blockKey(chunkIndex, b.kind)] != null)
+                MaterialBlockErrorCard(
+                  message: _blockErrors[_blockKey(chunkIndex, b.kind)]!,
+                  onRetry: () => _regenerateBlock(b),
+                )
+              else
+                MaterialBlockView(
+                  block: b,
+                  onDelete: () => _deleteBlock(b),
+                  onRegenerate: () => _regenerateBlock(b),
+                ),
+            ],
         ],
       ),
     );

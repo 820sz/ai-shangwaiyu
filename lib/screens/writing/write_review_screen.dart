@@ -11,6 +11,7 @@ import '../../providers/bookmark_provider.dart';
 import '../../services/base_api.dart';
 import '../../services/database.dart';
 import '../../services/doubao_api.dart';
+import '../../services/output_feedback.dart';
 import '../../services/writing_review_settings.dart';
 import '../../widgets/app_ui.dart';
 import '../../widgets/design_kit.dart' show AppProgressRing;
@@ -414,6 +415,21 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
       if (mounted) {
         setState(() => _saved = true);
         _toast('已保存到写译记录');
+      }
+      // v3 批 3 收尾:写译批改的错误也要进错误档案(以前只留在写译记录里,
+      // 于是"错误档案"永远是空的、助理也看不到写作薄弱点)。
+      // 用旧链路的文本类型归一,归一不上的丢弃(不新造标签)。
+      try {
+        final tags = OutputFeedback.canonicalTagsFromTexts([
+          for (final e in _issues)
+            '${e['type'] ?? ''} ${e['detail'] ?? e['reason'] ?? ''}',
+          ..._errorSummary.keys,
+        ]);
+        if (tags.isNotEmpty) {
+          await OutputFeedback.recordErrorTags(tags, source: 'writing');
+        }
+      } catch (_) {
+        // 回流失败不影响"记录已保存"这个结果
       }
       return true;
     } catch (e) {

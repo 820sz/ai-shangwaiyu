@@ -92,7 +92,9 @@ class _RootShell extends StatelessWidget {
         },
         child: Scaffold(
           body: IndexedStack(
-            // 顺序必须与 ReadFlowTab 枚举一致(输入 / 输出 / 我的 / 学习助理)
+            // 顺序必须与 ReadFlowTab 枚举一致(底栏 v3 文案:输入 / 输出 / 我的 / 助理,
+            // 见 widgets/bottom_nav.dart 的 v3(B0-5)说明 —— 输入/输出是学习闭环,
+            // 枚举名 input/output 不变,只改用户看到的两个字)
             index: currentTab.index,
             children: const [
               InputHomeScreen(),

@@ -121,6 +121,13 @@ class LearnerModelStore {
     required LearnerModel base,
     String? cefr,
     String? goal,
+    /// **多选目标**(v3 批 4,用户 2026-11-01:"学习助理的需求询问不支持多选……
+    /// 这些要支持多选呀,学习者又不是只有一个需求")。
+    ///
+    /// 与 [goal] 的关系:两者**都写**,`goals` 是完整多选、`goal` 是其中第一个
+    /// (保留给还没适配多选的旧读者,如 AI 提示词里的单值目标)。
+    /// 传 `null` = 不改动;传 `[]` = 清空。
+    List<String>? goals,
     int? dailyMinutes,
     int? maxNewWords,
     List<String>? interests,
@@ -128,6 +135,7 @@ class LearnerModelStore {
     List<String>? blockedKeywords,
   }) async {
     final model = base.copyWith(
+      goals: goals,
       cefr: (cefr == null || cefr.isEmpty)
           ? null
           : ProfileField<String>(

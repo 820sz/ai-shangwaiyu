@@ -81,12 +81,24 @@ class FollowUpController {
   /// 外部预设上下文(如「询问 AI 详解」),优先级高于 [buildContext]
   String? contextOverride;
 
-  /// 上次退出抽屉时停留在哪个位置(v2.6,用户实测"收起再点开又回到顶部")。
+  /// 上次仍在抽屉里时停留在哪个位置(v2.6 起,用户实测"收起再点开又回到顶部")。
   /// 抽屉是 modal 路由,每次打开都是全新的列表 —— 不记位置就永远从第一条开始,
   /// 而追问往往是接着上一条看的。
+  ///
+  /// v2.14(B0-1)修正:以前只在"消息列表重建"的 postFrame 里写这个值,
+  /// 但用户**只是滚动/直接收起**时消息列表不会重建,记录的永远是旧值(通常 0)。
+  /// 现在由 [_FollowUpScrollKeeper] 监听滚动持续写,见它的注释。
   double lastScrollOffset = 0;
 
-  /// 打开抽屉后是否要把位置还原到 [lastScrollOffset](消费一次即清)
+  /// 上次记录位置时的**最大可滚动距离**(v2.14,与 [lastScrollOffset] 同生命周期)。
+  ///
+  /// 抽屉高度可拖(DraggableScrollableSheet 0.6↔0.85):两次打开时
+  /// maxScrollExtent 不同,同一个像素值指向的内容位置就变了。还原时要用
+  /// [lastScrollExtent] 做比例换算,而不是直接按像素跳(那会错位)。
+  double lastScrollExtent = 0;
+
+  /// 打开抽屉后是否要把位置还原到 [lastScrollOffset](消费一次即清)。
+  /// v2.14 起由 [_FollowUpScrollKeeper] 在还原结束时置回 false。
   bool scrollRestorePending = false;
 
   List<FollowUpSavedConversation> savedConversations = [];
@@ -411,7 +423,8 @@ void showFollowUpDrawer({
   controller.inputCtrl.clear();
   if (prefillQuestion != null) controller.inputCtrl.text = prefillQuestion;
   controller.contextOverride = contextOverride;
-  // v2.6:标记"这次打开要还原上次的滚动位置"
+  // v2.14(B0-1):标记"这次打开要按比例还原上次的滚动位置";
+  // 真正执行还原的是抽屉里的 _FollowUpScrollKeeper(它在布局就绪后跳,最多 3 帧)。
   controller.scrollRestorePending = true;
   final bottomSafe = MediaQuery.of(context).padding.bottom;
   showModalBottomSheet(
@@ -431,6 +444,153 @@ void showFollowUpDrawer({
   );
 }
 
+/// 还原目标(纯函数,便于单测):把"上次的位置"按可滚区间比例换算到今天。
+///
+/// 为什么不能直接按像素还原:抽屉能在 0.6↔0.85 之间拖,两次打开的
+/// `maxScrollExtent` 不同;同一像素值在高度变化后指向别的内容,用户会看到
+/// "位置又不对了"。按**比例**换算,内容位置才稳定。
+/// [lastExtent] 为 0(上次内容不足一屏)时没有比例可言,退回像素 clamp。
+double resolveFollowUpRestoreOffset({
+  required double lastOffset,
+  required double lastExtent,
+  required double newExtent,
+}) {
+  if (newExtent <= 0) return 0;
+  final last = lastOffset.isFinite ? lastOffset : 0.0;
+  if (lastExtent <= 0) return last.clamp(0.0, newExtent).toDouble();
+  final ratio = (last / lastExtent).clamp(0.0, 1.0);
+  return (ratio * newExtent).clamp(0.0, newExtent).toDouble();
+}
+
+/// 抽屉存续期间持续记录滚动位置,并在打开后还原(v2.14,修 B0-1)。
+///
+/// 为什么必须是"零尺寸常驻子 widget"而不是在原 build 里加几行:
+/// 1. 抽屉是 `showModalBottomSheet` 的**销毁型路由**,收起即 pop,ListView 与
+///    ScrollPosition 全部 dispose;下次打开是全新对象 —— 位置只能记在
+///    [FollowUpController](页面级、不随抽屉销毁)上;
+/// 2. 原来唯一的写入点在"消息列表重建"的 postFrame 里(`ValueListenableBuilder`
+///    只在 messages 内容变化时重建),而用户**只是滚动 / 直接收起**时消息列表
+///    一次都不会重建 → 记录的永远是旧值(通常还是 0),所以"收起再开回到顶部";
+/// 3. 收起方式(点遮罩 / 下滑)都不会回调到业务层,没有"关闭时保存"的时机,
+///    只能靠 ScrollController 监听**持续**写;监听需要 initState/dispose 生命周期,
+///    又不能为它把整个 `_FollowUpSheet`(39KB 文件里的全部业务方法)改成 Stateful,
+///    所以收成一个零尺寸子节点,由它的 State 管监听(改动面最小)。
+///
+/// 放在 `DraggableScrollableSheet` 的 builder 返回的 Column 第一个子节点:
+/// 这里拿得到 sheet 交给列表的那个 ScrollController —— 抽屉高度变化时
+/// 该 controller 的位置会重新布局,于是新的 maxScrollExtent 也会被记下,
+/// 正好满足"0.6↔0.85 高度切换不错位"。
+class _FollowUpScrollKeeper extends StatefulWidget {
+  const _FollowUpScrollKeeper({
+    required this.controller,
+    required this.scrollCtrl,
+  });
+
+  final FollowUpController controller;
+  final ScrollController scrollCtrl;
+
+  @override
+  State<_FollowUpScrollKeeper> createState() => _FollowUpScrollKeeperState();
+}
+
+class _FollowUpScrollKeeperState extends State<_FollowUpScrollKeeper> {
+  /// 还原最多重试几帧:抽屉刚打开时列表未必已完成布局(`hasClients` /
+  /// `maxScrollExtent` 可能还是 0),此时 jumpTo 会被夹回 0 —— 用户看到的
+  /// 就是"又从头开始"。3 帧是防御值(真机首帧时序静态无法证明,见 bugs.md)。
+  static const int _maxRestoreAttempts = 3;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.scrollCtrl.addListener(_onScroll);
+    _restoreAttempt(0);
+  }
+
+  @override
+  void didUpdateWidget(covariant _FollowUpScrollKeeper oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 抽屉高度变化会让 builder 重建这棵子树;ScrollController 实例通常不变,
+    // 但真换过就重挂监听 —— 否则监听挂在已废弃的位置上,再也不会有回调。
+    if (oldWidget.scrollCtrl != widget.scrollCtrl) {
+      oldWidget.scrollCtrl.removeListener(_onScroll);
+      widget.scrollCtrl.addListener(_onScroll);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.scrollCtrl.removeListener(_onScroll);
+    super.dispose();
+  }
+
+  /// 持续记录"当前位置 + 可滚区间"。
+  ///
+  /// 不 setState:这里不需要任何 UI 重建,只写控制器上的两个字段;
+  /// 若 setState,流式回答每个 chunk 都会叠加一次整抽屉重建。
+  void _onScroll() {
+    if (!mounted) return;
+    // 还原还没完成:此刻的 pixels 是"刚打开的 0",写进去会把上次位置冲掉。
+    if (widget.controller.scrollRestorePending) return;
+    if (!widget.scrollCtrl.hasClients) return;
+    final pos = widget.scrollCtrl.position;
+    if (!pos.hasContentDimensions) return;
+    final max = pos.maxScrollExtent;
+    // 内容不足一屏时没有"位置"可言;记 0 只会覆盖上次有效的值。
+    if (max <= 0) return;
+    final px = pos.pixels.clamp(0.0, max).toDouble();
+    // 像素没变 = 这次通知来自"抽屉高度/内容尺寸变化",不是用户滚动。
+    // 这种通知不能更新比例基准:否则把抽屉从 0.85 拖回 0.6(或收起时的
+    // 高度动画)会把上次的位置按另一个窗口重新算一遍 —— 连续开关几次就漂移。
+    // 只记录"用户真的滚动过"的 像素+区间,两者必须来自同一时刻。
+    if (px == widget.controller.lastScrollOffset) return;
+    widget.controller.lastScrollOffset = px;
+    widget.controller.lastScrollExtent = max;
+  }
+
+  /// 打开后按比例还原位置(最多 [_maxRestoreAttempts] 帧)。
+  ///
+  /// 为什么放 postFrame 且要重试:刚打开那一帧列表可能还没完成布局,
+  /// `maxScrollExtent` 为 0 时 jumpTo 会被夹回顶部;等一帧再看,仍不行就再等。
+  void _restoreAttempt(int attempt) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final controller = widget.controller;
+      final scrollCtrl = widget.scrollCtrl;
+      final pos = scrollCtrl.hasClients ? scrollCtrl.position : null;
+      final ready =
+          pos != null && pos.hasContentDimensions && pos.maxScrollExtent > 0;
+      if (ready) {
+        final target = resolveFollowUpRestoreOffset(
+          lastOffset: controller.lastScrollOffset,
+          lastExtent: controller.lastScrollExtent,
+          newExtent: pos.maxScrollExtent,
+        );
+        // **先消费标记再跳**:jumpTo 会触发 _onScroll,标记还在的话监听会
+        // 跳过这次记录;而标记留到下次打开,则会把"打开时的 0"当用户位置写进去。
+        controller.scrollRestorePending = false;
+        if (target > 0 && (target - pos.pixels).abs() > 0.5) {
+          scrollCtrl.jumpTo(target);
+        }
+        return;
+      }
+      if (attempt + 1 < _maxRestoreAttempts) {
+        // 有些情况下"下一帧"不会自己来(列表还没挂上、页面没有动画在跑),
+        // 只注册 postFrame 会一直等到用户下次滚动才执行 —— 那时再跳位置很突兀。
+        // 主动要一帧,保证重试真的发生(最多要 2 次,开销可忽略)。
+        WidgetsBinding.instance.ensureVisualUpdate();
+        _restoreAttempt(attempt + 1);
+        return;
+      }
+      // 列表为空 / 内容不足一屏:没有可还原的位置。也要消费掉标记,
+      // 否则本次会话的滚动记录会被永久跳过。
+      controller.scrollRestorePending = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => const SizedBox.shrink();
+}
+
 class _FollowUpSheet extends StatelessWidget {
   final FollowUpController controller;
   final String title;
@@ -447,6 +607,10 @@ class _FollowUpSheet extends StatelessWidget {
       expand: false,
       builder: (ctx, scrollCtrl) => Column(
         children: [
+          // v2.14(B0-1):零尺寸常驻节点,只负责"抽屉存续期间持续记录滚动位置"
+          // 与"打开后按比例还原"—— 原实现在消息列表的 postFrame 里记录,
+          // 用户纯滚动/直接收起时没有写入点,所以收起再开总是回到顶部。
+          _FollowUpScrollKeeper(controller: controller, scrollCtrl: scrollCtrl),
           // 拖拽条
           Padding(
             padding: const EdgeInsets.only(top: 8, bottom: 4),
@@ -535,20 +699,11 @@ class _FollowUpSheet extends StatelessWidget {
                     controller.scrollScheduled = false;
                     if (!scrollCtrl.hasClients) return;
                     final pos = scrollCtrl.position;
-                    // v2.6:刚打开抽屉 → 先还原到上次的位置
-                    // (读完上面的对话收起抽屉,再点开不该被拽回顶部)
-                    if (controller.scrollRestorePending) {
-                      controller.scrollRestorePending = false;
-                      final target =
-                          controller.lastScrollOffset.clamp(0.0, pos.maxScrollExtent);
-                      if (target > 0) {
-                        scrollCtrl.jumpTo(target);
-                        controller.lastScrollOffset = target;
-                        return;
-                      }
-                    }
-                    // 随手记住当前位置,供下次打开还原
-                    controller.lastScrollOffset = pos.pixels;
+                    // v2.14(B0-1):"还原位置 / 随手记住"已移到上面的
+                    // _FollowUpScrollKeeper —— 不能挂在这里:这个
+                    // ValueListenableBuilder 只在 messages 内容变化时重建,
+                    // 用户"只滚动 / 直接收起"时一次都不会重建,记录值永远是旧的。
+                    // 这里只保留"新消息到达时滚到底"的原有行为。
                     final nearBottom = pos.maxScrollExtent - pos.pixels < 150;
                     if (controller.pendingScroll || nearBottom) {
                       controller.pendingScroll = false;

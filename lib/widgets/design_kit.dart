@@ -21,6 +21,7 @@ import 'package:flutter/material.dart';
 import '../config/design_tokens.dart';
 import '../config/theme.dart';
 import 'app_ui.dart';
+import 'graphics/graphics.dart';
 import 'material_cover.dart';
 
 // ─────────────────────────────────────────────────────────────
@@ -756,16 +757,25 @@ class _RingPainter extends CustomPainter {
       old.value != value || old.color != color || old.track != track;
 }
 
-/// 空态:自绘小图形(圆 + 点) + 标题 + 说明 + 主按钮。
+/// 空态:几何空态插图 + 标题 + 说明 + 主按钮。
 ///
-/// 为什么不用一个灰色大图标:空态是"第一印象"(样图都会给空态做设计)。
-/// 这里用**主色的低透明度圆 + 两个装饰点**做出"轻量插画"的观感,
-/// 不引入任何图片资源,也不破坏暗色。
+/// 为什么从"圆底 + 图标"换成插图(批 1 · B1-4):旧实现是全 App 统一的主色
+/// 低透明圆底 + 两个装饰点 + 32px 图标 —— 几十处空态长得一模一样,用户看到的
+/// 只是"一个灰色图标",读不出"为什么空、空了之后会有什么"。现在统一用图形
+/// 资产系统的 5 种空态插图([EmptyArt]):按**语义**选图(搜索无结果 / 还没有
+/// 内容 / 还没开始 / 词库为空 / 兜底),只画图形不写文案 —— 空态文案必须结合
+/// 上下文,仍由调用方给。
+///
+/// 兼容:旧的 [icon] 参数保留,作为"没有显式 [art] 时"的语义种子
+/// (见 [EmptyArtKind.fromIcon]),所有现有调用点一行不用改。
 class AppEmptyState extends StatelessWidget {
   final IconData icon;
   final String title;
   final String? hint;
   final Widget? action;
+
+  /// 显式指定空态插图;null = 按 [icon] 语义自动选([EmptyArtKind.fromIcon])
+  final EmptyArtKind? art;
 
   const AppEmptyState({
     super.key,
@@ -773,6 +783,7 @@ class AppEmptyState extends StatelessWidget {
     required this.title,
     this.hint,
     this.action,
+    this.art,
   });
 
   @override
@@ -785,35 +796,9 @@ class AppEmptyState extends StatelessWidget {
       ),
       child: Column(
         children: [
-          SizedBox(
-            width: 88,
-            height: 88,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                Container(
-                  width: 72,
-                  height: 72,
-                  decoration: BoxDecoration(
-                    color: cs.primary.withAlpha(16),
-                    shape: BoxShape.circle,
-                  ),
-                ),
-                // 两个装饰点:制造"轻插图"的手感,不抢主体
-                Positioned(
-                  right: 6,
-                  top: 14,
-                  child: _Dot(size: 8, color: cs.primary.withAlpha(60)),
-                ),
-                Positioned(
-                  left: 8,
-                  bottom: 12,
-                  child: _Dot(size: 5, color: cs.primary.withAlpha(38)),
-                ),
-                Icon(icon, size: 32, color: cs.primary.withAlpha(200)),
-              ],
-            ),
-          ),
+          // 96 = 图形资产的标准中档(GraphicsPalette.sizes):空态只占页面一块,
+          // 不值得用 hero 级 120/160;比旧图标(88 容器)的视觉重量更稳
+          EmptyArt(kind: art ?? EmptyArtKind.fromIcon(icon), size: 96),
           const SizedBox(height: Gap.md),
           Text(
             title,
@@ -834,22 +819,6 @@ class AppEmptyState extends StatelessWidget {
           ],
         ],
       ),
-    );
-  }
-}
-
-class _Dot extends StatelessWidget {
-  final double size;
-  final Color color;
-
-  const _Dot({required this.size, required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
     );
   }
 }

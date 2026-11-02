@@ -137,6 +137,8 @@ abstract class BaseApiService {
   /// 只在"参数不兼容"类 4xx(见 [isReasoningError])且请求体确实含有
   /// 可降级字段时重试一次,并同时去掉 reasoning_effort、关闭 thinking。
   /// [cancelToken] 供调用方中途取消(流式看门狗/用户点取消)。
+  /// [receiveTimeout] 覆盖本次请求的接收超时(默认 180s);阅读器逐段翻译传
+  /// 45s —— 单段(≤600 字符)不值得让用户干等 3 分钟,超时即失败可重试。
   Future<Response> postWithReasoningFallback(
     String path,
     Map<String, dynamic> body, {
@@ -144,6 +146,7 @@ abstract class BaseApiService {
     ResponseType? responseType,
     int retryDepth = 0,
     CancelToken? cancelToken,
+    Duration? receiveTimeout,
   }) async {
     final apiKey = cfg.apiKey;
     if (apiKey == null || apiKey.isEmpty) {
@@ -154,6 +157,8 @@ abstract class BaseApiService {
           options: Options(
             headers: {'Authorization': 'Bearer $apiKey'},
             responseType: responseType,
+            // null = 用 Dio 实例上的默认 180s;非 null 只覆盖本次请求
+            receiveTimeout: receiveTimeout,
           ),
           data: body,
           cancelToken: cancelToken);
@@ -165,7 +170,8 @@ abstract class BaseApiService {
           cfg: cfg,
           responseType: responseType,
           retryDepth: retryDepth + 1,
-          cancelToken: cancelToken);
+          cancelToken: cancelToken,
+          receiveTimeout: receiveTimeout);
     }
   }
 

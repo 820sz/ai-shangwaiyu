@@ -27,11 +27,37 @@ class TranslateOutcome {
 /// 原 DeepSeek 服务。槽位策略:副槽位已配置 → 用副;未配置 → 全部走主槽位
 /// (与用户约定:只填主 API 时所有操作都走主)。
 class DeepseekApiService extends BaseApiService {
-  @override
-  ApiEndpointConfig get config =>
+  /// 翻译实际使用的槽位:**副槽位已配置 → 副(DeepSeek);否则回落主槽位**。
+  ///
+  /// 抽成静态是让「控制条标注 / 诊断信息 / 真实请求」共用**同一份判定** ——
+  /// 旧实现这三处各 if 一遍,曾经出过"界面显示用 A、实际请求用 B"的误导
+  /// (阅读器的模型菜单改主槽位,但翻译走副槽位,用户以为换模型没生效)。
+  static ApiEndpointConfig get activeConfig =>
       ApiEndpointConfig.secondary.isConfigured
           ? ApiEndpointConfig.secondary
           : ApiEndpointConfig.primary;
+
+  /// 槽位中文名(界面/诊断标注用)
+  static String get slotLabel =>
+      ApiEndpointConfig.secondary.isConfigured ? '副槽位' : '主槽位';
+
+  /// 一行摘要:「副槽位 · deepseek-flash」(拿不到模型名就写"当前模型")
+  static String get targetSummary {
+    final m = activeConfig.model.trim();
+    return '$slotLabel · ${m.isEmpty ? '当前模型' : m}';
+  }
+
+  /// 翻译端点的 host(诊断用)。**只取 host,绝不含 key/路径/查询参数** ——
+  /// 诊断页整屏会被用户截图外发。
+  static String get baseHost {
+    final raw = activeConfig.baseUrl.trim();
+    if (raw.isEmpty) return '(默认端点)';
+    final host = Uri.tryParse(raw)?.host ?? '';
+    return host.isEmpty ? '(无法解析)' : host;
+  }
+
+  @override
+  ApiEndpointConfig get config => activeConfig;
 
   bool get isConfigured => config.isConfigured;
 
@@ -249,9 +275,17 @@ ${TranslationPolicy.discipline}
   /// 2. **maxTokens 随输入长度自适应** —— 旧实现固定 4096,公版书那种长段很容易把
   ///    自己截断 → JSON 不完整 → 整批丢弃 → 用户看到的就是"0% 卡死 + 一直报错";
   /// 3. **段数对不上时抢救**(能对上前 k 段就先给前 k 段),而不是整批扔掉。
+  ///
+  /// v2.13.1(用户 2026-11-01:"翻译永远没法用、进度永远是死的"):
+  /// - 调用方(阅读器)改成**一次只发一个真段落**(≤600 字符,见 reader_units.dart),
+  ///   不再把 2500 词的整块当"1 段"发 —— 这是"段数对不上/只翻第一段"的根;
+  /// - 新增 [receiveTimeout](默认 45s):非流式请求的首字节=整段算完才发,
+  ///   旧默认 180s 会让用户对着一句没反应干等 3 分钟;单段超时就标该段失败可重试;
+  /// - 解析/段数校验抽成可单测的纯函数 [parseTranslationOutcome]。
   Future<TranslateOutcome> translateParagraphsRich(
     List<String> paragraphs, {
     CancelToken? cancelToken,
+    Duration receiveTimeout = const Duration(seconds: 45),
   }) async {
     if (paragraphs.isEmpty || !config.isConfigured) {
       return const TranslateOutcome(translations: [], note: 'AI 未配置');
@@ -285,24 +319,86 @@ ${TranslationPolicy.discipline}
       ),
       cfg: config,
       cancelToken: cancelToken,
+      // 单段翻译(≤600 字符)不该等 180s:超时立刻让调用方把这一段标成
+      // "没翻出来 · 可重试",而不是让整条进度条僵在那里。
+      receiveTimeout: receiveTimeout,
     );
-    final content = BaseApiService.extractContentWithReasoning(response.data);
-    final parsed = _parseJsonResponse(content);
+    final data = response.data is Map
+        ? Map<String, dynamic>.from(response.data as Map)
+        : const <String, dynamic>{};
+    final content = BaseApiService.extractContentWithReasoning(data);
+    return parseTranslationOutcome(
+      content,
+      paragraphs.length,
+      finishReason: finishReasonOf(data),
+    );
+  }
+
+  /// 从 chat/completions 响应里取 `finish_reason`(纯函数,可单测)。
+  ///
+  /// `finish_reason == 'length'` = 模型**被输出上限截断**。旧实现完全不看它:
+  /// 用户只看到"少了一段/只有第一段",却不知道是截断 —— 诊断信息与段下提示
+  /// 都必须把这件事说出来(可重试 / 可缩小分段)。
+  static String? finishReasonOf(Map<String, dynamic> data) {
+    final choices = data['choices'];
+    if (choices is List && choices.isNotEmpty) {
+      final first = choices.first;
+      if (first is Map) {
+        final reason = first['finish_reason'];
+        if (reason != null) return '$reason';
+      }
+    }
+    return null;
+  }
+
+  /// 解析翻译返回并做**段数对账**(纯函数,可单测)。
+  ///
+  /// 规则(与 v2.10 的抢救逻辑一致,只是抽出来可测):
+  /// - 解析失败/没有译文 → `note: 'AI 没返回译文(可能被截断)'`;
+  /// - 段数 > 期望:多出来的丢掉(绝不把译文错位到别的段落上),给 note;
+  /// - 段数 < 期望:保留能对上的前 k 段,给 note(界面必须显示它,不能静默
+  ///   取 `.first` —— 旧实现就是这样让用户以为"只有第一段翻了");
+  /// - [finishReason] == `'length'`:note 明确写「输出被截断」(而不是含糊的
+  ///   "可能被截断"),让用户知道重试/缩小分段才有用;
+  /// - 完全匹配 → 无 note。
+  static TranslateOutcome parseTranslationOutcome(
+    String content,
+    int expectedCount, {
+    String? finishReason,
+  }) {
+    final truncated = finishReason == 'length';
+    final jsonStr = DoubaoApiService.extractJsonBlock(content);
+    final parsed = <String, dynamic>{};
+    if (jsonStr.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(jsonStr);
+        if (decoded is Map) parsed.addAll(Map<String, dynamic>.from(decoded));
+      } catch (_) {
+        // JSON 坏(被截断/夹带说明):按"没译文"处理,note 会提示可能被截断
+      }
+    }
     final list = (parsed['translations'] as List? ?? const [])
         .map((e) => '$e')
         .where((s) => s.trim().isNotEmpty)
         .toList();
     if (list.isEmpty) {
-      return const TranslateOutcome(translations: [], note: 'AI 没返回译文(可能被截断)');
+      return TranslateOutcome(
+        translations: const [],
+        note: truncated
+            ? '输出被截断(达到模型输出上限),没有可用的译文'
+            : 'AI 没返回译文(可能被截断)',
+      );
     }
-    if (list.length != paragraphs.length) {
-      // 抢救:AI 少给了就丢弃后面几段(那几段标失败可重试),绝不把译文错位
-      final kept = list.length > paragraphs.length
-          ? list.sublist(0, paragraphs.length)
+    if (expectedCount > 0 && list.length != expectedCount) {
+      final kept = list.length > expectedCount
+          ? list.sublist(0, expectedCount)
           : list;
+      final base = '只翻好了前 ${kept.length}/$expectedCount 段';
       return TranslateOutcome(
         translations: kept,
-        note: '只翻好了前 ${kept.length}/${paragraphs.length} 段(可能被截断)',
+        note: truncated
+            ? '$base(输出被截断:达到模型输出上限,可重试或分段再翻)'
+            : '$base(可能被截断)',
       );
     }
     return TranslateOutcome(translations: list);

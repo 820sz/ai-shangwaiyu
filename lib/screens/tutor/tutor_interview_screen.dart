@@ -42,9 +42,12 @@ class _Step {
 class _TutorInterviewScreenState extends State<TutorInterviewScreen> {
   static const List<_Step> _steps = [
     _Step(
-      question: '你学英语,最主要想用它做什么?',
-      why: '这决定我给你排什么材料、练什么题型',
+      question: '你学英语,最主要想用它做什么?(可多选)',
+      why: '这决定我给你排什么材料、练什么题型 —— 需求可以不止一个',
       options: ['四六级', '考研', '雅思/托福', '出国生活', '工作/学术', '兴趣阅读', '看剧看视频'],
+      // v3 批 4(用户 11/01):"需求询问不支持多选'四六级''兴趣阅读'——
+      // 这些要支持多选呀,学习者又不是只有一个需求"。
+      multi: true,
     ),
     _Step(
       question: '大概什么时候要用上?',
@@ -77,6 +80,12 @@ class _TutorInterviewScreenState extends State<TutorInterviewScreen> {
 
   int _index = 0;
   final List<Set<String>> _picked = List.generate(_steps.length, (_) => <String>{});
+
+  /// 每一步的**自由补充**(每步一个输入框)。
+  ///
+  /// v3 批 4 修:旧实现只读 `_picked`,用户打的字**从来没被保存**(被代码丢弃)。
+  /// 现在每翻一步就把当前输入收进对应位置,完成时一起写进画像与助理记忆。
+  final List<String> _freeNotes = List.generate(_steps.length, (_) => '');
   final TextEditingController _freeCtrl = TextEditingController();
   bool _saving = false;
 
@@ -87,6 +96,11 @@ class _TutorInterviewScreenState extends State<TutorInterviewScreen> {
   }
 
   bool get _isLast => _index == _steps.length - 1;
+
+  /// 翻步之前先把当前这一步的自由补充收起来(不然就丢了)。
+  void _stashFreeNote() {
+    _freeNotes[_index] = _freeCtrl.text.trim();
+  }
 
   void _toggle(String option) {
     final step = _steps[_index];
@@ -103,6 +117,8 @@ class _TutorInterviewScreenState extends State<TutorInterviewScreen> {
   }
 
   Future<void> _next() async {
+    // 先把这一步的自由补充收起来(旧实现直接 _freeCtrl.clear(),用户打的字丢了)
+    _stashFreeNote();
     // 非必答:但至少让人看到"可以跳过"
     if (!_isLast) {
       setState(() {
@@ -116,21 +132,30 @@ class _TutorInterviewScreenState extends State<TutorInterviewScreen> {
 
   /// 收尾:写进学习者模型 + 助理长期记忆,然后给一句"我记住了什么"
   Future<void> _finish() async {
+    _stashFreeNote(); // 最后一步的自由补充也要收(不然它同样会被丢掉)
     setState(() => _saving = true);
     final model = LearnerModelStore.load();
     final now = DateTime.now();
 
     String answerAt(int i) => _picked[i].join('、');
 
-    // ① 目标:直接写 goal(带来源=自评)
+    // ① 目标:多选写 goals(完整),goal 保留"第一个 + 期限"给旧读者
+    final goalList = _picked[0].toList();
     final goal = answerAt(0);
     final deadline = answerAt(1);
     final minutes = _minutesOf(answerAt(2));
     final levelSelf = answerAt(3);
     final interests = _picked[4].toList();
     final blocked = _picked[5].toList();
+    // 每步的自由补充:按"第 N 问:内容"拼起来(用户打的字必须留住)
+    final freeNotes = <String>[
+      for (var i = 0; i < _freeNotes.length; i++)
+        if (_freeNotes[i].isNotEmpty) '第 ${i + 1} 问:${_freeNotes[i]}',
+    ];
 
     var next = model.copyWith(
+      // v3 批 4:多选目标真的落库(旧实现只写 goal 单值,goals 永远空着)
+      goals: goalList,
       goal: goal.isEmpty
           ? null
           : ProfileField<String>(
@@ -160,6 +185,7 @@ class _TutorInterviewScreenState extends State<TutorInterviewScreen> {
         ...model.extras,
         'interview_level_self': levelSelf,
         'interview_at': now.toIso8601String(),
+        if (freeNotes.isNotEmpty) 'interview_free': freeNotes.join(' / '),
       },
     );
     if (goal.isEmpty) next = next.copyWith(clearGoal: true);
@@ -169,11 +195,13 @@ class _TutorInterviewScreenState extends State<TutorInterviewScreen> {
 
     // ② 助理长期记忆:二、三两个方向(分析与任务)要读它
     final lines = <String>[
-      if (goal.isNotEmpty) '学习目的:$goal${deadline.isEmpty ? '' : ' · $deadline'}',
+      if (goalList.isNotEmpty) '学习目的(多选):${goalList.join('、')}',
+      if (deadline.isNotEmpty) '期限:$deadline',
       if (minutes != null) '每天可投入约 $minutes 分钟',
       if (levelSelf.isNotEmpty) '自评水平:$levelSelf',
       if (interests.isNotEmpty) '偏好题材:${interests.join('、')}',
       if (blocked.isNotEmpty) '不想看:${blocked.join('、')}',
+      ...freeNotes.map((n) => '补充:$n'),
     ];
     for (final l in lines) {
       await DatabaseService.addTutorMemory(kind: 'preference', text: l);
@@ -297,7 +325,12 @@ class _TutorInterviewScreenState extends State<TutorInterviewScreen> {
               if (_index > 0)
                 Expanded(
                   child: OutlinedButton(
-                    onPressed: () => setState(() => _index--),
+                    onPressed: () => setState(() {
+                      _stashFreeNote();
+                      _index--;
+                      // 回到上一题时把当时写的补充填回来(否则用户会以为丢了)
+                      _freeCtrl.text = _freeNotes[_index];
+                    }),
                     child: const Text('上一题'),
                   ),
                 ),
@@ -319,11 +352,15 @@ class _TutorInterviewScreenState extends State<TutorInterviewScreen> {
                   onPressed: _saving
                       ? null
                       : () {
-                          // "这题先跳过":不选也能往下走
+                          // "这题先跳过":不选也能往下走(自由补充仍要收住)
+                          _stashFreeNote();
                           if (_isLast) {
                             _finish();
                           } else {
-                            setState(() => _index++);
+                            setState(() {
+                              _index++;
+                              _freeCtrl.clear();
+                            });
                           }
                         },
                   child: const Text('这题先跳过'),

@@ -149,6 +149,26 @@ class LearnerSnapshot {
   final Map<String, double> quizAccuracy; // kind → 正确率(0..1)
   final List<ErrorTagStat> errorTags;
 
+  // 输出维度(v2.18.0,批 3 收尾):这三个数据源以前**完全没进快照**,
+  // 于是"天天写译、助理还说近 30 天没有输出"(数据孤岛的根因)。
+  /// 近 30 天带 rubric 评分的输出作答次数(`output_attempts`)
+  final int outputAttempts30d;
+
+  /// 这些作答的 rubric 均分(0..100 百分比;null = 没有可评分作答,绝不写 0)
+  final double? outputAvgScore;
+
+  /// 最近一次输出作答时间(null = 30 天内没有)
+  final DateTime? outputLastAt;
+
+  /// 近 30 天写译批改篇数(`writing_logs`)
+  final int writeLogs30d;
+
+  /// 近 30 天练习记录次数(`drill_logs`)
+  final int drillLogs30d;
+
+  /// 语法薄弱点:错误档案里 5 个语法 tag 的 active 项,按次数倒序、最多 3 个
+  final List<String> weakGrammarTags;
+
   // 习惯
   final int streakDays;
   final int activeDays30d;
@@ -176,6 +196,12 @@ class LearnerSnapshot {
     this.recentMaterials = const [],
     this.quizAccuracy = const {},
     this.errorTags = const [],
+    this.outputAttempts30d = 0,
+    this.outputAvgScore,
+    this.outputLastAt,
+    this.writeLogs30d = 0,
+    this.drillLogs30d = 0,
+    this.weakGrammarTags = const [],
     this.streakDays = 0,
     this.activeDays30d = 0,
   });
@@ -256,7 +282,7 @@ class TutorEngine {
         severity: FindingSeverity.warn,
         title: '近 30 天只有输入,没有输出',
         evidence: '读了 ${s.readingWords30d} 词 / ${s.readingMinutes30d} 分钟'
-            '(${s.readingSessions30d} 次),但没有任何输出练习记录。',
+            '(${s.readingSessions30d} 次),但近 30 天没有写作、翻译、回译或练习记录。',
         action: '输出才是检验:用今天读到的内容写 3 句话,或做一次回译。',
         jump: TutorAction.writing,
         priority: 80,
@@ -517,6 +543,15 @@ class TutorEngine {
           .join('、');
       if (tags.isNotEmpty) b.writeln('错误热点:$tags');
     }
+    // 输出维度(v2.18.0):以前这一行完全没有 → AI 只能看到"输入",于是会复述
+    // 本地诊断里的"只有输入没有输出"。把三个真实输出数据源都写进证据包。
+    b.writeln('输出:近 30 天写作/翻译/回译作答 ${s.outputAttempts30d} 次'
+        '${s.outputAvgScore != null ? ',rubric 均分 ${s.outputAvgScore!.round()}%' : ''}'
+        '${s.writeLogs30d > 0 ? ',写译批改 ${s.writeLogs30d} 篇' : ''}'
+        '${s.drillLogs30d > 0 ? ',练习记录 ${s.drillLogs30d} 次' : ''}');
+    if (s.weakGrammarTags.isNotEmpty) {
+      b.writeln('语法薄弱点:${s.weakGrammarTags.join('、')}');
+    }
     b.writeln('习惯:连续 ${s.streakDays} 天,近 30 天活跃 ${s.activeDays30d} 天,'
         '每日可投入 ${s.model.dailyMinutes?.value ?? defaultDailyMinutes} 分钟');
     b.writeln();
@@ -552,8 +587,18 @@ class TutorEngine {
     return f != null && f.value > 0 && f.source == ProfileSource.test;
   }
 
+  /// 是否"有任何输出":quiz_results / output_attempts / drill_logs / writing_logs
+  /// 四个数据源任一有记录就算。
+  ///
+  /// v2.18.0 修:"近 30 天只有输入没有输出"长期误报的根因 —— 旧实现只认
+  /// `quizAccuracy`(读后测验),而用户日常产出(写作批改、翻译/回译练习、
+  /// 刷题记录)分别落在 writing_logs / output_attempts / drill_logs 三张表,
+  /// 这里全部计入。新增字段不可用(=0)时行为与旧版一致,不会凭空抑制提示。
   static bool _hasAnyOutput(LearnerSnapshot s) =>
-      s.quizAccuracy.keys.any((k) => k != 'vocab_placement');
+      s.quizAccuracy.keys.any((k) => k != 'vocab_placement') ||
+      s.outputAttempts30d > 0 ||
+      s.drillLogs30d > 0 ||
+      s.writeLogs30d > 0;
 
   static RecentMaterial? _hardestRecent(LearnerSnapshot s) {
     final withCoverage =

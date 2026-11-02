@@ -8,6 +8,7 @@ import '../../providers/vocab_provider.dart';
 import '../../services/backup_service.dart';
 import '../../services/export_service.dart';
 import '../../widgets/app_ui.dart';
+import '../../widgets/design_kit.dart';
 import '../../widgets/waiting.dart';
 
 /// 备份与导出(v2.2「生产力」)。
@@ -49,15 +50,15 @@ class _BackupScreenState extends State<BackupScreen> {
         _lastExport = file;
         _busy = false;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$label 已导出(${file.bytes} 字符)')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('$label 已导出(${file.bytes} 字符)')));
     } catch (e) {
       if (!mounted) return;
       setState(() => _busy = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$label 失败:$e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('$label 失败:$e')));
     }
   }
 
@@ -99,18 +100,18 @@ class _BackupScreenState extends State<BackupScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _busy = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('阅读包导出失败:$e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('阅读包导出失败:$e')));
     }
   }
 
   Future<void> _copy(ExportedFile file) async {
     await Clipboard.setData(ClipboardData(text: file.content));
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('内容已复制 —— 可粘到备忘录/微信/云盘')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('内容已复制 —— 可粘到备忘录/微信/云盘')));
   }
 
   Future<void> _share(ExportedFile file) async {
@@ -141,9 +142,12 @@ class _BackupScreenState extends State<BackupScreen> {
         builder: (ctx) => AlertDialog(
           title: const Text('覆盖导入?'),
           content: Text(
-            '会先清空当前的 ${context.read<VocabProvider>().vocabularies.length} 个生词'
-            '与全部复习状态,再导入备份里的 ${data.vocab.length} 个词。\n\n'
-            '这个操作不可撤销 —— 如果当前数据还有用,请先导出一份完整备份。',
+            '会先清空:当前 ${context.read<VocabProvider>().vocabularies.length} 个生词'
+            ' + 全部复习状态(不可撤销)。\n\n'
+            '然后导入:备份里的 ${data.vocab.length} 个词'
+            ' + 复习进度/学习画像。\n\n'
+            '不会动:材料库、阅读记录、学习统计与 API 设置。\n'
+            '如果当前数据还有用,请先导出一份完整备份。',
           ),
           actions: [
             TextButton(
@@ -153,6 +157,7 @@ class _BackupScreenState extends State<BackupScreen> {
             FilledButton(
               style: FilledButton.styleFrom(
                 backgroundColor: AppTheme.dangerColor(context),
+                foregroundColor: Theme.of(ctx).colorScheme.onPrimary,
               ),
               onPressed: () => Navigator.pop(ctx, true),
               child: const Text('清空并导入'),
@@ -182,8 +187,10 @@ class _BackupScreenState extends State<BackupScreen> {
             if (report.warnings.isNotEmpty) ...[
               const SizedBox(height: Gap.xs),
               for (final w in report.warnings)
-                Text('⚠️ $w',
-                    style: TextStyle(color: AppTheme.warningColor(context))),
+                Text(
+                  '⚠️ $w',
+                  style: TextStyle(color: AppTheme.warningColor(context)),
+                ),
             ],
           ],
         ),
@@ -209,35 +216,42 @@ class _BackupScreenState extends State<BackupScreen> {
           Text(
             '你的数据只在这台手机上(系统云备份已关闭)。'
             '换机、丢机或误清数据前,请先导出一份完整备份。',
-            style: theme.textTheme.bodySmall?.copyWith(color: muted),
+            style: AppFont.tagStyle.copyWith(color: muted, height: 1.5),
           ),
-          const SizedBox(height: Gap.md),
+          const SizedBox(height: Gap.xs),
 
-          // ── 导出 ──
-          const AppSectionTitle(title: '导出'),
+          // ── 01 导出 ──
+          const AppSectionHeader(indexLabel: '01', title: '导出'),
           _exportCard(
             icon: Icons.backup_outlined,
             title: '完整备份(JSON)',
             subtitle: '生词 + 复习进度 + 学习画像 + 偏好。「只有它能回导」,换机迁移用这个',
-            onTap: _busy ? null : () => _run(BackupService.exportBackupJson, '完整备份'),
+            onTap: _busy
+                ? null
+                : () => _run(BackupService.exportBackupJson, '完整备份'),
           ),
           _exportCard(
             icon: Icons.table_chart_outlined,
             title: '生词本 CSV',
             subtitle: 'Excel / 表格可直接打开(含释义、双音标、掌握度、复习状态)',
-            onTap: _busy ? null : () => _run(BackupService.exportVocabCsv, 'CSV'),
+            onTap: _busy
+                ? null
+                : () => _run(BackupService.exportVocabCsv, 'CSV'),
           ),
           _exportCard(
             icon: Icons.style_outlined,
             title: 'Anki 导入包(TSV)',
             subtitle: '正面=单词,背面=释义+音标+例句,标签带掌握度 —— 可导入 Anki 等工具',
-            onTap: _busy ? null : () => _run(BackupService.exportVocabAnkiTsv, 'Anki 包'),
+            onTap: _busy
+                ? null
+                : () => _run(BackupService.exportVocabAnkiTsv, 'Anki 包'),
           ),
 
           _exportCard(
             icon: Icons.auto_stories_outlined,
             title: '阅读包(全部材料 · Markdown)',
-            subtitle: '材料库里每篇材料导成一个 .md(元信息 + 正文 + 生词表),'
+            subtitle:
+                '材料库里每篇材料导成一个 .md(元信息 + 正文 + 生词表),'
                 '可丢进网盘或笔记软件按篇管理',
             onTap: _busy ? null : _runPack,
           ),
@@ -249,23 +263,28 @@ class _BackupScreenState extends State<BackupScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('最近导出:${_lastExport!.fileName}',
-                      style: theme.textTheme.bodyMedium
-                          ?.copyWith(fontWeight: FontWeight.w600)),
+                  Text(
+                    '最近导出:${_lastExport!.fileName}',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                   const SizedBox(height: Gap.xxs),
                   SelectableText(
                     '文件位置:${_lastExport!.path}',
                     style: theme.textTheme.bodySmall?.copyWith(color: muted),
                   ),
                   const SizedBox(height: Gap.xs),
-                  Row(
+                  // 一排按钮统一用 Wrap:窄屏/大字号自动换行,不把右边裁掉
+                  Wrap(
+                    spacing: Gap.xs,
+                    runSpacing: Gap.xs,
                     children: [
                       OutlinedButton.icon(
                         onPressed: () => _copy(_lastExport!),
                         icon: const Icon(Icons.copy, size: 16),
                         label: const Text('复制内容'),
                       ),
-                      const SizedBox(width: Gap.xs),
                       OutlinedButton.icon(
                         onPressed: () => _share(_lastExport!),
                         icon: const Icon(Icons.share, size: 16),
@@ -280,12 +299,12 @@ class _BackupScreenState extends State<BackupScreen> {
 
           const Divider(height: 32),
 
-          // ── 导入 ──
-          const AppSectionTitle(title: '从备份恢复'),
+          // ── 02 从备份恢复 ──
+          const AppSectionHeader(indexLabel: '02', title: '从备份恢复'),
           Text(
             '把备份 JSON 的内容粘进下面(全选复制文件内容即可)。'
             '「合并」只补本地没有的词;「覆盖」会先清空本地生词再导入。',
-            style: theme.textTheme.bodySmall?.copyWith(color: muted),
+            style: AppFont.tagStyle.copyWith(color: muted, height: 1.5),
           ),
           const SizedBox(height: Gap.xs),
           TextField(
@@ -299,14 +318,21 @@ class _BackupScreenState extends State<BackupScreen> {
           const SizedBox(height: Gap.xs),
           Row(
             children: [
-              OutlinedButton(onPressed: _busy ? null : _parse, child: const Text('解析')),
+              OutlinedButton(
+                onPressed: _busy ? null : _parse,
+                child: const Text('解析'),
+              ),
               const SizedBox(width: Gap.xs),
               if (_parsed != null)
                 Expanded(
                   child: Text(
-                    _parsed!.ok ? '识别到:${_parsed!.summaryLine}' : '❌ ${_parsed!.error}',
+                    _parsed!.ok
+                        ? '识别到:${_parsed!.summaryLine}'
+                        : '❌ ${_parsed!.error}',
                     style: theme.textTheme.bodySmall?.copyWith(
-                      color: _parsed!.ok ? muted : AppTheme.dangerColor(context),
+                      color: _parsed!.ok
+                          ? muted
+                          : AppTheme.dangerColor(context),
                     ),
                   ),
                 ),
@@ -314,26 +340,26 @@ class _BackupScreenState extends State<BackupScreen> {
           ),
           if (_parsed?.ok == true) ...[
             const SizedBox(height: Gap.sm),
-            Row(
+            // 一排按钮用 Wrap:窄屏/大字号自动换行(原来两个 Expanded 硬挤一行)
+            Wrap(
+              spacing: Gap.sm,
+              runSpacing: Gap.sm,
               children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: _busy ? null : () => _restore(replace: false),
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size(0, 48),
-                    ),
-                    child: const Text('合并导入'),
+                OutlinedButton(
+                  onPressed: _busy ? null : () => _restore(replace: false),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(0, 48),
+                    padding: const EdgeInsets.symmetric(horizontal: Gap.lg),
                   ),
+                  child: const Text('合并导入'),
                 ),
-                const SizedBox(width: Gap.sm),
-                Expanded(
-                  child: FilledButton(
-                    onPressed: _busy ? null : () => _restore(replace: true),
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size(0, 48),
-                    ),
-                    child: const Text('覆盖导入'),
+                FilledButton(
+                  onPressed: _busy ? null : () => _restore(replace: true),
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(0, 48),
+                    padding: const EdgeInsets.symmetric(horizontal: Gap.lg),
                   ),
+                  child: const Text('覆盖导入'),
                 ),
               ],
             ),
@@ -344,16 +370,18 @@ class _BackupScreenState extends State<BackupScreen> {
             // 的动作,用 ProgressStageBar 的未知进度流动条(value: null)说明
             // "确实还在动";这里并没有内容要出现,所以不用骨架屏(那会假装
             // 马上有卡片加载出来)。
-            const ProgressStageBar(
-              stage: '正在处理备份…',
-              detail: '数据正在读写,请勿退出 App',
-            ),
+            const ProgressStageBar(stage: '正在处理备份…', detail: '数据正在读写,请勿退出 App'),
           ],
           const SizedBox(height: Gap.lg),
-          Text(
-            '⚠️ 备份文件里不包含 API Key(那是你的密钥,不该出现在导出文件里),'
-            '换机后需要在「API 设置」里重新填一次。',
-            style: theme.textTheme.bodySmall?.copyWith(color: muted),
+          // ── 03 注意 ──
+          const AppSectionHeader(indexLabel: '03', title: '注意'),
+          AppCard(
+            color: theme.colorScheme.surfaceContainerHighest,
+            child: Text(
+              '· 备份文件里不包含 API Key(那是你的密钥,不该出现在导出文件里),'
+              '换机后需要在「API 设置」里重新填一次。',
+              style: AppFont.tagStyle.copyWith(color: muted, height: 1.5),
+            ),
           ),
         ],
       ),

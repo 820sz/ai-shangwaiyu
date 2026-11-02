@@ -5,6 +5,7 @@ import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:hive/hive.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -211,6 +212,191 @@ class UpdateService {
     }
     out[3] = int.tryParse(buildPart.trim()) ?? 0;
     return out;
+  }
+
+  // ═══════════ 自动检查更新(2026-11-01 用户 11/01 新增要求) ═══════════
+
+  /// 用户原话:"软件的内置更新按钮现在是只有手动点才会推送新版本,而不是点进软件
+  /// 自动提示;而且更新内容播报是属于'给我汇报工作的提示词'而不是规规矩矩的
+  /// 升级的地方'1,xxx。2,xxx'"。
+  ///
+  /// 这里放"自动检查"的节流开关:默认 **24 小时**最多自动查一次,
+  /// 避免每次冷启动都打一次 GitHub(国内网络一次要等 10~20s)。
+  /// 手动「检查更新」按钮不走这个节流,随点随查。
+  static const String _autoCheckKey = 'update_last_auto_check_at';
+
+  /// 纯函数:距离上次自动检查是否已超过 [interval]。抽出来是为了可单测。
+  static bool isAutoCheckDue(
+    int? lastCheckMs,
+    DateTime now, {
+    Duration interval = const Duration(hours: 24),
+  }) {
+    if (lastCheckMs == null) return true;
+    // 时钟回拨(用户改时间/时区)按"该查"处理,宁查勿漏
+    final elapsed = now.millisecondsSinceEpoch - lastCheckMs;
+    if (elapsed < 0) return true;
+    return elapsed >= interval.inMilliseconds;
+  }
+
+  /// 上次自动检查的时间戳(ms)。Hive 不可用时返回 null(=视为该检查)。
+  static Future<int?> lastAutoCheckMs() async {
+    try {
+      final box = await Hive.openBox(AppConstants.hiveBoxSettings);
+      return box.get(_autoCheckKey) as int?;
+    } catch (e) {
+      debugPrint('ReadFlow 读取更新检查时间失败: $e');
+      return null;
+    }
+  }
+
+  /// 记下"这次自动检查已完成"的时间戳(成功拿到响应后才调,失败下次还能重试)。
+  static Future<void> markAutoCheckDone([DateTime? at]) async {
+    try {
+      final box = await Hive.openBox(AppConstants.hiveBoxSettings);
+      await box.put(
+        _autoCheckKey,
+        (at ?? DateTime.now()).millisecondsSinceEpoch,
+      );
+    } catch (e) {
+      debugPrint('ReadFlow 记录更新检查时间失败: $e');
+    }
+  }
+
+  // ═══════════ Release 说明 → 用户可读的编号清单 ═══════════
+
+  /// 把 GitHub Release 的 markdown 正文解析成"给用户看的短句清单"。
+  ///
+  /// 为什么要有这个纯函数:更新弹窗以前把 Release body 原样塞进 `Text`,
+  /// 用户看到的是带 `#`、`**`、引用块的长文(像写给自己看的工作汇报)。
+  /// 现在统一归一成"1、2、3"的升级清单。
+  ///
+  /// 规则(从宽到严,兼容老版本说明):
+  /// 1. 优先取「## 更新内容 / 更新说明 / 本次更新」小节(本轮起发版说明的统一格式,
+  ///    见 docs/RELEASE-NOTES-FORMAT.md);
+  /// 2. 老正文没有该小节时,退化为"收集顶层列表项"(`- ` / `1. ` / `1、`);
+  /// 3. 遇到「验证/测试/还没做/风险/附录/后记/技术细节」这类非用户向小节就停止收集;
+  /// 4. 去掉 markdown 标记与链接 URL,只留纯文本;去重;最多 [maxItems] 条。
+  static List<String> parseReleaseNotesForDisplay(
+    String body, {
+    int maxItems = 8,
+  }) {
+    if (body.trim().isEmpty || maxItems <= 0) return const <String>[];
+    final lines = body.replaceAll('\r\n', '\n').split('\n');
+
+    // 非用户向小节:命中标题后,下面的列表项不再进更新弹窗
+    const stopHeadingWords = [
+      '验证',
+      '测试',
+      '还没做',
+      '未做',
+      '风险',
+      '附录',
+      '后记',
+      '技术细节',
+      '签名',
+    ];
+    bool isStopHeading(String line) {
+      final t = line.trim();
+      if (!t.startsWith('#')) return false;
+      final title = t.replaceFirst(RegExp(r'^#+\s*'), '');
+      return stopHeadingWords.any(title.contains);
+    }
+
+    // ① 先找「更新内容」小节起点
+    var sectionStart = -1;
+    for (var i = 0; i < lines.length; i++) {
+      final t = lines[i].trim();
+      if (!t.startsWith('#')) continue;
+      final title = t.replaceFirst(RegExp(r'^#+\s*'), '');
+      if (title.contains('更新内容') ||
+          title.contains('更新说明') ||
+          title.contains('本次更新')) {
+        sectionStart = i + 1;
+        break;
+      }
+    }
+
+    final out = <String>[];
+    var inStopSection = false;
+    // 全文兜底模式(没有「更新内容」小节)只认**列表行**:
+    // 普通段落交给下面的"取第一段前两句"兜底,避免整段正文被当成一条。
+    final bool listOnly = sectionStart < 0;
+    final listMarker = RegExp(r'^(?:[-*+]\s+|\d+[.、)）]\s*)');
+    for (var i = sectionStart >= 0 ? sectionStart : 0; i < lines.length; i++) {
+      final raw = lines[i];
+      final t = raw.trim();
+      if (t.startsWith('#')) {
+        // 小节模式下:下一个标题 = 更新内容结束
+        if (sectionStart >= 0) break;
+        // 全文模式下:进入/离开"非用户向"小节
+        inStopSection = isStopHeading(raw);
+        continue;
+      }
+      if (inStopSection) continue;
+      if (listOnly && !listMarker.hasMatch(t)) continue;
+      final item = _cleanNotesLine(raw);
+      if (item == null) continue;
+      if (!out.contains(item)) out.add(item);
+      if (out.length >= maxItems) break;
+    }
+
+    // ② 兜底:没有列表项时取第一段正文的前两句
+    if (out.isEmpty) {
+      for (final line in lines) {
+        final t = line.trim();
+        if (t.isEmpty ||
+            t.startsWith('#') ||
+            t.startsWith('>') ||
+            t.startsWith('|') ||
+            t.startsWith('```') ||
+            t.startsWith('![')) {
+          continue;
+        }
+        for (final sentence in t.split(RegExp(r'[。！？]'))) {
+          final item = _cleanNotesLine(sentence);
+          if (item == null) continue;
+          if (!out.contains(item)) out.add(item);
+          if (out.length >= 2) break;
+        }
+        if (out.isNotEmpty) break;
+      }
+    }
+    return out;
+  }
+
+  /// 清洗一行更新说明:去掉列表符号/markdown 标记/链接 URL。
+  /// 返回 null = 这一行不适合进"用户可读清单"(嵌套细节/表格/引用/纯链接)。
+  static String? _cleanNotesLine(String line) {
+    final raw = line.trim();
+    if (raw.isEmpty) return null;
+    if (raw.startsWith('>') ||
+        raw.startsWith('|') ||
+        raw.startsWith('```') ||
+        raw.startsWith('![')) {
+      return null;
+    }
+    // 缩进的子项属于上一条的细节,不单独成条
+    if (RegExp(r'^\s{2,}[-*+]\s').hasMatch(line)) return null;
+    if (RegExp(r'^\s{2,}\d+[.、)）]').hasMatch(line)) return null;
+
+    var t = raw;
+    t = t.replaceFirst(RegExp(r'^[-*+]\s+'), '');
+    t = t.replaceFirst(RegExp(r'^\d+[.、)）]\s*'), '');
+    t = t.replaceFirst(RegExp(r'^\[[ xX]\]\s*'), '');
+    // [文字](链接) 只留文字;裸 <html> 标签去掉
+    t = t.replaceAllMapped(
+      RegExp(r'\[([^\]]+)\]\([^)]*\)'),
+      (m) => m.group(1) ?? '',
+    );
+    t = t.replaceAll(RegExp(r'<[^>]+>'), '');
+    t = t.replaceAll('**', '').replaceAll('__', '').replaceAll('`', '');
+    t = t.replaceAll(RegExp(r'\s+'), ' ').trim();
+    // 句尾的"。"删掉更清爽(问号/叹号保留)
+    t = t.replaceFirst(RegExp(r'[。；;]+$'), '').trim();
+    if (t.length < 2) return null;
+    if (RegExp(r'^https?://\S+$').hasMatch(t)) return null;
+    if (RegExp(r'^[|:\-\s]+$').hasMatch(t)) return null;
+    return t;
   }
 
   /// GitHub 加速代理前缀(2026-03 国内实测可用/高速,按前缀式代理格式)。

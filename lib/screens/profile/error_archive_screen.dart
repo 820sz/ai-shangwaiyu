@@ -2,11 +2,30 @@ import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
 import '../../config/constants.dart';
+import '../../config/design_tokens.dart';
 import '../../config/theme.dart';
 import '../../services/database.dart';
-import '../../widgets/empty_state.dart';
+import '../../widgets/app_ui.dart';
+import '../../widgets/design_kit.dart';
 import '../../widgets/error_state.dart';
+import '../../widgets/graphics/graphics.dart';
 import '../../widgets/waiting.dart';
+import '../writing/write_review_screen.dart';
+
+/// 错误档案里 source 的中文名(用户不认识 'reading_quiz' 这类内部名)
+const Map<String, String> _errorSourceLabels = {
+  'writing': '写译批改',
+  'exercise': '回译练习',
+  'reading_quiz': '读后测验',
+  'review': '复习',
+  'output': '输出练习',
+};
+
+String _errorSourceLabel(String source) {
+  final raw = source.trim();
+  if (raw.isEmpty) return '其他';
+  return _errorSourceLabels[raw] ?? raw;
+}
 
 /// 错误档案页(v2.1)。
 ///
@@ -39,6 +58,10 @@ class _ErrorArchiveScreenState extends State<ErrorArchiveScreen> {
 
   /// 页签:0 = 待处理(active),1 = 已改正(fixed)
   int _tab = 0;
+
+  /// 来源筛选(null = 全部);v3 回流后同一 tag 会从多个来源写入,
+  /// 按来源能看出"这类错是写译扣出来的还是测验收出来的"。
+  String? _source;
 
   List<_ErrorTag> _active = const [];
   List<_ErrorTag> _fixed = const [];
@@ -177,24 +200,21 @@ class _ErrorArchiveScreenState extends State<ErrorArchiveScreen> {
     if (_error != null) {
       return ErrorState(message: _error!, onRetry: _load);
     }
-    final list = _tab == 0 ? _active : _fixed;
+    final base = _tab == 0 ? _active : _fixed;
+    final list = _filtered(base);
     return RefreshIndicator(
       onRefresh: _load,
       child: Column(
         children: [
-          _buildTabs(),
+          _buildTabs(base, list),
           Expanded(
             // 空态也套一层可滚动容器:否则空列表时 RefreshIndicator 拉不动,
             // 用户以为"下拉刷新坏了"
             child: list.isEmpty
                 ? ListView(
                     physics: const AlwaysScrollableScrollPhysics(),
-                    children: [
-                      SizedBox(
-                        height: MediaQuery.sizeOf(context).height * 0.5,
-                        child: _buildEmpty(),
-                      ),
-                    ],
+                    padding: Insets.page,
+                    children: [_buildEmpty(base)],
                   )
                 : _buildList(list),
           ),
@@ -203,47 +223,92 @@ class _ErrorArchiveScreenState extends State<ErrorArchiveScreen> {
     );
   }
 
-  Widget _buildTabs() {
-    final theme = Theme.of(context);
+  /// 按来源筛选(全部 = 不过滤)
+  List<_ErrorTag> _filtered(List<_ErrorTag> list) {
+    final source = _source;
+    if (source == null) return list;
+    return list.where((t) => t.source == source).toList(growable: false);
+  }
+
+  Widget _buildTabs(List<_ErrorTag> base, List<_ErrorTag> list) {
     // 各页签带条数:用户不进页签也知道另一边有没有积压
-    Widget chip(String label, int index, int count) {
+    Widget tabChip(String label, int index, int count) {
       final selected = _tab == index;
       return Expanded(
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4),
+          padding: const EdgeInsets.symmetric(horizontal: Gap.xxs),
           child: ChoiceChip(
             label: SizedBox(
               width: double.infinity,
-              child: Text('$label($count)', textAlign: TextAlign.center),
+              child: Text('$label $count', textAlign: TextAlign.center),
             ),
             selected: selected,
-            onSelected: (_) => setState(() => _tab = index),
-            labelStyle: theme.textTheme.bodyMedium?.copyWith(
-              fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+            onSelected: (_) => setState(() {
+              _tab = index;
+              // 切页签时清掉来源筛选:上个页签有的来源,这个页签未必有
+              _source = null;
+            }),
+            labelStyle: AppFont.metaStyle.copyWith(
+              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
             ),
           ),
         ),
       );
     }
 
-    final list = _tab == 0 ? _active : _fixed;
+    final sources = <String>{for (final t in base) t.source};
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+      padding: const EdgeInsets.fromLTRB(Gap.sm, Gap.sm, Gap.sm, Gap.xxs),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              chip('待处理', 0, _active.length),
-              chip('已改正', 1, _fixed.length),
+              tabChip('待处理', 0, _active.length),
+              tabChip('已改正', 1, _fixed.length),
             ],
           ),
-          // 汇总行:一眼看清总量与最该处理的那一类(空的时候不写废话)
-          if (list.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            _buildSummary(list),
+          if (base.isNotEmpty) ...[
+            const SizedBox(height: Gap.xs),
+            // 来源筛选:同一 tag 可能从写译/测验/复习多处写入,
+            // 分组后能看清"这类错主要是哪条链路扣出来的"
+            Wrap(
+              spacing: Gap.xs,
+              runSpacing: Gap.xxs,
+              children: [
+                _sourceChip('全部', count: base.length, source: null),
+                for (final source in sources)
+                  _sourceChip(
+                    _errorSourceLabel(source),
+                    count: base.where((t) => t.source == source).length,
+                    source: source,
+                  ),
+              ],
+            ),
+            if (list.isNotEmpty) ...[
+              const SizedBox(height: Gap.xs),
+              _buildSummary(list),
+            ],
           ],
         ],
+      ),
+    );
+  }
+
+  /// 来源筛选 chip(AppTag 风格;选中 = 主色 + 勾)
+  Widget _sourceChip(
+    String label, {
+    required int count,
+    required String? source,
+  }) {
+    final selected = _source == source;
+    return InkWell(
+      borderRadius: Radii.pillRadius,
+      onTap: () => setState(() => _source = source),
+      child: AppTag(
+        '$label $count',
+        tone: selected ? AppTagTone.primary : AppTagTone.neutral,
+        icon: selected ? Icons.check : null,
       ),
     );
   }
@@ -252,6 +317,12 @@ class _ErrorArchiveScreenState extends State<ErrorArchiveScreen> {
     final theme = Theme.of(context);
     final muted = theme.colorScheme.onSurfaceVariant;
     final total = list.fold<int>(0, (sum, t) => sum + t.count);
+    if (list.isEmpty) {
+      return Text(
+        '这个来源下没有记录(共 0 次)',
+        style: AppFont.metaStyle.copyWith(color: muted),
+      );
+    }
     final top = list.first; // 库里已按 count DESC 排好(错得最多的在前)
     final headline = _tab == 0
         ? '共 ${list.length} 类、$total 次;最需要处理的是「${top.tag}」(${top.count} 次)'
@@ -262,45 +333,95 @@ class _ErrorArchiveScreenState extends State<ErrorArchiveScreen> {
         Icon(
           _tab == 0 ? Icons.priority_high : Icons.check_circle_outline,
           size: 16,
-          color: _tab == 0 ? theme.colorScheme.error : AppTheme.successColor(context),
+          color: _tab == 0
+              ? theme.colorScheme.error
+              : AppTheme.successColor(context),
         ),
         const SizedBox(width: 6),
         Expanded(
           child: Text(
             headline,
-            style: theme.textTheme.bodySmall?.copyWith(color: muted),
+            style: AppFont.metaStyle.copyWith(color: muted),
           ),
         ),
       ],
     );
   }
 
-  /// 空态分两种,文案必须不同:
-  /// - 一条记录都没有 = 还没产出数据(引导去做一次会产生数据的动作)
-  /// - 这一类清干净了 = 用户的工作成果(是正反馈,不是"没有数据")
-  Widget _buildEmpty() {
-    if (_tab == 0) {
-      final everHad = _fixed.isNotEmpty;
-      return EmptyState(
-        icon: everHad ? Icons.verified_outlined : Icons.psychology_alt_outlined,
-        title: everHad ? '待处理的错误都清干净了' : '还没有错误记录',
-        hint: everHad
-            ? '共 ${_fixed.length} 类已改正 —— 再错一次会自动回到这里'
-            : '去做一次写译批改或读后测验就有了',
+  /// 空态分三种,文案与动作都必须不同:
+  /// - 来源筛选筛没了 = 不是没数据,清掉筛选即可(给"查看全部来源");
+  /// - 一条记录都没有 = 还没产出数据(引导去做一次会产生数据的动作);
+  /// - 这一类清干净了 = 用户的工作成果(正反馈,给"看看已改正的"入口)。
+  Widget _buildEmpty(List<_ErrorTag> base) {
+    if (_source != null && base.isNotEmpty) {
+      return AppCard(
+        child: AppEmptyState(
+          icon: Icons.filter_alt_outlined,
+          art: EmptyArtKind.magnifier,
+          title: '这个来源没有记录',
+          hint: '当前只看「${_errorSourceLabel(_source!)}」,清掉筛选能看到全部',
+          action: TextButton.icon(
+            onPressed: () => setState(() => _source = null),
+            icon: const Icon(Icons.clear_all, size: 16),
+            label: const Text('查看全部来源'),
+          ),
+        ),
       );
     }
-    return const EmptyState(
-      icon: Icons.check_circle_outline,
-      title: '这一类都清干净了',
-      hint: '标记为「已改正」的错误会出现在这里',
+    if (_tab == 0) {
+      final everHad = _fixed.isNotEmpty;
+      return AppCard(
+        child: AppEmptyState(
+          icon: everHad
+              ? Icons.verified_outlined
+              : Icons.psychology_alt_outlined,
+          art: EmptyArtKind.magnifier,
+          title: everHad ? '待处理的错误都清干净了' : '还没有错误记录',
+          hint: everHad
+              ? '共 ${_fixed.length} 类已改正 —— 再错一次会自动回到这里'
+              : '错误标签来自写译批改/读后测验/复习答错;做一次写译批改就会自动建档',
+          action: everHad
+              ? TextButton.icon(
+                  onPressed: () => setState(() => _tab = 1),
+                  icon: const Icon(Icons.check_circle_outline, size: 16),
+                  label: const Text('看看已改正的'),
+                )
+              : FilledButton.icon(
+                  onPressed: () async {
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const WriteReviewScreen(),
+                      ),
+                    );
+                    if (mounted) await _load();
+                  },
+                  icon: const Icon(Icons.edit_note, size: 18),
+                  label: const Text('去写译批改'),
+                ),
+        ),
+      );
+    }
+    return AppCard(
+      child: AppEmptyState(
+        icon: Icons.check_circle_outline,
+        art: EmptyArtKind.magnifier,
+        title: '还没有标记已改正的记录',
+        hint: '在「待处理」里点「标记已改正」,修好的错误会出现在这里',
+        action: TextButton.icon(
+          onPressed: () => setState(() => _tab = 0),
+          icon: const Icon(Icons.inbox_outlined, size: 16),
+          label: const Text('回到待处理'),
+        ),
+      ),
     );
   }
 
   Widget _buildList(List<_ErrorTag> list) {
     return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
+      padding: Insets.page.copyWith(top: Gap.xxs, bottom: Gap.xl),
       itemCount: list.length,
-      separatorBuilder: (_, _) => const SizedBox(height: 8),
+      separatorBuilder: (_, _) => const SizedBox(height: Gap.xs),
       itemBuilder: (context, i) => _ErrorTagCard(
         tag: list[i],
         // 已改正页签里的按钮固定是「恢复为待处理」,用 fixed 标志而不是时刻
@@ -381,15 +502,7 @@ class _ErrorTagCard extends StatelessWidget {
     this.fixedAt,
   });
 
-  /// source → 中文:用户不认识 'reading_quiz' 这种内部名
-  static const Map<String, String> _sourceLabels = {
-    'writing': '写译批改',
-    'exercise': '回译练习',
-    'reading_quiz': '读后测验',
-    'review': '复习',
-  };
-
-  String get _sourceLabel => _sourceLabels[tag.source] ?? tag.source;
+  String get _sourceLabel => _errorSourceLabel(tag.source);
 
   /// "9-21 14:30"(不补零:中文界面里 09-21 反而啰嗦)
   static String _fmt(DateTime? t) {
@@ -409,12 +522,11 @@ class _ErrorTagCard extends StatelessWidget {
     final muted = theme.colorScheme.onSurfaceVariant;
     final recurring = tag.isRecurring(fixedAt);
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 10, 8, 6),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+    return AppCard(
+      margin: EdgeInsets.zero,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -426,30 +538,22 @@ class _ErrorTagCard extends StatelessWidget {
                     children: [
                       Text(
                         tag.tag,
-                        style: theme.textTheme.titleSmall
-                            ?.copyWith(fontWeight: FontWeight.w700),
+                        style: AppFont.subheadStyle,
                       ),
-                      // 次数是最重要的信息:做成醒目的徽标
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: tag.count >= 3
-                              ? theme.colorScheme.error.withAlpha(24)
-                              : theme.colorScheme.primary.withAlpha(20),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          '${tag.count} 次',
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            fontWeight: FontWeight.w700,
-                            color: tag.count >= 3
-                                ? theme.colorScheme.error
-                                : theme.colorScheme.primary,
-                          ),
-                        ),
+                      // 次数是最重要的信息:做成醒目的徽标(v3 回流后次数会涨,
+                      // >=3 次用危险色 —— 这就是"复发/高频"的视觉信号)
+                      AppTag(
+                        '${tag.count} 次',
+                        tone: tag.count >= 3
+                            ? AppTagTone.danger
+                            : AppTagTone.primary,
+                        icon: Icons.repeat,
                       ),
-                      _Chip(text: _sourceLabel, icon: Icons.edit_note),
+                      AppTag(
+                        _sourceLabel,
+                        tone: AppTagTone.neutral,
+                        icon: Icons.edit_note,
+                      ),
                     ],
                   ),
                 ),
@@ -514,36 +618,6 @@ class _ErrorTagCard extends StatelessWidget {
               ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-/// 小的来源标签(用现成的 Chip 会太胖,这里只做个灰底小标记)
-class _Chip extends StatelessWidget {
-  final String text;
-  final IconData icon;
-
-  const _Chip({required this.text, required this.icon});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final muted = theme.colorScheme.onSurfaceVariant;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 12, color: muted),
-          const SizedBox(width: 3),
-          Text(text, style: theme.textTheme.labelSmall?.copyWith(color: muted)),
-        ],
       ),
     );
   }

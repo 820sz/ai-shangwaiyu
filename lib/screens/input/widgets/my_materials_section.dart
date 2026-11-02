@@ -248,11 +248,17 @@ class _CategoryVocabSheetState extends State<_CategoryVocabSheet> {
       );
       return;
     }
-    final newPath = '${widget.category}/$newName';
+    // v2.13.1:重命名也要走归一(用户可能在名称里带斜杠、或分组是历史脏路径);
+    // 分组键是原始路径字符串,写脏了又会裂出"新分组 + 旧分组"两个。
+    final newPath = normalizeMaterialPath(
+      widget.category,
+      '${widget.category}/$newName',
+    );
     await DatabaseService.renameBookPath(
       oldPath: group.path,
       newPath: newPath,
-      newBookName: newName,
+      // source_book 只存短材料名(去掉分类前缀),别再写成整条路径
+      newBookName: materialDisplayName(newPath, widget.category),
     );
     if (!mounted) return;
     await context.read<VocabProvider>().loadVocabularies();
@@ -318,13 +324,18 @@ class _CategoryVocabSheetState extends State<_CategoryVocabSheet> {
   /// 「移动材料」(v2.10,用户 10/4 第 8 条)。
   ///
   /// 用户要的是"**从已有分类里选**",而不是每次都要手打一遍材料名。所以:
-  /// 1. 列出**当前分类下已有的材料**(按生词数倒序)—— 一个词一个词点过来的人,
-  ///    通常就是要把零散的词并到同一本书下面;
-  /// 2. 再列出**其它分类下的材料**(跨分类移动也常见:拍下来的词原本归到"教材",
-  ///    其实属于某本"书籍");
-  /// 3. 都没有合适的 → 底部给「新建一个材料…」走原来的手填流程(兜底,不是主路径)。
+  /// 1. 列出**当前分类下已有的材料**(来自 DB 的完整 `material_path`)——
+  ///    一个词一个词点过来的人,通常就是要把零散的词并到同一本书下面;
+  /// 2. 都没有合适的 → 底部给「新建一个材料…」走原来的手填流程(兜底,不是主路径)。
+  ///
+  /// ⚠️ v2.13.1(用户 2026-11-01 截图:列表里同时出现「书籍/《Character》」和
+  /// 「书籍/书籍/《Character》」):选项是完整路径,必须先 [normalizeMaterialPath]
+  /// 归一再去重 —— 历史脏数据会把同一本书列成两条,用户点哪条都会继续生成
+  /// 新的重复分组。排除"当前分组自己"也必须用**同一口径**(完整路径),旧代码
+  /// 拿完整路径和显示名([MaterialGroup.label],如《Character》)比较,永远不相等,
+  /// 于是自己也能被选成移动目标(自己移自己 → 又叠一层重复前缀)。
   Future<void> _moveToExisting({
-    required String label,
+    required String groupPath,
     required List<Vocabulary> items,
   }) async {
     // 已经在"未归类"里的词:材料名是空的,列表里不会出现它们,直接给新建入口
@@ -332,10 +343,11 @@ class _CategoryVocabSheetState extends State<_CategoryVocabSheet> {
       widget.category,
     );
     if (!mounted) return;
-    final choices = <String>[
-      for (final p in paths)
-        if (p.trim().isNotEmpty && p != label) p,
-    ]..sort();
+    final currentPath = normalizeMaterialPath(widget.category, groupPath);
+    final unique = <String>{
+      for (final p in paths) normalizeMaterialPath(widget.category, p),
+    }..removeWhere((p) => p.isEmpty || p == currentPath);
+    final choices = unique.toList()..sort();
     final picked = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
@@ -409,31 +421,40 @@ class _CategoryVocabSheetState extends State<_CategoryVocabSheet> {
     );
     if (picked == null || !mounted) return;
     if (picked == '__new__') {
-      await _assignMaterial(label: label, items: items);
+      await _assignMaterial(
+        label: materialDisplayName(currentPath, widget.category),
+        items: items,
+      );
       return;
     }
     await _moveInto(picked, items);
   }
 
-  /// 真正把这批词移到目标材料下(不弹任何对话框,选完即生效)
-  Future<void> _moveInto(String materialName, List<Vocabulary> items) async {
+  /// 真正把这批词移到目标材料下(不弹任何对话框,选完即生效)。
+  ///
+  /// v2.13.1:目标 [targetPath] 就是**完整 material_path**(弹层选项来源),
+  /// 直接写库,不再走 [buildMaterialPath] 二次拼分类前缀 —— 旧实现把
+  /// `书籍/《Character》` 当"材料名"拼成 `书籍/书籍/《Character》`,而分组键
+  /// 是原始路径字符串,于是词永远不并入目标老分组,而是重复新建一个分类。
+  /// `source_book` 只写**短材料名**(去掉分类前缀),别再写成整条路径。
+  Future<void> _moveInto(String targetPath, List<Vocabulary> items) async {
     final ids = items.map((v) => v.id).whereType<int>().toList();
     if (ids.isEmpty) return;
+    final path = normalizeMaterialPath(widget.category, targetPath);
+    if (path.isEmpty) return;
+    final name = materialDisplayName(path, widget.category);
     await context.read<VocabProvider>().moveVocabularies(
           ids,
           category: widget.category,
-          materialPath: buildMaterialPath(
-            category: widget.category,
-            name: materialName,
-          ),
-          sourceBook: materialName,
+          materialPath: path,
+          sourceBook: name,
         );
     if (!mounted) return;
     await _load();
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('已把 ${ids.length} 个生词移到「$materialName」'),
+        content: Text('已把 ${ids.length} 个生词移到「$name」'),
         behavior: SnackBarBehavior.floating,
       ),
     );
@@ -520,14 +541,17 @@ class _CategoryVocabSheetState extends State<_CategoryVocabSheet> {
       return;
     }
     final normalized = normalizePageLabel(pageText);
+    // v2.13.1:用户手填的材料名也可能自带分类前缀(如「书籍/《X》」),归一后再
+    // 拼路径,避免又造出 `书籍/书籍/《X》` 这种重复前缀分组(移动链路的老病)。
+    final path = normalizeMaterialPath(
+      widget.category,
+      buildMaterialPath(category: widget.category, name: name),
+    );
     await context.read<VocabProvider>().moveVocabularies(
           ids,
           category: widget.category,
-          materialPath: buildMaterialPath(
-            category: widget.category,
-            name: name,
-          ),
-          sourceBook: name,
+          materialPath: path,
+          sourceBook: materialDisplayName(path, widget.category),
           sourcePage: normalized.isEmpty ? null : normalized,
         );
     if (!mounted) return;
@@ -789,7 +813,9 @@ class _CategoryVocabSheetState extends State<_CategoryVocabSheet> {
             // 而不是现在的'归入材料出处'这种点进去还得用户手动填"
             // → 先弹"选已有的分类/材料",手填只作为兜底入口。
             label: const Text('移动材料…'),
-            onPressed: () => _moveToExisting(label: g.label, items: items),
+            // v2.13.1:传 group.path(完整路径)而不是 group.label(显示名)——
+            // 移动弹层要用同一口径排除"当前分组自己",否则自己也能被选成目标。
+            onPressed: () => _moveToExisting(groupPath: g.path, items: items),
           ),
           if (!isUncategorized)
             ActionChip(

@@ -2,48 +2,141 @@ import 'package:flutter/material.dart';
 
 import '../services/update_service.dart';
 
-/// 发现新版本弹窗 → 确认后进入下载进度 → 下载完自动调起安装
+/// 发现新版本弹窗 → 确认后进入下载进度 → 下载完自动调起安装。
+///
+/// v3(2026-11-01 用户):更新说明不再把 Release 正文原样丢进 `Text`
+/// (用户原话:"更新内容播报是属于'给我汇报工作的提示词'而不是规规矩矩的
+/// 升级的地方'1,xxx。2,xxx'")。现在正文先经
+/// [UpdateService.parseReleaseNotesForDisplay] 归一成短句清单再渲染。
 Future<void> showUpdateDialog(BuildContext context, UpdateInfo info) async {
+  final notes = UpdateService.parseReleaseNotesForDisplay(info.releaseNotes);
   final action = await showDialog<bool>(
     context: context,
-    builder: (ctx) => AlertDialog(
-      title: const Text('发现新版本'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '当前 v${info.currentVersion} → v${info.version}',
-            style: Theme.of(ctx).textTheme.titleSmall,
-          ),
-          if (info.releaseNotes.trim().isNotEmpty) ...[
-            const SizedBox(height: 12),
-            const Text('更新内容', style: TextStyle(fontWeight: FontWeight.w600)),
-            const SizedBox(height: 4),
-            Text(
-              info.releaseNotes.trim(),
-              maxLines: 8,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(ctx).textTheme.bodySmall,
-            ),
-          ],
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(ctx, false),
-          child: const Text('稍后'),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.pop(ctx, true),
-          child: const Text('立即更新'),
-        ),
-      ],
-    ),
+    builder: (ctx) => _UpdatePromptDialog(info: info, notes: notes),
   );
 
   if (action == true && context.mounted) {
     await _showDownloadDialog(context, info);
+  }
+}
+
+/// 新版本提示:版本对比 + 编号清单(默认收 6 条,可展开)。
+class _UpdatePromptDialog extends StatefulWidget {
+  final UpdateInfo info;
+  final List<String> notes;
+
+  const _UpdatePromptDialog({required this.info, required this.notes});
+
+  @override
+  State<_UpdatePromptDialog> createState() => _UpdatePromptDialogState();
+}
+
+class _UpdatePromptDialogState extends State<_UpdatePromptDialog> {
+  /// 默认展示条数:弹窗一屏放得下,又不至于把按钮挤出去。
+  static const int _collapsedCount = 6;
+
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final notes = widget.notes;
+    final visible = _expanded ? notes : notes.take(_collapsedCount).toList();
+    final hidden = notes.length - visible.length;
+
+    return AlertDialog(
+      title: const Text('发现新版本'),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '当前 v${widget.info.currentVersion} → v${widget.info.version}',
+                style: theme.textTheme.titleSmall,
+              ),
+              if (notes.isNotEmpty) ...[
+                const SizedBox(height: 14),
+                Text(
+                  '本次更新',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                for (var i = 0; i < visible.length; i++)
+                  _noteRow(theme, i + 1, visible[i]),
+                if (hidden > 0)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton(
+                      onPressed: () => setState(() => _expanded = true),
+                      child: Text('展开其余 $hidden 条'),
+                    ),
+                  ),
+              ] else if (widget.info.releaseNotes.trim().isNotEmpty) ...[
+                // 解析不出清单时的兜底:原文截断展示,不白屏
+                const SizedBox(height: 12),
+                const Text(
+                  '更新内容',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  widget.info.releaseNotes.trim(),
+                  maxLines: 10,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall,
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('稍后'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text('立即更新'),
+        ),
+      ],
+    );
+  }
+
+  /// 一条更新说明:圆形序号 + 短句,长句自动换行。
+  Widget _noteRow(ThemeData theme, int index, String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 18,
+            height: 18,
+            alignment: Alignment.center,
+            margin: const EdgeInsets.only(top: 1),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.primaryContainer,
+              shape: BoxShape.circle,
+            ),
+            child: Text(
+              '$index',
+              style: theme.textTheme.labelSmall?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: theme.colorScheme.onPrimaryContainer,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(child: Text(text, style: theme.textTheme.bodyMedium)),
+        ],
+      ),
+    );
   }
 }
 

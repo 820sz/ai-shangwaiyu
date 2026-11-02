@@ -29,6 +29,9 @@ import '../../services/deepseek_api.dart';
 import '../../services/material_library.dart';
 import '../../widgets/app_ui.dart';
 import '../../widgets/bookshelf_view.dart';
+import '../../widgets/confirm_destructive.dart';
+import '../../widgets/design_kit.dart';
+import '../../widgets/graphics/graphics.dart';
 import '../../widgets/material_cover.dart';
 import '../../widgets/waiting.dart';
 import 'material_center_screen.dart';
@@ -49,6 +52,21 @@ enum BookshelfSort {
   const BookshelfSort(this.label);
 }
 
+/// 书架分组筛选(v3 统一):按阅读进度分组,顶部 chips 一切即筛。
+///
+/// 为什么是"进度"而不是"类型":用户来书架的目的只有一个 —— 继续读。
+/// 类型(书/论文/新闻)在材料中心已经分过了,书架上再分一次只是重复;
+/// 而"在读/没开始/读完"直接对应他此刻想找的那一本。
+enum BookshelfFilter {
+  all('全部'),
+  reading('在读'),
+  untouched('未开始'),
+  finished('已读完');
+
+  final String label;
+  const BookshelfFilter(this.label);
+}
+
 class BookshelfScreen extends StatefulWidget {
   const BookshelfScreen({super.key});
 
@@ -61,6 +79,26 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
   bool _loading = true;
   String? _error;
   BookshelfSort _sort = BookshelfSort.recent;
+  BookshelfFilter _filter = BookshelfFilter.all;
+
+  /// 当前筛选下的书(全部 = 不再过滤,避免无谓的 list 复制)
+  List<BookshelfBook> get _visibleBooks => switch (_filter) {
+        BookshelfFilter.all => _books,
+        BookshelfFilter.reading =>
+          _books.where((b) => b.reading).toList(growable: false),
+        BookshelfFilter.untouched =>
+          _books.where((b) => b.untouched).toList(growable: false),
+        BookshelfFilter.finished =>
+          _books.where((b) => b.finished).toList(growable: false),
+      };
+
+  /// 某分组的书数(筛选 chip 上显示,用户不进分组也知道有几本)
+  int _countOf(BookshelfFilter filter) => switch (filter) {
+        BookshelfFilter.all => _books.length,
+        BookshelfFilter.reading => _books.where((b) => b.reading).length,
+        BookshelfFilter.untouched => _books.where((b) => b.untouched).length,
+        BookshelfFilter.finished => _books.where((b) => b.finished).length,
+      };
 
   /// 已经试过补译名的材料 id:避免"翻不出来 → 每次进来都再翻一次"
   final Set<int> _titleTried = {};
@@ -269,40 +307,103 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
         ],
       );
     }
+    final visible = _visibleBooks;
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
         padding: Insets.page,
         children: [
-          BookshelfView(
-            books: _books,
-            onTapBook: _openBook,
-            onLongPressBook: _showBookSheet,
-            emptyHint: '书架还是空的 —— 读到想留着的材料,在阅读器里点「加入书架」,它就摆上来了',
-            emptyAction: FilledButton.icon(
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const MaterialCenterScreen()),
-              ).then((_) {
-                if (mounted) _load();
-              }),
-              icon: const Icon(Icons.explore_outlined, size: 18),
-              label: const Text('去材料中心挑一本'),
+          if (_books.isEmpty)
+            _emptyShelf()
+          else ...[
+            AppSectionTitle(
+              title: '我的书架',
+              subtitle: '共 ${_countOf(BookshelfFilter.all)} 本'
+                  ' · 在读 ${_countOf(BookshelfFilter.reading)}'
+                  ' · 已读完 ${_countOf(BookshelfFilter.finished)}',
+              padding: const EdgeInsets.only(top: Gap.xs, bottom: Gap.xs),
             ),
-          ),
-          const SizedBox(height: Gap.lg),
-          if (_books.isNotEmpty)
-            Text(
-              '点一本书继续读,长按可以移出书架或看封面',
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    fontSize: 11,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+            _filterChips(),
+            const SizedBox(height: Gap.sm),
+            if (visible.isEmpty)
+              AppCard(
+                child: AppEmptyState(
+                  icon: Icons.filter_alt_outlined,
+                  art: EmptyArtKind.floatingPages,
+                  title: '这个分组还没有书',
+                  hint: '「${_filter.label}」里暂时没有书 —— 换个分组,或去材料中心加一本',
+                  action: TextButton.icon(
+                    onPressed: () =>
+                        setState(() => _filter = BookshelfFilter.all),
+                    icon: const Icon(Icons.grid_view_outlined, size: 16),
+                    label: const Text('查看全部'),
                   ),
-            ),
+                ),
+              )
+            else
+              BookshelfView(
+                books: visible,
+                onTapBook: _openBook,
+                onLongPressBook: _showBookSheet,
+              ),
+            const SizedBox(height: Gap.md),
+            if (visible.isNotEmpty)
+              Text(
+                '点一本书继续读,长按可以移出书架或看封面',
+                textAlign: TextAlign.center,
+                style: AppFont.metaStyle.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+          ],
           const SizedBox(height: Gap.xl),
         ],
       ),
+    );
+  }
+
+  /// 空书架:给插画 + 下一步动作(只写"暂无数据"用户还是不知道从哪开始)
+  Widget _emptyShelf() {
+    return AppCard(
+      child: AppEmptyState(
+        icon: Icons.menu_book_outlined,
+        art: EmptyArtKind.floatingPages,
+        title: '书架还是空的',
+        hint: '读到想留着的材料,在阅读器里点「加入书架」,它就会摆到这里',
+        action: FilledButton.icon(
+          onPressed: _openMaterialCenter,
+          icon: const Icon(Icons.explore_outlined, size: 18),
+          label: const Text('去材料中心挑一本'),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openMaterialCenter() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const MaterialCenterScreen()),
+    );
+    if (mounted) await _load();
+  }
+
+  /// 进度分组 chips(用 AppTag 风格:选中=主色 + 勾,未选中=中性)
+  Widget _filterChips() {
+    return Wrap(
+      spacing: Gap.xs,
+      runSpacing: Gap.xs,
+      children: [
+        for (final filter in BookshelfFilter.values)
+          InkWell(
+            borderRadius: Radii.pillRadius,
+            onTap: () => setState(() => _filter = filter),
+            child: AppTag(
+              '${filter.label} ${_countOf(filter)}',
+              tone: _filter == filter ? AppTagTone.primary : AppTagTone.neutral,
+              icon: _filter == filter ? Icons.check : null,
+            ),
+          ),
+      ],
     );
   }
 
@@ -337,6 +438,16 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
         await _load(showSkeleton: false);
         _toast('《${book.title}》标记为已读完');
       case 'remove':
+        // 移出书架是"会丢东西"的操作(用户攒的书),必须先确认;
+        // 文案说清"只移出、不删材料",用户才敢点
+        final ok = await confirmDestructive(
+          context,
+          title: '移出书架',
+          message: '只把《${book.title}》从书架移出,材料本身与阅读进度都不会被删除,'
+              '随时可以重新加入。',
+          confirmText: '移出',
+        );
+        if (!ok || !mounted) return;
         await _removeBook(book);
     }
   }

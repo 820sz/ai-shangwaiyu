@@ -29,6 +29,11 @@ void main() {
     List<UnfinishedMaterial> unfinishedMaterials = const [],
     double? quizAccuracy,
     List<ErrorTagBrief> activeErrors = const [],
+    int outputAttempts = 0,
+    double? outputAvgScore,
+    double? outputPrevAvgScore,
+    Map<String, double> outputDimensions = const {},
+    List<ErrorTagBrief> outputErrorTags = const [],
     Map<String, int> reviewBuckets = const {},
     List<int> forecast = const [],
     int? dailyMinutes,
@@ -45,6 +50,11 @@ void main() {
         unfinishedMaterials: unfinishedMaterials,
         quizAccuracy: quizAccuracy,
         activeErrors: activeErrors,
+        outputAttempts: outputAttempts,
+        outputAvgScore: outputAvgScore,
+        outputPrevAvgScore: outputPrevAvgScore,
+        outputDimensions: outputDimensions,
+        outputErrorTags: outputErrorTags,
         reviewBuckets: reviewBuckets,
         forecast: forecast,
         dailyMinutes: dailyMinutes,
@@ -376,6 +386,90 @@ void main() {
       for (final s in r.highlights) {
         expect(RegExp(r'[0-9]').hasMatch(s), isTrue, reason: '亮点必须带数字:$s');
       }
+    });
+  });
+
+  group('输出块(v2.18.0,批 3 收尾)', () {
+    test('没有输出练习 → outputLines 明确写"本周没有输出练习"(不省略)', () {
+      final r = WeeklyReportBuilder.build(now: now, inputs: inputs());
+      expect(r.outputAttempts, 0);
+      expect(r.outputAvgScore, isNull);
+      expect(r.outputLines, isNotEmpty);
+      expect(r.outputLines.first, contains('本周没有输出练习'));
+      // 空输出不能把 isActive 变 true(没有别的活动时仍是空周)
+      expect(r.isActive, isFalse);
+    });
+
+    test('有输出 → 次数/均分/较上周/错误热点都能看见', () {
+      final r = WeeklyReportBuilder.build(
+        now: now,
+        inputs: inputs(
+          outputAttempts: 3,
+          outputAvgScore: 72,
+          outputPrevAvgScore: 60,
+          outputErrorTags: const [
+            ErrorTagBrief(tag: '词汇', count: 1),
+            ErrorTagBrief(tag: '时态', count: 3),
+          ],
+        ),
+      );
+      expect(r.isActive, isTrue, reason: '只做输出练习也是活跃的一周');
+      expect(r.outputLines.first, contains('3'));
+      expect(r.outputLines.first, contains('72%'));
+      expect(r.outputLines.first, contains('较上周 +12%'));
+      expect(r.outputLines.join('\n'), contains('时态(3 次)'));
+      // 亮点里也要有产出(旧周报只报输入,用户"写了也不被看见")
+      expect(r.highlights.join('\n'), contains('输出练习'));
+      // 已产出的一周不应再建议"去练一次输出"
+      expect(
+        r.suggestions.any((s) => s.contains('本周还没有输出练习')),
+        isFalse,
+      );
+    });
+
+    test('维度均分:列出前三 + 低于 60% 时点名最弱维度', () {
+      final r = WeeklyReportBuilder.build(
+        now: now,
+        inputs: inputs(
+          outputAttempts: 2,
+          outputAvgScore: 65,
+          outputDimensions: const {
+            'content': 80,
+            'language': 50,
+            'vocabulary': 70,
+          },
+        ),
+      );
+      expect(r.outputLines.join('\n'), contains('维度均分'));
+      expect(r.outputLines.join('\n'), contains('内容切题 80%'));
+      expect(r.outputLines.join('\n'), contains('最弱维度:语言准确(50%)'));
+    });
+
+    test('有输入没输出 → 建议里点名补一次输出(与助理 input_only 同口径)', () {
+      final r = WeeklyReportBuilder.build(
+        now: now,
+        inputs: inputs(readingSessions: 3, wordsRead: 900, minutesRead: 30),
+      );
+      expect(r.isActive, isTrue);
+      expect(r.outputLines.first, contains('本周没有输出练习'));
+      expect(
+        r.suggestions.any((s) => s.contains('本周还没有输出练习')),
+        isTrue,
+      );
+    });
+
+    test('输出均分偏低 → 建议按 rubric 最弱维度改一次(带数字)', () {
+      final r = WeeklyReportBuilder.build(
+        now: now,
+        inputs: inputs(
+          outputAttempts: 2,
+          outputAvgScore: 48,
+          outputDimensions: const {'language': 40, 'content': 60},
+        ),
+      );
+      final text = r.suggestions.join('\n');
+      expect(text, contains('48%'));
+      expect(text, contains('语言准确'));
     });
   });
 

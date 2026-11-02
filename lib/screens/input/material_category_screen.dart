@@ -8,9 +8,11 @@ import '../../services/material_topics.dart';
 import '../../services/original_search.dart';
 import '../../widgets/app_ui.dart';
 import '../../widgets/design_kit.dart';
+import '../../widgets/graphics/graphics.dart';
 import '../../widgets/waiting.dart';
 import 'ai_material_search.dart';
 import 'material_import_flow.dart';
+import 'widgets/material_topic_card.dart';
 
 /// **一个材料大分类的二级页**(v2.13,用户 2026-10-20 的要求)。
 ///
@@ -116,21 +118,21 @@ class _MaterialCategoryScreenState extends State<MaterialCategoryScreen> {
         padding: Insets.page,
         children: [
           // ① 题材头图:一眼知道"这个分类里是什么"
+          //
+          // v3(批 1):从"色块 + 图标"换成**领域身份图形**(与首页大分区卡同一套
+          // 几何语言,点进来不换视觉语法)。图形 88 是头图档位,左侧留白更稳。
           AppCard(
             variant: AppCardVariant.hero,
             padding: const EdgeInsets.all(Gap.md),
             child: Row(
               children: [
-                Container(
-                  width: 56,
-                  height: 56,
-                  decoration: BoxDecoration(
-                    color: cs.primary.withAlpha(18),
-                    borderRadius: BorderRadius.circular(Radii.control + 2),
-                  ),
-                  child: Icon(widget.topic.icon, size: 28, color: cs.primary),
+                DomainGraphic(
+                  domain: graphicDomainOfTopic(widget.topic),
+                  size: 88,
+                  showPanel: true,
+                  semanticLabel: widget.topic.label,
                 ),
-                const SizedBox(width: Gap.sm),
+                const SizedBox(width: Gap.md),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,

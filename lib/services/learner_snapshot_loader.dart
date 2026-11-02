@@ -2,8 +2,10 @@ import 'package:flutter/foundation.dart';
 
 import '../models/learner_model.dart';
 import '../models/learning_record.dart';
+import '../models/writing_log.dart';
 import 'database.dart';
 import 'learner_model_store.dart';
+import 'output_feedback.dart';
 import 'tutor_engine.dart';
 
 /// 快照加载器(v2.0):把 Hive 里的画像 + SQLite 里的行为明细拼成
@@ -72,6 +74,52 @@ class LearnerSnapshotLoader {
       fallback: const <Map<String, Object?>>[],
     );
 
+    // v2.18.0(批 3 收尾):输出数据接进快照 —— 以前这里只读 quiz_results +
+    // error_tags,"写译批改/练习记录/rubric 作答"三张表完全没进快照,于是
+    // 助理会对着天天写作的用户报"只有输入没有输出"(数据孤岛)。
+    // 每个来源都独立 _safe:任一查询失败只丢那一块,页面照常出诊断。
+    final outputSnap = await _safe(
+      () => OutputFeedback.outputSnapshot(days: sessionWindowDays, now: at),
+      fallback: const <String, Object?>{},
+    );
+    final drillRows = await _safe(
+      () => DatabaseService.getDrillLogs(limit: 500),
+      fallback: const <Map<String, Object?>>[],
+    );
+    final writeLogs = await _safe(
+      () => DatabaseService.getWritingLogs(limit: 200),
+      fallback: const <WritingLog>[],
+    );
+    final windowStart = at.subtract(Duration(days: sessionWindowDays));
+    var drillLogs30d = 0;
+    for (final row in drillRows) {
+      final t = DateTime.tryParse('${row['created_at'] ?? ''}');
+      if (t != null && !t.isBefore(windowStart) && !t.isAfter(at)) {
+        drillLogs30d++;
+      }
+    }
+    var writeLogs30d = 0;
+    for (final log in writeLogs) {
+      if (!log.createdAt.isBefore(windowStart) && !log.createdAt.isAfter(at)) {
+        writeLogs30d++;
+      }
+    }
+    // 语法薄弱点:错误档案里 5 个语法标签的 active 项(按次数倒序,最多 3 个)。
+    // 用归一层的 grammarTags 做白名单,避免把「词汇」也算成语法薄弱点。
+    final weakGrammarTags = errorRows
+        .where((r) =>
+            OutputFeedback.grammarTags.contains('${r['tag'] ?? ''}') &&
+            '${r['status'] ?? 'active'}' == 'active')
+        .toList()
+      ..sort((a, b) =>
+          ((b['count'] as num?)?.toInt() ?? 0)
+              .compareTo((a['count'] as num?)?.toInt() ?? 0));
+    final weakTags = weakGrammarTags
+        .take(3)
+        .map((r) => '${r['tag'] ?? ''}')
+        .where((t) => t.isNotEmpty)
+        .toList();
+
     // ── 习惯维度(用本地已有的 daily_log,和「学习统计」页同一份数据) ──
     final activeDays = dailyLogs
         .where((r) =>
@@ -115,6 +163,12 @@ class LearnerSnapshotLoader {
               ))
           .where((e) => e.tag.isNotEmpty)
           .toList(),
+      outputAttempts30d: _int(outputSnap['attempts']),
+      outputAvgScore: _double(outputSnap['avgScore']),
+      outputLastAt: DateTime.tryParse('${outputSnap['lastAt'] ?? ''}'),
+      writeLogs30d: writeLogs30d,
+      drillLogs30d: drillLogs30d,
+      weakGrammarTags: weakTags,
       streakDays: streak,
       activeDays30d: activeDays,
     );

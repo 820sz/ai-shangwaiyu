@@ -1,34 +1,41 @@
 import 'package:flutter/material.dart';
 
 import '../../config/design_tokens.dart';
-import '../../config/theme.dart';
 import '../../models/learner_model.dart';
 import '../../services/drill_catalog.dart';
 import '../../services/drill_planner.dart';
+import '../../services/database.dart';
 import '../../services/learner_model_store.dart';
+import '../../services/output_composer.dart';
+import '../../widgets/app_page_route.dart';
 import '../../widgets/app_ui.dart';
 import '../../widgets/design_kit.dart';
 import '../../widgets/waiting.dart';
+import '../review/review_screen.dart';
 import '../writing/write_review_screen.dart';
 import '../writing/writing_logs_screen.dart';
 import 'drill_plan_screen.dart';
-import 'drill_screen.dart';
+// DrillMode 枚举定义在 drill_screen.dart;四阶卡片的进度摘要按模式取
+import 'drill_screen.dart' show DrillMode;
+import 'practice_setup_screen.dart';
+import 'widgets/output_tier_card.dart';
 
-/// 输出页(v1.8.0 起;v2.9 重做成"练习系统"的入口)。
+/// 输出页(v3 · 批 3 重做)。
 ///
-/// 用户 10/2 第 2 条原话:"上次这个功能没做好 —— 词汇拼写、翻译练习、
-/// 口语交流(等待开放,不着急,先挂那)—— 每个功能同样的,支持按用户目的需求、
-/// 水平现状,进行提供分类、针对性个性化、可选择的练习材料,注意 ui……
-/// 词汇练习、翻译练习这些,都要有系统规划、进度追踪,要让用户看得出有完整的
-/// 练习方向 —— 而不是现在这种随便给几个词、给几个句子翻译。"
+/// 用户 2026-11-01 的批注(两条,决定了这一页的结构):
+/// 1. > "输出练习,主要是在语音、词汇、语法三要素的基础上,去开发听说读写中
+///      '写'的练习,因为'说'当前模型不支持"
+/// 2. > "四阶写作阶梯这个不错,不过不要搞成'只有写词过了才写句'这种死人逻辑,
+///      而是并行逻辑,因为每个人的需求基础想法不一样。"
 ///
-/// 所以这一页只做三件事(细节都在练习中心里):
-/// 1. **说清"按什么练"**:目标需求(多选)+ 当前水平(软件内数据 + 用户补充),
-///    点开进 [DrillPlanScreen] 改;
-/// 2. **让方向看得见**:每个练习入口都挂上**当前进度摘要**
-///    ("计划第 3/28 天 · 今天已练 10 题 · 正确率 82%"),而不是一个光秃秃的入口;
-/// 3. **不假装能用**:口语交流仍然挂着,但把"为什么还没做、要接什么"写清楚 ——
-///    用户要的是"先挂那",不是"给个按钮点了没反应"。
+/// 所以这一页是**四阶并行的工作台**,不是"线性闯关":
+/// - 写词(词汇+语音):认词/拼写/听写 —— 入口接现有复习内核(FSRS);
+/// - 写句(词汇+语法):中译英回译 —— 入口接现有翻译练习;
+/// - 写段(语法+篇章):摘要/续写/观点段 —— 题源(从读过的材料出题)正在做,
+///   卡片明确标"开发中",不装作能用;
+/// - 写篇(篇章+语用):写译批改 + 写译记录(按目标考试要求批改)。
+///
+/// 四张卡**平级并列**,没有先后锁;从哪一阶开始由用户自己决定。
 class OutputHomeScreen extends StatefulWidget {
   const OutputHomeScreen({super.key});
 
@@ -39,9 +46,14 @@ class OutputHomeScreen extends StatefulWidget {
 class _OutputHomeScreenState extends State<OutputHomeScreen> {
   LearnerModel _model = LearnerModel();
 
-  /// 两个练习模式各自的进度摘要(入口卡上要显示)
+  /// 两个练习模式各自的进度摘要(卡片上要显示真实进度)
   final Map<DrillMode, DrillSummary> _summaries = {};
   bool _loading = true;
+
+  /// 今日建议用的真实数据:到期复习词数 + 最近 7 天写译篇数。
+  /// 只读现有表(不新增查询口径),拿不到就当 0 —— 建议卡随之隐藏该行,不编数字。
+  int _dueWords = 0;
+  int _writes7d = 0;
 
   @override
   void initState() {
@@ -60,7 +72,26 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
       if (!mounted) return;
       setState(() => _summaries[mode] = summary);
     }
-    if (mounted) setState(() => _loading = false);
+    var due = 0;
+    try {
+      due = await DatabaseService.getDueReviewCount();
+    } catch (_) {
+      // 复习队列读失败不影响输出页打开
+    }
+    var writes = 0;
+    try {
+      final logs = await DatabaseService.getWritingLogs(limit: 50);
+      final cutoff = DateTime.now().subtract(const Duration(days: 7));
+      writes = logs.where((l) => l.createdAt.isAfter(cutoff)).length;
+    } catch (_) {
+      // 写译记录读失败同理:建议卡少一行,页面照常
+    }
+    if (!mounted) return;
+    setState(() {
+      _dueWords = due;
+      _writes7d = writes;
+      _loading = false;
+    });
   }
 
   Future<void> _openPlan({DrillMode? mode}) async {
@@ -71,17 +102,24 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
       ),
     );
     if (!mounted) return;
-    await _load(); // 回来刷新进度(用户可能刚练了一轮)
+    await _load();
   }
 
-  /// 练习入口:直接开练(组题的步骤在练习中心/练习页里用真实时间线显示)
-  Future<void> _startDrill(DrillMode mode) async {
-    Navigator.push(
+  /// 进四阶练习器(写词/写句/写段/写篇):先选"从哪出题",再逐题写 + 按 rubric 批改。
+  ///
+  /// 用 [AppPageRoute] 的淡入+上滑转场(批 6):输出是"选来源 → 做题 → 看结果"
+  /// 的钻取流,统一转场比默认右滑更像"展开一层"。
+  Future<void> _openPractice(OutputTier tier) async {
+    await appPush(context, (_) => PracticeSetupScreen(tier: tier));
+    if (mounted) _load();
+  }
+
+  Future<void> _openReview() async {
+    await Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => DrillScreen(mode: mode)),
-    ).then((_) {
-      if (mounted) _load();
-    });
+      MaterialPageRoute(builder: (_) => const ReviewScreen()),
+    );
+    if (mounted) _load();
   }
 
   /// 口语交流:说明白"在做什么、为什么还不能用"
@@ -101,7 +139,8 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
               children: [
                 Row(
                   children: [
-                    Icon(Icons.mic_none, size: 20, color: theme.colorScheme.primary),
+                    Icon(Icons.mic_none,
+                        size: 20, color: theme.colorScheme.primary),
                     const SizedBox(width: Gap.xs),
                     Text(
                       '口语交流还没开放',
@@ -150,7 +189,7 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
                   ),
                 const SizedBox(height: Gap.xs),
                 Text(
-                  '在那之前:拼写与翻译练的是"想得起、写得出",这正是口语的地基 —— '
+                  '在那之前:写出来的东西,才是说出来的地基 —— '
                   '说不出来,多半是先写不出来。',
                   style: theme.textTheme.bodySmall?.copyWith(
                     height: 1.5,
@@ -165,6 +204,19 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
     );
   }
 
+  /// 练习进度摘要(真实数据;没有计划就报已练题数/正确率)。
+  String? _progressOf(DrillMode mode) {
+    final summary = _summaries[mode] ?? DrillSummary.empty;
+    if (!summary.stats.hasData) return null;
+    final stats = summary.stats;
+    final parts = <String>['已练 ${stats.total} 题'];
+    if (stats.total > 0) {
+      parts.add('正确率 ${(stats.accuracy * 100).round()}%');
+    }
+    if (summary.hasPlan) parts.add(summary.progress.summary);
+    return parts.join(' · ');
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -176,12 +228,12 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
     final level = DrillPlanner.levelOf(_model);
 
     return Scaffold(
-      // v2.12:去掉 AppBar —— 大标题 + 一行说明成为内容的一部分(与输入页/材料中心同一套)
       body: SafeArea(
         bottom: false,
         child: ListView(
           padding: Insets.page,
           children: [
+            // ① 标题
             Padding(
               padding: const EdgeInsets.only(top: Gap.xs, bottom: Gap.sm),
               child: Row(
@@ -192,198 +244,338 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          '练习',
+                          '输出',
                           style: AppFont.displayStyle.copyWith(
                             color: theme.colorScheme.onSurface,
                           ),
                         ),
                         const SizedBox(height: 6),
                         Text(
-                          '用你生词本里的真实词与句出题',
+                          '写词 → 写句 → 写段 → 写篇 · 四阶并行，从哪阶开始都行',
                           style: AppFont.metaStyle.copyWith(color: muted),
                         ),
                       ],
                     ),
                   ),
                   TextButton.icon(
-                    onPressed: _openPlan,
+                    onPressed: () => _openPlan(),
                     icon: const Icon(Icons.tune, size: 16),
                     label: const Text('练习中心'),
                   ),
                 ],
               ),
             ),
-            // ── ① 按什么练:目标 + 水平(点开进练习中心改)──
+
+            // ② 方向卡:目标 + 水平(点开进练习中心改;四阶共用同一个方向)
             AppStagger(
-            index: 0,
-            child: AppCard(
-              onTap: () => _openPlan(),
-              color: theme.colorScheme.primary.withAlpha(12),
-              padding: const EdgeInsets.all(Gap.md),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              index: 0,
+              child: AppCard(
+                onTap: () => _openPlan(),
+                color: theme.colorScheme.primary.withAlpha(12),
+                padding: const EdgeInsets.all(Gap.md),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.flag_outlined,
+                            size: 18, color: theme.colorScheme.primary),
+                        const SizedBox(width: Gap.xs),
+                        Expanded(
+                          child: Text(
+                            goals.isEmpty ? '还没选目标' : '目标:${goals.join(' + ')}',
+                            style: theme.textTheme.titleSmall
+                                ?.copyWith(fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                        Text(
+                          '${level.label}档',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w700,
+                            color: theme.colorScheme.primary,
+                          ),
+                        ),
+                        const SizedBox(width: 2),
+                        Icon(Icons.chevron_right,
+                            size: 18, color: theme.colorScheme.outline),
+                      ],
+                    ),
+                    const SizedBox(height: Gap.xs),
+                    Text(
+                      goals.isEmpty
+                          ? '选目标(可多选)后,四阶题目都会按它挑词长、句长与评分标准'
+                          : DrillCatalog.resolve(goals)
+                              .map((g) => g.what)
+                              .take(2)
+                              .join(';'),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: muted,
+                        fontSize: 11.5,
+                        height: 1.45,
+                      ),
+                    ),
+                    const SizedBox(height: Gap.sm),
+                    Wrap(
+                      spacing: Gap.xs,
+                      runSpacing: Gap.xs,
+                      children: [
+                        _infoPill(theme, Icons.speed, '水平:${level.label}'),
+                        if (_model.hasVocabBaseline)
+                          _infoPill(
+                            theme,
+                            Icons.bar_chart,
+                            '词汇量 ${_model.vocabEstimate!.value}',
+                          )
+                        else
+                          _infoPill(theme, Icons.help_outline, '还没测词汇量'),
+                        if ((_model.dailyMinutes?.value ?? 0) > 0)
+                          _infoPill(
+                            theme,
+                            Icons.schedule,
+                            '每天 ${_model.dailyMinutes!.value} 分钟',
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: Gap.sm),
+
+            // ②.5 今日建议:只用真实数据(到期复习词数 / 近 7 天写译篇数)
+            if (!_loading)
+              AppStagger(index: 1, child: _buildTodayAdvice(theme)),
+            const SizedBox(height: Gap.md),
+
+            // ③ 四阶台阶(并行,不锁顺序)
+            const AppSectionHeader(title: '四阶', indexLabel: '01'),
+            if (_loading)
+              const AppCard(
+                child: SkeletonLines(lines: 3, withTitle: true, seed: 3),
+              )
+            else
+              GridView.count(
+                crossAxisCount: 2,
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                mainAxisSpacing: Gap.xs,
+                crossAxisSpacing: Gap.xs,
+                childAspectRatio: 1.28,
                 children: [
-                  Row(
-                    children: [
-                      Icon(Icons.flag_outlined,
-                          size: 18, color: theme.colorScheme.primary),
-                      const SizedBox(width: Gap.xs),
-                      Expanded(
-                        child: Text(
-                          goals.isEmpty ? '还没选目标' : '目标:${goals.join(' + ')}',
-                          style: theme.textTheme.titleSmall
-                              ?.copyWith(fontWeight: FontWeight.w700),
-                        ),
-                      ),
-                      Text(
-                        '${level.label}档',
-                        style: TextStyle(
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w700,
-                          color: theme.colorScheme.primary,
-                        ),
-                      ),
-                      const SizedBox(width: 2),
-                      Icon(Icons.chevron_right,
-                          size: 18, color: theme.colorScheme.outline),
-                    ],
+                  OutputTierCard(
+                    tier: outputTierCatalog[0].tier,
+                    title: outputTierCatalog[0].title,
+                    subtitle: outputTierCatalog[0].subtitle,
+                    progress: _progressOf(DrillMode.spelling),
+                    // v3 增强:写词不再只有"复习生词本"一条路 —— 进设置页还能
+                    // 按目标练内置考纲/外刊高频词(不依赖输入闭环)。
+                    onTap: () => _openPractice(OutputTier.word),
                   ),
-                  const SizedBox(height: Gap.xs),
-                  Text(
-                    goals.isEmpty
-                        ? '选目标(可多选)后,练习会按它挑词长与句长 —— 备考偏长词长句,'
-                            '生活偏高频短语'
-                        : DrillCatalog.resolve(goals)
-                            .map((g) => g.what)
-                            .take(2)
-                            .join(';'),
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: muted,
-                      fontSize: 11.5,
-                      height: 1.45,
-                    ),
+                  OutputTierCard(
+                    tier: outputTierCatalog[1].tier,
+                    title: outputTierCatalog[1].title,
+                    subtitle: outputTierCatalog[1].subtitle,
+                    progress: _progressOf(DrillMode.translation),
+                    onTap: () => _openPractice(OutputTier.sentence),
                   ),
-                  const SizedBox(height: Gap.sm),
-                  Wrap(
-                    spacing: Gap.xs,
-                    runSpacing: Gap.xs,
-                    children: [
-                      _infoPill(
-                        theme,
-                        Icons.speed,
-                        '水平:${level.label}',
-                      ),
-                      if (_model.hasVocabBaseline)
-                        _infoPill(
-                          theme,
-                          Icons.bar_chart,
-                          '词汇量 ${_model.vocabEstimate!.value}',
-                        )
-                      else
-                        _infoPill(
-                          theme,
-                          Icons.help_outline,
-                          '还没测词汇量',
-                        ),
-                      if ((_model.dailyMinutes?.value ?? 0) > 0)
-                        _infoPill(
-                          theme,
-                          Icons.schedule,
-                          '每天 ${_model.dailyMinutes!.value} 分钟',
-                        ),
-                    ],
+                  OutputTierCard(
+                    tier: outputTierCatalog[2].tier,
+                    title: outputTierCatalog[2].title,
+                    subtitle: outputTierCatalog[2].subtitle,
+                    onTap: () => _openPractice(OutputTier.paragraph),
                   ),
-                  const SizedBox(height: Gap.xs),
-                  Text(
-                    '练习中心里能改目标、补一句自己的水平情况、切三种练法。',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: muted,
-                      fontSize: 10.5,
-                    ),
+                  OutputTierCard(
+                    tier: outputTierCatalog[3].tier,
+                    title: outputTierCatalog[3].title,
+                    subtitle: outputTierCatalog[3].subtitle,
+                    onTap: () => _openPractice(OutputTier.essay),
                   ),
                 ],
               ),
-            ),
-          ),
-
-          // ── ② 练(每个入口都挂当前进度)──
-          AppSectionHeader(
-            title: '练',
-            indexLabel: '01',
-            trailing: TextButton(
-              onPressed: () => _openPlan(),
-              child: const Text('练习中心'),
-            ),
-          ),
-          for (var i = 0; i < DrillMode.values.length; i++)
-            AppStagger(
-              index: 1 + i,
-              child: _loading
-                  ? const AppCard(
-                      child: SkeletonLines(lines: 2, withTitle: true, seed: 2),
-                    )
-                  : _drillTile(theme, muted, DrillMode.values[i]),
-            ),
-
-          // ── ③ 口语(先挂着,但说清规划)──
-          const SizedBox(height: Gap.xs),
-          AppStagger(
-            index: 3,
-            child: Opacity(
-              opacity: 0.75,
-              child: AppActionTile(
-                icon: Icons.mic_none,
-                title: '口语交流(敬请期待)',
-                subtitle: '要接实时语音 + 音素级发音评分 + 按目标出话题,做不好不上',
-                trailing: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(Radii.control - 4),
-                  ),
-                  child: Text('开发中',
-                      style: TextStyle(fontSize: 10, color: muted)),
+            const SizedBox(height: Gap.xs),
+            // 写词/写句的补充入口:拼写与回译的"练习计划"仍在练习中心
+            Wrap(
+              spacing: Gap.xs,
+              children: [
+                TextButton(
+                  onPressed: () => _openPlan(mode: DrillMode.spelling),
+                  child: const Text('写词 · 拼写练习计划'),
                 ),
-                onTap: _explainSpeaking,
-              ),
+                TextButton(
+                  onPressed: () => _openPlan(mode: DrillMode.translation),
+                  child: const Text('写句 · 回译练习计划'),
+                ),
+              ],
             ),
-          ),
 
-          // ── ④ 写 ──
-          const AppSectionHeader(
-            title: '写',
-            indexLabel: '02',
-          ),
-          AppStagger(
-            index: 4,
-            child: AppActionTile(
-              icon: Icons.edit_note,
-              title: '写译批改',
-              subtitle: '手写 / 电子稿 → AI 批改(按你的目标提要求)',
-              highlight: true,
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const WriteReviewScreen()),
+            // ④ 写篇:批改与复盘(现有能力,真实入口)
+            const AppSectionHeader(title: '写篇 · 批改与复盘', indexLabel: '02'),
+            AppStagger(
+              index: 4,
+              child: AppActionTile(
+                icon: Icons.edit_note,
+                title: '写译批改',
+                subtitle: '手写 / 电子稿 → 按你的目标考试评分（rubric 维度分）',
+                highlight: true,
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const WriteReviewScreen()),
+                ),
               ),
             ),
-          ),
-          AppStagger(
-            index: 5,
-            child: AppActionTile(
-              icon: Icons.history_edu_outlined,
-              title: '写译记录',
-              subtitle: '按日期查阅与复盘',
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const WritingLogsScreen()),
+            AppStagger(
+              index: 5,
+              child: AppActionTile(
+                icon: Icons.workspace_premium_outlined,
+                title: '按目标考试真题练',
+                subtitle: '抓公开真题页面出题（写作 / 翻译），每题标注来源',
+                onTap: () => _openPractice(OutputTier.essay),
               ),
             ),
-          ),
-          const SizedBox(height: Gap.lg),
+            AppStagger(
+              index: 6,
+              child: AppActionTile(
+                icon: Icons.history_edu_outlined,
+                title: '写译记录',
+                subtitle: '按日期查阅与复盘',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const WritingLogsScreen()),
+                ),
+              ),
+            ),
+
+            // ⑤ 口语:先挂着,但说清规划(不装能用)
+            const SizedBox(height: Gap.xs),
+            AppStagger(
+              index: 6,
+              child: Opacity(
+                opacity: 0.75,
+                child: AppActionTile(
+                  icon: Icons.mic_none,
+                  title: '口语交流(敬请期待)',
+                  subtitle: '要接实时语音 + 音素级发音评分 + 按目标出话题,做不好不上',
+                  trailing: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(Radii.control - 4),
+                    ),
+                    child: Text('开发中',
+                        style: TextStyle(fontSize: 10, color: muted)),
+                  ),
+                  onTap: _explainSpeaking,
+                ),
+              ),
+            ),
+            const SizedBox(height: Gap.lg),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 今日建议(v3 批 3):两条真实数据 → 两条建议。
+  ///
+  /// 为什么不做 AI 生成的"鸡汤式建议":项目纪律是**每条结论必须带数据**;
+  /// 到期词数、近 7 天写译篇数都是软件里已有的真实数字,直接拿来用。
+  Widget _buildTodayAdvice(ThemeData theme) {
+    final cs = theme.colorScheme;
+    final rows = <Widget>[];
+    if (_dueWords > 0) {
+      rows.add(_adviceRow(
+        theme,
+        Icons.sync,
+        '有 $_dueWords 个词到期，先用「写词」把它们写一遍',
+        '去写词',
+        _openReview,
+      ));
+    } else {
+      rows.add(_adviceRow(
+        theme,
+        Icons.check_circle_outline,
+        '今天没有到期的复习词',
+        null,
+        null,
+      ));
+    }
+    if (_writes7d == 0) {
+      rows.add(_adviceRow(
+        theme,
+        Icons.edit_note,
+        '最近 7 天没有写译练习，写一篇 120 词的短文最有效',
+        '去写篇',
+        () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const WriteReviewScreen()),
+        ),
+      ));
+    } else {
+      rows.add(_adviceRow(
+        theme,
+        Icons.trending_up,
+        '近 7 天写了 $_writes7d 篇，保持输出节奏',
+        null,
+        null,
+      ));
+    }
+    return AppCard(
+      variant: AppCardVariant.accent,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.lightbulb_outline, size: 16, color: cs.primary),
+              const SizedBox(width: 6),
+              Text(
+                '今日建议',
+                style: AppFont.subheadStyle.copyWith(
+                  color: cs.onSurface,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
             ],
           ),
+          const SizedBox(height: Gap.xs),
+          for (var i = 0; i < rows.length; i++) ...[
+            if (i > 0) const SizedBox(height: 6),
+            rows[i],
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _adviceRow(
+    ThemeData theme,
+    IconData icon,
+    String text,
+    String? actionLabel,
+    VoidCallback? onTap,
+  ) {
+    final cs = theme.colorScheme;
+    return Row(
+      children: [
+        Icon(icon, size: 15, color: cs.onSurfaceVariant),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            text,
+            style: AppFont.tagStyle.copyWith(
+              color: cs.onSurface,
+              height: 1.35,
+            ),
+          ),
         ),
+        if (actionLabel != null && onTap != null)
+          TextButton(
+            onPressed: onTap,
+            child: Text(actionLabel, style: const TextStyle(fontSize: 11)),
+          ),
+      ],
     );
   }
 
@@ -406,143 +598,6 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
               fontSize: 11,
               fontWeight: FontWeight.w600,
               color: theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 练习入口卡:图标 + 标题 + 一句话 + **当前进度摘要**(用户要"看得出有方向")
-  Widget _drillTile(ThemeData theme, Color muted, DrillMode mode) {
-    final summary = _summaries[mode] ?? DrillSummary.empty;
-    final p = summary.progress;
-    final note = summary.note;
-    final hasData = summary.stats.hasData;
-    return AppCard(
-      onTap: () => _startDrill(mode),
-      padding: const EdgeInsets.all(Gap.md),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.primary.withAlpha(20),
-                  borderRadius: BorderRadius.circular(Radii.control),
-                ),
-                child:
-                    Icon(mode.icon, size: 20, color: theme.colorScheme.primary),
-              ),
-              const SizedBox(width: Gap.sm),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      mode.label,
-                      style: theme.textTheme.titleSmall
-                          ?.copyWith(fontWeight: FontWeight.w700),
-                    ),
-                    const SizedBox(height: 1),
-                    Text(
-                      mode.description,
-                      style: theme.textTheme.bodySmall
-                          ?.copyWith(color: muted, fontSize: 11.5),
-                    ),
-                  ],
-                ),
-              ),
-              if (summary.hasPlan)
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.primary.withAlpha(18),
-                    borderRadius: BorderRadius.circular(Radii.control - 4),
-                  ),
-                  child: Text(
-                    DrillPlanNote.labelOf(note.planMode),
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
-                      color: theme.colorScheme.primary,
-                    ),
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(height: Gap.sm),
-          // 进度摘要:没有计划时给"怎么开始",有计划时给当前状态
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(
-              horizontal: Gap.sm,
-              vertical: Gap.xs,
-            ),
-            decoration: BoxDecoration(
-              color: theme.colorScheme.surfaceContainerHighest.withAlpha(140),
-              borderRadius: Radii.controlRadius,
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  summary.hasPlan
-                      ? p.summary
-                      : (hasData
-                          ? '还没定方向 · 已练 ${summary.stats.total} 题'
-                          : '还没开始 —— 点「练习中心」定个方向'),
-                  style: TextStyle(
-                    fontSize: 11.5,
-                    height: 1.4,
-                    fontWeight: FontWeight.w600,
-                    color: theme.colorScheme.onSurface,
-                  ),
-                ),
-                if (hasData) ...[
-                  const SizedBox(height: 5),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(3),
-                          child: LinearProgressIndicator(
-                            value: summary.hasPlan && p.totalDays > 0
-                                ? (p.dayIndex / p.totalDays).clamp(0.0, 1.0)
-                                : (p.todayTotal / (p.perDay == 0 ? 10 : p.perDay))
-                                    .clamp(0.0, 1.0),
-                            minHeight: 4,
-                            backgroundColor:
-                                theme.colorScheme.outlineVariant.withAlpha(90),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: Gap.xs),
-                      Text(
-                        p.todayDone
-                            ? '今天已达标'
-                            : '今天 ${p.todayTotal}/${p.perDay} 题',
-                        style: TextStyle(
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w600,
-                          color: p.todayDone
-                              ? AppTheme.successColor(context)
-                              : muted,
-                        ),
-                      ),
-                      const SizedBox(width: Gap.xs),
-                      Text(
-                        '正确率 ${(summary.stats.accuracy * 100).round()}%',
-                        style: TextStyle(fontSize: 10.5, color: muted),
-                      ),
-                    ],
-                  ),
-                ],
-              ],
             ),
           ),
         ],

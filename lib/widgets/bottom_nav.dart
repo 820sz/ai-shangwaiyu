@@ -3,9 +3,13 @@ import 'package:flutter/services.dart' show HapticFeedback;
 
 import '../config/design_tokens.dart';
 
-/// 底部导航。v2.2 起四栏顺序为:**输入 / 输出 / 我的 / 学习助理** ——
-/// 用户真机实测后的调整:学习助理(原「导师」)从最左挪到最右,
+/// 底部导航。v3 起四栏文案为:**输入 / 输出 / 我的 / 助理** ——
+/// 顺序沿用 v2.2 用户真机实测后的调整:学习助理(原「导师」)从最左挪到最右,
 /// 因为日常最常做的是"拍/读/写"(输入与输出),助理是回头看结论的地方。
+///
+/// v3(B0-5)的文案口径:**输入 / 输出** 对应语言学习的"输入输出闭环"——
+/// 前者是"拿什么进来学"(读/听、收词、找材料),后者是"拿什么练出去"(说/写);
+/// 四格统一成两个字的层级,与「我的」「助理」同语级,扫一眼就知道这一栏干嘛。
 /// 枚举顺序与 `IndexedStack.children` 必须一一对应,改这里要同时改 `app.dart`。
 ///
 /// v2.11(用户 10/5:"前端非常单一…非常单调平庸"):给这一条加了**轻动效**。
@@ -50,9 +54,11 @@ class ReadFlowBottomNav extends StatelessWidget {
               _NavItem(
                 icon: Icons.auto_stories_outlined,
                 activeIcon: Icons.auto_stories,
-                // v2.12:底栏文案从"输入"(工程词)改成**用户语言**"材料" ——
-                // 这一页实际做的是"拍照 / 导入 / 找材料",叫输入会让用户猜。
-                label: '材料',
+                // v3(B0-5):从"材料"改回"输入"—— 四个 tab 收敛成语言学习的
+                // **输入 / 输出**闭环(输入=读/听与收词,输出=说/写与练习);
+                // 而"材料"只覆盖这一页的一部分(还有书架、推荐、材料库),
+                // 单看两个字反而不知道点进去看什么。
+                label: '输入',
                 isActive: currentTab == ReadFlowTab.input,
                 onTap: () => _select(context, ReadFlowTab.input),
                 indicatorColor: cs.primary,
@@ -60,8 +66,10 @@ class ReadFlowBottomNav extends StatelessWidget {
               _NavItem(
                 icon: Icons.assignment_outlined,
                 activeIcon: Icons.assignment,
-                // "输出" → "练习":这一页实际是练习系统(练 + 写译)。
-                label: '练习',
+                // v3(B0-5):从"练习"改回"输出"—— 与"输入"成对,用户第一眼
+                // 看到的是"输入→输出"的学习闭环;且这一页不只有练习,还有
+                // 写译记录与口语(开发中),叫"练习"会让人以为只有刷题。
+                label: '输出',
                 isActive: currentTab == ReadFlowTab.output,
                 onTap: () => _select(context, ReadFlowTab.output),
                 indicatorColor: cs.primary,

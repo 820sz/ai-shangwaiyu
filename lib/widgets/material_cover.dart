@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../config/design_tokens.dart';
 import '../services/material_source.dart';
+import 'graphics/graphics.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 纯函数层:封面的"内容规则"全部放这里(不碰 BuildContext,可单测)
@@ -420,7 +421,6 @@ class MaterialCover extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final brightness = Theme.of(context).brightness;
     return ClipRRect(
       borderRadius: BorderRadius.circular(radius),
       child: SizedBox(
@@ -438,7 +438,6 @@ class MaterialCover extends StatelessWidget {
             final short = math.min(w, h);
             final showLevel = coverShowLevelBadge(levelLabel, short);
             final chrome = _CoverChrome.of(w, h, showLevel: showLevel);
-            final colors = coverPalette(seed, brightness);
             final hasImage = coverHasImage(imageUrl);
             final large = coverIsLarge(h);
             // v2.11:按**真实渲染尺寸 × 设备像素比**解码(见下面 Image.network 的注释)
@@ -449,7 +448,7 @@ class MaterialCover extends StatelessWidget {
               fit: StackFit.expand,
               children: [
                 // ① + ② + ③ 程序化封面(真图会整个盖住它,包括里面的标题文字)
-                _procedural(colors, chrome, large),
+                _procedural(w, h, chrome, large),
                 if (hasImage) ...[
                   Image.network(
                     imageUrl!.trim(),
@@ -504,8 +503,14 @@ class MaterialCover extends StatelessWidget {
     );
   }
 
-  /// 程序化封面:渐变底 + 纹理 + 顶部提亮/底部压暗 + 主体文字
-  Widget _procedural(List<Color> colors, _CoverChrome c, bool large) {
+  /// 程序化封面:图形身份层 + 顶部提亮/底部压暗 + 主体文字。
+  ///
+  /// v3(2026-11-01 批 1):底座从"渐变 + 手写纹理"换成图形资产系统的
+  /// [MaterialCoverArt] —— 用户连着几轮说封面是"色块 + 文字",根因是全 App
+  /// 没有任何自绘图形。现在每种材料类型有各自的几何身份(书脊/点阵/报头/
+  /// 考卷/声波/便签),真图缺失时也不再是一块纯色。
+  /// 文字仍由本组件叠在上面:身份图层**不画字**(避免和标题打架)。
+  Widget _procedural(double w, double h, _CoverChrome c, bool large) {
     final text = large
         ? coverTitleSnippet(seed, maxChars: c.titleChars)
         : coverMonogram(seed, small: true);
@@ -513,17 +518,17 @@ class MaterialCover extends StatelessWidget {
     return Stack(
       fit: StackFit.expand,
       children: [
-        DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: colors,
-            ),
+        // ① 类型身份图(几何纹理 + 类型渐变色,深色主题自动压暗一档)
+        Positioned.fill(
+          child: MaterialCoverArt(
+            kind: MaterialKindArt.fromId(kind),
+            seed: seed,
+            width: w,
+            height: h,
+            radius: 0, // 外层 ClipRRect 已经裁过圆角
           ),
         ),
-        CustomPaint(painter: _CoverTexturePainter(kind: kind)),
-        // 顶部一点"光"、底部压暗:底部压暗是白字对比度的保险(暗面本来已经够深)
+        // ② 顶部一点"光"、底部压暗:底部压暗是白字对比度的保险(暗面本来已经够深)
         DecoratedBox(
           decoration: BoxDecoration(
             gradient: LinearGradient(
@@ -538,6 +543,7 @@ class MaterialCover extends StatelessWidget {
             ),
           ),
         ),
+        // ③ 主体文字:大卡标题(底部对齐) / 小卡单字(居中)
         Positioned(
           left: c.pad,
           right: c.pad,
@@ -829,12 +835,18 @@ class _CoverChrome {
 
 /// 按 [kind] 画低对比度几何纹理。用 CustomPainter 自绘:零依赖、零资源。
 ///
+/// v3(2026-11-01 批 1,图形资产系统)起,`MaterialCover` 的封面底座改成
+/// [MaterialCoverArt](类型身份图:书脊/点阵/报头/考卷/声波/便签)。
+/// 这份手写纹理**当前不被封面调用**,保留作参考实现:以后若要做"纯纹理"
+/// 的极简变体(或 `MaterialCoverArt` 需要迁移绘制工具)可以直接复用,
+/// 不必重写一遍几何。
+///
 /// 三条自我约束:
 /// - 透明度只有 20~22/255(白),层次感靠"形"而不是靠"亮";
 /// - 线条间距下限 9px —— 52 的小卡上按比例画会把线挤成一片灰雾;
 /// - 只画 5~8 笔,列表里一屏十几张封面也不会掉帧。
-class _CoverTexturePainter extends CustomPainter {
-  const _CoverTexturePainter({required this.kind});
+class CoverTexturePainter extends CustomPainter {
+  const CoverTexturePainter({required this.kind});
 
   final String kind;
 
@@ -957,7 +969,7 @@ class _CoverTexturePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _CoverTexturePainter old) => old.kind != kind;
+  bool shouldRepaint(covariant CoverTexturePainter old) => old.kind != kind;
 }
 
 /// 封面外廓:1px 上亮下暗的描边 + 顶边内阴影。

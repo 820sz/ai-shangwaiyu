@@ -10,8 +10,10 @@ import '../../models/bookmark.dart';
 import '../../providers/bookmark_provider.dart';
 import '../../widgets/app_ui.dart';
 import '../../widgets/confirm_destructive.dart';
-import '../../widgets/empty_state.dart';
+import '../../widgets/design_kit.dart';
 import '../../widgets/error_state.dart';
+import '../../widgets/graphics/graphics.dart';
+import '../input/material_center_screen.dart';
 // 复用追问气泡那套"克制的 Markdown 样式":正文一律 onSurface,
 // 只有链接用主色,层级靠字重 —— 详见 calmMarkdownSheet 的注释。
 import '../input/widgets/follow_up_bubble.dart' show calmMarkdownSheet;
@@ -81,11 +83,29 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
       );
     }
     if (bp.items.isEmpty) {
-      return const EmptyState(
-        key: ValueKey('bookmarks-empty'),
-        icon: Icons.star_border,
-        title: '还没有收藏',
-        hint: '在追问回答顶部、词条卡片、阅读器里点 ☆ 即可收藏,会自动归到对应分区',
+      // 空收藏:插画 + 下一步动作(收藏是"顺手"行为,得告诉用户去哪儿顺手)
+      return Center(
+        key: const ValueKey('bookmarks-empty'),
+        child: SingleChildScrollView(
+          padding: Insets.page,
+          child: AppEmptyState(
+            icon: Icons.star_border,
+            art: EmptyArtKind.floatingPages,
+            title: '还没有收藏',
+            hint: '在追问回答、词条卡片、阅读器里点 ☆ 就会自动归到对应分区,'
+                '以后回来能按来源找',
+            action: FilledButton.icon(
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const MaterialCenterScreen(),
+                ),
+              ),
+              icon: const Icon(Icons.explore_outlined, size: 18),
+              label: const Text('去材料中心逛逛'),
+            ),
+          ),
+        ),
       );
     }
 
@@ -96,15 +116,19 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
     return Column(
       key: const ValueKey('bookmarks-list'),
       children: [
-        // ① 分区 chips(用户第 10 条的核心)
-        SizedBox(
-          height: 46,
-          child: ListView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        // ① 分区 chips(用户第 10 条的核心):AppTag 风格 + 计数,v3 四屏统一
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            Gap.page,
+            Gap.sm,
+            Gap.page,
+            Gap.xxs,
+          ),
+          child: Wrap(
+            spacing: Gap.xs,
+            runSpacing: Gap.xxs,
             children: [
               _sectionChip(
-                context,
                 label: '全部',
                 count: bp.items.length,
                 selected: _section == null,
@@ -112,7 +136,6 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
               ),
               for (final s in AppConstants.bookmarkSections)
                 _sectionChip(
-                  context,
                   label: s['label']!,
                   count: _countOf(bp, s['id']!),
                   selected: _section == s['id'],
@@ -124,15 +147,19 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
         // ② 当前分区的说明(告诉用户"这类是从哪儿收藏来的")
         if (_section != null)
           Padding(
-            padding: const EdgeInsets.fromLTRB(14, 0, 14, 4),
+            padding: const EdgeInsets.fromLTRB(
+              Gap.page,
+              0,
+              Gap.page,
+              Gap.xxs,
+            ),
             child: Align(
               alignment: Alignment.centerLeft,
               child: Text(
                 AppConstants.bookmarkSections
                         .firstWhere((s) => s['id'] == _section)['hint'] ??
                     '',
-                style: TextStyle(
-                  fontSize: 11,
+                style: AppFont.metaStyle.copyWith(
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
@@ -140,15 +167,29 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
           ),
         Expanded(
           child: items.isEmpty
-              ? const EmptyState(
-                  icon: Icons.inbox_outlined,
-                  title: '这个分区还没有收藏',
-                  hint: '换个分区看看,或去对应功能区点 ☆',
+              // 分区空 ≠ 全空:不能把用户吓回"没有收藏",给"查看全部"的出口
+              ? ListView(
+                  padding: Insets.page,
+                  children: [
+                    AppCard(
+                      child: AppEmptyState(
+                        icon: Icons.filter_alt_outlined,
+                        art: EmptyArtKind.floatingPages,
+                        title: '这个分区还没有收藏',
+                        hint: '换个分区看看,或去对应功能区点 ☆',
+                        action: TextButton.icon(
+                          onPressed: () => setState(() => _section = null),
+                          icon: const Icon(Icons.clear_all, size: 16),
+                          label: const Text('查看全部收藏'),
+                        ),
+                      ),
+                    ),
+                  ],
                 )
               : ListView.separated(
-                  padding: const EdgeInsets.all(12),
+                  padding: Insets.page,
                   itemCount: items.length,
-                  separatorBuilder: (_, _) => const SizedBox(height: 8),
+                  separatorBuilder: (_, _) => const SizedBox(height: Gap.xs),
                   itemBuilder: (context, i) =>
                       _BookmarkCard(bookmark: items[i]),
                 ),
@@ -157,28 +198,19 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
     );
   }
 
-  Widget _sectionChip(
-    BuildContext context, {
+  Widget _sectionChip({
     required String label,
     required int count,
     required bool selected,
     required VoidCallback onTap,
   }) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.only(right: 6),
-      child: ChoiceChip(
-        label: Text(count > 0 ? '$label $count' : label),
-        selected: selected,
-        onSelected: (_) => onTap(),
-        visualDensity: VisualDensity.compact,
-        labelStyle: TextStyle(
-          fontSize: 12,
-          color: selected
-              ? theme.colorScheme.primary
-              : theme.colorScheme.onSurface,
-          fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
-        ),
+    return InkWell(
+      borderRadius: Radii.pillRadius,
+      onTap: onTap,
+      child: AppTag(
+        count > 0 ? '$label $count' : label,
+        tone: selected ? AppTagTone.primary : AppTagTone.neutral,
+        icon: selected ? Icons.check : null,
       ),
     );
   }
@@ -699,69 +731,78 @@ class _BookmarkCard extends StatelessWidget {
         .replaceAll(RegExp(r'\s+'), ' ')
         .trim();
 
-    return Card(
-      color: theme.colorScheme.surface,
-      child: InkWell(
-        borderRadius: Radii.cardRadius,
-        onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => BookmarkReaderScreen(bookmark: bookmark),
-          ),
+    return AppCard(
+      margin: EdgeInsets.zero,
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => BookmarkReaderScreen(bookmark: bookmark),
         ),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 10, 4, 10),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(style.icon, size: 18, color: style.color),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 来源身份用图标 + 主题色:四个来源在列表里一眼可分,不用读文字
+          Container(
+            width: 34,
+            height: 34,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: style.color.withAlpha(22),
+              borderRadius: Radii.controlRadius,
+            ),
+            child: Icon(style.icon, size: 18, color: style.color),
+          ),
+          const SizedBox(width: Gap.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  bookmark.title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppFont.subheadStyle,
+                ),
+                const SizedBox(height: Gap.xxs),
+                Wrap(
+                  spacing: Gap.xs,
+                  runSpacing: Gap.xxs,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
+                    AppTag(style.label, icon: style.icon),
                     Text(
-                      bookmark.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '${style.label} · '
                       '${bookmark.createdAt.year}-'
                       '${bookmark.createdAt.month.toString().padLeft(2, '0')}-'
                       '${bookmark.createdAt.day.toString().padLeft(2, '0')}',
-                      // P2-31:次要文字对比度不足 → 用主题的次要文字色(深浅色都达 AA)
-                      style: TextStyle(
-                          fontSize: 10,
-                          color: theme.colorScheme.onSurfaceVariant),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      preview.length > 80
-                          ? '${preview.substring(0, 80)}…'
-                          : preview,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                          fontSize: 11,
-                          color: theme.colorScheme.onSurfaceVariant),
+                      style: AppFont.metaStyle.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
                     ),
                   ],
                 ),
-              ),
-              IconButton(
-                icon: Icon(Icons.delete_outline,
-                    size: 18, color: theme.colorScheme.onSurfaceVariant),
-                tooltip: '删除收藏',
-                onPressed: () => _confirmDelete(context),
-              ),
-            ],
+                const SizedBox(height: Gap.xxs),
+                Text(
+                  preview.length > 80
+                      ? '${preview.substring(0, 80)}…'
+                      : preview,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppFont.metaStyle.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                    height: 1.45,
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
+          IconButton(
+            icon: Icon(Icons.delete_outline,
+                size: 18, color: theme.colorScheme.onSurfaceVariant),
+            tooltip: '删除收藏',
+            onPressed: () => _confirmDelete(context),
+          ),
+        ],
       ),
     );
   }
@@ -772,7 +813,7 @@ class _BookmarkCard extends StatelessWidget {
     final ok = await confirmDestructive(
       context,
       title: '删除收藏',
-      message: '确定删除「${bookmark.title}」吗？删除后不可恢复。',
+      message: '只删除本机这条收藏,不影响原文与材料。删除后不可恢复(可撤销)。',
     );
     if (!ok || !context.mounted) return;
     final id = bookmark.id;

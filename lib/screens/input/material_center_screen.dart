@@ -13,6 +13,7 @@ import '../../services/database.dart';
 import '../../services/deepseek_api.dart';
 import '../../services/external_link.dart';
 import '../../services/feed_parser.dart' show FeedItem;
+import '../../services/input_prefs.dart';
 import '../../services/learner_model_store.dart';
 import '../../services/material_library.dart';
 import '../../services/material_prefs.dart';
@@ -29,10 +30,12 @@ import '../../widgets/material_cover.dart';
 import '../../widgets/waiting.dart';
 import 'category_material_screen.dart';
 import 'material_category_screen.dart';
+import 'material_discover_screen.dart';
 import 'bookshelf_screen.dart';
 import 'material_import_flow.dart';
 import 'material_reader_screen.dart';
 import 'widgets/material_preview_dialog.dart';
+import 'widgets/material_topic_card.dart';
 
 /// 材料中心(v2.0;v2.7 大改;v2.8 按参考软件做视觉与信息架构升级)。
 ///
@@ -72,6 +75,10 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
   String? _error;
   LearnerModel _model = LearnerModel();
   MaterialPrefs _prefs = MaterialPrefs.empty;
+
+  /// 输入偏好统一层(v3 批 2):目标(多选)/兴趣/难度档/时间都从这里读,
+  /// 与「输入」首页的「我的需求」是同一份数据 —— 两处显示不能不一致。
+  InputPreferences _inputPrefs = InputPreferences.load();
   bool _onlyFit = false;
   Map<String, SourceHealth> _health = const {};
   bool _probing = false;
@@ -108,6 +115,7 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
   void initState() {
     super.initState();
     _prefs = MaterialPrefs.load();
+    _inputPrefs = InputPreferences.load();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _model = LearnerModelStore.load();
@@ -995,7 +1003,9 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
     final configured = !_prefs.band.isAny ||
         _prefs.kinds.isNotEmpty ||
         _prefs.genres.trim().isNotEmpty ||
-        _prefs.extra.trim().isNotEmpty;
+        _prefs.extra.trim().isNotEmpty ||
+        _inputPrefs.examGoals.isNotEmpty ||
+        _inputPrefs.interests.isNotEmpty;
     return AppCard(
       variant: AppCardVariant.hero,
       onTap: _showPrefsSheet,
@@ -1037,28 +1047,71 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
                     '下面的材料都按它来 —— 不设也行,那就按通用推荐',
             style: AppFont.metaStyle.copyWith(color: muted, height: 1.5),
           ),
-          if (configured) ...[
-            const SizedBox(height: Gap.xs),
-            Wrap(
-              spacing: Gap.xs,
-              runSpacing: Gap.xs,
-              children: [
-                AppTag('难度 ${_prefs.band.label}'),
-                if (_prefs.genres.trim().isNotEmpty)
-                  AppTag('题材 ${_prefs.genres.trim()}'),
-                if (_prefs.kinds.isNotEmpty)
-                  AppTag('来源 ${_prefs.kinds.join(' / ')}'),
-              ],
-            ),
-          ],
+          const SizedBox(height: Gap.xs),
+          // v3 批 2:目标/兴趣/每天时长与「输入」首页共用同一份偏好,
+          // 这一页也要显示出来(用户会问"为什么这里和首页说的不一样")
+          Wrap(
+            spacing: Gap.xs,
+            runSpacing: Gap.xs,
+            children: [
+              if (_inputPrefs.examGoals.isNotEmpty)
+                AppTag('目标 ${_inputPrefs.examGoals.join(' / ')}'),
+              if (_inputPrefs.interests.isNotEmpty)
+                AppTag('兴趣 ${_inputPrefs.interests.take(2).join(' / ')}'),
+              if ((_inputPrefs.dailyMinutes ?? 0) > 0)
+                AppTag('每天 ${_inputPrefs.dailyMinutes} 分钟'),
+            ],
+          ),
+          const SizedBox(height: Gap.xs),
+          // 难度档**在卡上直接可切**(v3 批 2:用户要求"难度要能自选、
+          // 全 App 同步")—— 材料中心是主入口,不该藏在弹层里两层。
+          Wrap(
+            spacing: Gap.xs,
+            runSpacing: Gap.xs,
+            children: [
+              for (final band in MaterialBand.values)
+                ChoiceChip(
+                  label: Text(
+                    band.label,
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                  selected: _prefs.band == band,
+                  onSelected: (v) => _quickSwitchBand(band),
+                ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            _prefs.band.description,
+            style: AppFont.tagStyle.copyWith(color: muted, height: 1.35),
+          ),
         ],
       ),
     );
   }
 
+  /// 卡片上直接切难度档:存偏好 + 重新按档排序材料库(不重抓网络)。
+  Future<void> _quickSwitchBand(MaterialBand band) async {
+    final next = _prefs.copyWith(band: band);
+    setState(() {
+      _prefs = next;
+      _inputPrefs = _inputPrefs.withBand(
+        DifficultyBand.bandOf(band.name),
+      );
+    });
+    await next.save();
+    // 全 App 同步:难度档也写进输入偏好层(材料中心/输入首页/输出共用)
+    await _inputPrefs.saveBand(DifficultyBand.bandOf(band.name));
+    if (mounted) await _loadShelf();
+  }
+
   /// **按分类找材料**:大分区网格(点进去才是子分区与列表,v2.13)
+  ///
+  /// v3(批 1,2026-11-01):每个题材从"色块 + Material 图标"换成**自绘几何身份
+  /// 图形**(`DomainGraphic`)。用户截图里那排小图标块是他反复说"简陋/前端没变"
+  /// 的直接来源 —— 现在 13 个领域各有自己的几何语言(轨道/柱线/脉搏/拱门/航线/
+  /// 字母/考卷/公式/报头/书脊/声波/便签),分类墙才像"图形墙"。
   Widget _buildCategoryGrid(ThemeData theme) {
-    final cs = theme.colorScheme;
     final topics = _availableTopics;
     return GridView.builder(
       shrinkWrap: true,
@@ -1068,54 +1121,19 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
         crossAxisCount: 2,
         mainAxisSpacing: Gap.xs,
         crossAxisSpacing: Gap.xs,
-        mainAxisExtent: 132,
+        // 比 v2.13 高 20:给身份图形留出主位(图形占卡片上半,文字在下方)
+        mainAxisExtent: 152,
       ),
       itemCount: topics.length,
       itemBuilder: (_, i) {
         final t = topics[i];
-        return AppCard(
-          variant: AppCardVariant.compact,
-          padding: const EdgeInsets.all(Gap.sm),
+        return MaterialTopicCard(
+          topic: t,
           onTap: () => Navigator.push(
             context,
             MaterialPageRoute(
               builder: (_) => MaterialCategoryScreen(topic: t),
             ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // 图形化标识:每个分类一个主色块 + 图标(不靠生图,靠代码)
-              Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: cs.primary.withAlpha(18),
-                  borderRadius: BorderRadius.circular(Radii.control),
-                ),
-                child: Icon(t.icon, size: 19, color: cs.primary),
-              ),
-              const Spacer(),
-              Text(
-                t.label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: AppFont.subheadStyle.copyWith(
-                  color: cs.onSurface,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                t.description,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: AppFont.tagStyle.copyWith(
-                  color: cs.onSurfaceVariant,
-                  height: 1.3,
-                ),
-              ),
-            ],
           ),
         );
       },
@@ -1181,6 +1199,58 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
           controller: scroll,
           padding: Insets.page,
           children: [
+            // v3 批 2:"AI 按需求找材料"—— 需求→检索计划→多源抓取→本地算难度。
+            // 放在弹层最上面:它是"按需求提供材料"的主路径,题材检索是补充。
+            AppCard(
+              variant: AppCardVariant.accent,
+              onTap: () {
+                Navigator.pop(ctx);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const MaterialDiscoverScreen(),
+                  ),
+                );
+              },
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.auto_awesome,
+                    color: theme.colorScheme.primary,
+                    size: 20,
+                  ),
+                  const SizedBox(width: Gap.xs),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'AI 按需求找材料',
+                          style: AppFont.subheadStyle.copyWith(
+                            color: theme.colorScheme.onSurface,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '用中文说想要什么：公开源 + DeepSeek 官方搜索，抓回正文算真实难度',
+                          style: AppFont.tagStyle.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                            height: 1.3,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(
+                    Icons.chevron_right,
+                    size: 20,
+                    color: theme.colorScheme.outline,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: Gap.md),
             Text(
               '按你的水平找材料',
               style: AppFont.headingStyle.copyWith(

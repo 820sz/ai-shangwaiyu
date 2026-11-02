@@ -117,4 +117,124 @@ void main() {
     expect(after.width, 100, reason: 'orientation=6 应把 200x100 转成 100x200');
     expect(after.height, 200);
   });
+
+  // ── B0-6:手动旋转(只转"发给模型的像素",源文件/缩略图不动) ──
+  group('B0-6 quarterTurns 手动旋转', () {
+    test('quarterTurns:1 → 宽高互换(发送前按 90° 转后编码)', () {
+      final out = VisionImagePrep.prepare(jpegOf(400, 600), quarterTurns: 1);
+      final decoded = img.decodeImage(out)!;
+      expect(decoded.width, 600, reason: '400x600 顺时针转 90° → 600x400');
+      expect(decoded.height, 400);
+    });
+
+    test('quarterTurns 按 4 取模:4 等价于 0(连点 4 次回到原方向)', () {
+      final base = img.decodeImage(VisionImagePrep.prepare(jpegOf(800, 600)))!;
+      final full = img.decodeImage(
+        VisionImagePrep.prepare(jpegOf(800, 600), quarterTurns: 4),
+      )!;
+      expect(full.width, base.width);
+      expect(full.height, base.height);
+    });
+
+    test('tiles 也支持手动角度:旋转后切块仍是横的(整批一致)', () {
+      final tiles = VisionImagePrep.tiles(jpegOf(400, 600), quarterTurns: 1);
+      expect(tiles, hasLength(4));
+      final first = img.decodeImage(tiles.first)!;
+      // 400x600 转 90° → 600x400,2×2 切块后每块约 348x232(含 8% 重叠)
+      expect(
+        first.width,
+        greaterThan(first.height),
+        reason: '页面旋转后是横的,切出来的块也应是横的(说明角度进了切块链路)',
+      );
+    });
+  });
+
+  // ── B0-3:detectRotationOf(接已解码的图,避免每张图二次整图解码) ──
+  group('B0-3 detectRotationOf(已解码图)方向判定', () {
+    /// 造一张"横排文字"合成图:整行暗带 + 行间白底。
+    /// 原理与实现一致:行投影方差大 → 内容水平排列;列投影方差大 → 内容被横放。
+    img.Image textRowsImage({int width = 400, int height = 600}) {
+      final image = img.Image(width: width, height: height);
+      // 先铺白底(image 包默认像素是透明黑,不铺白就分不出"文字行"和背景)
+      for (var y = 0; y < height; y++) {
+        for (var x = 0; x < width; x++) {
+          image.setPixelRgb(x, y, 255, 255, 255);
+        }
+      }
+      // 每 24px 画一条 4px 高的"文字行"(整行铺满 → 行均值方差拉起来)
+      for (var y = 20; y < height - 20; y += 24) {
+        for (var dy = 0; dy < 4; dy++) {
+          for (var x = 20; x < width - 20; x++) {
+            image.setPixelRgb(x, y + dy, 0, 0, 0);
+          }
+        }
+      }
+      return image;
+    }
+
+    test('横排文字 → 判定不用转(rotationNone)', () {
+      expect(
+        VisionImagePrep.detectRotationOf(textRowsImage()),
+        VisionImagePrep.rotationNone,
+      );
+    });
+
+    test('内容横放(整图转 90°)→ 判定需顺时针转 90°(rotationClockwise90)', () {
+      expect(
+        VisionImagePrep.detectRotationOf(
+          img.copyRotate(textRowsImage(), angle: 90),
+        ),
+        VisionImagePrep.rotationClockwise90,
+      );
+    });
+
+    test('倒置 180°/反向 270°:返回的是**约定**(分不出,由用户旋转重试兜底)', () {
+      // vision_image.dart 的注释写明:投影法只能判"内容是否横放",
+      // 分不出 0°/180°、90°/270°。所以这里断言的是既定约定而不是"理想答案":
+      // 180° 仍按"不转"、270° 仍按"转 90°";这两种情况由 UI 的
+      // 「方向不对?旋转重试」(B0-6,用户可循环 90/180/270)兜底。
+      expect(
+        VisionImagePrep.detectRotationOf(
+          img.copyRotate(textRowsImage(), angle: 180),
+        ),
+        VisionImagePrep.rotationNone,
+      );
+      expect(
+        VisionImagePrep.detectRotationOf(
+          img.copyRotate(textRowsImage(), angle: 270),
+        ),
+        VisionImagePrep.rotationClockwise90,
+      );
+    });
+  });
+
+  // ── B0-3:后台 isolate 入口 smoke(真机内存收益靠真机验证,这里只保接口/等价性) ──
+  group('B0-3 isolate 后台入口 smoke', () {
+    test('toDataUriInBackground 与同步版逐字节一致', () async {
+      final raw = jpegOf(600, 400);
+      expect(
+        await VisionImagePrep.toDataUriInBackground(raw),
+        VisionImagePrep.toDataUri(raw),
+        reason: 'isolate 只是换线程,结果必须与同步版完全一致',
+      );
+    });
+
+    test('prepareInBackground 与同步版一致(含 quarterTurns 分支)', () async {
+      final raw = jpegOf(400, 600);
+      expect(
+        await VisionImagePrep.prepareInBackground(raw, quarterTurns: 1),
+        VisionImagePrep.prepare(raw, quarterTurns: 1),
+      );
+    });
+
+    test('tilesInBackground 在后台 isolate 产出 4 块合法 JPEG', () async {
+      final tiles = await VisionImagePrep.tilesInBackground(
+        jpegOf(1600, 2400),
+      );
+      expect(tiles, hasLength(4));
+      for (final tile in tiles) {
+        expect(img.decodeImage(tile), isNotNull, reason: '每块都必须是合法 JPEG');
+      }
+    });
+  });
 }

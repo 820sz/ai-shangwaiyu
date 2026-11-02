@@ -15,11 +15,13 @@ import '../../services/learner_context.dart';
 import '../../services/learner_model_store.dart';
 import '../../services/material_source.dart';
 import '../../services/material_source_status.dart';
+import '../../services/translation_diagnostics.dart';
 import '../../services/widget_service.dart';
 import '../../widgets/profile_name_card.dart';
 import '../../utils/crash_logger.dart';
 import '../../widgets/app_ui.dart';
 import '../../widgets/design_kit.dart';
+import '../../widgets/graphics/graphics.dart';
 import '../../widgets/stats_chart.dart';
 import '../../widgets/update_dialog.dart';
 import '../../services/update_service.dart';
@@ -95,8 +97,11 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
             // ── 个性化名片(v2.8,用户第 9 条):头像 / 背景 / 签名 / 词汇量 ──
             ProfileNameCard(vocabCount: stats.totalVocab),
 
-            // ── 数据就在手边:三个关键数字 ──
-            _buildStatsRow(theme, stats),
+            // ── 数据亮点(Hero 概览卡)──
+            // v3(批 5):三个数字平铺改成"Hero 形态 + 环形活跃率 + 近 7 天柱状"。
+            // 用户 2026-11-01 原话是"其他页面 UI 也不够现代化" —— 我的页作为
+            // 使用频率最高的二级页,必须和输入/输出/助理是同一套视觉语言。
+            _buildOverview(theme, stats),
             const SizedBox(height: Gap.md),
 
             // ── 词汇量基线(v2.0;v2.6 收成一行入口)──
@@ -188,11 +193,33 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
                       MaterialPageRoute(builder: (_) => const BackupScreen()),
                     ),
                   ),
-                  // 学习曲线预览:数据与回顾组里最"一眼看懂"的那张图
-                  if (stats.dailyLogs.isNotEmpty) ...[
-                    const SizedBox(height: Gap.xs),
+                  // 学习曲线预览已移到「数据与回顾」分组的下方(见下方 AppCard):
+                  // 它是"看趋势"的图,不该夹在 4 个入口行中间打断列表节奏。
+                ],
+              ),
+            ),
+
+            // 学习曲线预览卡(近 30 天,图形 TrendLine)——
+            // 没数据时也保留这张卡,用图形资产空态说明"收了词就会出现",而不是
+            // 让整块凭空消失(用户会以为这个功能不存在)。
+            const SizedBox(height: Gap.sm),
+            AppCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const AppSectionTitle(
+                    title: '学习曲线',
+                    subtitle: '近 30 天每日新增词汇',
+                  ),
+                  const SizedBox(height: Gap.md),
+                  if (stats.dailyLogs.isEmpty)
+                    const AppEmpty(
+                      icon: Icons.show_chart,
+                      title: '还没有学习记录',
+                      hint: '收词或做练习后,这里会画出近 30 天趋势',
+                    )
+                  else
                     LearningCurveChart(dailyLogs: stats.dailyLogs),
-                  ],
                 ],
               ),
             ),
@@ -277,50 +304,105 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
     );
   }
 
-  /// 顶部三个关键数字(总词汇量 / 连续天数 / 已完成练习)
+  /// 顶部「学习概览」Hero 卡(v3 · 批 5)。
   ///
-  /// v2.12:从"三张独立小卡"改成**一张数据面板卡**(三列 + 细分隔线)。
-  /// 为什么:三张小卡并排时每张都很窄,数字不够突出;合成一张面板后
-  /// 数字可以做到 26 号(w800),符合"战绩一眼看懂"的要求。
-  Widget _buildStatsRow(ThemeData theme, StatsProvider stats) {
+  /// 为什么升级:旧版是"一张面板 + 三列数字 + 细分隔线",信息对但**没有形状** ——
+  /// 用户看到的是又一块文字卡;新版用 Hero 形态 + 两个数据图形回答两个问题:
+  /// 「最近有没有在学」(近 7 天活跃率环)、「学得有多密」(近 7 天量柱状)。
+  /// 口径说明写进卡内小字:**新收词 + 复习 + 练习**(与统计页 totalActivity 同源),
+  /// 不把 0 画成"失败",没数据时用图形资产空态说明"做了什么才会出现"。
+  Widget _buildOverview(ThemeData theme, StatsProvider stats) {
+    final cs = theme.colorScheme;
+    final series = dailySeriesOf(
+      stats.dailyLogs,
+      days: 7,
+      pick: (r) => r.totalActivity,
+    );
+    final weekTotal = series.fold<double>(0, (sum, v) => sum + v).round();
+    final activeDays = activeDaysOf(stats.dailyLogs, days: 7);
+    final hasWeek = weekTotal > 0;
     return AppCard(
-      padding: const EdgeInsets.symmetric(horizontal: Gap.md, vertical: Gap.md),
-      child: Row(
+      variant: AppCardVariant.hero,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: AppStat(
-              value: '${stats.totalVocab}',
-              label: '总词汇量',
-              valueColor: theme.colorScheme.primary,
-            ),
+          // ① 累计战绩(与旧版同口径,但放进 Hero 卡里;三列仍均匀分宽)
+          Row(
+            children: [
+              Expanded(
+                child: AppStat(
+                  value: '${stats.totalVocab}',
+                  label: '总词汇量',
+                  valueColor: cs.primary,
+                ),
+              ),
+              Expanded(
+                child: AppStat(
+                  value: '${stats.streakDays}',
+                  label: '连续天数',
+                  valueColor: AppTheme.warningColor(context),
+                ),
+              ),
+              Expanded(
+                child: AppStat(
+                  value: '${stats.totalExercises}',
+                  label: '已完成练习',
+                  valueColor: AppTheme.successColor(context),
+                ),
+              ),
+            ],
           ),
-          _statDivider(theme),
-          Expanded(
-            child: AppStat(
-              value: '${stats.streakDays}',
-              label: '连续天数',
-              valueColor: AppTheme.warningColor(context),
+          const SizedBox(height: Gap.md),
+          // ② 近 7 天节奏:柱状 + 活跃率环;没数据画一排 0 会被误读成评分
+          if (!hasWeek)
+            const AppEmpty(
+              icon: Icons.insights_outlined,
+              title: '这 7 天还没有学习记录',
+              hint: '收词、复习或做一次练习,这里会画出每天的量',
+            )
+          else ...[
+            Row(
+              children: [
+                Expanded(
+                  child: SparkBars(
+                    values: series,
+                    height: 56,
+                    semanticLabel:
+                        '近 7 天活动量柱状图,合计 $weekTotal,活跃 $activeDays 天',
+                  ),
+                ),
+                const SizedBox(width: Gap.md),
+                // 环 = 近 7 天有几个"真的有活动"的日子(分母就是 7 天,不造目标值)
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    AppProgressRing(
+                      value: activeDays / 7,
+                      centerText: '$activeDays',
+                      size: 60,
+                      stroke: 6,
+                    ),
+                    const SizedBox(height: Gap.xxs),
+                    Text(
+                      '活跃天/7',
+                      style: AppFont.tagStyle.copyWith(
+                        color: cs.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ),
-          ),
-          _statDivider(theme),
-          Expanded(
-            child: AppStat(
-              value: '${stats.totalExercises}',
-              label: '已完成练习',
-              valueColor: AppTheme.successColor(context),
+            const SizedBox(height: Gap.xs),
+            Text(
+              '近 7 天活动量 · 新收词 + 复习 + 练习,合计 $weekTotal',
+              style: AppFont.metaStyle.copyWith(color: cs.onSurfaceVariant),
             ),
-          ),
+          ],
         ],
       ),
     );
   }
-
-  Widget _statDivider(ThemeData theme) => Container(
-        width: 1,
-        height: 34,
-        margin: const EdgeInsets.symmetric(horizontal: Gap.xs),
-        color: theme.colorScheme.outlineVariant.withAlpha(90),
-      );
 
   /// 错误档案:回来后刷新副标题(用户刚在里面标了「已改正」)
   Future<void> _openErrorArchive() async {
@@ -523,6 +605,16 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
       'Base URL: ${briefUrl(box.get(AppConstants.keyDeepseekBaseUrl) as String?)}',
       '模型: ${ApiEndpointConfig.secondary.model}',
       '',
+      // v2.16.0(阅读器翻译根治):翻译链路曾经"查不动"——
+      // 阅读器的模型菜单改的是主槽位,而翻译实际走副槽位;再加失败原因
+      // 只在段下显示一行。这里把**真实请求使用的槽位/模型/端点 host** 与
+      // 最近 3 条失败原因摊开(host 不可能是 key;失败原因写入前已脱敏)。
+      '── 翻译(阅读器) ──',
+      '槽位/模型: ${TranslationDiagnostics.targetSummary}',
+      'Base URL: ${TranslationDiagnostics.baseHost}',
+      '最近失败:',
+      ...TranslationDiagnostics.failureLines(),
+      '',
       '── 模型列表加载 ──',
       DoubaoApiService.lastFetchNote,
       // v2.3:内容源可达性取决于**用户网络**,平时看不见 —— 放这里让"材料中心
@@ -552,8 +644,34 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
           ),
         ),
         actions: [
+          // 危险操作二次确认(v3 · 批 5):「清空日志」不可恢复,而且用户很容易
+          // 把"清日志"误解成"清学习数据" —— 先在确认框里把后果说清楚再执行。
           TextButton(
+            style: TextButton.styleFrom(
+              foregroundColor: AppTheme.dangerColor(ctx),
+            ),
             onPressed: () async {
+              final confirmed = await showDialog<bool>(
+                context: ctx,
+                builder: (c) => AlertDialog(
+                  title: const Text('清空崩溃日志?'),
+                  content: const Text(
+                    '只会删除本机保存的崩溃诊断记录,不影响生词、材料、'
+                    '学习统计与 API Key。清空后无法恢复。',
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(c, false),
+                      child: const Text('取消'),
+                    ),
+                    FilledButton(
+                      onPressed: () => Navigator.pop(c, true),
+                      child: const Text('清空'),
+                    ),
+                  ],
+                ),
+              );
+              if (confirmed != true) return;
               await CrashLogger.clearCrashLog();
               if (ctx.mounted) Navigator.pop(ctx);
             },

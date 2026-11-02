@@ -11,6 +11,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../config/design_tokens.dart';
+import 'graphics/graphics.dart';
 import 'waiting.dart';
 
 /// 卡片的视觉变体(v2.11,G 批"全局 UI 升级"的地基)。
@@ -290,12 +291,20 @@ class AppActionTile extends StatelessWidget {
   }
 }
 
-/// 空态:图标 + 一句话 + 补充说明(+ 可选动作)
+/// 空态:空态插图 + 一句话 + 补充说明(+ 可选动作)
+///
+/// 批 1(B1-4):旧的"44px 灰图标"换成图形资产系统的几何插图([EmptyArt]),
+/// 按语义选图(见 [EmptyArtKind.fromIcon]);[icon] 参数保留为语义种子,
+/// 现有调用点一行不用改。这里用 72 档(整页空态 [AppEmptyState] 用 96 档)——
+/// `AppEmpty` 常嵌在卡片/侧栏里,插图不该压过标题。
 class AppEmpty extends StatelessWidget {
   final IconData icon;
   final String title;
   final String? hint;
   final Widget? action;
+
+  /// 显式指定空态插图;null = 按 [icon] 语义自动选([EmptyArtKind.fromIcon])
+  final EmptyArtKind? art;
 
   const AppEmpty({
     super.key,
@@ -303,6 +312,7 @@ class AppEmpty extends StatelessWidget {
     required this.title,
     this.hint,
     this.action,
+    this.art,
   });
 
   @override
@@ -313,7 +323,7 @@ class AppEmpty extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: Gap.lg, horizontal: Gap.md),
       child: Column(
         children: [
-          Icon(icon, size: 44, color: theme.colorScheme.outlineVariant),
+          EmptyArt(kind: art ?? EmptyArtKind.fromIcon(icon), size: 72),
           const SizedBox(height: Gap.sm),
           Text(
             title,

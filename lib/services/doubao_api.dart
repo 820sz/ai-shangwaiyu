@@ -134,14 +134,28 @@ class DoubaoApiService extends BaseApiService {
   /// 读取文件并转为 data URI。
   ///
   /// v2.4:统一走 [VisionImagePrep] 预处理 —— **按 EXIF 把像素转正 + 长边压到
-  /// 2000px + JPEG q88**。旧实现只在"文件 >500KB 且 >2048px"时才处理:
+  /// 2600px + JPEG q92**。旧实现只在"文件 >500KB 且 >2048px"时才处理:
   /// 手机直出的小图(或被 image_picker 压过的图)会**原样发出**,方向与分辨率
   /// 全凭运气 —— 用户提供的样本里就有横置/倒置的页面,模型得先"歪着读"。
-  /// 失败仍回退原图,绝不因为预处理失败就不给识别。
-  Future<String> _imageToDataUri(File imageFile) async {
+  ///
+  /// **B0-3 根治**:预处理(整图解码/方向检测/压缩/编码/base64)全部在**后台
+  /// isolate** 里做。旧实现是同步纯 Dart 跑在 UI isolate 上 —— 一张 12MP 图
+  /// 解码 RGBA ≈ 20MB,追加图片时再叠加第二遍高清复查的并发解码,就是用户
+  /// 看到的"卡一下然后闪退"(native OOM/ANR,CrashLogger 抓不到)。
+  /// 失败链:isolate 失败 → 退回主 isolate 同步处理 → 仍失败才发原图,
+  /// 绝不因为预处理失败就不给识别。
+  ///
+  /// [quarterTurns]:用户手动"方向不对?旋转重试"的角度(B0-6,顺时针 90° 数)。
+  Future<String> _imageToDataUri(File imageFile, {int quarterTurns = 0}) async {
     final rawBytes = await _readImageBytes(imageFile);
     try {
-      return VisionImagePrep.toDataUri(rawBytes);
+      return await VisionImagePrep.toDataUriInBackground(rawBytes,
+          quarterTurns: quarterTurns);
+    } catch (e) {
+      debugPrint('ReadFlow _imageToDataUri isolate 失败(退回主 isolate): $e');
+    }
+    try {
+      return VisionImagePrep.toDataUri(rawBytes, quarterTurns: quarterTurns);
     } catch (e) {
       debugPrint('ReadFlow _imageToDataUri fallback: $e');
       final mime = _detectImageMime(rawBytes);
@@ -343,15 +357,18 @@ ${TranslationPolicy.discipline}
   Stream<SseChunk> extractFullTextStream(
     List<File> imageFiles, {
     String? hint,
+    int quarterTurns = 0,
   }) async* {
     if (imageFiles.isEmpty) throw Exception('没有可提取的图片');
     if (!config.isConfigured) {
       throw Exception('请先在设置中配置主 API Key');
     }
-    final imageUris = await Future.wait(
-      imageFiles.map((f) => _imageToDataUri(f)),
-      eagerError: true,
-    );
+    // 串行预处理(B0-3,同 [extractVocabularyStream]):多图并发解码是
+    // "图片导入 9 张图"时同样会触发的 OOM 高发点。
+    final imageUris = <String>[];
+    for (final f in imageFiles) {
+      imageUris.add(await _imageToDataUri(f, quarterTurns: quarterTurns));
+    }
     const systemPrompt = '''你是 OCR 文字提取工具。用户给你阅读材料的照片或截图,
 请把**图上的全部正文**提取成纯文本。输出纪律:
 1. **逐行照抄**:不翻译、不总结、不改写、不补写原文没有的内容;
@@ -458,6 +475,7 @@ ${TranslationPolicy.discipline}
   /// 拍照取词 — 流式返回（async* 生成器，逐个产出 SseChunk）
   /// [calibrate] true = 校准重识别(v1.7.0):逐行扫描 + 高清图 + 自检提示词,
   /// 结果由调用方整组替换(区别于 [excludeWords] 的"只补漏")。
+  /// [quarterTurns] 用户手动旋转角度(B0-6,顺时针 90° 数),对整批图生效。
   Stream<SseChunk> extractVocabularyStream(
     List<File> imageFiles, {
     String? sourceBook,
@@ -465,16 +483,22 @@ ${TranslationPolicy.discipline}
     String analysisMode = AppConstants.analysisModeMarked,
     List<String> excludeWords = const [],
     bool calibrate = false,
+    int quarterTurns = 0,
   }) async* {
     if (imageFiles.isEmpty) throw Exception('没有可识别的图片');
     if (!config.isConfigured) {
       throw Exception('请先在设置中配置主 API Key');
     }
 
-    final imageUris = await Future.wait(
-      imageFiles.map((f) => _imageToDataUri(f)),
-      eagerError: true,
-    );
+    // ⚠️ **串行**预处理(B0-3 根治):旧实现 `Future.wait` 把 2~4 张图同时
+    // 解码/方向检测/压缩/编码,峰值内存 = 张数 × 单张解码量(12MP 图 RGBA
+    // 约 20MB/张);结果页此时还挂着缩略图与第二遍复查,叠加就 OOM。
+    // 串行时上一张的中间缓冲区在下一张开始前即可回收,峰值降到
+    // "1 张解码 + 已编码产物"。预处理本身已在后台 isolate 里跑(不阻塞 UI)。
+    final imageUris = <String>[];
+    for (final f in imageFiles) {
+      imageUris.add(await _imageToDataUri(f, quarterTurns: quarterTurns));
+    }
 
     final body = _buildRequestBody(
       imageUris,
@@ -740,9 +764,17 @@ ${TranslationPolicy.discipline}
   }
 
   /// 将图片文件转为 data URI 列表(供追问附带识别图片)。
-  /// 复用 [extractVocabularyStream] 同款压缩逻辑,大图缩至 2048 内。
-  Future<List<String>> imageDataUrisFor(List<File> files) async {
-    return Future.wait(files.map((f) => _imageToDataUri(f)), eagerError: true);
+  /// 复用 [extractVocabularyStream] 同款压缩逻辑。
+  /// **串行**(B0-3):并发 `Future.wait` 是多图解码 OOM 的主要来源之一。
+  Future<List<String>> imageDataUrisFor(
+    List<File> files, {
+    int quarterTurns = 0,
+  }) async {
+    final out = <String>[];
+    for (final f in files) {
+      out.add(await _imageToDataUri(f, quarterTurns: quarterTurns));
+    }
+    return out;
   }
 
   // ── 写译批改(v1.5.0,多图/错误汇总 v1.6.0) ──

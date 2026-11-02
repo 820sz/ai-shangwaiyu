@@ -74,6 +74,55 @@ String buildMaterialPath({required String category, required String name}) {
   return '$category/${trimmed.isEmpty ? '未命名材料' : trimmed}';
 }
 
+/// 路径归一:折掉**重复的前导分类段**(v2.13.1,用户 2026-11-01 截图:
+/// 移动弹层同时出现「书籍/《Character》」和「书籍/书籍/《Character》」)。
+///
+/// 病根在移动链路:弹层选项本身就是完整 `material_path`,旧 `_moveInto` 又把它
+/// 当"材料名"交给 [buildMaterialPath] 二次拼前缀 → `书籍/书籍/《X》`;再移一次
+/// 变三层。而分组键([groupMaterials])就是原始路径字符串 —— 脏串与干净串永远
+/// 不相等,于是词不会并入目标老分组,而是"重复新建一个分类"。
+///
+/// 规则(纯函数,可单测):
+/// - 去首尾空白、丢掉空段(`书籍//《X》` → `书籍/《X》`);
+/// - 折掉连续重复的前导段,直到不再重复:`书籍/书籍/《X》` → `书籍/《X》`、
+///   `书籍/书籍/书籍/《X》` → `书籍/《X》`;
+/// - **只折到剩两段为止**:`书籍/书籍` 是"材料名恰好等于分类名"的合法数据,
+///   折成单段会掉进「未归类」(v2.4 A6 的教训),不能动;
+/// - 有 [category] 时保证只有一层分类前缀;材料名丢了就落「未命名材料」
+///   (与 [buildMaterialPath] 同一约定,避免拼出裸分类伪路径);
+/// - [category] 为空时只做通用的"重复前导段"折 —— 给 `materials.group_name`
+///   这类没有分类前缀的自由文本复用。
+String normalizeMaterialPath(String category, String raw) {
+  final cat = category.trim();
+  var parts = _splitMaterialPath(raw);
+  if (parts.isEmpty) return '';
+  // ① 折重复前导段。不用 `while (parts[0] == cat)` 直接砍第一段:材料名本身
+  //    可能就叫「书籍」(`书籍/书籍`),直接砍会把它变成裸分类 → 掉进未归类。
+  //    只折"连续相同"的段,且折完至少保留 2 段。
+  while (parts.length > 2 && parts[0] == parts[1]) {
+    parts = parts.sublist(1);
+  }
+  if (cat.isEmpty) return parts.join('/');
+  // ② 只有一层分类前缀:材料名里带进来的其它分类名不当成新前缀(移动链路
+  //    永远写当前分类,历史脏值也不该把分类改掉)。
+  if (parts[0] == cat) {
+    if (parts.length < 2) return buildMaterialPath(category: cat, name: '');
+    return '${parts[0]}/${parts.sublist(1).join('/')}';
+  }
+  return buildMaterialPath(category: cat, name: parts.join('/'));
+}
+
+/// 分组名归一(`materials.group_name` 这类**没有分类前缀**的自由文本)。
+/// 同一个"重复前导段"病,复用 [normalizeMaterialPath] 的通用折法。
+String normalizeGroupName(String raw) => normalizeMaterialPath('', raw);
+
+/// 拆路径:trim + 丢空段(`书籍//《X》` 这种历史上会拼出来的脏值)。
+List<String> _splitMaterialPath(String raw) => raw
+    .split('/')
+    .map((s) => s.trim())
+    .where((s) => s.isNotEmpty)
+    .toList();
+
 /// 分组(纯函数,可单测)
 List<MaterialGroup> groupMaterials(
   List<Vocabulary> items, {

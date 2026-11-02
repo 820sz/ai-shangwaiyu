@@ -12,6 +12,7 @@ import '../models/learning_record.dart';
 import '../models/bookmark.dart';
 import '../models/writing_log.dart';
 import '../models/material_recommendation.dart';
+import '../utils/material_group.dart';
 import '../utils/page_label.dart';
 
 /// 本地 SQLite 数据库服务 — 生词、文章、练习、学习记录全部落本地
@@ -42,6 +43,29 @@ class VocabInsertOutcome {
     if (occurrencesAdded > 0) parts.add('记录出现 $occurrencesAdded 处');
     return parts.join(' · ');
   }
+}
+
+/// 一条已落库的阅读器译文(v2.16.0 / dbVersion 20)。
+///
+/// 为什么单独建模:译文是"**某份材料某一段**的翻译",不是生词属性;而且必须带
+/// [sourceText](落库时的原文快照) —— 材料重新导入/重新切段后 unit 下标会漂移,
+/// 靠快照比对才能避免把 A 段的译文显示到 B 段下面(错位比没有更糟)。
+class MaterialTranslation {
+  final int unitIndex;
+  final int chunkIndex;
+  final String sourceText;
+  final String translatedText;
+  final String? model;
+  final DateTime? updatedAt;
+
+  const MaterialTranslation({
+    required this.unitIndex,
+    required this.chunkIndex,
+    required this.sourceText,
+    required this.translatedText,
+    this.model,
+    this.updatedAt,
+  });
 }
 
 class DatabaseService {
@@ -235,6 +259,19 @@ class DatabaseService {
     'CREATE INDEX IF NOT EXISTS idx_error_tag ON error_tags(tag, status)',
     'CREATE INDEX IF NOT EXISTS idx_tutor_task_date ON tutor_tasks(plan_date, done_at)',
     'CREATE INDEX IF NOT EXISTS idx_tutor_msg_created ON tutor_messages(created_at DESC)',
+    // ── v2.16(dbVersion 20)──
+    // 阅读器打开时一次性读整份材料的译文(material_id 过滤 + unit_index 排序)
+    'CREATE INDEX IF NOT EXISTS idx_material_trans_material ON material_translations(material_id, unit_index)',
+    // ── v2.17(dbVersion 21)──
+    // 做题页按 set 拉全部题目(按 idx 排);列表页按时间倒序;统计按 set 聚合
+    'CREATE INDEX IF NOT EXISTS idx_exercise_items_set ON exercise_items(set_id, idx)',
+    'CREATE INDEX IF NOT EXISTS idx_output_attempts_created ON output_attempts(created_at DESC)',
+    'CREATE INDEX IF NOT EXISTS idx_output_attempts_set ON output_attempts(set_id)',
+    // ── v2.18(dbVersion 22)──
+    // 能力项趋势:按维度取最近 N 条(latest / previous / history 都走它)
+    'CREATE INDEX IF NOT EXISTS idx_ability_dim_time ON ability_snapshots(dimension, snapshot_at DESC)',
+    // 任务事件:按任务拉完整时间线(复盘页)
+    'CREATE INDEX IF NOT EXISTS idx_task_events_task ON task_events(task_id, at)',
   ];
 
   // ═══════════════ v2.0(dbVersion 11)新增表 ═══════════════
@@ -304,6 +341,167 @@ class DatabaseService {
       title TEXT,
       text TEXT NOT NULL,
       UNIQUE(material_id, chunk_index)
+    )
+  ''';
+
+  /// 阅读器译文(v2.16.0 / dbVersion 20):「翻过一次就永久在」。
+  ///
+  /// 为什么单独一张表而不是塞进 material_content:
+  /// - 译文与正文是**两条独立生命周期**:正文是事实源(重新导入会换掉),
+  ///   译文是可复用资产(能保留、能整材料清空、能覆盖重翻);
+  /// - [source_text] 存落库时的原文快照:重导入/切段变化后 unit 下标会漂移,
+  ///   读取时比对快照不一致就丢弃该条(宁可重翻,也不显示错位的译文);
+  /// - UNIQUE(material_id, unit_index) = 同一段只有一条译文,重翻走 UPSERT 覆盖。
+  static const String _materialTranslationsTableSql = '''
+    CREATE TABLE IF NOT EXISTS material_translations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      material_id INTEGER NOT NULL,
+      unit_index INTEGER NOT NULL,
+      chunk_index INTEGER NOT NULL,
+      source_text TEXT NOT NULL,
+      translated_text TEXT NOT NULL,
+      model TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT,
+      UNIQUE(material_id, unit_index)
+    )
+  ''';
+
+  // ═══════════════ v2.17(dbVersion 21)输出重建:题组 / 题目 / rubric / 作答 ═══════════════
+  //
+  // 为什么新开四张表,而不是复用旧的 exercises / drill_logs:
+  // - 旧 `exercises` 的结构是"一次练习 = 一批句子 + 一份总分",且 article_id 绑死文章,
+  //   承载不了"逐题 rubric / 能力标签 / 分档 / 依据"(见 docs/research/output-and-tutor.md §1.6);
+  // - 旧 `drill_logs` 只有对错计数,没有逐题作答、没有维度分、没有用时;
+  // - 新结构按"题组(set)→ 题目(item)→ 作答(attempt)"三层拆开:出题器只写
+  //   set/items,评分层只读 rubrics,统计层只读 attempts —— 三块可以各自演进。
+  //
+  // 枚举值(数据库只存字符串,由服务层校验;这样以后加题型不用改表):
+  // - source: ai / builtin / user_import / exam
+  // - exam_type: cet4 / cet6 / kaoyan / ielts / nce / none
+  // - section: writing / translation / back_translation / summary / sentence_rewrite
+  // - item.type: spelling / back_translation / sentence_rewrite / error_correction /
+  //              summary / writing / translation / blank_filling
+  // - verify_status: pending / verified(AI 生成默认 pending,等校对后再算"可信任题源")
+  // - rubric.scoring_mode: objective / ai_rubric / manual
+
+  /// 题组/卷面(一套题一行;题目在 exercise_items)
+  static const String _exerciseSetsTableSql = '''
+    CREATE TABLE IF NOT EXISTS exercise_sets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source TEXT NOT NULL DEFAULT 'ai',
+      exam_type TEXT DEFAULT 'none',
+      paper_year INTEGER,
+      paper_label TEXT,
+      section TEXT,
+      title TEXT NOT NULL,
+      difficulty_cefr TEXT,
+      goals_json TEXT,
+      rubric_id TEXT,
+      material_id INTEGER,
+      license_note TEXT,
+      verify_status TEXT DEFAULT 'pending',
+      created_at TEXT NOT NULL
+    )
+  ''';
+
+  /// 单题(一套题 N 行;idx = 展示顺序)
+  static const String _exerciseItemsTableSql = '''
+    CREATE TABLE IF NOT EXISTS exercise_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      set_id INTEGER NOT NULL,
+      idx INTEGER NOT NULL DEFAULT 0,
+      type TEXT NOT NULL,
+      prompt_zh TEXT,
+      prompt_en TEXT,
+      reference_answer TEXT,
+      accepted_answers_json TEXT,
+      rubric_id TEXT,
+      ability_tags_json TEXT,
+      grammar_points_json TEXT,
+      word_count INTEGER DEFAULT 0,
+      source_span TEXT,
+      audio_ref TEXT
+    )
+  ''';
+
+  /// 评分标准(id 用 TEXT:内置 4 条固定 id + 以后可注入自定义 rubric)
+  ///
+  /// 为什么不做自增 id:出题器/评分层按 **rubric_id 名称**对齐
+  /// (cet4_writing / cet4_translation / back_translation / summary),
+  /// 自增 id 跨设备/备份恢复后不稳定;固定 id 才能"内置 rubric 一处定义、
+  /// 迁移 seed、两处引用"。
+  /// - dimensions_json: [{key,label,weight}] —— 维度权重(评分层按它算总分)
+  /// - bands_json:      [{score_range,label,desc}] —— 分档描述(UI 显示"你在哪一档")
+  /// - prompt_template: 注入题目的评分提示词模板(评分层拼好后发模型)
+  static const String _rubricsTableSql = '''
+    CREATE TABLE IF NOT EXISTS rubrics (
+      id TEXT PRIMARY KEY NOT NULL,
+      type TEXT NOT NULL,
+      scoring_mode TEXT NOT NULL DEFAULT 'ai_rubric',
+      dimensions_json TEXT,
+      bands_json TEXT,
+      prompt_template TEXT,
+      created_at TEXT NOT NULL
+    )
+  ''';
+
+  /// 作答明细(一题一行)
+  ///
+  /// correct 三态:1 = 客观题答对 / 0 = 答错 / NULL = 主观题(未判对错,
+  /// 只有 score_json 维度分)。统计口径必须把 NULL 排除在正确率分母外。
+  static const String _outputAttemptsTableSql = '''
+    CREATE TABLE IF NOT EXISTS output_attempts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      set_id INTEGER,
+      item_id INTEGER,
+      mode TEXT,
+      answer TEXT,
+      correct INTEGER,
+      score_json TEXT,
+      seconds INTEGER DEFAULT 0,
+      plan_id INTEGER,
+      error_tags_json TEXT,
+      created_at TEXT NOT NULL
+    )
+  ''';
+
+  /// **能力项快照**(v2.18 / dbVersion 22):能力维度的时间序列。
+  ///
+  /// 为什么单独成表,而不是塞进 `learner_model`(Hive 单行 JSON):
+  /// - 能力项要的是**时间序列**("这周写作维度 +6"),单行 JSON 存不下趋势;
+  /// - 每条带 source / confidence / evidence_json —— 沿用 `ProfileField` 那套
+  ///   "来源与置信度"纪律,UI 才能区分"测出来的 / 自报的 / 推断的",不把推断
+  ///   伪装成实测;
+  /// - **只读派生**:由词汇量测试、写作批改、drill 完成、周报等算出来写,
+  ///   不是用户手填(手填的是目标,不是能力值)。
+  static const String _abilitySnapshotsTableSql = '''
+    CREATE TABLE IF NOT EXISTS ability_snapshots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      snapshot_at TEXT NOT NULL,
+      dimension TEXT NOT NULL,
+      value REAL NOT NULL DEFAULT 0,
+      unit TEXT,
+      source TEXT,
+      confidence REAL,
+      evidence_json TEXT,
+      created_at TEXT
+    )
+  ''';
+
+  /// **任务事件流**(v2.18 / dbVersion 22):任务状态变化的**只追加审计**。
+  ///
+  /// 为什么不直接改 `tutor_tasks` 的一列了事:复盘要回答"这个任务是跳过了还是
+  /// 过期了、改过几次、跳过几次" —— 只存当前状态会把历史抹掉。事件只追加、
+  /// 不修改、不删除,与 `done_at/result_json/status` 这些"当前快照"并存。
+  static const String _taskEventsTableSql = '''
+    CREATE TABLE IF NOT EXISTS task_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id INTEGER NOT NULL,
+      event TEXT NOT NULL,
+      at TEXT NOT NULL,
+      payload_json TEXT,
+      created_at TEXT
     )
   ''';
 
@@ -433,6 +631,16 @@ class DatabaseService {
   ''';
 
   /// 导师任务卡
+  ///
+  /// v2.18(dbVersion 22)在原表上**扩列**(旧库由迁移里的 `_ensureColumn` 补,
+  /// 不删旧列):
+  /// - origin(任务来源 auto=助理派 / custom=用户自建)
+  /// - status(状态机 pending/active/done/skipped/expired)
+  /// - started_at / actual_minutes(追踪"实际投入"与复盘偏差)
+  /// - note(用户备注)/ parent_id(周期模板父任务)/ goal_tag(关联目标需求)
+  ///
+  /// 新建库直接建全列;老库靠迁移/自检补 —— 两条路径的最终 schema 必须一致,
+  /// 否则"新装用户能用、老用户升级缺列"这种最难查的 bug 会出现。
   static const String _tutorTasksTableSql = '''
     CREATE TABLE IF NOT EXISTS tutor_tasks (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -443,7 +651,14 @@ class DatabaseService {
       target_minutes INTEGER DEFAULT 0,
       done_at TEXT,
       result_json TEXT,
-      created_at TEXT
+      created_at TEXT,
+      origin TEXT DEFAULT 'auto',
+      status TEXT DEFAULT 'pending',
+      started_at TEXT,
+      actual_minutes INTEGER,
+      note TEXT,
+      parent_id INTEGER,
+      goal_tag TEXT
     )
   ''';
 
@@ -507,6 +722,17 @@ class DatabaseService {
     await db.execute(_drillLogsTableSql);
     await db.execute(_materialBlocksTableSql);
     await db.execute(_bookshelfTableSql);
+    // v2.16(用户:C1-19 翻译"永远没法用")
+    await db.execute(_materialTranslationsTableSql);
+    // v2.17(输出重建:题组/题目/rubric/作答)
+    await db.execute(_exerciseSetsTableSql);
+    await db.execute(_exerciseItemsTableSql);
+    await db.execute(_rubricsTableSql);
+    await db.execute(_outputAttemptsTableSql);
+    // v2.18(批 4 助理数据层:能力快照 + 任务事件)
+    await db.execute(_abilitySnapshotsTableSql);
+    await db.execute(_taskEventsTableSql);
+    await _seedBuiltinRubrics(db);
     await _createIndexes(db);
   }
 
@@ -615,6 +841,54 @@ class DatabaseService {
       // 显示行为与以前完全一致(不会因为升级而"多出一堆图"或"图错位")。
       await _ensureColumn(db, 'materials', 'cover_url', 'TEXT');
     }
+    if (oldV < 19) {
+      // v2.13.1(用户 2026-11-01 截图):「移动材料」把完整 material_path 当
+      // 材料名二次拼前缀 → `书籍/书籍/《Character》`;分组键就是原始路径字符串,
+      // 于是同一本书被拆成两个分组("移动后不并入老分类,而是重复新建")。
+      // 这里只做本地确定性归一(纯函数与 utils/material_group.dart 同一份),
+      // 幂等;失败整体回滚,下次启动 _onOpen 自检会重跑。
+      await _normalizeDuplicatedMaterialPaths(db);
+    }
+    if (oldV < 20) {
+      // v2.16.0(阅读器翻译根治第一段):译文落库。
+      // 纯建表、不动既有数据 —— 老用户首次打开任意材料时表已就绪,没有译文
+      // (= 行为与以前完全一致,照常翻;翻完这次之后就永久在了)。
+      // 索引交给 _createIndexes(单条失败不阻断,与既有约定一致)。
+      await _ensureTable(db, 'material_translations', _materialTranslationsTableSql);
+      await _createIndexes(db);
+    }
+    if (oldV < 21) {
+      // v2.17.0(批 3 输出重建 P0 数据层):题组/题目/rubric/作答四张表 +
+      // 内置 rubric seed。纯建表 + 幂等 seed,不动既有数据 —— 老用户升级后
+      // "输出"页数据为空,首次做题才开始写;内置 rubric 用 INSERT OR IGNORE,
+      // 用户/后续版本改过的同 id rubric 不会被覆盖。
+      await _ensureTable(db, 'exercise_sets', _exerciseSetsTableSql);
+      await _ensureTable(db, 'exercise_items', _exerciseItemsTableSql);
+      await _ensureTable(db, 'rubrics', _rubricsTableSql);
+      await _ensureTable(db, 'output_attempts', _outputAttemptsTableSql);
+      await _seedBuiltinRubrics(db);
+      await _createIndexes(db);
+    }
+    if (oldV < 22) {
+      // v2.18(dbVersion 22,批 4 助理数据层):
+      // ① 新建 ability_snapshots(能力项时间序列)/ task_events(任务事件审计);
+      // ② tutor_tasks **扩列**(状态机/追踪/自定义任务)——只加列、不删旧列:
+      //    周报、桌面小组件、旧 tutor_home 仍在读 done_at/result_json;
+      // ③ 老任务 status 回填:done_at 非空 = 历史上勾过 → 'done'。
+      //    只改 status 仍是默认 'pending' 的行,重复迁移/自检不会把用户后来
+      //    设成 skipped/expired 的任务又改回 done(幂等)。
+      await _ensureTable(db, 'ability_snapshots', _abilitySnapshotsTableSql);
+      await _ensureTable(db, 'task_events', _taskEventsTableSql);
+      await _ensureColumn(db, 'tutor_tasks', 'origin', "TEXT DEFAULT 'auto'");
+      await _ensureColumn(db, 'tutor_tasks', 'status', "TEXT DEFAULT 'pending'");
+      await _ensureColumn(db, 'tutor_tasks', 'started_at', 'TEXT');
+      await _ensureColumn(db, 'tutor_tasks', 'actual_minutes', 'INTEGER');
+      await _ensureColumn(db, 'tutor_tasks', 'note', 'TEXT');
+      await _ensureColumn(db, 'tutor_tasks', 'parent_id', 'INTEGER');
+      await _ensureColumn(db, 'tutor_tasks', 'goal_tag', 'TEXT');
+      await _backfillTutorTaskStatus(db);
+      await _createIndexes(db);
+    }
   }
 
   /// 打开后自检(v1.9.0,审查 P0-2 的兜底):
@@ -644,6 +918,8 @@ class DatabaseService {
       await _ensureTable(db, 'word_review', _wordReviewTableSql, repaired);
       await _ensureTable(db, 'materials', _materialsTableSql, repaired);
       await _ensureTable(db, 'material_content', _materialContentTableSql, repaired);
+      // v2.16:阅读器译文表(半迁移/历史迁移被吞过的库也能自愈)
+      await _ensureTable(db, 'material_translations', _materialTranslationsTableSql, repaired);
       await _ensureTable(db, 'material_progress', _materialProgressTableSql, repaired);
       await _ensureTable(db, 'reading_sessions', _readingSessionsTableSql, repaired);
       await _ensureTable(db, 'quiz_results', _quizResultsTableSql, repaired);
@@ -664,7 +940,32 @@ class DatabaseService {
       await _ensureColumn(db, 'materials', 'title_cn', 'TEXT', repaired);
       // v2.11:封面/配图地址(老库补列;新库由建表 SQL 带出来)
       await _ensureColumn(db, 'materials', 'cover_url', 'TEXT', repaired);
+      // v2.17:输出重建四表(半迁移/历史迁移被吞过的库也能自愈)
+      await _ensureTable(db, 'exercise_sets', _exerciseSetsTableSql, repaired);
+      await _ensureTable(db, 'exercise_items', _exerciseItemsTableSql, repaired);
+      await _ensureTable(db, 'rubrics', _rubricsTableSql, repaired);
+      await _ensureTable(db, 'output_attempts', _outputAttemptsTableSql, repaired);
+      // v2.18(批 4 助理数据层):两张新表 + tutor_tasks 七列,
+      // 半迁移/历史迁移被吞过的库在这里自愈;回填幂等(只改 pending 行)。
+      await _ensureTable(db, 'ability_snapshots', _abilitySnapshotsTableSql, repaired);
+      await _ensureTable(db, 'task_events', _taskEventsTableSql, repaired);
+      await _ensureColumn(db, 'tutor_tasks', 'origin', "TEXT DEFAULT 'auto'", repaired);
+      await _ensureColumn(db, 'tutor_tasks', 'status', "TEXT DEFAULT 'pending'", repaired);
+      await _ensureColumn(db, 'tutor_tasks', 'started_at', 'TEXT', repaired);
+      await _ensureColumn(db, 'tutor_tasks', 'actual_minutes', 'INTEGER', repaired);
+      await _ensureColumn(db, 'tutor_tasks', 'note', 'TEXT', repaired);
+      await _ensureColumn(db, 'tutor_tasks', 'parent_id', 'INTEGER', repaired);
+      await _ensureColumn(db, 'tutor_tasks', 'goal_tag', 'TEXT', repaired);
+      await _backfillTutorTaskStatus(db);
       await _createIndexes(db);
+      // 内置 rubric seed:幂等(INSERT OR IGNORE),放在自检里保证
+      // "表在但 rubric 缺失"的半迁移库也能补齐默认评分标准。
+      await _seedBuiltinRubrics(db);
+      // v2.13.1:材料路径/分组名归一兜底(幂等)。
+      // 放在自检而不是只放版本迁移:① 半迁移/历史迁移被吞过的库也能自愈;
+      // ② 老版本 App 与新版混用(用户装了旧包又升回来)时,旧链路可能又写进
+      //    重复前缀,下次启动直接再清一遍。
+      await _normalizeDuplicatedMaterialPaths(db);
       // v2.0 不变式:每个生词都有一条复习状态(word_review)。
       // 放在自检里而不是只放迁移里:这样"迁移后新增的词"也有状态,
       // v2.1 的复习队列不会因为缺少记录而漏词(幂等,只补缺的)。
@@ -676,6 +977,157 @@ class DatabaseService {
     if (repaired.isNotEmpty) {
       debugPrint('ReadFlow DB 自检补建: ${repaired.join(', ')}');
     }
+  }
+
+  /// 内置 rubric seed(v2.17.0 / dbVersion 21)。
+  ///
+  /// 幂等:`INSERT OR IGNORE` + 固定 id ——
+  /// ① 新装/升级都只插一次(启动自检也会调,重复执行安全);
+  /// ② 以后同 id 的 rubric 被用户/后续版本改过,再启动**不会覆盖**(内置只是默认值);
+  /// ③ 失败静默:rubric 缺失时界面回落"无档位描述",不能因为 seed 失败让 App 起不来。
+  static Future<void> _seedBuiltinRubrics(Database db) async {
+    try {
+      final now = DateTime.now().toIso8601String();
+      final batch = db.batch();
+      for (final row in _builtinRubricRows(now)) {
+        batch.rawInsert(
+          'INSERT OR IGNORE INTO rubrics '
+          '(id, type, scoring_mode, dimensions_json, bands_json, prompt_template, created_at) '
+          'VALUES (?, ?, ?, ?, ?, ?, ?)',
+          [
+            row['id'],
+            row['type'],
+            row['scoring_mode'],
+            row['dimensions_json'],
+            row['bands_json'],
+            row['prompt_template'],
+            row['created_at'],
+          ],
+        );
+      }
+      await batch.commit(noResult: true);
+    } catch (e) {
+      debugPrint('ReadFlow 内置 rubric 初始化失败(不影响启动): $e');
+    }
+  }
+
+  /// 内置 4 条 rubric 的默认内容(纯数据生成,便于测试与以后调整文案)。
+  ///
+  /// 固定 id(出题器/评分层按名称对齐,**不要改名**):
+  /// `cet4_writing` / `cet4_translation` / `back_translation` / `summary`。
+  ///
+  /// 维度与档位对齐考试习惯:
+  /// - CET-4 写作 15 分制:内容切题 30% / 组织连贯 25% / 语言准确 30% /
+  ///   词汇丰富 10% / 句式多样 5%;
+  /// - CET-4 翻译 15 分制:原文理解 40% / 译文准确 40% / 表达通顺 20%;
+  /// - 回译 5 分制:准确 60% / 通顺 40%;
+  /// - 摘要 5 分制:要点覆盖 50% / 连贯 30% / 语言 20%。
+  static List<Map<String, Object?>> _builtinRubricRows(String createdAt) {
+    List<Map<String, Object?>> dims(List<(String, String, double)> list) => [
+          for (final (key, label, weight) in list)
+            {'key': key, 'label': label, 'weight': weight},
+        ];
+    List<Map<String, Object?>> bands(List<(String, String, String)> list) => [
+          for (final (range, label, desc) in list)
+            {'score_range': range, 'label': label, 'desc': desc},
+        ];
+
+    final bands15 = bands([
+      ('13-15', '优秀', '内容完整切题,结构清晰,语言基本无误,表达得体'),
+      ('10-12', '良好', '内容较完整,结构较清楚,少量语言错误但不影响理解'),
+      ('7-9', '及格', '基本完成任务,有明显语言错误,部分表达影响理解'),
+      ('4-6', '较差', '内容残缺或偏题,错误较多,阅读困难'),
+      ('0-3', '差', '几乎无法理解或未作答'),
+    ]);
+    final bands5 = bands([
+      ('5', '优秀', '意思完整准确,表达自然通顺'),
+      ('4', '良好', '基本准确,仅个别小错'),
+      ('3', '及格', '主要意思仍在,有影响理解的错误'),
+      ('2', '较差', '多处错误,部分意思丢失'),
+      ('0-1', '差', '偏离原意或未作答'),
+    ]);
+
+    return [
+      {
+        'id': 'cet4_writing',
+        'type': 'writing',
+        'scoring_mode': 'ai_rubric',
+        'dimensions_json': jsonEncode(dims([
+          ('content', '内容切题', 0.30),
+          ('organization', '组织连贯', 0.25),
+          ('language', '语言准确', 0.30),
+          ('vocabulary', '词汇丰富', 0.10),
+          ('sentence', '句式多样', 0.05),
+        ])),
+        'bands_json': jsonEncode(bands15),
+        'prompt_template': '''你是 CET-4 写作阅卷员。先给依据、再给分,不许只给总分。
+评分维度(权重见括号):{维度}
+分档参考:{档位}
+题目:{题目}
+学生作文:{学生答案}
+只输出 JSON:
+{"score":总分(0-15),"dimensions":[{"key":"维度key","score":0-15,"band":"档位","evidence":"原文依据"}],"issues":[{"span":"原文片段","type":"语法/词汇/结构/内容","reason":"中文说明"}],"correction":"修改后的完整作文","summary":"一句中文总评"}''',
+        'created_at': createdAt,
+      },
+      {
+        'id': 'cet4_translation',
+        'type': 'translation',
+        'scoring_mode': 'ai_rubric',
+        'dimensions_json': jsonEncode(dims([
+          ('comprehension', '原文理解', 0.40),
+          ('accuracy', '译文准确', 0.40),
+          ('fluency', '表达通顺', 0.20),
+        ])),
+        'bands_json': jsonEncode(bands15),
+        'prompt_template': '''你是 CET-4 汉译英阅卷员。逐句核对原文信息是否完整、准确、通顺。
+评分维度(权重见括号):{维度}
+分档参考:{档位}
+题目(中文原文):{题目}
+学生译文:{学生答案}
+只输出 JSON:
+{"score":总分(0-15),"dimensions":[{"key":"维度key","score":0-15,"band":"档位","evidence":"学生译文中的依据"}],"issues":[{"span":"学生译文片段","type":"误译/漏译/语法/搭配","reason":"中文说明","suggestion":"建议译法"}],"correction":"参考译文","summary":"一句中文总评"}''',
+        'created_at': createdAt,
+      },
+      {
+        'id': 'back_translation',
+        'type': 'back_translation',
+        'scoring_mode': 'ai_rubric',
+        'dimensions_json': jsonEncode(dims([
+          ('accuracy', '准确', 0.60),
+          ('fluency', '通顺', 0.40),
+        ])),
+        'bands_json': jsonEncode(bands5),
+        'prompt_template': '''你是回译练习评分员。用户先读英文原句,再只看中文把英文写回来;
+请对照"英文原句"判断还原度,不要因为学生用了同义表达就扣分。
+评分维度(权重见括号):{维度}
+分档参考:{档位}
+英文原句(标准答案):{参考}
+中文提示:{题目}
+学生写回的英文:{学生答案}
+只输出 JSON:
+{"score":总分(0-5),"dimensions":[{"key":"维度key","score":0-5,"band":"档位","evidence":"学生译文中的依据"}],"issues":[{"span":"片段","type":"语法/词汇/漏信息","reason":"中文说明"}],"correction":"更自然的英文版本","summary":"一句中文总评"}''',
+        'created_at': createdAt,
+      },
+      {
+        'id': 'summary',
+        'type': 'summary',
+        'scoring_mode': 'ai_rubric',
+        'dimensions_json': jsonEncode(dims([
+          ('coverage', '要点覆盖', 0.50),
+          ('coherence', '连贯', 0.30),
+          ('language', '语言', 0.20),
+        ])),
+        'bands_json': jsonEncode(bands5),
+        'prompt_template': '''你是英文摘要评分员。先列出原文的关键要点,再检查学生摘要覆盖了哪些。
+评分维度(权重见括号):{维度}
+分档参考:{档位}
+原文:{题目}
+学生摘要:{学生答案}
+只输出 JSON:
+{"score":总分(0-5),"dimensions":[{"key":"维度key","score":0-5,"band":"档位","evidence":"学生摘要中的依据"}],"issues":[{"span":"片段","type":"漏要点/冗余/语言","reason":"中文说明"}],"correction":"参考摘要","summary":"一句中文总评"}''',
+        'created_at': createdAt,
+      },
+    ];
   }
 
   /// 用旧的 `mastery_level` 给 FSRS 状态一个**保守初值**(v2.0 → v2.1 的衔接)。
@@ -761,6 +1213,26 @@ class DatabaseService {
     repaired?.add(table);
   }
 
+  /// v2.18:老 `tutor_tasks` 回填 `status`(done_at 非空 → 'done'),**幂等**。
+  ///
+  /// 为什么只改 `status` 仍是默认 'pending' 的行:迁移重跑/自检重跑时,
+  /// 不能把用户后来设成 skipped/expired 的任务又改回 done;而 'pending'
+  /// 等价于"从未写过状态"(v22 之前所有行都是默认值)。
+  /// 失败只记日志不阻断启动 —— 任务卡照常显示,只是状态少回填一次。
+  static Future<int> _backfillTutorTaskStatus(DatabaseExecutor db) async {
+    try {
+      return await db.update(
+        'tutor_tasks',
+        {'status': 'done'},
+        where: "done_at IS NOT NULL AND done_at != '' "
+            "AND (status IS NULL OR status = 'pending')",
+      );
+    } catch (e) {
+      debugPrint('ReadFlow 回填 tutor_tasks.status 失败(不影响启动): $e');
+      return 0;
+    }
+  }
+
   static Future<void> _createIndexes(Database db) async {
     for (final sql in _indexStatements) {
       try {
@@ -831,6 +1303,110 @@ class DatabaseService {
       }
       await batch.commit(noResult: true);
     });
+  }
+
+  /// v19:清理「移动材料」二次拼前缀留下的脏路径(用户 2026-11-01 截图:
+  /// 移动弹层同时出现「书籍/《Character》」和「书籍/书籍/《Character》」)。
+  ///
+  /// 病根:移动弹层选项本身就是完整 `material_path`,旧 `_moveInto` 又把它当
+  /// "材料名"交给 `buildMaterialPath` 二次拼分类前缀 → `书籍/书籍/《X》`;
+  /// 而分组键(`groupMaterials`)就是原始路径字符串 → 脏串与干净串永远不相等,
+  /// 同一本书被拆成两个分组("移动后不并入老分类,而是重复新建")。
+  /// `vocabulary.source_book` 也被同一条链路写成了整条路径。
+  ///
+  /// 只做**本地确定性判定**的归一(纯函数与 `utils/material_group.dart` 同一份,
+  /// 单一事实来源),不做模糊猜测:
+  /// - 只处理至少 3 段的路径 —— 二次拼前缀必然产生 ≥3 段;
+  /// - 两段的 `书籍/书籍`(材料名恰好叫「书籍」)是合法数据,不折;
+  /// - 不改 id/掌握度/created_at/occurrences_json;`word_review` 按 vocab_id
+  ///   关联,id 不变 → 复习状态天然不受影响;
+  /// - 单事务 + batch,失败整体回滚(下次启动 `_onOpen` 会重跑,幂等)。
+  ///
+  /// ⚠️ 为什么不复用 v8 的 [_normalizeBookPaths]:它是"把第三段当页码"的旧
+  /// 规则,会把 `书籍/书籍/《X》` 归成 `书籍/书籍` + `source_page=《X》`,
+  /// 越修越脏 —— 重复前缀必须按"折掉重复前导段"单独处理。
+  ///
+  /// 返回实际修复的条数(0 = 库是干净的;测试与诊断日志用)。
+  static Future<int> _normalizeDuplicatedMaterialPaths(Database db) async {
+    // 1) vocabulary:先按"至少 3 段"粗筛(LIKE 用不上索引,但 5000 词上限的
+    //    全表扫描在启动时只花几毫秒),再用纯函数确认是否真的需要改。
+    final vocabCols = await db.rawQuery('PRAGMA table_info(vocabulary)');
+    final hasSourceBook =
+        vocabCols.any((r) => (r['name'] as String?) == 'source_book');
+    final vocabRows = await db.query(
+      'vocabulary',
+      columns: [
+        'id',
+        'category',
+        'material_path',
+        if (hasSourceBook) 'source_book',
+      ],
+      where: "material_path IS NOT NULL AND material_path != '' "
+          "AND material_path LIKE '%/%/%'",
+    );
+
+    // 2) materials.group_name:没有分类前缀的自由文本,按通用"重复前导段"折。
+    //    表/列都先确认存在 —— 老库/半迁移库里这两个都可能缺。
+    var materialRows = const <Map<String, Object?>>[];
+    final hasMaterials = (await db.rawQuery(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='materials'",
+    )).isNotEmpty;
+    if (hasMaterials) {
+      final cols = await db.rawQuery('PRAGMA table_info(materials)');
+      if (cols.any((r) => (r['name'] as String?) == 'group_name')) {
+        materialRows = await db.query(
+          'materials',
+          columns: ['id', 'group_name'],
+          where: "group_name IS NOT NULL AND group_name LIKE '%/%'",
+        );
+      }
+    }
+    if (vocabRows.isEmpty && materialRows.isEmpty) return 0;
+
+    var fixed = 0;
+    await db.transaction((txn) async {
+      final batch = txn.batch();
+      for (final r in vocabRows) {
+        final id = r['id'] as int?;
+        if (id == null) continue;
+        final category = (r['category'] as String?)?.trim() ?? '';
+        final rawPath = (r['material_path'] as String?) ?? '';
+        final fixedPath = normalizeMaterialPath(category, rawPath);
+        if (fixedPath.isEmpty || fixedPath == rawPath) continue;
+        final updates = <String, Object?>{'material_path': fixedPath};
+        if (hasSourceBook) {
+          final book = ((r['source_book'] as String?) ?? '').trim();
+          // 旧实现 source_book = 完整路径(必然以 `分类/` 开头)。只修这种
+          // 确定脏的;用户自己填的书名即使带斜杠也不动。
+          if (book.isNotEmpty &&
+              category.isNotEmpty &&
+              book.startsWith('$category/')) {
+            updates['source_book'] = materialDisplayName(fixedPath, category);
+          }
+        }
+        batch.update('vocabulary', updates, where: 'id = ?', whereArgs: [id]);
+        fixed++;
+      }
+      for (final r in materialRows) {
+        final id = r['id'] as int?;
+        if (id == null) continue;
+        final raw = (r['group_name'] as String?) ?? '';
+        final normalized = normalizeGroupName(raw);
+        if (normalized.isEmpty || normalized == raw) continue;
+        batch.update(
+          'materials',
+          {'group_name': normalized},
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+        fixed++;
+      }
+      if (fixed > 0) await batch.commit(noResult: true);
+    });
+    if (fixed > 0) {
+      debugPrint('ReadFlow 材料路径归一:修复 $fixed 处重复分类前缀');
+    }
+    return fixed;
   }
 
   /// v10:清理孤儿练习行(开外键前积累的历史脏数据)
@@ -1791,6 +2367,381 @@ class DatabaseService {
     }
   }
 
+  // ── 阅读器译文(v2.16.0 / dbVersion 20)──
+  //
+  // 设计口径:
+  // - 一段一条(UNIQUE(material_id, unit_index)),重翻 = UPSERT 覆盖并刷新 updated_at
+  //   (created_at 保留第一次翻成功的时间 —— "这条译文是什么时候第一次有的")；
+  // - 读出来必须带 source_text:材料重新导入/切段变化后 unit 下标会漂移,
+  //   只有快照一致才敢显示(见 [alignTranslationsToUnits])；
+  // - 所有方法失败都**静默降级**(返回空/不抛):译文是"阅读的辅助",
+  //   落库失败不能让阅读器打不开,下次翻到这段会再试一次。
+
+  /// 写入/覆盖一条阅读器译文。重翻同一段 → 覆盖译文并刷新 updated_at。
+  static Future<void> saveMaterialTranslation(
+    int materialId, {
+    required int unitIndex,
+    required int chunkIndex,
+    required String sourceText,
+    required String translatedText,
+    String? model,
+  }) async {
+    final source = sourceText.trim();
+    final translated = translatedText.trim();
+    if (materialId <= 0 || unitIndex < 0 || source.isEmpty || translated.isEmpty) {
+      return; // 空内容不落库(避免脏行占住 UNIQUE 槽位)
+    }
+    try {
+      final db = await database;
+      final now = DateTime.now().toIso8601String();
+      await db.rawInsert(
+        '''
+        INSERT INTO material_translations
+          (material_id, unit_index, chunk_index, source_text, translated_text,
+           model, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(material_id, unit_index) DO UPDATE SET
+          chunk_index = excluded.chunk_index,
+          source_text = excluded.source_text,
+          translated_text = excluded.translated_text,
+          model = excluded.model,
+          updated_at = excluded.updated_at
+        ''',
+        [
+          materialId,
+          unitIndex,
+          chunkIndex,
+          source,
+          translated,
+          (model ?? '').trim().isEmpty ? null : model!.trim(),
+          now,
+          now,
+        ],
+      );
+    } catch (e) {
+      debugPrint('ReadFlow saveMaterialTranslation failed: $e');
+    }
+  }
+
+  /// 读出某份材料已落库的译文**原始记录**(含 source_text 快照)。
+  ///
+  /// 阅读器应该用这个 + [alignTranslationsToUnits] 做防错位过滤;
+  /// [loadMaterialTranslations] 只是"不关心错位风险"的便捷 Map 版本。
+  static Future<List<MaterialTranslation>> loadMaterialTranslationRecords(
+    int materialId,
+  ) async {
+    try {
+      final db = await database;
+      final rows = await db.query(
+        'material_translations',
+        where: 'material_id = ?',
+        whereArgs: [materialId],
+        orderBy: 'unit_index ASC',
+      );
+      return [
+        for (final r in rows)
+          if ('${r['translated_text'] ?? ''}'.trim().isNotEmpty)
+            MaterialTranslation(
+              unitIndex: (r['unit_index'] as num?)?.toInt() ?? -1,
+              chunkIndex: (r['chunk_index'] as num?)?.toInt() ?? -1,
+              sourceText: '${r['source_text'] ?? ''}',
+              translatedText: '${r['translated_text'] ?? ''}',
+              model: r['model'] as String?,
+              updatedAt: DateTime.tryParse('${r['updated_at'] ?? ''}'),
+            ),
+      ];
+    } catch (e) {
+      debugPrint('ReadFlow loadMaterialTranslationRecords failed: $e');
+      return [];
+    }
+  }
+
+  /// 某份材料已落库译文:`unit_index → 译文`(不做 source_text 校验)。
+  static Future<Map<int, String>> loadMaterialTranslations(
+    int materialId,
+  ) async {
+    final records = await loadMaterialTranslationRecords(materialId);
+    return {
+      for (final r in records)
+        if (r.unitIndex >= 0) r.unitIndex: r.translatedText,
+    };
+  }
+
+  /// **纯函数**:把已落库译文对齐到"当前切段"(防错位)。
+  ///
+  /// 规则:只有 [MaterialTranslation.sourceText] 与当前 [currentUnitTexts] 同下标
+  /// 的段落**内容一致**(仅忽略首尾与连续空白差异)时才采用;不一致说明材料
+  /// 重新导入/切段变了,宁可当没翻过(重翻),也不能把别的段落译文显示过来。
+  static Map<int, String> alignTranslationsToUnits(
+    List<MaterialTranslation> saved,
+    List<String> currentUnitTexts,
+  ) {
+    String norm(String s) => s.replaceAll(RegExp(r'\s+'), ' ').trim();
+    final out = <int, String>{};
+    for (final t in saved) {
+      final i = t.unitIndex;
+      if (i < 0 || i >= currentUnitTexts.length) continue;
+      if (norm(t.sourceText) != norm(currentUnitTexts[i])) continue;
+      if (t.translatedText.trim().isEmpty) continue;
+      out[i] = t.translatedText;
+    }
+    return out;
+  }
+
+  /// 清掉某份材料的全部译文(材料被彻底删除/用户想重翻时用)。
+  /// 本轮阅读器不调用它(材料删除流程不动),只是把能力先提供出来。
+  static Future<int> deleteMaterialTranslations(int materialId) async {
+    try {
+      final db = await database;
+      return await db.delete(
+        'material_translations',
+        where: 'material_id = ?',
+        whereArgs: [materialId],
+      );
+    } catch (e) {
+      debugPrint('ReadFlow deleteMaterialTranslations failed: $e');
+      return 0;
+    }
+  }
+
+  // ═══════════════ 输出模块 CRUD(v2.17.0 / dbVersion 21)═══════════════
+  //
+  // 统一约定:失败**静默降级** —— 查询返回 null/空列表、写入返回 0/void。
+  // 理由:输出/做题页是"锦上添花"的功能,一次 DB 异常不该让整页崩溃;
+  // 需要确认写入成功的场景(出题器)看返回值(0 = 没写进去,事务已回滚)。
+
+  /// 插入一个题组(可带题目)。**单事务**:先插 set 再逐条插 items,
+  /// 任何一条失败整体回滚 —— 避免"有卷面没题目"的半套题出现在列表里。
+  ///
+  /// 返回新题组 id;失败返回 0。
+  /// [items] 不需要 set_id(自动注入)与 idx(缺省按数组顺序 0..N-1)。
+  static Future<int> insertExerciseSet(
+    Map<String, Object?> set, {
+    List<Map<String, Object?>> items = const [],
+  }) async {
+    try {
+      final db = await database;
+      return await db.transaction<int>((txn) async {
+        final setRow = Map<String, Object?>.from(set);
+        setRow.putIfAbsent('created_at', () => DateTime.now().toIso8601String());
+        final setId = await txn.insert('exercise_sets', setRow);
+        for (var i = 0; i < items.length; i++) {
+          final itemRow = Map<String, Object?>.from(items[i]);
+          itemRow['set_id'] = setId;
+          itemRow.putIfAbsent('idx', () => i);
+          await txn.insert('exercise_items', itemRow);
+        }
+        return setId;
+      });
+    } catch (e) {
+      debugPrint('ReadFlow insertExerciseSet failed: $e');
+      return 0;
+    }
+  }
+
+  /// 读一个题组:题组字段 + `items`(题目列表,按 idx 升序)。
+  /// 不存在/失败返回 null。
+  static Future<Map<String, Object?>?> getExerciseSet(int id) async {
+    try {
+      final db = await database;
+      final rows = await db.query(
+        'exercise_sets',
+        where: 'id = ?',
+        whereArgs: [id],
+        limit: 1,
+      );
+      if (rows.isEmpty) return null;
+      final items = await db.query(
+        'exercise_items',
+        where: 'set_id = ?',
+        whereArgs: [id],
+        orderBy: 'idx ASC, id ASC',
+      );
+      return {...rows.first, 'items': items};
+    } catch (e) {
+      debugPrint('ReadFlow getExerciseSet failed: $e');
+      return null;
+    }
+  }
+
+  /// 题组列表(创建时间倒序)。[examType]/[section] 非空时过滤。
+  static Future<List<Map<String, Object?>>> listExerciseSets({
+    String? examType,
+    String? section,
+    int limit = 50,
+  }) async {
+    try {
+      final db = await database;
+      final where = <String>[];
+      final args = <Object?>[];
+      if (examType != null && examType.trim().isNotEmpty) {
+        where.add('exam_type = ?');
+        args.add(examType.trim());
+      }
+      if (section != null && section.trim().isNotEmpty) {
+        where.add('section = ?');
+        args.add(section.trim());
+      }
+      final safeLimit = limit < 1 ? 1 : (limit > 200 ? 200 : limit);
+      return await db.query(
+        'exercise_sets',
+        where: where.isEmpty ? null : where.join(' AND '),
+        whereArgs: where.isEmpty ? null : args,
+        orderBy: 'created_at DESC, id DESC',
+        limit: safeLimit,
+      );
+    } catch (e) {
+      debugPrint('ReadFlow listExerciseSets failed: $e');
+      return [];
+    }
+  }
+
+  /// 单条 rubric(内置 4 条固定 id:cet4_writing / cet4_translation /
+  /// back_translation / summary);不存在返回 null。
+  static Future<Map<String, Object?>?> getRubric(String id) async {
+    try {
+      final db = await database;
+      final rows = await db.query(
+        'rubrics',
+        where: 'id = ?',
+        whereArgs: [id],
+        limit: 1,
+      );
+      return rows.isEmpty ? null : rows.first;
+    } catch (e) {
+      debugPrint('ReadFlow getRubric failed: $e');
+      return null;
+    }
+  }
+
+  /// 全部 rubric(id 升序:内置 4 条在前,自定义按名称排在后面)。
+  static Future<List<Map<String, Object?>>> listRubrics() async {
+    try {
+      final db = await database;
+      return await db.query('rubrics', orderBy: 'created_at ASC, id ASC');
+    } catch (e) {
+      debugPrint('ReadFlow listRubrics failed: $e');
+      return [];
+    }
+  }
+
+  /// 记录一条作答(失败静默:写不进去不该挡住用户继续做下一题)。
+  static Future<void> insertOutputAttempt(Map<String, Object?> attempt) async {
+    try {
+      final db = await database;
+      final row = Map<String, Object?>.from(attempt);
+      row.putIfAbsent('created_at', () => DateTime.now().toIso8601String());
+      await db.insert('output_attempts', row);
+    } catch (e) {
+      debugPrint('ReadFlow insertOutputAttempt failed: $e');
+    }
+  }
+
+  /// 作答列表(created_at 倒序)。
+  /// [setItemId] = 只看某一道题(exercise_items.id);
+  /// [setId] = 只看某一套题(exercise_sets.id)。
+  static Future<List<Map<String, Object?>>> listOutputAttempts({
+    int limit = 100,
+    int? setItemId,
+    int? setId,
+  }) async {
+    try {
+      final db = await database;
+      final where = <String>[];
+      final args = <Object?>[];
+      if (setItemId != null) {
+        where.add('item_id = ?');
+        args.add(setItemId);
+      }
+      if (setId != null) {
+        where.add('set_id = ?');
+        args.add(setId);
+      }
+      final safeLimit = limit < 1 ? 1 : (limit > 500 ? 500 : limit);
+      return await db.query(
+        'output_attempts',
+        where: where.isEmpty ? null : where.join(' AND '),
+        whereArgs: where.isEmpty ? null : args,
+        orderBy: 'created_at DESC, id DESC',
+        limit: safeLimit,
+      );
+    } catch (e) {
+      debugPrint('ReadFlow listOutputAttempts failed: $e');
+      return [];
+    }
+  }
+
+  /// 输出模块统计(首页/周报/教练页用)。
+  ///
+  /// 口径(必须写清,否则"正确率"永远对不上 UI):
+  /// - `sets` = 题组数(受 [since] 过滤);
+  /// - `attempts` = 作答条数(受 [since] 过滤);
+  /// - `correctRate` = correct=1 的条数 ÷ **correct 非空**的条数 ——
+  ///   主观题 correct=NULL(只有维度分),**不进分母**,否则正确率永远被拉低;
+  /// - `totalSeconds` = SUM(seconds);
+  /// - `byType` = 按题型(取 exercise_items.type;缺失时回落 exercise_sets.section)
+  ///   的作答条数。
+  static Future<Map<String, Object?>> outputStats({DateTime? since}) async {
+    try {
+      final db = await database;
+      final sinceIso = since?.toIso8601String();
+      final filter = sinceIso == null ? '' : 'WHERE created_at >= ?';
+      final args = <Object?>[?sinceIso];
+
+      final setsRow = (await db.rawQuery(
+        'SELECT COUNT(*) AS c FROM exercise_sets $filter',
+        args,
+      )).first;
+      final sets = (setsRow['c'] as num?)?.toInt() ?? 0;
+
+      final attemptRow = (await db.rawQuery('''
+        SELECT COUNT(*) AS total,
+               SUM(CASE WHEN correct IS NULL THEN 0 ELSE 1 END) AS graded,
+               SUM(CASE WHEN correct = 1 THEN 1 ELSE 0 END) AS ok,
+               COALESCE(SUM(seconds), 0) AS sec
+        FROM output_attempts $filter
+      ''', args)).first;
+      final attempts = (attemptRow['total'] as num?)?.toInt() ?? 0;
+      final graded = (attemptRow['graded'] as num?)?.toInt() ?? 0;
+      final ok = (attemptRow['ok'] as num?)?.toInt() ?? 0;
+      final totalSeconds = (attemptRow['sec'] as num?)?.toInt() ?? 0;
+      final correctRate = graded == 0 ? 0.0 : ok / graded;
+
+      final typeRows = await db.rawQuery('''
+        SELECT COALESCE(NULLIF(TRIM(i.type), ''),
+                        NULLIF(TRIM(s.section), ''),
+                        'unknown') AS t,
+               COUNT(*) AS c
+        FROM output_attempts a
+        LEFT JOIN exercise_items i ON i.id = a.item_id
+        LEFT JOIN exercise_sets s ON s.id = a.set_id
+        ${sinceIso == null ? '' : 'WHERE a.created_at >= ?'}
+        GROUP BY t
+        ORDER BY c DESC, t ASC
+      ''', args);
+
+      return {
+        'sets': sets,
+        'attempts': attempts,
+        'correctRate': correctRate,
+        'totalSeconds': totalSeconds,
+        'byType': <String, int>{
+          for (final r in typeRows)
+            '${r['t'] ?? 'unknown'}': (r['c'] as num?)?.toInt() ?? 0,
+        },
+      };
+    } catch (e) {
+      debugPrint('ReadFlow outputStats failed: $e');
+      return {
+        'sets': 0,
+        'attempts': 0,
+        'correctRate': 0.0,
+        'totalSeconds': 0,
+        'byType': <String, int>{},
+      };
+    }
+  }
+
   /// 删材料:同时清掉它的正文分块与阅读进度(单事务,不留孤儿行)。
   /// **不删 reading_sessions** —— 那是行为历史(导师判断"读过什么/速度多少"
   /// 的依据),删材料不等于抹掉"我读过它";真要清历史另有入口。
@@ -2422,23 +3373,55 @@ class DatabaseService {
   /// 新建导师任务卡。`plan_date` 存完整 ISO8601(与全表约定一致),
   /// 取"当天"靠 [getTutorTasks] 的 [当天 00:00, 次日 00:00) 半开区间
   /// (走 idx_tutor_task_date)。返回任务 id,失败 -1。
+  ///
+  /// v2.18 起支持任务来源与状态机字段(全部可选,旧调用点不用改):
+  /// - [origin]:`auto`(助理计划生成,默认)/ `custom`(用户自建);
+  /// - [status]:默认 `pending`;`custom` 任务可直接从 `active` 开始;
+  /// - [note]/[goalTag]/[parentId]:自定义备注、关联目标、周期模板父任务。
+  ///
+  /// 每次插入都会写一条 `task_events(event='create')` —— 复盘要能回答
+  /// "这个任务是哪来的、什么时候建的",而不是只看一条当前行。
   static Future<int> insertTutorTask({
     required DateTime planDate,
     required String kind,
     required String title,
     Map<String, Object?>? payload,
     int targetMinutes = 0,
+    String origin = 'auto',
+    String status = 'pending',
+    String? note,
+    String? goalTag,
+    int? parentId,
   }) async {
     try {
       final db = await database;
-      return await db.insert('tutor_tasks', {
+      final now = DateTime.now().toIso8601String();
+      final id = await db.insert('tutor_tasks', {
         'plan_date': planDate.toIso8601String(),
         'kind': kind,
         'title': title,
         'payload_json': payload == null ? null : jsonEncode(payload),
         'target_minutes': targetMinutes,
-        'created_at': DateTime.now().toIso8601String(),
+        'origin': origin,
+        'status': status,
+        'note': note,
+        'goal_tag': goalTag,
+        'parent_id': parentId,
+        'created_at': now,
       });
+      if (id > 0) {
+        await insertTaskEvent(<String, Object?>{
+          'task_id': id,
+          'event': 'create',
+          'at': now,
+          'payload_json': <String, Object?>{
+            'origin': origin,
+            'status': status,
+            'kind': kind,
+          },
+        });
+      }
+      return id;
     } catch (e) {
       debugPrint('ReadFlow insertTutorTask failed: $e');
       return -1;
@@ -2467,7 +3450,11 @@ class DatabaseService {
     }
   }
 
-  /// 勾掉任务卡:写 done_at,有 [result] 时一并写入(不传 = 保留已有结果)。
+  /// 勾掉任务卡:写 done_at + `status='done'`,有 [result] 时一并写入
+  /// (不传 = 保留已有结果);**同时写一条 submit 事件**。
+  ///
+  /// 为什么旧方法也要同步 status/事件:旧 tutor_home 的"手动勾"仍在调用它,
+  /// 若只写 done_at 不写 status,新状态机统计会把"做完的任务"算成 pending。
   /// 返回受影响行数(0 = id 不存在)。
   static Future<int> completeTutorTask(
     int id, {
@@ -2475,15 +3462,43 @@ class DatabaseService {
   }) async {
     try {
       final db = await database;
-      return await db.update(
-        'tutor_tasks',
-        {
-          'done_at': DateTime.now().toIso8601String(),
-          if (result != null) 'result_json': jsonEncode(result),
-        },
-        where: 'id = ?',
-        whereArgs: [id],
-      );
+      final now = DateTime.now().toIso8601String();
+      var affected = 0;
+      await db.transaction((txn) async {
+        final before = await txn.query(
+          'tutor_tasks',
+          columns: ['status'],
+          where: 'id = ?',
+          whereArgs: [id],
+          limit: 1,
+        );
+        final from = before.isEmpty ? null : '${before.first['status'] ?? ''}';
+        affected = await txn.update(
+          'tutor_tasks',
+          {
+            'done_at': now,
+            'status': 'done',
+            if (result != null) 'result_json': jsonEncode(result),
+          },
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+        if (affected > 0) {
+          await txn.insert('task_events', {
+            'task_id': id,
+            'event': 'submit',
+            'at': now,
+            'payload_json': jsonEncode(<String, Object?>{
+              'from': from,
+              'to': 'done',
+              'manual': true,
+              if (result != null) 'has_result': true,
+            }),
+            'created_at': now,
+          });
+        }
+      });
+      return affected;
     } catch (e) {
       debugPrint('ReadFlow completeTutorTask failed: $e');
       return 0;
@@ -2492,15 +3507,44 @@ class DatabaseService {
 
   /// 取消完成(v2.4,A5):把 done_at 与 result 清掉,任务回到"待办"。
   /// 用户实测"划去任务后没法再点回来" —— 勾选必须能来回切换。
+  ///
+  /// v2.18:同步把 status 回 `pending` 并记一条 reopen 事件(审计口径:
+  /// "撤销完成"是一次 reopen,不是删除历史)。
   static Future<int> reopenTutorTask(int id) async {
     try {
       final db = await database;
-      return await db.update(
-        'tutor_tasks',
-        {'done_at': null, 'result_json': null},
-        where: 'id = ?',
-        whereArgs: [id],
-      );
+      final now = DateTime.now().toIso8601String();
+      var affected = 0;
+      await db.transaction((txn) async {
+        final before = await txn.query(
+          'tutor_tasks',
+          columns: ['status'],
+          where: 'id = ?',
+          whereArgs: [id],
+          limit: 1,
+        );
+        final from = before.isEmpty ? null : '${before.first['status'] ?? ''}';
+        affected = await txn.update(
+          'tutor_tasks',
+          {'done_at': null, 'result_json': null, 'status': 'pending'},
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+        if (affected > 0) {
+          await txn.insert('task_events', {
+            'task_id': id,
+            'event': 'reopen',
+            'at': now,
+            'payload_json': jsonEncode(<String, Object?>{
+              'from': from,
+              'to': 'pending',
+              'manual': true,
+            }),
+            'created_at': now,
+          });
+        }
+      });
+      return affected;
     } catch (e) {
       debugPrint('ReadFlow reopenTutorTask failed: $e');
       return 0;
@@ -2524,6 +3568,545 @@ class DatabaseService {
       'payload': _tryDecodeJson(row['payload_json']?.toString()),
       'result': _tryDecodeJson(row['result_json']?.toString()),
     };
+  }
+
+  // ═══════════════ v2.18(dbVersion 22):助理数据层 ═══════════════
+  //
+  // 三块能力(批 4 · 助理重做):
+  // ① ability_snapshots:能力项(vocab/grammar/reading/output/habit)的时间
+  //    序列,带来源/置信度/证据 —— "现状分析"从"报行为债"升级为"报能力项变化";
+  // ② task_events:状态机每次变化的**只追加审计**,复盘能回答"跳了几次/改过几次";
+  // ③ tutor_tasks 状态机 CRUD:任务可编辑/跳过/过期/撤销,并留痕。
+  //
+  // 与旧方法的关系:getTutorTasks/completeTutorTask/reopenTutorTask 保留;
+  // complete/reopen 内部同步 status 与事件 —— 新旧两条 UI 链路读同一份事实。
+
+  /// 合法任务状态(顺序即 UI 状态点/筛选项顺序)
+  static const List<String> tutorTaskStatuses = <String>[
+    'pending',
+    'active',
+    'done',
+    'skipped',
+    'expired',
+  ];
+
+  /// 合法任务事件(只追加审计)
+  static const List<String> tutorTaskEvents = <String>[
+    'create',
+    'start',
+    'submit',
+    'skip',
+    'reopen',
+    'edit',
+    'expire',
+  ];
+
+  /// 任务来源:auto = 助理按诊断派的任务;custom = 用户自建
+  static const List<String> tutorTaskOrigins = <String>['auto', 'custom'];
+
+  /// 能力项维度(固定顺序:现状分析/复盘图表都按它渲染)
+  static const List<String> abilityDimensions = <String>[
+    'vocab',
+    'grammar',
+    'reading',
+    'output',
+    'habit',
+  ];
+
+  /// 能力项来源:test=测出来 / self_report=自报 / inferred=行为推断
+  static const List<String> abilitySources = <String>[
+    'test',
+    'self_report',
+    'inferred',
+  ];
+
+  static bool isValidTutorTaskStatus(String status) =>
+      tutorTaskStatuses.contains(status.trim());
+
+  /// 状态 → 审计事件(状态机的"落事件"口径)
+  static String eventForTutorTaskStatus(String status) =>
+      switch (status.trim()) {
+        'active' => 'start',
+        'done' => 'submit',
+        'skipped' => 'skip',
+        'expired' => 'expire',
+        _ => 'reopen', // pending:撤销完成 / 重新打开
+      };
+
+  // ── 能力快照 ──────────────────────────────────────────────────────
+
+  /// 写一条能力项快照(**upsert**:同 `dimension + snapshot_at` 只留一条)。
+  ///
+  /// 为什么是 upsert 而不是纯插入:同一天可能被多个触发点写(词汇量测试、
+  /// 写作批改、周报、任务结算),纯插入会让"今天的能力值"出现多行、趋势图锯齿;
+  /// 但**不同 snapshot_at** 仍逐条保留 —— 趋势看的是时间序列,不能覆盖历史。
+  ///
+  /// [snapshot] 支持的键:`snapshot_at`(默认现在)、`dimension`(必填)、
+  /// `value`、`unit`、`source`、`confidence`、`evidence_json`(Map/List/已是
+  /// JSON 串均可)、`created_at`。返回快照 id,失败 -1。
+  static Future<int> insertAbilitySnapshot(Map<String, Object?> snapshot) async {
+    try {
+      final db = await database;
+      final now = DateTime.now().toIso8601String();
+      final dimension = '${snapshot['dimension'] ?? ''}'.trim();
+      if (dimension.isEmpty) return -1;
+      final snapshotAt =
+          '${snapshot['snapshot_at'] ?? now}'.trim().isEmpty
+              ? now
+              : '${snapshot['snapshot_at'] ?? now}'.trim();
+      final row = <String, Object?>{
+        'snapshot_at': snapshotAt,
+        'dimension': dimension,
+        'value': _toDoubleOrNull(snapshot['value']) ?? 0,
+        'unit': snapshot['unit']?.toString(),
+        'source': snapshot['source']?.toString(),
+        'confidence': _toDoubleOrNull(snapshot['confidence']),
+        'evidence_json': _jsonFieldOrNull(snapshot['evidence_json']),
+        'created_at': '${snapshot['created_at'] ?? now}',
+      };
+      final existing = await db.query(
+        'ability_snapshots',
+        columns: ['id'],
+        where: 'dimension = ? AND snapshot_at = ?',
+        whereArgs: [dimension, snapshotAt],
+        limit: 1,
+      );
+      if (existing.isNotEmpty) {
+        final id = (existing.first['id'] as num).toInt();
+        await db.update(
+          'ability_snapshots',
+          row,
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+        return id;
+      }
+      return await db.insert('ability_snapshots', row);
+    } catch (e) {
+      debugPrint('ReadFlow insertAbilitySnapshot failed: $e');
+      return -1;
+    }
+  }
+
+  /// 某维度的**最新**能力快照(没有 → null;**不编默认值**)
+  static Future<Map<String, Object?>?> latestAbility(String dimension) async {
+    try {
+      final db = await database;
+      final rows = await db.query(
+        'ability_snapshots',
+        where: 'dimension = ?',
+        whereArgs: [dimension.trim()],
+        orderBy: 'snapshot_at DESC, id DESC',
+        limit: 1,
+      );
+      return rows.isEmpty ? null : _decorateAbilitySnapshot(rows.first);
+    } catch (e) {
+      debugPrint('ReadFlow latestAbility failed: $e');
+      return null;
+    }
+  }
+
+  /// 某维度**上一次**快照(用于"变化量":latest - previous;没有 → null)。
+  ///
+  /// 取最近两条的**第二条**;只有一条时返回 null —— 不能拿最新条跟自己比
+  /// 算出"变化 0",那会让界面显示"这周没变化"(其实是没有历史可比较)。
+  static Future<Map<String, Object?>?> previousAbility(
+    String dimension,
+  ) async {
+    try {
+      final db = await database;
+      final rows = await db.query(
+        'ability_snapshots',
+        where: 'dimension = ?',
+        whereArgs: [dimension.trim()],
+        orderBy: 'snapshot_at DESC, id DESC',
+        limit: 2,
+      );
+      if (rows.length < 2) return null;
+      return _decorateAbilitySnapshot(rows[1]);
+    } catch (e) {
+      debugPrint('ReadFlow previousAbility failed: $e');
+      return null;
+    }
+  }
+
+  /// 某维度最近 [limit] 条快照,按时间**升序**返回(画趋势图可直接用)。
+  ///
+  /// SQL 先 DESC 取最新 N 条再反转:直接 ASC + LIMIT 会取到**最早**的 N 条
+  /// (和能力项越用越久的历史相反),这是"列表 limit"最常见的坑。
+  static Future<List<Map<String, Object?>>> abilityHistory(
+    String dimension, {
+    int limit = 30,
+  }) async {
+    try {
+      final db = await database;
+      final rows = await db.query(
+        'ability_snapshots',
+        where: 'dimension = ?',
+        whereArgs: [dimension.trim()],
+        orderBy: 'snapshot_at DESC, id DESC',
+        limit: limit <= 0 ? 30 : limit,
+      );
+      return rows.reversed.map(_decorateAbilitySnapshot).toList();
+    } catch (e) {
+      debugPrint('ReadFlow abilityHistory failed: $e');
+      return [];
+    }
+  }
+
+  // ── 任务事件 ──────────────────────────────────────────────────────
+
+  /// 追加一条任务事件(只追加,不改不删)。
+  ///
+  /// [event] 支持的键:`task_id`(必填)、`event`(必填,建议取自
+  /// [tutorTaskEvents])、`at`(默认现在)、`payload_json`/`payload`
+  /// (Map/List/JSON 串)、`created_at`。参数非法/写库失败静默跳过 ——
+  /// 审计是"加分项",不能因为记事件失败让任务操作本身失败。
+  static Future<void> insertTaskEvent(Map<String, Object?> event) async {
+    try {
+      final taskId = _toIntOrNull(event['task_id']);
+      final name = '${event['event'] ?? ''}'.trim();
+      if (taskId == null || taskId <= 0 || name.isEmpty) return;
+      final db = await database;
+      final now = DateTime.now().toIso8601String();
+      await db.insert('task_events', {
+        'task_id': taskId,
+        'event': name,
+        'at': '${event['at'] ?? now}',
+        'payload_json':
+            _jsonFieldOrNull(event['payload_json'] ?? event['payload']),
+        'created_at': '${event['created_at'] ?? now}',
+      });
+    } catch (e) {
+      debugPrint('ReadFlow insertTaskEvent failed: $e');
+    }
+  }
+
+  /// 某任务的全部事件,按时间**正序**(复盘时间线:create → start → submit…)。
+  /// 每条附解析后的 `payload` 键(坏 JSON → null,原串保留)。
+  static Future<List<Map<String, Object?>>> listTaskEvents(int taskId) async {
+    try {
+      final db = await database;
+      final rows = await db.query(
+        'task_events',
+        where: 'task_id = ?',
+        whereArgs: [taskId],
+        orderBy: 'at ASC, id ASC',
+      );
+      return rows
+          .map((row) => <String, Object?>{
+                ...row,
+                'payload': _tryDecodeJson(row['payload_json']?.toString()),
+              })
+          .toList();
+    } catch (e) {
+      debugPrint('ReadFlow listTaskEvents failed: $e');
+      return [];
+    }
+  }
+
+  // ── 任务状态机 ────────────────────────────────────────────────────
+
+  /// 改任务状态,**同时写一条 task_events**(复盘要审计,不能只改当前行)。
+  ///
+  /// 状态机(research §2.4.2):
+  /// ```
+  /// pending ──开始──> active ──提交/手动勾──> done
+  /// pending/active ──跳过──> skipped
+  /// pending/active ──次日结算未做──> expired
+  /// done/skipped ──重新打开──> pending
+  /// ```
+  /// 行为约定:
+  /// - `active` 且没给 [startedAt]:自动写开始时间(第一次开始);
+  /// - `done` 且 done_at 为空:自动补 done_at(手动勾也算完成时间);
+  /// - `pending`(撤销/重开):清掉 done_at/result_json —— 避免出现
+  ///   "状态是 pending 但仍有完成时间"的自相矛盾行;
+  /// - [resultJson] 是**已编码的 JSON 串**(UI 传 jsonEncode(map)),不传则保留原值;
+  /// - 非法 status/不存在的 id 一律静默忽略(记 debugPrint),不抛给 UI。
+  /// 编辑任务本身(标题 / 预计分钟 / 归属维度 / 说明)。
+  ///
+  /// v3 批 4(用户 2026-11-01):"学习任务也是死的,不支持用户编辑自定义
+  /// —— 支持后,还要支持软件内部的数据追踪复盘与指导"。
+  /// 所以任务必须可改:改标题、改时长、改归属;每次修改都写一条 `edit` 事件,
+  /// 复盘时才能回答"这条任务是被用户改过才完成的,还是原样完成的"。
+  ///
+  /// 与 [updateTutorTaskStatus] 分开的原因:状态迁移会联动 `started_at` /
+  /// `done_at` / 清 `result_json` 等规则,编辑只改"内容字段",不碰状态。
+  static Future<bool> updateTutorTaskFields(
+    int taskId, {
+    String? title,
+    int? targetMinutes,
+    String? kind,
+    String? goalTag,
+    String? note,
+  }) async {
+    if (taskId <= 0) return false;
+    final fields = <String, Object?>{};
+    if (title != null && title.trim().isNotEmpty) {
+      fields['title'] = title.trim();
+    }
+    if (targetMinutes != null && targetMinutes >= 0) {
+      fields['target_minutes'] = targetMinutes;
+    }
+    if (kind != null && kind.trim().isNotEmpty) fields['kind'] = kind.trim();
+    if (goalTag != null) fields['goal_tag'] = goalTag.trim();
+    if (note != null) fields['note'] = note;
+    if (fields.isEmpty) return false;
+    try {
+      final db = await database;
+      final now = DateTime.now().toIso8601String();
+      await db.transaction((txn) async {
+        await txn.update(
+          'tutor_tasks',
+          fields,
+          where: 'id = ?',
+          whereArgs: [taskId],
+        );
+        await txn.insert('task_events', {
+          'task_id': taskId,
+          'event': 'edit',
+          'at': now,
+          'payload_json': jsonEncode(fields),
+          'created_at': now,
+        });
+      });
+      return true;
+    } catch (e) {
+      debugPrint('ReadFlow updateTutorTaskFields failed: $e');
+      return false;
+    }
+  }
+
+  /// 更新任务状态(状态机 + 审计事件,v2.18.0 / 批 4)。
+  ///
+  /// 规则:
+  /// - `active` 且没给 [startedAt]:自动写开始时间(第一次开始);
+  /// - `done` 且 done_at 为空:自动补 done_at(手动勾也算完成时间);
+  /// - `pending`(撤销/重开):清掉 done_at/result_json —— 避免出现
+  ///   "状态是 pending 但仍有完成时间"的自相矛盾行;
+  /// - [resultJson] 是**已编码的 JSON 串**(UI 传 jsonEncode(map)),不传则保留原值;
+  /// - 非法 status/不存在的 id 一律静默忽略(记 debugPrint),不抛给 UI。
+  static Future<void> updateTutorTaskStatus(
+    int taskId,
+    String status, {
+    String? startedAt,
+    int? actualMinutes,
+    String? note,
+    String? resultJson,
+  }) async {
+    final target = status.trim();
+    if (taskId <= 0 || !isValidTutorTaskStatus(target)) {
+      debugPrint('ReadFlow updateTutorTaskStatus 参数非法: id=$taskId status=$status');
+      return;
+    }
+    try {
+      final db = await database;
+      final now = DateTime.now().toIso8601String();
+      await db.transaction((txn) async {
+        final before = await txn.query(
+          'tutor_tasks',
+          where: 'id = ?',
+          whereArgs: [taskId],
+          limit: 1,
+        );
+        if (before.isEmpty) return;
+        final row = before.first;
+        final from = '${row['status'] ?? 'pending'}';
+        final fields = <String, Object?>{'status': target};
+        if (startedAt != null && startedAt.trim().isNotEmpty) {
+          fields['started_at'] = startedAt.trim();
+        } else if (target == 'active' &&
+            (row['started_at'] == null ||
+                '${row['started_at']}'.trim().isEmpty)) {
+          fields['started_at'] = now;
+        }
+        if (actualMinutes != null) fields['actual_minutes'] = actualMinutes;
+        if (note != null) fields['note'] = note;
+        if (resultJson != null) fields['result_json'] = resultJson;
+        if (target == 'done') {
+          if (row['done_at'] == null ||
+              '${row['done_at']}'.trim().isEmpty) {
+            fields['done_at'] = now;
+          }
+        } else if (target == 'pending') {
+          fields['done_at'] = null;
+          fields['result_json'] = null;
+        }
+        await txn.update(
+          'tutor_tasks',
+          fields,
+          where: 'id = ?',
+          whereArgs: [taskId],
+        );
+        await txn.insert('task_events', {
+          'task_id': taskId,
+          'event': eventForTutorTaskStatus(target),
+          'at': now,
+          'payload_json': jsonEncode(<String, Object?>{
+            'from': from,
+            'to': target,
+            'started_at': ?startedAt,
+            'actual_minutes': ?actualMinutes,
+            'note': ?note,
+          }),
+          'created_at': now,
+        });
+      });
+    } catch (e) {
+      debugPrint('ReadFlow updateTutorTaskStatus failed: $e');
+    }
+  }
+
+  /// 任务列表(跨天/按状态/按日期筛选),`plan_date DESC, created_at ASC`。
+  ///
+  /// [planDate] 传 `'2026-11-02'` 或 ISO 时间都行(内部只取日期,半开区间
+  /// `[当天 00:00, 次日 00:00)`;解析失败则忽略该筛选,不返回空列表骗用户)。
+  /// [status] 非法则忽略筛选。返回行带解析后的 `payload`/`result`。
+  static Future<List<Map<String, Object?>>> listTutorTasks({
+    String? planDate,
+    String? status,
+    int limit = 50,
+  }) async {
+    try {
+      final db = await database;
+      final where = <String>[];
+      final args = <Object?>[];
+      final statusText = status?.trim() ?? '';
+      if (statusText.isNotEmpty && isValidTutorTaskStatus(statusText)) {
+        where.add('status = ?');
+        args.add(statusText);
+      }
+      final dateText = planDate?.trim() ?? '';
+      if (dateText.isNotEmpty) {
+        final day = DateTime.tryParse(dateText);
+        if (day != null) {
+          final start = DateTime(day.year, day.month, day.day);
+          final end = DateTime(day.year, day.month, day.day + 1);
+          where.add('plan_date >= ? AND plan_date < ?');
+          args
+            ..add(start.toIso8601String())
+            ..add(end.toIso8601String());
+        }
+      }
+      final rows = await db.query(
+        'tutor_tasks',
+        where: where.isEmpty ? null : where.join(' AND '),
+        whereArgs: args.isEmpty ? null : args,
+        orderBy: 'plan_date DESC, created_at ASC, id ASC',
+        limit: limit <= 0 ? 50 : limit,
+      );
+      return rows.map(_decorateTutorTask).toList();
+    } catch (e) {
+      debugPrint('ReadFlow listTutorTasks failed: $e');
+      return [];
+    }
+  }
+
+  /// 完成率/按时统计(复盘页与周报的"任务"块)。
+  ///
+  /// ## 口径(按 docs/research/output-and-tutor.md §2.4.4 锁死)
+  /// - `completionRate = done / (done + skipped + expired)`;
+  /// - **expired 进分母**:过期=没按时完成,是"计划不合身"的证据,不能从
+  ///   分母里抹掉(否则跳过/过期越多完成率越高,复盘就失真);
+  /// - `pending`/`active` **不进分母**(还没结算,不能算失败);
+  /// - `planned` = 区间内任务总数(含 pending/active),与完成率分母**不是一回事**,
+  ///   两个数都要给 UI(pending 多说明"今天还没开始",不是完成率差);
+  /// - `avgActualMinutes` 只统计 `status='done'` 且 actual_minutes>0 的任务,
+  ///   没有样本返回 null(不伪造 0 分钟)。
+  ///
+  /// [since] 传了就按"那天的 00:00 起"过滤(含当天);null = 不限时间。
+  static Future<Map<String, Object?>> taskCompletionStats({
+    DateTime? since,
+  }) async {
+    try {
+      final db = await database;
+      final sinceStart = since == null
+          ? null
+          : DateTime(since.year, since.month, since.day);
+      final rows = await db.rawQuery(
+        'SELECT status, COUNT(*) AS c FROM tutor_tasks '
+        '${sinceStart == null ? '' : 'WHERE plan_date >= ? '}'
+        'GROUP BY status',
+        sinceStart == null ? null : [sinceStart.toIso8601String()],
+      );
+      final counts = <String, int>{};
+      for (final row in rows) {
+        final key = '${row['status'] ?? 'pending'}';
+        counts[key] =
+            (counts[key] ?? 0) + ((row['c'] as num?)?.toInt() ?? 0);
+      }
+      final planned = counts.values.fold<int>(0, (sum, c) => sum + c);
+      final done = counts['done'] ?? 0;
+      final skipped = counts['skipped'] ?? 0;
+      final expired = counts['expired'] ?? 0;
+      final denominator = done + skipped + expired;
+      final completionRate = denominator == 0 ? 0.0 : done / denominator;
+      final avgRows = await db.rawQuery(
+        "SELECT AVG(actual_minutes) AS m FROM tutor_tasks "
+        "WHERE status = 'done' AND actual_minutes IS NOT NULL "
+        "AND actual_minutes > 0 "
+        "${sinceStart == null ? '' : 'AND plan_date >= ? '}",
+        sinceStart == null ? null : [sinceStart.toIso8601String()],
+      );
+      final avg = avgRows.isEmpty
+          ? null
+          : _toDoubleOrNull(avgRows.first['m']);
+      return <String, Object?>{
+        'planned': planned,
+        'done': done,
+        'skipped': skipped,
+        'expired': expired,
+        'completionRate': completionRate,
+        'avgActualMinutes': avg,
+      };
+    } catch (e) {
+      debugPrint('ReadFlow taskCompletionStats failed: $e');
+      return <String, Object?>{
+        'planned': 0,
+        'done': 0,
+        'skipped': 0,
+        'expired': 0,
+        'completionRate': 0.0,
+        'avgActualMinutes': null,
+      };
+    }
+  }
+
+  // ── 内部小工具 ────────────────────────────────────────────────────
+
+  static Map<String, Object?> _decorateAbilitySnapshot(
+    Map<String, Object?> row,
+  ) {
+    return {
+      ...row,
+      'evidence': _tryDecodeJson(row['evidence_json']?.toString()),
+    };
+  }
+
+  static double? _toDoubleOrNull(Object? value) {
+    if (value is num) return value.toDouble();
+    if (value is String) return double.tryParse(value.trim());
+    return null;
+  }
+
+  static int? _toIntOrNull(Object? value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    if (value is String) return int.tryParse(value.trim());
+    return null;
+  }
+
+  /// JSON 字段归一:null → null;String 视为**已编码的 JSON 串**原样保留;
+  /// 其余(Map/List)jsonEncode。编码失败(循环引用等)→ null,不抛。
+  static String? _jsonFieldOrNull(Object? value) {
+    if (value == null) return null;
+    if (value is String) return value;
+    try {
+      return jsonEncode(value);
+    } catch (e) {
+      debugPrint('ReadFlow 任务/能力 JSON 编码失败(置空): $e');
+      return null;
+    }
   }
 
   /// 追加一条导师对话。[at] 用于补齐历史(导入/测试),不传就是"现在"。

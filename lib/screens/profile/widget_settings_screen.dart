@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../../config/design_tokens.dart';
 import '../../services/widget_payload.dart';
 import '../../services/widget_service.dart';
+import '../../widgets/app_ui.dart';
+import '../../widgets/design_kit.dart';
 import '../../widgets/waiting.dart';
 
 /// 桌面小组件设置页(v2.2)。
@@ -55,10 +57,10 @@ class _WidgetSettingsScreenState extends State<WidgetSettingsScreen> {
       _message = ok
           ? null
           : (count == 0
-              // 桌面上还没有这个小组件时,推送本来就没对象 —— 这不是失败,
-              // 要引导用户先添加,而不是吓唬他说"设备不支持"
-              ? '你还没把小组件放到桌面 —— 先点上面的「一键添加到桌面」'
-              : '数据已保存,但通知桌面刷新失败 —— 桌面上的数字可能还是旧的');
+                // 桌面上还没有这个小组件时,推送本来就没对象 —— 这不是失败,
+                // 要引导用户先添加,而不是吓唬他说"设备不支持"
+                ? '你还没把小组件放到桌面 —— 先点上面的「一键添加到桌面」'
+                : '数据已保存,但通知桌面刷新失败 —— 桌面上的数字可能还是旧的');
     });
   }
 
@@ -84,121 +86,117 @@ class _WidgetSettingsScreenState extends State<WidgetSettingsScreen> {
       body: ListView(
         padding: Insets.page,
         children: [
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('状态',
-                      style: theme.textTheme.titleSmall
-                          ?.copyWith(fontWeight: FontWeight.w700)),
-                  const SizedBox(height: 6),
-                  Text(
-                    _loading
-                        ? '正在查询…'
-                        : (_installed > 0
+          // ── 01 状态 ──
+          const AppSectionHeader(indexLabel: '01', title: '状态', trailing: null),
+          AppCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _loading
+                      ? '正在查询…'
+                      : (_installed > 0
                             ? '你已经在桌面上放了 $_installed 个小组件'
                             : '桌面上还没有小组件'),
-                    style: theme.textTheme.bodyMedium,
+                  style: AppFont.bodyStyle.copyWith(
+                    color: theme.colorScheme.onSurface,
+                    fontWeight: FontWeight.w600,
                   ),
+                ),
+                const SizedBox(height: Gap.sm),
+                // 两个按钮原来挤在同一个 Row 里 —— 窄屏 + 中文按钮长
+                // ("一键添加到桌面" / "同步并预览")会被右边缘切掉。
+                // 保持**整行竖排**(每个按钮独占一行、48 高),任何屏幕都完整;
+                // 这不是"一排按钮",所以不用 Wrap 硬塞。
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    onPressed: _busy ? null : _pin,
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size(0, 48),
+                    ),
+                    icon: const Icon(Icons.add_to_home_screen, size: 18),
+                    label: const Text('一键添加到桌面'),
+                  ),
+                ),
+                const SizedBox(height: Gap.xs),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _busy ? null : _sync,
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(0, 48),
+                    ),
+                    icon: const Icon(Icons.refresh, size: 18),
+                    label: const Text('同步并预览'),
+                  ),
+                ),
+                if (_busy) ...[
                   const SizedBox(height: Gap.sm),
-                  // v2.6:两个按钮原来挤在同一个 Row 里 —— 窄屏 + 中文按钮长
-                  // ("一键添加到桌面" / "同步并预览")会被右边缘切掉。
-                  // 改成**整行竖排**(每个按钮独占一行,宽度 48 高),任何屏幕都完整。
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton.icon(
-                      onPressed: _busy ? null : _pin,
-                      style: FilledButton.styleFrom(
-                        minimumSize: const Size(0, 48),
-                      ),
-                      icon: const Icon(Icons.add_to_home_screen, size: 18),
-                      label: const Text('一键添加到桌面'),
-                    ),
+                  // v2.10:这里等的是"点按钮后的短操作"(请求钉到桌面 /
+                  // 推送一次小组件),不是内容加载 —— 铺骨架屏会让人误以为
+                  // 下面马上要出现卡片。三点跳动占高最小,不会把卡片撑高;
+                  // 两个按钮此刻已被 _busy 置灰,反馈已经足够。
+                  const Center(
+                    child: ThinkingDots(label: '正在处理…', compact: true),
                   ),
-                  const SizedBox(height: Gap.xs),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: _busy ? null : _sync,
-                      style: OutlinedButton.styleFrom(
-                        minimumSize: const Size(0, 48),
-                      ),
-                      icon: const Icon(Icons.refresh, size: 18),
-                      label: const Text('同步并预览'),
-                    ),
-                  ),
-                  if (_busy) ...[
-                    const SizedBox(height: 12),
-                    // v2.10:这里等的是"点按钮后的短操作"(请求钉到桌面 /
-                    // 推送一次小组件),不是内容加载 —— 铺骨架屏会让人误以为
-                    // 下面马上要出现卡片。三点跳动占高最小,不会把卡片撑高;
-                    // 两个按钮此刻已被 _busy 置灰,反馈已经足够。
-                    const Center(
-                      child: ThinkingDots(label: '正在处理…', compact: true),
-                    ),
-                  ],
-                  if (_message != null) ...[
-                    const SizedBox(height: 10),
-                    Text(_message!,
-                        style: theme.textTheme.bodySmall?.copyWith(color: muted)),
-                  ],
                 ],
-              ),
+                if (_message != null) ...[
+                  const SizedBox(height: Gap.xs),
+                  Text(
+                    _message!,
+                    style: AppFont.tagStyle.copyWith(color: muted, height: 1.4),
+                  ),
+                ],
+              ],
             ),
           ),
 
+          // ── 02 预览(只有同步过一次才有内容)──
           if (_preview != null) ...[
-            const SizedBox(height: 8),
+            const AppSectionHeader(indexLabel: '02', title: '预览'),
             _WidgetPreviewCard(payload: _preview!),
           ],
 
-          const SizedBox(height: 8),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('手动添加(所有启动器都行)',
-                      style: theme.textTheme.titleSmall
-                          ?.copyWith(fontWeight: FontWeight.w700)),
-                  const SizedBox(height: 6),
-                  Text(
-                    '1. 长按桌面空白处;\n'
-                    '2. 选「小组件 / 挂件」;\n'
-                    '3. 在列表里找「AI上外语 · 今天」,拖到桌面上。',
-                    style: theme.textTheme.bodyMedium,
-                  ),
-                ],
+          // ── 03 添加方式 ──
+          const AppSectionHeader(indexLabel: '03', title: '手动添加(所有启动器都行)'),
+          AppCard(
+            child: Text(
+              '1. 长按桌面空白处;\n'
+              '2. 选「小组件 / 挂件」;\n'
+              '3. 在列表里找「AI上外语 · 今天」,拖到桌面上。',
+              style: AppFont.bodyStyle.copyWith(
+                color: theme.colorScheme.onSurface,
+                height: 1.6,
               ),
             ),
           ),
 
-          const SizedBox(height: 8),
-          Card(
+          // ── 04 说明 ──
+          const AppSectionHeader(indexLabel: '04', title: '它显示什么 / 不显示什么'),
+          AppCard(
             color: theme.colorScheme.surfaceContainerHighest,
-            child: Padding(
-              padding: const EdgeInsets.all(14),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('它显示什么 / 不显示什么',
-                      style: theme.textTheme.titleSmall
-                          ?.copyWith(fontWeight: FontWeight.w700)),
-                  const SizedBox(height: 6),
-                  Text(
-                    '· 显示:今天第一件该做的事、待复习词数、今天的新词额度、连续学习天数;'
-                    '点整块打开 App。\n'
-                    '· 数据是「打开 App 时推送」的(桌面挂件读不到 App 的数据库),'
-                    '所以超过一天没打开 App,小组件会自己改说「打开 App 刷新今日任务」,'
-                    '不会拿旧数字冒充今天。\n'
-                    '· 不显示:生词内容、AI 回复 —— 桌面是公开场合,学习内容不该默认摊在外面。',
-                    style: theme.textTheme.bodySmall?.copyWith(color: muted),
-                  ),
-                ],
-              ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '· 显示:今天第一件该做的事、待复习词数、今天的新词额度、连续学习天数;'
+                  '点整块打开 App。',
+                  style: AppFont.tagStyle.copyWith(color: muted, height: 1.5),
+                ),
+                const SizedBox(height: Gap.xxs),
+                Text(
+                  '· 数据是「打开 App 时推送」的(桌面挂件读不到 App 的数据库),'
+                  '所以超过一天没打开 App,小组件会自己改说「打开 App 刷新今日任务」,'
+                  '不会拿旧数字冒充今天。',
+                  style: AppFont.tagStyle.copyWith(color: muted, height: 1.5),
+                ),
+                const SizedBox(height: Gap.xxs),
+                Text(
+                  '· 不显示:生词内容、AI 回复 —— 桌面是公开场合,学习内容不该默认摊在外面。',
+                  style: AppFont.tagStyle.copyWith(color: muted, height: 1.5),
+                ),
+              ],
             ),
           ),
         ],
@@ -217,62 +215,83 @@ class _WidgetPreviewCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final lines = payload.previewLines();
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('桌面上的样子(文字预览)',
-                style: theme.textTheme.titleSmall
-                    ?.copyWith(fontWeight: FontWeight.w700)),
-            const SizedBox(height: 10),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: const Color(0xFF1A1A2E),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      const Expanded(
-                        child: Text('AI上外语 · 今天',
-                            style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF8FC0F0))),
-                      ),
-                      if (payload.badge.isNotEmpty)
-                        Text(payload.badge,
-                            style: const TextStyle(
-                                fontSize: 11, color: Color(0xFF8FC0F0))),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Text(lines.isNotEmpty ? lines[0] : '',
-                      style: const TextStyle(
-                          fontSize: 17,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white)),
-                  const SizedBox(height: 4),
-                  if (lines.length > 1)
-                    Text(lines[1],
-                        style: const TextStyle(
-                            fontSize: 12, color: Color(0xFFC9D1E0))),
-                  const SizedBox(height: 2),
-                  if (lines.length > 2)
-                    Text(lines[2],
-                        style: const TextStyle(
-                            fontSize: 10, color: Color(0xFF8B93A5))),
-                ],
-              ),
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '桌面上的样子(文字预览)',
+            style: AppFont.subheadStyle.copyWith(
+              color: theme.colorScheme.onSurface,
+              fontWeight: FontWeight.w700,
             ),
-          ],
-        ),
+          ),
+          const SizedBox(height: Gap.sm),
+          // 这块**故意用桌面小组件的固有色**(不是主题色):它模拟的是原生
+          // AppWidget 在桌面上的样子,桌面配色不随 App 深浅色主题变化。
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(Gap.sm),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1A1A2E),
+              borderRadius: BorderRadius.circular(Radii.card),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'AI上外语 · 今天',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF8FC0F0),
+                        ),
+                      ),
+                    ),
+                    if (payload.badge.isNotEmpty)
+                      Text(
+                        payload.badge,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: Color(0xFF8FC0F0),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  lines.isNotEmpty ? lines[0] : '',
+                  style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                if (lines.length > 1)
+                  Text(
+                    lines[1],
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Color(0xFFC9D1E0),
+                    ),
+                  ),
+                const SizedBox(height: 2),
+                if (lines.length > 2)
+                  Text(
+                    lines[2],
+                    style: const TextStyle(
+                      fontSize: 10,
+                      color: Color(0xFF8B93A5),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -61,4 +61,74 @@ void main() {
       expect(groups.map((g) => g.label), contains('未命名材料'));
     });
   });
+
+  /// v2.13.1 回归(用户 2026-11-01 截图):移动弹层同时出现「书籍/《Character》」
+  /// 与「书籍/书籍/《Character》」—— 移动链路把完整路径当材料名二次拼前缀。
+  /// 归一后同一本书只能有一个分组键,否则永远不会并入老分类。
+  group('normalizeMaterialPath:折掉重复的前导分类段', () {
+    test('一次二次拼接 → 折回干净路径', () {
+      expect(normalizeMaterialPath('书籍', '书籍/书籍/《Character》'),
+          '书籍/《Character》');
+    });
+
+    test('多次拼接(三层以上)也一次折干净', () {
+      expect(normalizeMaterialPath('书籍', '书籍/书籍/书籍/《Character》'),
+          '书籍/《Character》');
+      expect(normalizeMaterialPath('书籍', '书籍/书籍/书籍/书籍/《Character》'),
+          '书籍/《Character》');
+    });
+
+    test('干净路径幂等(调用方可以无脑先归一)', () {
+      expect(normalizeMaterialPath('书籍', '书籍/《Character》'),
+          '书籍/《Character》');
+      expect(normalizeMaterialPath('教材', '教材/新概念英语/第2册'),
+          '教材/新概念英语/第2册');
+    });
+
+    test('两段的「书籍/书籍」是合法材料名(叫「书籍」),不能被折成裸分类', () {
+      expect(normalizeMaterialPath('书籍', '书籍/书籍'), '书籍/书籍');
+    });
+
+    test('空段/首尾空白被清掉(历史脏值)', () {
+      expect(normalizeMaterialPath('书籍', ' 书籍 / 书籍 / 《Character》 '),
+          '书籍/《Character》');
+      expect(normalizeMaterialPath('书籍', '书籍//《Character》'),
+          '书籍/《Character》');
+    });
+
+    test('缺分类前缀时补上分类;只有分类名时落「未命名材料」', () {
+      expect(normalizeMaterialPath('书籍', '《Character》'),
+          '书籍/《Character》');
+      expect(normalizeMaterialPath('书籍', '书籍'), '书籍/未命名材料');
+      expect(normalizeMaterialPath('书籍', '   '), '');
+    });
+
+    test('跨分类/无分类前缀的脏值不会把分类改掉', () {
+      expect(normalizeMaterialPath('书籍', '《三体》/第一部'),
+          '书籍/《三体》/第一部');
+    });
+
+    test('normalizeGroupName:自由文本只折重复前导段(无分类前缀)', () {
+      expect(normalizeGroupName('书籍/书籍/《Character》'), '书籍/《Character》');
+      expect(normalizeGroupName('新视野教材'), '新视野教材');
+      expect(normalizeGroupName(' 论文 / 2026 '), '论文/2026');
+    });
+  });
+
+  group('归一后分组:同一本书只出现一个 MaterialGroup', () {
+    test('脏路径 + 干净路径的同一批词,归一后只剩一个分组', () {
+      final items = [
+        voc('apple', path: '书籍/《Character》', page: 'p3'),
+        voc('banana', path: '书籍/书籍/《Character》', page: 'p3'),
+      ].map((v) {
+        final fixed = normalizeMaterialPath('书籍', v.materialPath!);
+        return v.copyWith(materialPath: fixed);
+      }).toList();
+      final groups = groupMaterials(items, category: '书籍');
+      expect(groups.length, 1);
+      expect(groups.single.path, '书籍/《Character》');
+      expect(groups.single.label, '《Character》');
+      expect(groups.single.totalCount, 2);
+    });
+  });
 }

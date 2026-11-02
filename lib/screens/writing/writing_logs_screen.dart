@@ -1,13 +1,19 @@
 import 'dart:io';
+
 import 'package:flutter/material.dart';
+
+import '../../config/design_tokens.dart';
 import '../../config/theme.dart';
 import '../../models/writing_log.dart';
 import '../../services/database.dart';
+import '../../widgets/app_ui.dart';
 import '../../widgets/confirm_destructive.dart';
-import '../../widgets/empty_state.dart';
+import '../../widgets/design_kit.dart';
 import '../../widgets/error_state.dart';
+import '../../widgets/graphics/graphics.dart';
 import '../../widgets/waiting.dart';
 import '../../widgets/writing_labels.dart';
+import 'write_review_screen.dart';
 
 /// 写译记录(v1.6.0):按日期文件夹归档的写译练习轨迹,可查阅复盘。
 class WritingLogsScreen extends StatefulWidget {
@@ -64,21 +70,21 @@ class _WritingLogsScreenState extends State<WritingLogsScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final logs = _logs;
+    final all = logs ?? const <WritingLog>[];
+    final summary = _summary(all);
     return Scaffold(
       appBar: AppBar(
         title: const Text('写译记录'),
         actions: [
-          if ((logs ?? []).isNotEmpty)
+          if (all.isNotEmpty)
             Padding(
-              padding: const EdgeInsets.only(right: 12),
+              padding: const EdgeInsets.only(right: Gap.sm),
               child: Center(
+                // 顶部只放两个真数字(篇数 / 均分):用户一眼看到产出与水平
                 child: Text(
-                  '共 ${logs!.length} 篇',
-                  // P2-31:次要文字对比度不足 → 用主题的次要文字色(深浅色都达 AA)
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
+                  summary,
+                  style: AppFont.metaStyle
+                      .copyWith(color: theme.colorScheme.onSurfaceVariant),
                 ),
               ),
             ),
@@ -115,11 +121,29 @@ class _WritingLogsScreenState extends State<WritingLogsScreen> {
       );
     }
     if (logs.isEmpty) {
-      return const EmptyState(
-        key: ValueKey('logs-empty'),
-        icon: Icons.history_edu_outlined,
-        title: '还没有保存的写译练习',
-        hint: '在「写译批改」批改后点「保存记录」即可归档到这里',
+      // 空态必须给"下一步":只写"暂无记录"用户仍然不知道从哪里开始
+      return Center(
+        key: const ValueKey('logs-empty'),
+        child: SingleChildScrollView(
+          padding: Insets.page,
+          child: AppEmptyState(
+            icon: Icons.edit_note,
+            art: EmptyArtKind.scatteredLetters,
+            title: '还没有写译记录',
+            hint: '批改完点「保存记录」就会按日期归档到这里;'
+                '攒几篇回看,能看出自己反复踩的坑',
+            action: FilledButton.icon(
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const WriteReviewScreen()),
+              ).then((_) {
+                if (mounted) _load();
+              }),
+              icon: const Icon(Icons.edit_note, size: 18),
+              label: const Text('去写译批改'),
+            ),
+          ),
+        ),
       );
     }
     return RefreshIndicator(
@@ -129,141 +153,187 @@ class _WritingLogsScreenState extends State<WritingLogsScreen> {
     );
   }
 
+  /// 按日期分组的标题 + 组内均分:日期头只显示"几篇"太单薄,
+  /// 有了分数才能一眼看出"那天写得好不好"(没有分数的记录不参与均分)。
+  Widget _dateHeader(ThemeData theme, String date, List<WritingLog> logs) {
+    final avg = _avgScore(logs);
+    return AppSectionTitle(
+      title: logs.first.dateLabel,
+      subtitle: avg == null ? '${logs.length} 篇' : '${logs.length} 篇 · 均分 $avg',
+      padding: const EdgeInsets.only(top: Gap.md, bottom: Gap.xxs),
+    );
+  }
+
+  /// 顶部摘要:共几篇 + 均分(有评分才显示)—— 两个都是本机真实数据
+  String _summary(List<WritingLog> logs) {
+    final avg = _avgScore(logs);
+    return avg == null ? '共 ${logs.length} 篇' : '共 ${logs.length} 篇 · 均分 $avg';
+  }
+
+  /// 记录里的分数(坏值返回 null:不把"解析失败"当 0 分)
+  static int? _scoreOf(WritingLog log) {
+    final raw = int.tryParse((log.score ?? '').trim());
+    if (raw == null) return null;
+    return raw.clamp(0, 100);
+  }
+
+  /// 一组记录的均分;一条评分都没有时返回 null(不显示 0 分)
+  static int? _avgScore(List<WritingLog> logs) {
+    final scores = logs.map(_scoreOf).whereType<int>().toList();
+    if (scores.isEmpty) return null;
+    final sum = scores.fold<int>(0, (a, b) => a + b);
+    return (sum / scores.length).round();
+  }
+
+  /// 分数语义色:>=80 成功 / >=60 注意 / 其余危险 —— 与写译批改结果页同一套阈值
+  Color _scoreColor(BuildContext context, int? score) {
+    if (score == null) return Theme.of(context).colorScheme.onSurfaceVariant;
+    if (score >= 80) return AppTheme.successColor(context);
+    if (score >= 60) return AppTheme.warningColor(context);
+    return AppTheme.dangerColor(context);
+  }
+
   Widget _buildList(ThemeData theme) {
     final groups = _groupByDate();
     final dates = groups.keys.toList()..sort((a, b) => b.compareTo(a));
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+      padding: Insets.page,
       children: [
+        _summaryCard(theme, _logs ?? const []),
         for (final date in dates) ...[
-          // 日期文件夹标题
-          Padding(
-            padding: const EdgeInsets.only(top: 8, bottom: 6),
-            child: Row(
-              children: [
-                Icon(
-                  Icons.folder,
-                  size: 18,
-                  color: AppTheme.amber(context),
-                ),
-                const SizedBox(width: 6),
-                // B3:日期是变长文本,给 Flexible 让它换行而不是把这一行挤爆
-                Flexible(
-                  child: Text(
-                    groups[date]!.first.dateLabel,
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  '${groups[date]!.length} 篇',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
-            ),
-          ),
+          _dateHeader(theme, date, groups[date]!),
           ...groups[date]!.map((log) => _logCard(theme, log)),
-          const SizedBox(height: 8),
+          const SizedBox(height: Gap.xs),
         ],
+        const SizedBox(height: Gap.lg),
       ],
     );
   }
 
+  /// 顶部摘要卡:产出量 + 均分(均分没有评分时显示"待评分",不写 0 分)
+  Widget _summaryCard(ThemeData theme, List<WritingLog> logs) {
+    final avg = _avgScore(logs);
+    final muted = theme.colorScheme.onSurfaceVariant;
+    return AppCard(
+      variant: AppCardVariant.accent,
+      child: Row(
+        children: [
+          Icon(Icons.edit_note, size: 22, color: theme.colorScheme.primary),
+          const SizedBox(width: Gap.xs),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('保存下来的写译练习', style: AppFont.subheadStyle),
+                const SizedBox(height: 2),
+                Text(
+                  '共 ${logs.length} 篇 · 点开可看逐条点评与修正全文',
+                  style: AppFont.metaStyle.copyWith(color: muted),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: Gap.xs),
+          AppTag(
+            avg == null ? '待评分' : '均分 $avg',
+            tone: avg == null
+                ? AppTagTone.neutral
+                : (avg >= 80
+                    ? AppTagTone.success
+                    : (avg >= 60 ? AppTagTone.warning : AppTagTone.danger)),
+            icon: Icons.insights_outlined,
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _logCard(ThemeData theme, WritingLog log) {
-    final score = int.tryParse(log.score ?? '');
-    // 语义色随明暗切换(v2.5,U2):以前写死 grey/green/orange/red,
-    // 白底上只有 2.2~3.7:1,深色下又偏刺眼
-    final scoreColor = score == null
-        ? theme.colorScheme.onSurfaceVariant
-        : score >= 80
-        ? AppTheme.successColor(context)
-        : score >= 60
-        ? AppTheme.warningColor(context)
-        : AppTheme.dangerColor(context);
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-        leading: ConstrainedBox(
-          // B3:原来是 44×44 的硬盒子装 fontSize 14 的分数,系统字号放大到
-          // 1.5×~2× 时文字会被裁掉。改成"下限 44(保持原视觉)+ 上限 60",
-          // 配 FittedBox:正常字号仍占 44,字号放大时盒子长一点,
-          // 极端字号下缩小填进去,永不裁切。
-          constraints: const BoxConstraints(
-            minWidth: 44,
-            minHeight: 44,
-            maxWidth: 60,
-            maxHeight: 60,
-          ),
-          child: Container(
-            padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: scoreColor.withAlpha(25),
-              border: Border.all(
-                color: scoreColor.withAlpha(120),
-                width: 1.5,
-              ),
-            ),
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Text(
-                (log.score ?? '').isEmpty ? '--' : log.score!,
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                  color: scoreColor,
+    final score = _scoreOf(log);
+    final scoreColor = _scoreColor(context, score);
+    return AppCard(
+      onTap: () => _showDetail(log),
+      margin: const EdgeInsets.only(bottom: Gap.xs),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _scoreBadge(scoreColor, log),
+          const SizedBox(width: Gap.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  log.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppFont.subheadStyle,
                 ),
-              ),
+                const SizedBox(height: Gap.xxs),
+                Wrap(
+                  spacing: Gap.xs,
+                  runSpacing: Gap.xxs,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text(
+                      log.timeLabel,
+                      style: AppFont.metaStyle.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    AppTag(
+                      materialTypeLabel(log.sourceType),
+                      tone: log.sourceType == kMaterialTypeHandwritten
+                          ? AppTagTone.primary
+                          : AppTagTone.neutral,
+                      icon: log.sourceType == kMaterialTypeHandwritten
+                          ? Icons.gesture
+                          : Icons.keyboard_alt_outlined,
+                    ),
+                    if (log.issueCount > 0)
+                      AppTag(
+                        '${log.issueCount} 处问题',
+                        tone: AppTagTone.warning,
+                        icon: Icons.edit_outlined,
+                      ),
+                  ],
+                ),
+              ],
             ),
           ),
-        ),
-        title: Text(
-          log.title,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
-        ),
-        subtitle: Padding(
-          padding: const EdgeInsets.only(top: 4),
-          // B3:原来是一个 Row,系统字号放大到 2× 时"时间 + 两个标签"必然
-          // 横向溢出(黄黑条纹)。改 Wrap:正常字号仍是一行,字号大时自动换行。
-          child: Wrap(
-            spacing: 8,
-            runSpacing: 4,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              Text(
-                log.timeLabel,
-                // P2-31:次要文字对比度不足 → 用主题的次要文字色(深浅色都达 AA)
-                style: TextStyle(
-                  fontSize: 11,
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
-              _chip(
-                materialTypeLabel(log.sourceType),
-                // 档位区分色(v2.5,U2):保留原色相语义 ——
-                // 手写档=紫(tertiary)、电子档=中性(onSurfaceVariant)
-                log.sourceType == kMaterialTypeHandwritten
-                    ? theme.colorScheme.tertiary
-                    : theme.colorScheme.onSurfaceVariant,
-              ),
-              if (log.issueCount > 0)
-                _chip('${log.issueCount} 处问题', AppTheme.amber(context)),
-            ],
+          IconButton(
+            icon: Icon(Icons.delete_outline,
+                size: 18, color: theme.colorScheme.onSurfaceVariant),
+            tooltip: '删除这条记录',
+            onPressed: () => _confirmDelete(log),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 分数徽标:圆形底色 + 大数字(结果页/记录页同一套语义色阈值)
+  Widget _scoreBadge(Color color, WritingLog log) {
+    final text = (log.score ?? '').trim();
+    return Container(
+      width: 46,
+      height: 46,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: color.withAlpha(24),
+        border: Border.all(color: color.withAlpha(110), width: 1.5),
+      ),
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Text(
+          text.isEmpty ? '--' : text,
+          style: AppFont.tagStyle.copyWith(
+            fontSize: 15,
+            fontWeight: FontWeight.w800,
+            color: color,
           ),
         ),
-        trailing: IconButton(
-          icon: const Icon(Icons.delete_outline, size: 18),
-          onPressed: () => _confirmDelete(log),
-        ),
-        onTap: () => _showDetail(log),
       ),
     );
   }
@@ -292,7 +362,8 @@ class _WritingLogsScreenState extends State<WritingLogsScreen> {
     final ok = await confirmDestructive(
       context,
       title: '删除练习记录',
-      message: '确定删除「${log.title}」吗？删除后不可恢复。',
+      message: '只删除本机这条写译记录,不影响原文与材料。'
+          '删除后不可恢复(可用下方「撤销」找回)。',
     );
     if (!ok || !mounted) return;
     try {

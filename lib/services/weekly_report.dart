@@ -50,6 +50,25 @@ class WeeklyInputs {
   /// 本周还处于 active 的错误标签(最多几类由 build 截断)
   final List<ErrorTagBrief> activeErrors;
 
+  // ── 输出维度(v2.18.0,批 3 收尾)──
+  // 以前周报只有"输入"(读了多少),用户天天写译也看不到产出 —— 这一块补上
+  // 「写了没有/写得怎么样」,数据来自 output_attempts(UI 用
+  // OutputFeedback.outputSnapshot(days: 7) 取好传进来)。
+  /// 本周输出练习次数(写作/翻译/回译/rubric 作答)
+  final int outputAttempts;
+
+  /// 本周 rubric 均分(0..100 百分比;null = 没有可评分作答,不能写成 0)
+  final double? outputAvgScore;
+
+  /// 上周 rubric 均分(可空;有值才显示"较上周 ±x%")
+  final double? outputPrevAvgScore;
+
+  /// 本周各评分维度均分(维度 key → 0..100;用于"哪一维最弱")
+  final Map<String, double> outputDimensions;
+
+  /// 本周输出的错误热点(已归一成错误档案的既有标签)
+  final List<ErrorTagBrief> outputErrorTags;
+
   /// 全库到期分布(getReviewBuckets)
   final Map<String, int> reviewBuckets;
 
@@ -71,6 +90,11 @@ class WeeklyInputs {
     this.unfinishedMaterials = const [],
     this.quizAccuracy,
     this.activeErrors = const [],
+    this.outputAttempts = 0,
+    this.outputAvgScore,
+    this.outputPrevAvgScore,
+    this.outputDimensions = const {},
+    this.outputErrorTags = const [],
     this.reviewBuckets = const {},
     this.forecast = const [],
     this.dailyMinutes,
@@ -121,6 +145,20 @@ class WeeklyReport {
   /// 本周最该处理的 2-3 类错误(带次数)
   final List<String> topErrors;
 
+  // ── 输出块(v2.18.0)──
+  /// 本周输出练习次数(0 = 没有输出练习)
+  final int outputAttempts;
+
+  /// 本周 rubric 均分(0..100;null = 没有可评分作答)
+  final double? outputAvgScore;
+
+  /// 本周输出错误热点(已归一成既有标签,格式「时态(3 次)」)
+  final List<String> outputErrorTags;
+
+  /// 「输出」块的现成文案(1~4 行)。**没有数据时也有一行明确说明**
+  /// ("本周没有输出练习"),UI 直接逐行渲染即可,不必自己拼措辞。
+  final List<String> outputLines;
+
   /// 2-4 条"本周做得好/值得注意"的结论(每条必带数字)
   final List<String> highlights;
 
@@ -148,6 +186,10 @@ class WeeklyReport {
     required this.materialsFinished,
     required this.quizAccuracy,
     required this.topErrors,
+    this.outputAttempts = 0,
+    this.outputAvgScore,
+    this.outputErrorTags = const [],
+    this.outputLines = const [],
     required this.highlights,
     required this.suggestions,
     required this.forecast,
@@ -206,13 +248,29 @@ class WeeklyReportBuilder {
         .map((e) => '${e.tag}(${e.count} 次)')
         .toList();
 
+    // 输出错误热点:与错误档案同一套标签(已由 OutputFeedback 归一),
+    // 次数相同时按名称排序 —— 同一份数据两次生成必须完全一致。
+    final outputErrors = [...inputs.outputErrorTags]
+      ..sort((a, b) {
+        final byCount = b.count.compareTo(a.count);
+        return byCount != 0 ? byCount : a.tag.compareTo(b.tag);
+      });
+    final outputErrorTags = outputErrors
+        .take(maxTopErrors)
+        .map((e) => '${e.tag}(${e.count} 次)')
+        .toList();
+
     final isActive = activeDays > 0 ||
         inputs.readingSessions > 0 ||
         inputs.wordsRead > 0 ||
         inputs.newWords > 0 ||
         inputs.reviewsDone > 0 ||
         inputs.materialsFinished > 0 ||
-        inputs.quizAccuracy != null;
+        inputs.quizAccuracy != null ||
+        // v2.18.0:只做了输出练习(没阅读)也是"本周活跃" —— 否则周报会
+        // 一边列出"完成 5 次写作",一边说"近 7 天还没有学习记录"。
+        inputs.outputAttempts > 0 ||
+        inputs.outputAvgScore != null;
 
     // 未来 7 天负荷:index 0 = 今天(与 FsrsScheduler.loadForecast 同口径)
     final forecast = <String, int>{};
@@ -233,6 +291,16 @@ class WeeklyReportBuilder {
       materialsFinished: inputs.materialsFinished,
       quizAccuracy: inputs.quizAccuracy,
       topErrors: topErrors,
+      outputAttempts: inputs.outputAttempts,
+      outputAvgScore: inputs.outputAvgScore,
+      outputErrorTags: outputErrorTags,
+      outputLines: _outputLines(
+        outputAttempts: inputs.outputAttempts,
+        outputAvgScore: inputs.outputAvgScore,
+        outputPrevAvgScore: inputs.outputPrevAvgScore,
+        outputDimensions: inputs.outputDimensions,
+        outputErrors: outputErrors,
+      ),
       highlights: _highlights(
         activeDays: activeDays,
         inputs: inputs,
@@ -247,6 +315,93 @@ class WeeklyReportBuilder {
       forecast: forecast,
       isActive: isActive,
     );
+  }
+
+  // ── 输出块 ──
+
+  /// 评分维度 key → 中文标签(与 rubrics.dimensions_json 的 key 对齐)。
+  /// 未知 key 直接显示原 key(宁可露出英文,也不猜一个错标签)。
+  static const Map<String, String> _dimLabels = {
+    'content': '内容切题',
+    'organization': '组织连贯',
+    'language': '语言准确',
+    'vocabulary': '词汇丰富',
+    'sentence': '句式多样',
+    'comprehension': '原文理解',
+    'accuracy': '准确',
+    'fluency': '表达通顺',
+    'coverage': '要点覆盖',
+    'coherence': '连贯',
+  };
+
+  /// 生成「输出」块文案(1~4 行)。
+  ///
+  /// 关键纪律:**没有数据也要明说**("本周没有输出练习"),而不是像旧周报那样
+  /// 整块省略 —— 用户要的是"数据追踪复盘":看不见 = 以为没记录。
+  static List<String> _outputLines({
+    required int outputAttempts,
+    required double? outputAvgScore,
+    required double? outputPrevAvgScore,
+    required Map<String, double> outputDimensions,
+    required List<ErrorTagBrief> outputErrors,
+  }) {
+    if (outputAttempts <= 0 && outputAvgScore == null) {
+      return const ['本周没有输出练习(写作 / 翻译 / 回译)'];
+    }
+    final lines = <String>[];
+    final parts = <String>['完成 $outputAttempts 次输出练习'];
+    if (outputAvgScore != null) {
+      parts.add('rubric 均分 ${outputAvgScore.round()}%');
+      if (outputPrevAvgScore != null) {
+        final delta = (outputAvgScore - outputPrevAvgScore).round();
+        parts.add('较上周 ${delta >= 0 ? '+' : ''}$delta%');
+      }
+    }
+    lines.add(parts.join(','));
+
+    if (outputDimensions.isNotEmpty) {
+      final dims = outputDimensions.entries.toList()
+        ..sort((a, b) => b.value.compareTo(a.value));
+      final shown = dims.take(3).map((e) {
+        final label = _dimLabels[e.key] ?? e.key;
+        return '$label ${e.value.round()}%';
+      }).join('、');
+      // 只列前三:维度是"看方向"的,列全反而看不清重点
+      lines.add('维度均分:$shown');
+      // 已按分数降序,最弱的就是最后一项;低于 60% 才点出来(否则是噪声)
+      final weakKey = outputDimensions.entries.isEmpty
+          ? null
+          : (outputDimensions.entries.toList()
+                ..sort((a, b) => a.value.compareTo(b.value)))
+              .first
+              .key;
+      if (weakKey != null && outputDimensions[weakKey]! < 60) {
+        lines.add(
+          '最弱维度:${_dimLabels[weakKey] ?? weakKey}'
+          '(${outputDimensions[weakKey]!.round()}%)',
+        );
+      }
+    }
+
+    if (outputErrors.isNotEmpty) {
+      final top = [...outputErrors]
+        ..sort((a, b) {
+          final byCount = b.count.compareTo(a.count);
+          return byCount != 0 ? byCount : a.tag.compareTo(b.tag);
+        });
+      lines.add(
+        '错误热点:${top.take(3).map((e) => '${e.tag}(${e.count} 次)').join('、')}',
+      );
+    }
+    return lines;
+  }
+
+  /// 最弱的评分维度 key(空 map / 全 null → null)。抽成函数是为了让
+  /// 「输出块」与「下周建议」用同一个判据,不各写一套排序。
+  static String? _weakestDimension(Map<String, double> dims) {
+    if (dims.isEmpty) return null;
+    final sorted = dims.entries.toList()..sort((a, b) => a.value.compareTo(b.value));
+    return sorted.first.key;
   }
 
   // ── 亮点 ──
@@ -281,6 +436,16 @@ class WeeklyReportBuilder {
       scored.add(_Scored(
         pct >= 70 ? 95 : 30,
         '读后测验正确率 $pct%',
+      ));
+    }
+
+    // 输出练习(v2.18.0):有产出就是亮点 —— 它是"闭环另一半"的直接证据
+    if (inputs.outputAttempts > 0) {
+      final avg = inputs.outputAvgScore;
+      scored.add(_Scored(
+        90,
+        '完成 ${inputs.outputAttempts} 次输出练习'
+        '${avg != null ? '(rubric 均分 ${avg.round()}%)' : ''}',
       ));
     }
 
@@ -382,6 +547,26 @@ class WeeklyReportBuilder {
     if (inputs.reviewsDone > 0 && inputs.reviewsDone < daily) {
       scored.add(_Scored(50, '复习了 ${inputs.reviewsDone} 个词,'
           '低于每天 $daily 分钟的容量(约 ${_reviewCapacity(inputs)} 个/天)'));
+    }
+
+    // ⑦ 输出闭环(v2.18.0):有输入没输出 → 点名补一次输出;均分偏低 → 按最弱维度改
+    // 优先级刻意排在"过期债/未读完材料"之后:**周报只有 3 条建议位**,
+    // 不能让"补一次输出"挤掉"差一点读完"这种投入产出比更高的行动项;
+    // 该说的事实由「输出块」那条"本周没有输出练习"承担,不依赖建议位。
+    final outputAvg = inputs.outputAvgScore;
+    if (isActive && inputs.outputAttempts <= 0 && outputAvg == null) {
+      scored.add(_Scored(
+        45,
+        '本周还没有输出练习:写 3 句话或做 1 次回译(约 10 分钟),才能检验读到的内容',
+      ));
+    } else if (outputAvg != null && outputAvg < 60) {
+      final weak = _weakestDimension(inputs.outputDimensions);
+      scored.add(_Scored(
+        75,
+        '输出均分 ${outputAvg.round()}%'
+        '${weak != null ? ',${_dimLabels[weak] ?? weak}最弱' : ''}'
+        ':按 rubric 改 1 次,先改证据项最多的那条',
+      ));
     }
 
     // ⑥ 一条建议都没有(本周空转或一切正常)时,给一个带数字的基准目标:

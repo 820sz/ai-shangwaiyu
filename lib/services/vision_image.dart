@@ -48,13 +48,19 @@ class VisionImagePrep {
   /// 局限(诚实记下来):投影分不出 0° 与 180°、90° 与 270° ——
   /// 倒置/反向由 EXIF 与调用方的"识别不到就换方向重试"兜底,
   /// UI 上也给了"方向不对?旋转重试"。
-  static int detectRotation(Uint8List raw, {double threshold = 1.18}) {
+  /// 从**已解码、且已按 EXIF 转正**的图判断"内容是不是被横放了"。
+  ///
+  /// 为什么要把检测和"解码"拆开(B0-3 根治):旧实现 [detectRotation] 内部
+  /// 会再 `decodeImage(raw)` 一次,而 [prepare]/[tiles] 自己已经解过整图 ——
+  /// 同一张 12MP 图预处理要整图解码 **2 次**(每次 RGBA ≈ 20MB),叠加"追加图片"
+  /// 时第二遍高清复查的并发解码,就是用户看到的"卡一下然后闪退"(native OOM,
+  /// Dart 层 CrashLogger 抓不到)。现在调用方把已解码/已转正的图传进来,
+  /// 全程只解 1 次,B200 宽的统计图也只是小图拷贝。
+  static int detectRotationOf(img.Image oriented, {double threshold = 1.18}) {
     try {
-      final decoded = img.decodeImage(raw);
-      if (decoded == null) return rotationNone;
       // 缩到 200 宽再算:快、且抗噪(细线噪点被平均掉)
       final small = img.copyResize(
-        img.bakeOrientation(decoded),
+        oriented,
         width: 200,
         interpolation: img.Interpolation.average,
       );
@@ -70,15 +76,35 @@ class VisionImagePrep {
     }
   }
 
+  /// 从原始字节判断方向(自带一次解码)。
+  ///
+  /// ⚠️ 预处理链路([prepare]/[tiles])**不要**用它 —— 那边已有解码好的图,
+  /// 应改用 [detectRotationOf],否则又会多解一次整图(B0-3 的根因之一)。
+  /// 保留这个入口只为单测与"只有字节"的场景。
+  static int detectRotation(Uint8List raw, {double threshold = 1.18}) {
+    try {
+      final decoded = img.decodeImage(raw);
+      if (decoded == null) return rotationNone;
+      return detectRotationOf(img.bakeOrientation(decoded), threshold: threshold);
+    } catch (e) {
+      debugPrint('ReadFlow 方向检测失败(按原方向): $e');
+      return rotationNone;
+    }
+  }
+
   /// 预处理:转正 → 必要时缩放 → (可选)划线增强 → 统一 JPEG 编码
   ///
   /// [autoRotate]:内容横放时自动转 90°(默认开)。
   /// [enhanceMarks]:淡色划线增强;**只在"识别标记"场景开** ——
   /// 全文翻译/普通阅读要的是清晰的字,不是更深的纸纹。
+  /// [quarterTurns]:用户手动点「方向不对?旋转重试」累积的顺时针 90° 数
+  /// (B0-6)。检测分不出 0°/180°、也分不出 90°/270°,所以最终判断权交给用户;
+  /// 这里只负责把**发出去的像素**转对,源文件一个字都不动。
   static Uint8List prepare(
     Uint8List raw, {
     bool autoRotate = true,
     bool enhanceMarks = false,
+    int quarterTurns = 0,
   }) {
     try {
       final decoded = img.decodeImage(raw);
@@ -86,9 +112,16 @@ class VisionImagePrep {
       // ① 按 EXIF 把像素转正(手机照片最常见的问题)
       var work = img.bakeOrientation(decoded);
       // ② 内容横放(EXIF 救不了的那种)→ 本地转 90°
-      if (autoRotate && detectRotation(raw) == rotationClockwise90) {
+      //    B0-3:方向检测用**这张已解码的图**,不再为检测多解一次整图
+      if (autoRotate && detectRotationOf(work) == rotationClockwise90) {
         work = img.copyRotate(work, angle: 90);
         debugPrint('ReadFlow 检测到内容横放,已顺时针转正');
+      }
+      // ②b 用户手动指定的角度(B0-6"方向不对?旋转重试")
+      final turns = quarterTurns % 4;
+      if (turns != 0) {
+        work = img.copyRotate(work, angle: turns * 90);
+        debugPrint('ReadFlow 按用户选择旋转 ${turns * 90}° 后识别');
       }
       // ③ 长边压到上限以内(不放大)
       final longEdge = work.width > work.height ? work.width : work.height;
@@ -126,8 +159,9 @@ class VisionImagePrep {
     Uint8List raw, {
     bool autoRotate = true,
     bool enhanceMarks = false,
+    int quarterTurns = 0,
   }) =>
-      'data:image/jpeg;base64,${base64Encode(prepare(raw, autoRotate: autoRotate, enhanceMarks: enhanceMarks))}';
+      'data:image/jpeg;base64,${base64Encode(prepare(raw, autoRotate: autoRotate, enhanceMarks: enhanceMarks, quarterTurns: quarterTurns))}';
 
   /// 把一页切成若干**互相重叠**的高清小块(v2.6 新增)。
   ///
@@ -137,6 +171,7 @@ class VisionImagePrep {
   /// 预算下**每块的字大了一倍**;再带 8% 重叠,避免把划在切口上的词切断。
   ///
   /// 用途:第二遍"只找漏"复查(结果追加,不替换第一遍)。
+  /// [quarterTurns]:同 [prepare] 的手动角度(B0-6:旋转重试后复查也要按同一角度切)
   static List<Uint8List> tiles(
     Uint8List raw, {
     int rows = 2,
@@ -144,14 +179,18 @@ class VisionImagePrep {
     double overlap = 0.08,
     bool autoRotate = true,
     bool enhanceMarks = false,
+    int quarterTurns = 0,
   }) {
     try {
       final decoded = img.decodeImage(raw);
-      if (decoded == null) return [prepare(raw)];
+      if (decoded == null) return [prepare(raw, quarterTurns: quarterTurns)];
       var work = img.bakeOrientation(decoded);
-      if (autoRotate && detectRotation(raw) == rotationClockwise90) {
+      // B0-3:同 prepare —— 方向检测复用这张已解码的图,不再多解一次整图
+      if (autoRotate && detectRotationOf(work) == rotationClockwise90) {
         work = img.copyRotate(work, angle: 90);
       }
+      final turns = quarterTurns % 4;
+      if (turns != 0) work = img.copyRotate(work, angle: turns * 90);
       if (enhanceMarks) work = _enhanceMarks(work);
       final out = <Uint8List>[];
       final tileW = (work.width / cols).ceil();
@@ -171,7 +210,7 @@ class VisionImagePrep {
       return out;
     } catch (e) {
       debugPrint('ReadFlow 切块失败(退回整图): $e');
-      return [prepare(raw)];
+      return [prepare(raw, quarterTurns: quarterTurns)];
     }
   }
 
@@ -183,6 +222,7 @@ class VisionImagePrep {
     double overlap = 0.08,
     bool autoRotate = true,
     bool enhanceMarks = false,
+    int quarterTurns = 0,
   }) =>
       tiles(
         raw,
@@ -191,7 +231,82 @@ class VisionImagePrep {
         overlap: overlap,
         autoRotate: autoRotate,
         enhanceMarks: enhanceMarks,
+        quarterTurns: quarterTurns,
       ).map((t) => 'data:image/jpeg;base64,${base64Encode(t)}').toList();
+
+  // ── 后台 isolate 入口(B0-3:图片预处理不再占 UI isolate) ──
+  //
+  // 为什么必须移:一张 12MP 图 `package:image` 解码一次 RGBA ≈ 20MB,压缩/
+  // 方向检测/划线增强/编码全是**同步纯 Dart**;跑在 UI isolate 上就是"主线程
+  // 长时间阻塞 → 追加时叠加第二遍复查 → native OOM/ANR 被杀"(Dart 层
+  // CrashLogger 抓不到,所以反复修还有)。`image` 是纯 Dart 包,能直接在
+  // isolate 里跑,UI 线程只负责发请求。
+  //
+  // 为什么参数用 List<Object?> 而不是自定义参数类:跨 isolate 消息对自定义
+  // 实例的可发送性依赖 Dart 版本,只传 Uint8List/bool/int 最稳,不会在真机上
+  // 抛 "Illegal argument in isolate message"。
+  static Uint8List _prepareTask(List<Object?> args) => prepare(
+        args[0] as Uint8List,
+        autoRotate: args[1] as bool,
+        enhanceMarks: args[2] as bool,
+        quarterTurns: args[3] as int,
+      );
+
+  static String _dataUriTask(List<Object?> args) => toDataUri(
+        args[0] as Uint8List,
+        autoRotate: args[1] as bool,
+        enhanceMarks: args[2] as bool,
+        quarterTurns: args[3] as int,
+      );
+
+  static List<Uint8List> _tilesTask(List<Object?> args) => tiles(
+        args[0] as Uint8List,
+        autoRotate: args[1] as bool,
+        enhanceMarks: args[2] as bool,
+        quarterTurns: args[3] as int,
+      );
+
+  /// 后台 isolate 版 [prepare](识图链路一律用它)
+  static Future<Uint8List> prepareInBackground(
+    Uint8List raw, {
+    bool autoRotate = true,
+    bool enhanceMarks = false,
+    int quarterTurns = 0,
+  }) =>
+      compute(
+        _prepareTask,
+        <Object?>[raw, autoRotate, enhanceMarks, quarterTurns],
+        debugLabel: 'vision_prepare',
+      );
+
+  /// 后台 isolate 版 [toDataUri](JPEG 编码 + base64 也挪出 UI 线程)
+  static Future<String> toDataUriInBackground(
+    Uint8List raw, {
+    bool autoRotate = true,
+    bool enhanceMarks = false,
+    int quarterTurns = 0,
+  }) =>
+      compute(
+        _dataUriTask,
+        <Object?>[raw, autoRotate, enhanceMarks, quarterTurns],
+        debugLabel: 'vision_data_uri',
+      );
+
+  /// 后台 isolate 版 [tiles](第二遍高清复查用)
+  static Future<List<Uint8List>> tilesInBackground(
+    Uint8List raw, {
+    int rows = 2,
+    int cols = 2,
+    double overlap = 0.08,
+    bool autoRotate = true,
+    bool enhanceMarks = false,
+    int quarterTurns = 0,
+  }) =>
+      compute(
+        _tilesTask,
+        <Object?>[raw, autoRotate, enhanceMarks, quarterTurns],
+        debugLabel: 'vision_tiles',
+      );
 
   // ── 投影方差(方向检测的核心) ──
 
