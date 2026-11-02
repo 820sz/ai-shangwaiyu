@@ -26,8 +26,24 @@ class ExportParagraph {
 class ExportService {
   ExportService._();
 
-  /// 备份格式版本:导入侧据此判断兼容性
+  /// 旧格式版本(`version` 字段):导入侧据此判断兼容性。
+  ///
+  /// 保持 1 不动是有意的兼容设计:v2 备份**同时**写 `version: 1` 与
+  /// `backupVersion: 2` —— 旧版 App(v2.20 及以前)只认 `version`,于是它会把
+  /// v2 备份当 v1 读:恢复生词/画像/设置、忽略 `tables`(未知键) —— 不崩、不丢
+  /// 它能理解的那部分数据。向后兼容靠的就是"旧字段语义不变"。
   static const int backupVersion = 1;
+
+  /// 备份**格式**版本(新字段 `backupVersion`)。
+  ///
+  /// - v1:只有生词本/复习状态/学习画像/少量设置(历史格式,无 `backupVersion` 字段);
+  /// - v2(2026-11-02,批 8 · P2-7):额外带 `tables` —— 阅读器译文、输出题组/题目/
+  ///   作答、能力快照、任务事件、任务、错误标签、复习状态原表、rubrics;
+  ///   以及 `truncation`(哪些表被截断、备份时共多少条)。
+  ///
+  /// 为什么加**新字段**而不是把 `version` 升到 2:见 [backupVersion] 的注释 ——
+  /// 升老字段会让旧版 App 直接拒绝导入整份备份(用户从新手机退不回旧手机)。
+  static const int currentBackupVersion = 2;
 
   /// Excel 打开中文 CSV 需要 BOM(否则乱码);JSON 不需要
   static const String utf8Bom = '\uFEFF';
@@ -118,21 +134,32 @@ class ExportService {
   /// 生成备份 JSON。
   /// 包含:词条(含双音标) + 复习状态(FSRS 卡片) + 学习者模型 + 少量设置白名单。
   /// **不含** API Key(那是用户自己的密钥,不该出现在导出文件里)。
+  ///
+  /// v2 起额外带 [tables]:v3 新表的**原样行数据**。为什么不做强类型建模 ——
+  /// 这些表的列会随版本演进(例如 tutor_tasks 从 9 列扩到 16 列),备份层的契约
+  /// 是"原样搬运 + 恢复侧按白名单取列",宽进宽出比给每一列建模更不容易漏数据。
   static String backupJson({
     required List<Vocabulary> vocab,
     required Map<int, FsrsCard> cards,
     required LearnerModel model,
     Map<String, String> settings = const {},
+    Map<String, List<Map<String, Object?>>> tables = const {},
+    Map<String, Object?> truncation = const {},
     DateTime? now,
   }) {
     final at = now ?? DateTime.now();
     final payload = {
       'version': backupVersion,
+      // 新字段:格式版本。旧版 App 不认它 → 只会恢复 `vocab`/`learner_model`,
+      // 忽略 `tables`;新版 App 认它 → 决定要不要碰 v3 新表(见 parseBackup)。
+      'backupVersion': currentBackupVersion,
       'app': 'readflow',
       'exported_at': at.toIso8601String(),
       'counts': {
         'vocab': vocab.length,
         'review_cards': cards.length,
+        // 各表条数也写进 counts:用户/支持人员打开 JSON 一眼能看到备份装了什么
+        for (final entry in tables.entries) entry.key: entry.value.length,
       },
       'vocab': [
         for (final v in vocab)
@@ -144,6 +171,9 @@ class ExportService {
       ],
       'learner_model': model.toJson(),
       'settings': settings,
+      'tables': tables,
+      // 只在真的截断时出现:空对象写进去会让"没截断"和"不确定"分不清
+      if (truncation.isNotEmpty) 'truncation': truncation,
     };
     return const JsonEncoder.withIndent('  ').convert(payload);
   }
@@ -181,6 +211,17 @@ class ExportService {
     if (version > backupVersion) {
       return BackupData(
         error: '备份来自更新版本的 App(v$version),请先升级再导入',
+      );
+    }
+    // 格式版本:v2 起才有 `backupVersion`。**没有该字段 = v1 老备份** ——
+    // 这是"旧备份继续能恢复"的判定点:只有 v2 才去读 tables,
+    // 老备份连 `tables` 键都没有,自然走 v1 路径(与升级前行为完全一致)。
+    final formatVersion = map['backupVersion'] is int
+        ? map['backupVersion'] as int
+        : 1;
+    if (formatVersion > currentBackupVersion) {
+      return BackupData(
+        error: '备份来自更新版本的 App(备份格式 v$formatVersion),请先升级再导入',
       );
     }
     // 字段类型不对一律当空(备份导入的契约是"绝不抛":宁可少导入,
@@ -225,13 +266,34 @@ class ExportService {
         if (v is String) settings['$k'] = v;
       });
     }
+    // v2 表数据:宽进 —— 只收"表名 → 行对象列表",行里字段类型不在这里校验
+    // (恢复侧按白名单取列 + 事务兜底);一行坏数据不能毁掉整份备份的解析。
+    final tables = <String, List<Map<String, Object?>>>{};
+    final rawTables = map['tables'];
+    if (rawTables is Map) {
+      rawTables.forEach((key, value) {
+        final name = '$key'.trim();
+        if (name.isEmpty || value is! List) return;
+        final rows = <Map<String, Object?>>[];
+        for (final raw in value) {
+          if (raw is Map) rows.add(Map<String, Object?>.from(raw));
+        }
+        tables[name] = rows;
+      });
+    }
+    final truncation = map['truncation'] is Map
+        ? Map<String, Object?>.from(map['truncation'] as Map)
+        : const <String, Object?>{};
     return BackupData(
       version: version,
+      backupVersion: formatVersion,
       exportedAt: DateTime.tryParse('${map['exported_at']}'),
       vocab: vocab,
       cardsByWord: cards,
       model: model,
       settings: settings,
+      tables: tables,
+      truncation: truncation,
     );
   }
 
@@ -351,7 +413,13 @@ class ExportService {
 
 /// 解析后的备份内容(导入用)
 class BackupData {
+  /// 旧 `version` 字段(v1 = 1);保留是为了兼容只认它的旧读者/旧代码
   final int version;
+
+  /// 备份**格式**版本(v1/v2)。老备份没有该字段 → 1:
+  /// 恢复路径只看它决定要不要碰 v3 新表(见 [backupVersion] 注释)。
+  final int backupVersion;
+
   final DateTime? exportedAt;
   final List<Vocabulary> vocab;
 
@@ -360,16 +428,26 @@ class BackupData {
   final LearnerModel? model;
   final Map<String, String> settings;
 
+  /// v2 才有:v3 新表的原样行数据(表名 → 行)。为空 = 没有新表数据可恢复。
+  final Map<String, List<Map<String, Object?>>> tables;
+
+  /// v2 才有:导出时被截断的表的说明(表名 → {limit, total, exported})。
+  /// 恢复时据此给用户一句"备份里的作答只保留最近 N 条"。
+  final Map<String, Object?> truncation;
+
   /// 解析失败时的原因(非空即失败)
   final String? error;
 
   const BackupData({
     this.version = 0,
+    this.backupVersion = 1,
     this.exportedAt,
     this.vocab = const [],
     this.cardsByWord = const {},
     this.model,
     this.settings = const {},
+    this.tables = const {},
+    this.truncation = const {},
     this.error,
   });
 
@@ -381,6 +459,16 @@ class BackupData {
     if (cardsByWord.isNotEmpty) parts.add('${cardsByWord.length} 条复习状态');
     if (model != null) parts.add('学习画像');
     if (settings.isNotEmpty) parts.add('${settings.length} 项设置');
+    // 让用户在"粘贴备份"这一步就看到这份备份带了哪些学习历史,
+    // 而不是导入完才发现"怎么没有输出记录"
+    final nonEmpty = [
+      for (final entry in tables.entries)
+        if (entry.value.isNotEmpty) entry,
+    ];
+    if (nonEmpty.isNotEmpty) {
+      final total = nonEmpty.fold<int>(0, (sum, e) => sum + e.value.length);
+      parts.add('$total 条 v3 学习记录(${nonEmpty.length} 张表)');
+    }
     return parts.join(' · ');
   }
 }

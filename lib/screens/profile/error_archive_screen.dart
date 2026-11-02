@@ -16,6 +16,7 @@ import '../writing/write_review_screen.dart';
 const Map<String, String> _errorSourceLabels = {
   'writing': '写译批改',
   'exercise': '回译练习',
+  'placement': '水平测试',
   'reading_quiz': '读后测验',
   'review': '复习',
   'output': '输出练习',

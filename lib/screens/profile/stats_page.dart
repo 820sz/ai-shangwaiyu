@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../config/design_tokens.dart';
 import '../../config/theme.dart';
 import '../../providers/stats_provider.dart';
+import '../../services/learner_extras_sync.dart';
 import '../../services/material_library.dart';
 import '../../widgets/app_ui.dart';
 import '../../widgets/design_kit.dart';
@@ -38,6 +41,10 @@ class _StatsPageScreenState extends State<StatsPageScreen> {
       // 不加这道判断会抛错并被 CrashLogger 记成"崩溃",污染诊断日志
       if (!mounted) return;
       context.read<StatsProvider>().loadStats();
+      // C1-15(批 8):统计页是"看整体数据"的幂等时机 —— 顺手把真实阅读速度
+      // (近 30 天 avg_wpm)与词汇量测试基线回写进学习者模型 extras,供
+      // LearnerContext 做难度/速度预估。值没变不会写盘;失败静默,不影响统计。
+      unawaited(LearnerExtrasSync.syncAll());
     });
   }
 

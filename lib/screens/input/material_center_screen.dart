@@ -125,23 +125,45 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
     super.initState();
     _prefs = MaterialPrefs.load();
     _inputPrefs = InputPreferences.load();
+    // v2.23 修:自定义分区存 Hive,原来只在"新加分区"时才读 —— 重启 App 后
+    // 分类墙上看不到自己建的分区,用户会以为分区丢了。首次进入就读全。
+    _availableTopics = [...MaterialTopic.all, ...CustomTopics.load()];
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _model = LearnerModelStore.load();
       _health = MaterialSourceStatus.loadAll();
-      _sourceId = MaterialSourceStatus.preferredSourceId(
-        knownIds: [for (final s in MaterialSourceService.sources) s.id],
-        fallback: MaterialSourceService.defaultSourceId,
-        all: _health,
-      );
+      _sourceId = _initialSourceId();
       _loadShelf();
       _loadItems();
+      // v2.23 修:书架预览原来只在"进过书架页又返回"后才加载,首屏永远是一排
+      // 空书位 —— 用户以为书架坏了。跟其它区块一起首屏加载。
+      unawaited(_loadBookshelf());
       _loadTopics([_availableTopics.first]);
       // 已有的材料里还没中文名的,后台补齐(用户为此提过两次)
       unawaited(_backfillShelfTitles());
       // 难度档辅助调整:用最近真实行为算一条建议(数据不足时静默不显示)
       unawaited(_loadBandAdvice());
     });
+  }
+
+  /// 初始内容源:用户选了「来源类型」偏好就用那一类里可用的源,否则按健康度选。
+  ///
+  /// v2.23 修(分类筛选失效):「我的需求 → 来源类型」以前**对今日推荐完全不
+  /// 生效**(只作用于弹层里的题材检索),用户勾了"外刊/新闻"回到首页看到的还是
+  /// 公版书 —— 看起来就是筛选坏了。现在首屏与保存偏好后都按它重选源。
+  String _initialSourceId() {
+    if (_prefs.kinds.isNotEmpty) {
+      for (final s in _prefs.preferredSources) {
+        final health = _health[s.id];
+        // 偏好里没测过 / 实测可用 → 就用它;已知连不上的继续找下一个
+        if (health == null || health.ok) return s.id;
+      }
+    }
+    return MaterialSourceStatus.preferredSourceId(
+      knownIds: [for (final s in MaterialSourceService.sources) s.id],
+      fallback: MaterialSourceService.defaultSourceId,
+      all: _health,
+    );
   }
 
   /// 读真实信号并算"要不要调档"的建议(失败静默:建议只是锦上添花,
@@ -177,16 +199,26 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
       _error = null;
     });
     try {
-      final items = await _service.listItems(_sourceId, limit: 12);
+      final raw = await _service.listItems(_sourceId, limit: 12);
       await MaterialSourceStatus.recordOk(_sourceId);
       if (!mounted) return;
+      // v2.23 修:同一个源偶尔把同一篇发两次(RSS 重发/多栏目同时收录),
+      // 横滑列表会出现两张一模一样的卡 —— 按链接/标题先去重再展示。
+      final items = MaterialLibrary.dedupeBy(
+        raw,
+        urlOf: (e) => e.link,
+        titleOf: (e) => e.title,
+      );
       setState(() {
         _items = items;
         _loadingItems = false;
         _health = MaterialSourceStatus.loadAll();
       });
+      // 今日精读同样遵守屏蔽设置:只从过滤后的条目里挑,不能一边说"已过滤
+      // N 条"、一边又把被屏蔽的第一条做成全页最大的卡。
+      final allowed = _allowedFeed(items).kept;
       // 今日精读:取第一条做"预分析"(抓正文 + 本地难度),失败就退回不带难度的卡
-      unawaited(_loadDaily(items.isEmpty ? null : items.first));
+      unawaited(_loadDaily(allowed.isEmpty ? null : allowed.first));
       // 标题中文化(用户第 2(2)/6(1) 条:标题一律「中文(英文)」)
       unawaited(_translateTitles(items.take(10).map((e) => e.title).toList()));
     } catch (e) {
@@ -198,6 +230,45 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
         _health = MaterialSourceStatus.loadAll();
       });
     }
+  }
+
+  /// 当前内容源的中文名(黑名单匹配与界面展示共用;拿不到就用 id,不编名字)
+  String get _sourceLabel =>
+      MaterialSourceService.sourceOf(_sourceId)?.label ?? _sourceId;
+
+  /// 「今日推荐 / 今日精读」的过滤口径(C1-14)。
+  ///
+  /// 过滤判断本身在 [InputPreferences.allowsMaterial](标题/来源/题材任一命中
+  /// 屏蔽词即过滤),这里只负责把 FeedItem 映射成那三个输入。
+  BlocklistFilterResult<FeedItem> _allowedFeed(
+    Iterable<FeedItem> items,
+  ) {
+    final kind = MaterialLevel.kindOfSource(_sourceId);
+    return MaterialLibrary.filterBlocked(
+      items,
+      _inputPrefs,
+      titleOf: (e) => e.title,
+      sourceOf: (_) => _sourceLabel,
+      genresOf: (_) => [MaterialLibrary.kindLabel(kind)],
+    );
+  }
+
+  /// 「发现更多」结果的过滤口径(C1-14):标题 / 来源 / 检索题材三处命中即过滤。
+  BlocklistFilterResult<OriginalHit> _allowedHits(
+    Iterable<OriginalHit> hits,
+  ) {
+    final topics = _topics;
+    return MaterialLibrary.filterBlocked(
+      hits,
+      _inputPrefs,
+      titleOf: (h) => h.title,
+      sourceOf: (h) =>
+          MaterialSourceService.sourceOf(h.sourceId)?.label ?? h.sourceId,
+      genresOf: (h) => [
+        MaterialLibrary.kindLabel(MaterialLevel.kindOfSource(h.sourceId)),
+        for (final t in topics) t.label,
+      ],
+    );
   }
 
   /// 今日精读:抓第一条的正文并做本地难度分析(不入库)。
@@ -523,18 +594,23 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
 
   /// 打开一条"今日推荐"条目(v2.10)**真的打开它**,不是只换上面那张卡
   Future<void> _openFeedItem(FeedItem item) async {
-    await MaterialImportFlow.openHitWithProgress(
-      context,
-      hit: OriginalHit(
-        sourceId: _sourceId,
-        sourceId2: item.link,
-        title: item.title,
-        url: item.link,
-        note: item.summary,
-        imageUrl: item.imageUrl,
-      ),
-      model: _model,
-    );
+    try {
+      await MaterialImportFlow.openHitWithProgress(
+        context,
+        hit: OriginalHit(
+          sourceId: _sourceId,
+          sourceId2: item.link,
+          title: item.title,
+          url: item.link,
+          note: item.summary,
+          imageUrl: item.imageUrl,
+        ),
+        model: _model,
+      );
+    } catch (e) {
+      // 流程内部已提示可读原因,这里只兜住"没被接住的异常",让页面不僵死
+      _showOpenFailure(item.title, e);
+    }
     if (!mounted) return;
     _model = LearnerModelStore.load();
     await _loadShelf();
@@ -545,19 +621,23 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
   Future<void> _openDaily() async {
     final item = _daily;
     if (item == null) return;
-    await MaterialImportFlow.openHitWithProgress(
-      context,
-      hit: OriginalHit(
-        sourceId: _sourceId,
-        sourceId2: item.link,
-        title: item.title,
-        url: item.link,
-        note: item.summary,
-        imageUrl: item.imageUrl,
-      ),
-      model: _model,
-      label: '正在抓取并分析这篇…',
-    );
+    try {
+      await MaterialImportFlow.openHitWithProgress(
+        context,
+        hit: OriginalHit(
+          sourceId: _sourceId,
+          sourceId2: item.link,
+          title: item.title,
+          url: item.link,
+          note: item.summary,
+          imageUrl: item.imageUrl,
+        ),
+        model: _model,
+        label: '正在抓取并分析这篇…',
+      );
+    } catch (e) {
+      _showOpenFailure(item.title, e);
+    }
     if (!mounted) return;
     _model = LearnerModelStore.load();
     await _loadShelf();
@@ -565,11 +645,15 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
 
   /// 打开一条发现结果(软件内阅读)
   Future<void> _openHit(OriginalHit hit) async {
-    await MaterialImportFlow.openHitWithProgress(
-      context,
-      hit: hit,
-      model: _model,
-    );
+    try {
+      await MaterialImportFlow.openHitWithProgress(
+        context,
+        hit: hit,
+        model: _model,
+      );
+    } catch (e) {
+      _showOpenFailure(hit.title, e);
+    }
     if (!mounted) return;
     await _loadShelf();
   }
@@ -606,19 +690,46 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
   }
 
   Future<void> _openExternal(String url) async {
+    var opened = false;
     try {
-      final ok = await launchExternalUrl(url);
-      if (!ok && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('打不开这个链接:$url')),
-        );
-      }
+      opened = await launchExternalUrl(url);
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('打开链接失败:$e')),
-      );
+      // 打不开外链不是致命错误:统一走同一句提示,不吞异常但也不崩
+      _showOpenFailure(url, e);
+      return;
     }
+    if (!opened) _showOpenFailure(url);
+  }
+
+  /// 打开失败的**统一**提示(C1-17)。
+  ///
+  /// 为什么收成一个入口:一页里"点开卡片/点原文链接/今日精读"有 4 条路径,
+  /// 旧实现文案各写各的("打不开这个链接:$url" / "打开链接失败:$e"),同一件
+  /// 事两种说法 —— 用户困惑,排障时也不知道该信哪条。现在全部是
+  /// 「打不开这条内容[:原因] · 名称」,并浮动显示不挡内容。
+  void _showOpenFailure(String what, [Object? error]) {
+    if (!mounted) return;
+    final name = what.trim();
+    final reason = error == null ? '' : ':${_humanOpenError(error)}';
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          '打不开这条内容$reason${name.isEmpty ? '' : ' · $name'}',
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+        ),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  /// 异常 → 一句人能读的话(太长的堆栈式信息截断,SnackBar 一行放得下)
+  String _humanOpenError(Object error) {
+    final raw = '$error'.trim();
+    if (raw.isEmpty) return '网络或链接异常';
+    // 异常文本里常常带 "Exception: " 前缀,去掉后用户更好读
+    final text = raw.replaceFirst(RegExp(r'^[A-Za-z]+Exception:\s*'), '');
+    return text.length > 80 ? '${text.substring(0, 80)}…' : text;
   }
 
   // (v2.13 移除)`_setBand`:难度选择收进了「我的需求」的调整弹层
@@ -791,11 +902,24 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
     setState(() => _prefs = draft);
     await _prefs.save();
     if (!mounted) return;
+    // v2.23 修:「我的需求」里的兴趣/题材与输入偏好层是同一份数据(Hive 同一个
+    // key),保存后必须重读 —— 否则本页标签与黑名单过滤还按旧值渲染,看起来
+    // 就是"筛选没生效"。
+    setState(() => _inputPrefs = InputPreferences.load());
+    // v2.23 修:来源类型偏好保存后**立即**生效 —— 以前只影响弹层里的题材检索,
+    // 今日推荐还是旧源,用户会以为来源筛选坏了。偏好变了就换源重拉。
+    if (_prefs.kinds.isNotEmpty) {
+      final preferred = _prefs.preferredSources;
+      if (preferred.isNotEmpty && preferred.first.id != _sourceId) {
+        setState(() => _sourceId = preferred.first.id);
+        unawaited(_loadItems());
+      }
+    }
     await _loadShelf();
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('偏好已保存 —— 下次找材料会按它来'),
+        content: Text('偏好已保存 —— 推荐与找材料都会按它来'),
         behavior: SnackBarBehavior.floating,
       ),
     );
@@ -810,23 +934,37 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final muted = theme.colorScheme.onSurfaceVariant;
-    // v3 批 8:去重(v3 曾出现重复条目)+ 按目标优先排序(拍板 #1 后半)。
+    // v3 批 8 去重 + 按目标优先排序(拍板 #1 后半);v2.23 补 url/title 级去重。
     var shelf = (_onlyFit && !_prefs.band.isAny)
         ? _shelf.where((s) {
             final c = s.coverage;
             return c == null || _prefs.band.contains(c);
           }).toList()
         : _shelf;
+    // 两层去重:id 层(同一行被读两次/接口重复返回)是数据层兜底;url/title 层
+    // 解决"同一篇从不同链接入库"—— 只做 id 层时材料库里会出现同一篇两张卡。
     shelf = MaterialLibrary.dedupeShelf(shelf);
+    shelf = MaterialLibrary.dedupeBy(
+      shelf,
+      urlOf: (s) => s.url,
+      titleOf: (s) => '${s.titleCn} ${s.title}',
+    );
     if (_goalFirst && _inputPrefs.examGoals.isNotEmpty) {
       shelf = MaterialLibrary.rankForGoals(shelf, _inputPrefs.examGoals);
     }
-    // 内容领域页签(v2.12):直接用 [MaterialTopic.all] —— 这套题材是 v2.8 就为
-    // "参考软件顶部那种题材 tab"定好的(科学与技术/商业与政治/…),之前却被埋在
-    // 「发现更多」区块里的多选 chip 后面,用户看不到。现在提到页面顶部当导航。
-    final topicTabs = _availableTopics.take(8).toList();
-    var tabIndex = topicTabs.indexWhere((t) => _selectedTopics.contains(t.id));
-    if (tabIndex < 0) tabIndex = 0;
+    // 今日推荐:去重 + 黑名单过滤(C1-14)。
+    //
+    // 为什么过滤放在 build 而不是加载时:`_inputPrefs` 可能在本页内变(保存
+    // 「我的需求」、以后从别处改完回来),每次重建都用最新屏蔽词,列表才不会
+    // 出现"改了屏蔽词但推荐没变"的假筛选。
+    final feed = _allowedFeed(
+      MaterialLibrary.dedupeBy(
+        _items,
+        urlOf: (e) => e.link,
+        titleOf: (e) => e.title,
+      ),
+    );
+    final feedRail = feed.kept.take(8).toList();
     return SectionPrefsScope(
       notifier: _sectionPrefs,
       child: Scaffold(
@@ -932,6 +1070,18 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
                     const SizedBox(height: Gap.xs),
                     _sourceNote(theme, muted),
                     const SizedBox(height: Gap.sm),
+                    // C1-14:黑名单过滤计数 —— 列表变短必须让用户知道是"自己
+                    // 的屏蔽设置"造成的,否则会被当成"这个源没内容"。
+                    if (feed.hasHidden) ...[
+                      Text(
+                        '已按你的屏蔽设置过滤 ${feed.hidden} 条',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: muted,
+                          fontSize: 11,
+                        ),
+                      ),
+                      const SizedBox(height: Gap.xs),
+                    ],
                     if (_loadingItems)
                       const SkeletonLines(lines: 4, seed: 1)
                     else if (_error != null)
@@ -942,20 +1092,43 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
                         title: '这个源暂时没有条目',
                         hint: '换一个源试试,或点「检测可用源」',
                       )
-                    else
+                    else if (feedRail.isEmpty)
+                      // 有内容但全被屏蔽:给明确空态 + 可执行出口(不静默缩成空)
+                      const AppEmpty(
+                        icon: Icons.block_outlined,
+                        title: '这个源的条目都被你的屏蔽设置过滤了',
+                        hint: '到「我的 → 学习偏好」调整屏蔽词,或换一个内容源',
+                      )
+                    else ...[
                       SizedBox(
-                        height: 186,
+                        // v2.23:高度按"封面 + 三行文字 + 动作行"重算(原 186
+                        // 放不下两行标题 + 难度行,长标题会把动作行挤出卡片);
+                        // 文字缩放上限由卡片自己夹到 1.15,再大字号也不会溢出。
+                        height: 240,
                         child: ListView.separated(
                           scrollDirection: Axis.horizontal,
-                          itemCount: _items.take(8).length,
+                          itemCount: feedRail.length,
                           separatorBuilder: (_, _) =>
                               const SizedBox(width: Gap.sm),
                           itemBuilder: (_, i) => SizedBox(
                             width: 236,
-                            child: _buildFeedCard(theme, _items[i]),
+                            child: _buildFeedCard(theme, feedRail[i]),
                           ),
                         ),
                       ),
+                      const SizedBox(height: Gap.xs),
+                      // 口径必须写在卡外:卡上只放一句「预计」,否则容易被当成
+                      // "实测覆盖率"(真正实测的只有今日精读那张大卡)。
+                      Text(
+                        '「预计」难度按来源/类型估算,不是实测认知率;点开卡片让软件'
+                        '按你的词频分析一次,才有真实覆盖率。',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: muted,
+                          fontSize: 11,
+                          height: 1.4,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -1450,6 +1623,12 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
         ? MaterialLevel.fallbackForKind(kind)
         : MaterialLevel.of(a.cefr, kind: kind);
     final accent = MaterialLevel.accentOf(_sourceId);
+    // v2.23(C1-17):没有正文分析时不再"什么难度都不显示",用源元数据给预计
+    // 区间;有分析(`_dailyAnalysis`)的卡继续显示真实认知率 —— 两者绝不混用。
+    final estimate = MaterialLibrary.estimateDifficulty(
+      sourceId: _sourceId,
+      kind: kind,
+    );
 
     if (item == null) {
       return Padding(
@@ -1463,7 +1642,9 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
                       ?.copyWith(fontWeight: FontWeight.w700)),
               const SizedBox(height: Gap.sm),
               if (_loadingItems || _dailyLoading)
-                const AppLoading(label: '正在准备今天的精读…')
+                // 加载态与其它区块统一成骨架屏(此前这里是 AppLoading:
+                // 同一页出现两种骨架形状,数据到达时布局会跳)。
+                const SkeletonLines(lines: 5, seed: 0)
               else
                 Text('这个源暂时没有可精读的条目 —— 换一个源,或看上面的「发现更多」',
                     style: theme.textTheme.bodySmall?.copyWith(color: muted)),
@@ -1545,6 +1726,9 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
                           Icons.speed,
                           '已知 ${(a.knownTokenRatio * 100).toStringAsFixed(0)}%',
                         ),
+                      // 没有本地分析 → 显示"预计"区间,并明确它不是实测覆盖率
+                      if (a == null)
+                        _meta(theme, Icons.speed, estimate.label),
                       if (a != null)
                         _meta(theme, Icons.timer_outlined, '约 ${a.estMinutes} 分钟'),
                       if (a != null && a.wordCount > 0)
@@ -1569,6 +1753,18 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
                       ),
                     ),
                   ],
+                  // 估算口径必须原样写给用户看:这是"预计",不是算出来的认知率
+                  if (a == null) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      '${estimate.basis} · 开始阅读后按你的词频算真实认知率',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: muted,
+                        fontSize: 11,
+                        height: 1.4,
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: Gap.sm),
                   Row(
                     children: [
@@ -1588,7 +1784,15 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
                         onPressed: _loadingItems
                             ? null
                             : () {
-                                final next = _items.length > 1 ? _items[1] : null;
+                                // 「换一篇」也要绕开屏蔽词:从过滤后的条目里取
+                                // 下一篇,不能换成一篇用户明确屏蔽掉的
+                                FeedItem? next;
+                                for (final f in _allowedFeed(_items).kept) {
+                                  if (f.link != item.link) {
+                                    next = f;
+                                    break;
+                                  }
+                                }
                                 if (next != null) _loadDaily(next);
                               },
                         icon: const Icon(Icons.refresh),
@@ -1654,6 +1858,15 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
 
   Widget _buildDiscover(ThemeData theme, Color muted) {
     final selected = _selectedTopics;
+    // C1-14:发现列表也遵守黑名单;先按 url/title 去重(不同题材的检索词
+    // 经常命中同一篇,旧实现只在"同一次多题材合并"里按 URL 去重)。
+    final hits = _allowedHits(
+      MaterialLibrary.dedupeBy(
+        _topicHits,
+        urlOf: (h) => h.url,
+        titleOf: (h) => h.title,
+      ),
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1766,6 +1979,17 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
               style: theme.textTheme.bodySmall
                   ?.copyWith(color: muted, fontSize: 11, height: 1.4)),
         ],
+        // 黑名单过滤计数:与今日推荐同一句文案(用户不需要记两套说法)
+        if (hits.hasHidden) ...[
+          const SizedBox(height: Gap.xs),
+          Text(
+            '已按你的屏蔽设置过滤 ${hits.hidden} 条',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: muted,
+              fontSize: 11,
+            ),
+          ),
+        ],
         const SizedBox(height: Gap.xs),
         if (_topicLoading && _topicHits.isEmpty)
           // 方案 B:骨架屏(与结果卡片同形状),不再是转圈
@@ -1776,11 +2000,18 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
             title: '这个题材这次没找到',
             hint: '换个题材,或加一个自己的分区;也可以在「个性化找资源」里写清你想要什么',
           )
+        else if (hits.kept.isEmpty)
+          // 找到了但全被屏蔽:明确说是"你的设置"而不是"没内容"
+          AppEmpty(
+            icon: Icons.block_outlined,
+            title: '找到的 ${hits.hidden} 篇都被你的屏蔽设置过滤了',
+            hint: '到「我的 → 学习偏好」调整屏蔽词,或换个题材再找',
+          )
         else
-          for (var i = 0; i < _topicHits.length; i++)
+          for (var i = 0; i < hits.kept.length; i++)
             AppStagger(
               index: i,
-              child: _buildDiscoverCard(theme, _topicHits[i]),
+              child: _buildDiscoverCard(theme, hits.kept[i]),
             ),
       ],
     );
@@ -2096,8 +2327,8 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
   /// 旧版式:76×76 封面 + 右边三行文字(标题/中文标题/一行小按钮)——
   /// 和材料库卡、发现卡几乎一模一样,一屏六张全同宽同高,这就是用户说的
   /// "清一色的竖列功能块"。
-  /// 新版式:卡片宽 232,上半是**通栏 120 高的封面**(有真图时一眼看到原图),
-  /// 下半是标题 + 中文标题 + 一行动作。整块只占约 176 高,横向滑动看更多。
+  /// 新版式:卡片宽 236,上半是**通栏 120 高的封面**(有真图时一眼看到原图),
+  /// 下半是标题 + 中文标题 + 预计难度 + 一行动作。横向滑动看更多。
   ///
   /// 动作保持不变(点卡 = 直接打开阅读,「设为今日精读」仍是卡上小按钮)——
   /// 用户 10/4 明确要求过"点卡片要真的打开",这条不能因为改版式而丢。
@@ -2105,7 +2336,18 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
     final muted = theme.colorScheme.onSurfaceVariant;
     final kind = MaterialLevel.kindOfSource(_sourceId);
     final cn = _titleCnOf(item.title);
-    return AppCard(
+    // C1-17:feed 卡没有本地分析,给"预计难度区间"(口径见 estimateDifficulty);
+    // 卡片高度是定死的,这一行直接占掉原来"中文标题占位行"下方的空隙。
+    final estimate = MaterialLibrary.estimateDifficulty(
+      sourceId: _sourceId,
+      kind: kind,
+    );
+    // 卡片高度定死(横向列表需要确定高度),系统字号放大到 2× 时三行文字 +
+    // 动作行必然溢出。这里把**这张卡**的文字缩放夹到 1.15:不影响全局无障碍
+    // 设置,也保住卡片不出现黄黑条/被裁掉动作按钮。
+    return MediaQuery.withClampedTextScaling(
+      maxScaleFactor: 1.15,
+      child: AppCard(
       variant: AppCardVariant.compact,
       padding: EdgeInsets.zero,
       margin: EdgeInsets.zero,
@@ -2128,9 +2370,9 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
           // 文字区:**必须用 Expanded 包住**,不能直接塞进 Column。
           //
           // 为什么(这是个真坑,不是防御性多余代码):这张卡的高度是由外层
-          // `SizedBox(height: 176)` 定死的,而下面结构里需要"把动作行压到卡底"。
+          // `SizedBox(height: 240)` 定死的,而下面结构里需要"把动作行压到卡底"。
           // 如果文字区用 `Column` + `Spacer`,一旦某行行高比估算的高
-          //(系统字号放大、字体回退、中文行高差异),整列就会超出 176 →
+          //(系统字号放大、字体回退、中文行高差异),整列就会超出 240 →
           // **BOTTOM OVERFLOWED** 黄黑条(v2.9 就栽过同类问题)。
           // `Expanded` 会把它拿到的高度**夹紧**给子列,`Spacer` 再吸收余量:
           // 有余量时贴底,不够时由子列自己裁剪/省略,永不溢出。
@@ -2155,6 +2397,26 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodySmall
                           ?.copyWith(color: muted, fontSize: 11, height: 1.3)),
+                  const SizedBox(height: 2),
+                  // 预计难度区间(不是实测覆盖率):完整口径在区块脚注与
+                  // tooltip 里,卡片内只放一句"预计",避免被误读成精确值。
+                  Tooltip(
+                    message: estimate.basis,
+                    child: Row(
+                      children: [
+                        Icon(Icons.speed, size: 12, color: muted),
+                        const SizedBox(width: 3),
+                        Expanded(
+                          child: Text(
+                            estimate.label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 11, color: muted),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                   const Spacer(),
                   // 动作行:窄卡里两个按钮必须能换行(Wrap),否则又会出现
                   // v2.9 那次"按钮被裁成『原』字"的事故
@@ -2204,6 +2466,7 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
             ),
           ),
         ],
+      ),
       ),
     );
   }

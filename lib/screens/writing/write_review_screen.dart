@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -9,6 +10,7 @@ import '../../config/theme.dart';
 import '../../models/bookmark.dart';
 import '../../models/writing_log.dart';
 import '../../providers/bookmark_provider.dart';
+import '../../services/ability_recorder.dart';
 import '../../services/api_endpoint.dart';
 import '../../services/base_api.dart';
 import '../../services/database.dart';
@@ -721,6 +723,29 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
       }
       _phase = _Phase.result;
     });
+    // E1-5(v3 批 8):写译批改完成 → 能力快照 output(inferred)。
+    // - rubric 成功:用 rubric 总分归一成 0..100 百分比(跨题型可比);
+    // - rubric 失败回退旧解析:score 本身是 0-100,直接按百分比记;
+    // - 同日 upsert:一天批改多篇只留当天最新一条,趋势图不必一天十几个锯齿点;
+    // - unawaited:能力快照是加分项,不能让写库失败/变慢拖住"结果页出现"。
+    if (scored != null && rubric != null) {
+      unawaited(AbilityRecorder.recordScoredOutput(
+        scored: scored,
+        rubric: rubric,
+        taskType: _taskType.label,
+      ));
+    } else {
+      final legacyScore =
+          int.tryParse('${merged['score'] ?? ''}'.trim());
+      if (legacyScore != null) {
+        unawaited(AbilityRecorder.recordOutputScore(
+          score: legacyScore.toDouble(),
+          maxScore: 100,
+          taskType: _taskType.label,
+          note: '写译批改旧解析(0-100 总分)',
+        ));
+      }
+    }
     if (!_promptedSave) {
       _promptedSave = true;
       WidgetsBinding.instance.addPostFrameCallback((_) => _askSaveLog());

@@ -41,6 +41,26 @@ class _BackupScreenState extends State<BackupScreen> {
     super.dispose();
   }
 
+  /// 表名 → 用户能看懂的中文(恢复报告逐行显示用;内部表名不直接给用户看)。
+  String _tableLabel(String table) => switch (table) {
+        'material_translations' => '阅读译文',
+        'exercise_sets' => '题组',
+        'exercise_items' => '题目',
+        'output_attempts' => '输出作答',
+        'ability_snapshots' => '能力快照',
+        'task_events' => '任务事件',
+        'tutor_tasks' => '学习任务',
+        'error_tags' => '错误档案',
+        'word_review' => '复习记录',
+        'rubrics' => '评分标准',
+        'vocabulary' => '生词',
+        'materials' => '材料',
+        'material_content' => '正文',
+        'material_progress' => '阅读进度',
+        'daily_log' => '学习日志',
+        _ => table,
+      };
+
   Future<void> _run(Future<ExportedFile> Function() job, String label) async {
     setState(() => _busy = true);
     try {
@@ -50,9 +70,21 @@ class _BackupScreenState extends State<BackupScreen> {
         _lastExport = file;
         _busy = false;
       });
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('$label 已导出(${file.bytes} 字符)')));
+      // v3 批 8:备份可能被截断(最近 5000 条),截断事实必须让用户看见 ——
+      // 否则用户以为"全备份了",换机后少数据会以为软件丢数据。
+      final notes = file.notes.where((n) => n.trim().isNotEmpty).toList();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            notes.isEmpty
+                ? '$label 已导出(${file.bytes} 字符)'
+                : '$label 已导出(${file.bytes} 字符)${'\n'}${notes.join('\n')}',
+          ),
+          duration: notes.isEmpty
+              ? const Duration(seconds: 4)
+              : const Duration(seconds: 8),
+        ),
+      );
     } catch (e) {
       if (!mounted) return;
       setState(() => _busy = false);
@@ -175,6 +207,7 @@ class _BackupScreenState extends State<BackupScreen> {
     await context.read<VocabProvider>().loadVocabularies();
     if (!mounted) return;
     setState(() => _busy = false);
+    final theme = Theme.of(context);
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -184,7 +217,26 @@ class _BackupScreenState extends State<BackupScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(report.summary),
-            if (report.warnings.isNotEmpty) ...[
+            // v3 批 8:恢复报告逐表条数(用户换机后要能核对"哪些数据回来了")
+            if (report.tables.isNotEmpty) ...[
+              const SizedBox(height: Gap.xs),
+              for (final entry in report.tables.entries)
+                if (entry.value.restored > 0 || entry.value.skipped > 0)
+                  Text(
+                    '· ${_tableLabel(entry.key)}:'
+                    '恢复 ${entry.value.restored}'
+                    '${entry.value.skipped > 0 ? ',跳过 ${entry.value.skipped}' : ''}',
+                    style: AppFont.tagStyle.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+            ],
+            const SizedBox(height: 2),
+            Text(
+              '备份格式版本:${report.backupVersion}',
+              style: AppFont.tagStyle
+                  .copyWith(color: theme.colorScheme.onSurfaceVariant),
+            ),            if (report.warnings.isNotEmpty) ...[
               const SizedBox(height: Gap.xs),
               for (final w in report.warnings)
                 Text(

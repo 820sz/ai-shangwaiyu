@@ -1205,6 +1205,120 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     _picked = 0;
   }
 
+  /// 目录抽屉(v3 批 8 · C1-11):按章节/分块列出来,点一下跳过去。
+  ///
+  /// 为什么用"块"当目录:材料入库按 2500 词一块(长文/书就是多块),块自带
+  /// `title`(书的小节名 / 文章分节);没有标题的块给「第 N 节 · 约 xx 词」。
+  /// 这是用户 11/01 点名"阅读器视觉没重排"里的一项:长材料没有目录等于只能
+  /// 顺着滚,找内容极慢。
+  Future<void> _showToc() async {
+    final theme = Theme.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant;
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (ctx) {
+        final chunks = _chunks;
+        return SafeArea(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(ctx).size.height * 0.7,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(Gap.md, 0, Gap.md, Gap.xs),
+                  child: Row(
+                    children: [
+                      Icon(Icons.list_alt, size: 18, color: theme.colorScheme.primary),
+                      const SizedBox(width: 6),
+                      Text(
+                        '目录',
+                        style: theme.textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                      const Spacer(),
+                      if (chunks.isNotEmpty)
+                        Text(
+                          '共 ${chunks.length} 节',
+                          style: theme.textTheme.bodySmall
+                              ?.copyWith(color: muted),
+                        ),
+                    ],
+                  ),
+                ),
+                if (chunks.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.all(Gap.md),
+                    child: Text(
+                      '这篇材料没有分节信息,先往下读吧',
+                      style: theme.textTheme.bodySmall?.copyWith(color: muted),
+                    ),
+                  )
+                else
+                  Flexible(
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      padding: const EdgeInsets.fromLTRB(Gap.md, 0, Gap.md, Gap.md),
+                      itemCount: chunks.length,
+                      separatorBuilder: (_, _) =>
+                          const Divider(height: 1, thickness: 0.5),
+                      itemBuilder: (_, i) {
+                        final title = '${chunks[i]['title'] ?? ''}'.trim();
+                        final text = '${chunks[i]['text'] ?? ''}';
+                        final words = RegExp(r"[A-Za-z']+")
+                            .allMatches(text)
+                            .length;
+                        final current = i == _lastChunkIndex;
+                        return ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(
+                            current
+                                ? Icons.radio_button_checked
+                                : Icons.radio_button_unchecked,
+                            size: 18,
+                            color: current
+                                ? theme.colorScheme.primary
+                                : muted,
+                          ),
+                          title: Text(
+                            title.isEmpty ? '第 ${i + 1} 节' : title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              fontWeight:
+                                  current ? FontWeight.w700 : FontWeight.w500,
+                              color: current
+                                  ? theme.colorScheme.primary
+                                  : null,
+                            ),
+                          ),
+                          subtitle: Text(
+                            '${words > 0 ? '约 $words 词' : text.isEmpty ? '' : '${text.length} 字符'}'
+                            '${current ? ' · 正在读' : ''}',
+                            style: theme.textTheme.bodySmall
+                                ?.copyWith(color: muted),
+                          ),
+                          onTap: () {
+                            Navigator.pop(ctx);
+                            _scrollToChunk(i);
+                          },
+                        );
+                      },
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   /// 接着上次读:滚到上次的段(不静默跳转 —— 用户点了「继续」才跳)
   void _scrollToChunk(int index) {
     if (_chunks.length <= 1) return;
@@ -1974,6 +2088,8 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
         if (url.trim().isNotEmpty) _openSourceLink(url);
       case 'settings':
         _showReaderSettings();
+      case 'toc':
+        _showToc();
       case 'dictation':
         if (_chunks.isEmpty) return;
         Navigator.push(
@@ -2063,6 +2179,17 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
                     Icon(Icons.format_size, size: 17),
                     SizedBox(width: Gap.xs),
                     Text('阅读设置(字号 / 行距)', style: TextStyle(fontSize: 13)),
+                  ],
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'toc',
+                height: 38,
+                child: Row(
+                  children: [
+                    Icon(Icons.list_alt, size: 17),
+                    SizedBox(width: Gap.xs),
+                    Text('目录(跳到某节)', style: TextStyle(fontSize: 13)),
                   ],
                 ),
               ),

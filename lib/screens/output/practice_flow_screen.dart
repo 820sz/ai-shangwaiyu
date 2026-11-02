@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../../config/design_tokens.dart';
 import '../../models/learner_model.dart';
+import '../../services/ability_recorder.dart';
 import '../../services/database.dart';
 import '../../services/output_composer.dart';
 import '../../services/output_feedback.dart';
@@ -138,6 +139,22 @@ class _PracticeFlowScreenState extends State<PracticeFlowScreen> {
       );
     } catch (_) {
       // 回流失败不影响练习结果展示
+    }
+    // ② E1-5(v3 批 8):练习批改完成 → 能力快照 output(inferred,同日 upsert)。
+    //    放在"批改成功"这个时刻、且在"题组没落库"的提前返回**之前** ——
+    //    批改本身已经产生了一次能力证据,不能因为题组保存失败就不记;
+    //    同日 upsert 保证一天多次练习只留当天最新值,趋势图不被锯齿淹没。
+    //    AbilityRecorder 内部失败静默,不影响作答落库与结果展示。
+    try {
+      await AbilityRecorder.recordScoredOutput(
+        scored: scored,
+        rubric: _rubricOf(_task),
+        taskType: widget.set.section.isNotEmpty
+            ? widget.set.section
+            : _task.type,
+      );
+    } catch (_) {
+      // 双保险:能力快照绝不能反过来影响练习结果
     }
     if (widget.savedSetId <= 0) return;
     try {
@@ -355,12 +372,17 @@ class _PracticeFlowScreenState extends State<PracticeFlowScreen> {
             ),
           ] else ...[
             // ④ 批改结果
-            PracticeResultView(
-              result: _result!,
-              title: '第 ${_index + 1} 题 · 批改结果',
-              reference: task.reference,
-              // 折算档位用本轮实际使用的 rubric(区间/描述是本地事实源)
-              rubric: _rubricOf(task),
+            // 结果出现时做一次入场(AppStagger 本身尊重系统"减少动态"设置):
+            // 批改结果信息密度高,淡入+上滑让用户知道"这是刚出来的新东西"。
+            AppStagger(
+              index: 0,
+              child: PracticeResultView(
+                result: _result!,
+                title: '第 ${_index + 1} 题 · 批改结果',
+                reference: task.reference,
+                // 折算档位用本轮实际使用的 rubric(区间/描述是本地事实源)
+                rubric: _rubricOf(task),
+              ),
             ),
             const SizedBox(height: Gap.sm),
             Row(

@@ -101,41 +101,21 @@ class _WeeklyReportScreenState extends State<WeeklyReportScreen> {
     final reviews = await DatabaseService.getWordReviews();
     final tasks = await DatabaseService.getTutorTasks(now);
 
-    // v3 批 3 收尾:本周输出练习(写作/翻译/回译)聚合 —— 以前周报只有输入侧,
-    // 用户"天天写译、周报里一个字都没有"(数据孤岛)。这里读最近 7 天,
-    // 并对上一周同一窗口再读一次,用于"较上周 ±x%"。
+    // v3 批 3 收尾:本周输出练习(写作/翻译/回译)聚合;v2.23(E1-9)起把解析
+    // 收口到 [WeeklyOutputBlock] —— 助理读的是同一个 OutputFeedback.outputSnapshot、
+    // 同一批键、同一套解析规则(attempts→int、avgScore 保留 null),
+    // 避免"周报说 5 次、助理说 4 次"这种同一天两份数字的情况。
     final output = await OutputFeedback.outputSnapshot(days: 7, now: to);
     final prevOutput = await OutputFeedback.outputSnapshot(
       days: 7,
       now: from.subtract(const Duration(milliseconds: 1)),
     );
-    final outputAttempts = (output['attempts'] as num?)?.toInt() ?? 0;
-    final outputAvgScore = (output['avgScore'] as num?)?.toDouble();
-    final outputPrevAvgScore = (prevOutput['avgScore'] as num?)?.toDouble();
-    final outputDimensions = <String, double>{};
-    final dimRaw = output['dimensionAvg'];
-    if (dimRaw is Map) {
-      for (final entry in dimRaw.entries) {
-        if (entry.value is num) {
-          outputDimensions['${entry.key}'] = (entry.value as num).toDouble();
-        }
-      }
-    }
-    final outputErrorTags = <ErrorTagBrief>[];
-    final tagRaw = output['topErrorTags'];
-    if (tagRaw is Map) {
-      for (final entry in tagRaw.entries) {
-        if (entry.value is num && (entry.value as num) > 0) {
-          outputErrorTags.add(ErrorTagBrief(
-            tag: '${entry.key}',
-            count: (entry.value as num).toInt(),
-          ));
-        }
-      }
-    }
+    final outputBlock = WeeklyOutputBlock.fromSnapshots(
+      current: output,
+      previous: prevOutput,
+    );
     // 有输出练习的那几天也算活跃(以前"只做了输出"会被周报当成没学习)
-    final lastOutRaw = '${output['lastAt'] ?? ''}'.trim();
-    final lastOutputAt = lastOutRaw.isEmpty ? null : DateTime.tryParse(lastOutRaw);
+    final lastOutputAt = outputBlock.lastAt;
 
     // ── 活跃日:把各数据源里"有动作"的自然日并起来 ──
     // 为什么这么拼:没有任何一个接口直接给逐日活跃度(getReadingStats 只有
@@ -243,11 +223,11 @@ class _WeeklyReportScreenState extends State<WeeklyReportScreen> {
         forecast: _forecastFor(reviews, now),
         dailyMinutes: model.dailyMinutes?.value,
         // 输出侧(写作/翻译/回译):次数、rubric 均分与上周对比、维度均分、错误热点
-        outputAttempts: outputAttempts,
-        outputAvgScore: outputAvgScore,
-        outputPrevAvgScore: outputPrevAvgScore,
-        outputDimensions: outputDimensions,
-        outputErrorTags: outputErrorTags,
+        outputAttempts: outputBlock.attempts,
+        outputAvgScore: outputBlock.avgScore,
+        outputPrevAvgScore: outputBlock.prevAvgScore,
+        outputDimensions: outputBlock.dimensions,
+        outputErrorTags: outputBlock.errorTags,
       ),
     );
   }

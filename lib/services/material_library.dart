@@ -643,37 +643,6 @@ class MaterialLibrary {
     return head;
   }
 
-  /// 通用的"按链接/标题去重"(纯函数)。
-  ///
-  /// 为什么把去重放在这里:今日推荐(RSS 偶尔同一篇发两次)、材料库(同一材料
-  /// 从不同来路入库)、分类页(多组检索词命中同一篇)都需要它 —— 三处各写一遍
-  /// 就会出现"这里去了那里没去"的半吊子去重。
-  static List<T> dedupeBy<T>(
-    Iterable<T> items, {
-    required String Function(T) urlOf,
-    required String Function(T) titleOf,
-  }) {
-    final seen = <String>{};
-    final out = <T>[];
-    for (final item in items) {
-      final url = _dedupeKey(urlOf(item));
-      final title = _dedupeKey(titleOf(item));
-      final key = url.isNotEmpty ? 'u:$url' : (title.isNotEmpty ? 't:$title' : '');
-      // 没有链接也没有标题的条目无法判断是否重复:保留,宁可多不可误删
-      if (key.isEmpty || seen.add(key)) out.add(item);
-    }
-    return out;
-  }
-
-  static String _dedupeKey(String raw) {
-    var key = raw.trim().toLowerCase();
-    if (key.isEmpty) return '';
-    while (key.endsWith('/')) {
-      key = key.substring(0, key.length - 1);
-    }
-    return key;
-  }
-
   // ═══════════════════════════════════════════════════════════════════
   // 今日推荐难度标签(元数据区间,不伪造精确覆盖率)
   // ═══════════════════════════════════════════════════════════════════
@@ -686,17 +655,35 @@ class MaterialLibrary {
     'C1+',
   ];
 
-  /// 用**源元数据**给一条 feed 材料一个"预计难度区间"。
+  /// 区间 → 一句用户能看懂的程度词(与区间一起显示,如"预计 B1~B2 · 中等")。
   ///
-  /// 为什么只给区间:列表页拿不到正文,本地覆盖率要抓全文才能算(一次网络往返
-  /// 且可能失败)。这里只根据"材料形态 + 已知长度"给一个诚实的区间,并在 basis
-  /// 里写清依据,绝不冒充"实测覆盖率"。真正分析过的卡(`_dailyAnalysis`)继续
-  /// 显示真实认知率,不用这个。
-  static ({String label, String basis}) estimateDifficulty({
+  /// 用"入门/中等/进阶/高难"而不是"简单/困难":难度是相对的,带价值判断的词
+  /// 会让用户觉得被冒犯(尤其 i+100 快反馈档的用户就爱读难的)。
+  static const Map<String, String> difficultyBandDesc = {
+    'A2~B1': '入门',
+    'B1~B2': '中等',
+    'B2~C1': '进阶',
+    'C1+': '高难',
+  };
+
+  /// 用**源元数据**给一条材料一个"预计难度区间"(纯函数,可单测)。
+  ///
+  /// ## 为什么只给区间、不冒充覆盖率
+  /// 列表页拿不到正文,真实覆盖率必须抓全文 + 本地词频分析(一次网络往返,
+  /// 且可能失败)。所以这里只根据**来源形态 / 材料类型 / 已知长度**给出一个
+  /// 诚实的区间,并把口径写进 [basis](界面必须原样展示"非精确覆盖率")。
+  /// 真正分析过的卡(例如今日精读有 `MaterialAnalysis`)继续显示真实认知率,
+  /// 不用这个估算 —— 两者在界面上必须能区分开。
+  ///
+  /// ## 信号与方向
+  /// - 类型:论文最高(学术英语)、公版书/百科次高(长句多)、播客口语最低
+  ///   (VOA 慢速英语再降一档)、外刊新闻居中;
+  /// - 长度:只有**真实词数**才参考(<300 词降一档,>1500 词升一档);
+  ///   摘要字数不算长度 —— 摘要常常只有一句导语,按它判长短会系统性误判。
+  static ({String label, String band, String difficulty, String basis})
+      estimateDifficulty({
     required String sourceId,
     String kind = '',
-    String title = '',
-    String summary = '',
     int? wordCount,
   }) {
     final k = kind.trim().isNotEmpty
@@ -722,17 +709,119 @@ class MaterialLibrary {
       }
     }
     final band = difficultyBands[idx.clamp(0, difficultyBands.length - 1)];
-    final kindText = kindLabel(k);
-    final lengthText = wc > 0 ? '$wc 词' : '未分析';
+    final difficulty = difficultyBandDesc[band] ?? '中等';
+    // 口径文案是给用户看的,必须说清"估算"与"非精确覆盖率"两件事;
+    // 有真实词数时把"长度"也列进依据,没有就不列(不编信号)
+    final basis = wc > 0
+        ? '根据来源/长度/类型估算,非精确覆盖率'
+        : '根据来源/类型估算,非精确覆盖率';
     return (
-      label: '预计 $band',
-      basis: '$kindText · $lengthText',
+      label: '预计 $band · $difficulty',
+      band: band,
+      difficulty: difficulty,
+      basis: basis,
     );
   }
 
-  /// 从摘要估算词数(纯函数):只用于难度标签的长度信号,不当作正文长度
+  /// 从摘要估算词数(纯函数)。
+  ///
+  /// ⚠️ 只用于"摘要大概多长"这类展示,不作为 [estimateDifficulty] 的长度信号
+  /// (理由见那个函数:摘要长度 ≠ 正文长度)。
   static int excerptWordCount(String text) {
     final matches = RegExp(r"[A-Za-z][A-Za-z'-]*").allMatches(text);
     return matches.length;
   }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // 用户黑名单过滤(C1-14:公开源结果也要遵守「学习偏好」里的屏蔽词)
+  // ═══════════════════════════════════════════════════════════════════
+
+  /// 黑名单过滤的结果:保留项 + 被过滤条数。
+  ///
+  /// 为什么要把"过滤掉几条"一起带出来:用户设了屏蔽词,列表变短时必须告诉他
+  /// "是你自己的设置过滤掉的",否则他会以为公开源没内容了(静默缩短 = 信息丢失)。
+  static BlocklistFilterResult<T> filterBlocked<T>(
+    Iterable<T> items,
+    InputPreferences prefs, {
+    required String Function(T) titleOf,
+    required String? Function(T) sourceOf,
+    required List<String> Function(T) genresOf,
+  }) {
+    final all = items.toList(growable: false);
+    if (prefs.blockedKeywords.isEmpty && prefs.blockedTopics.isEmpty) {
+      return BlocklistFilterResult<T>(kept: all, hidden: 0);
+    }
+    final kept = <T>[];
+    var hidden = 0;
+    for (final item in all) {
+      // 判断口径唯一事实源是 [InputPreferences.allowsMaterial]:
+      // 标题 / 来源 / 题材任一命中屏蔽词即过滤(含大小写不敏感、包含匹配)。
+      if (prefs.allowsMaterial(
+        title: titleOf(item),
+        source: sourceOf(item),
+        genres: genresOf(item),
+      )) {
+        kept.add(item);
+      } else {
+        hidden++;
+      }
+    }
+    return BlocklistFilterResult<T>(kept: kept, hidden: hidden);
+  }
+
+  /// 通用的"按链接/标题去重"(纯函数)。
+  ///
+  /// 为什么把去重放在这里:今日推荐(RSS 偶尔同一篇发两次)、材料库(同一材料
+  /// 从不同链接入库)、分类页(多组检索词命中同一篇)都需要它 —— 三处各写一遍
+  /// 就会出现"这里去了那里没去"的半吊子去重。
+  ///
+  /// 判定:链接**或**标题任一重复即视为重复(链接不同但标题相同的,多半是同一
+  /// 篇被不同 entry 地址收了第二次)。没有链接也没有标题的条目无法判断,保留。
+  static List<T> dedupeBy<T>(
+    Iterable<T> items, {
+    required String Function(T) urlOf,
+    required String Function(T) titleOf,
+  }) {
+    final seenUrls = <String>{};
+    final seenTitles = <String>{};
+    final out = <T>[];
+    for (final item in items) {
+      final url = _dedupeKey(urlOf(item));
+      final title = _dedupeKey(titleOf(item));
+      final dupUrl = url.isNotEmpty && seenUrls.contains(url);
+      final dupTitle = title.isNotEmpty && seenTitles.contains(title);
+      if (dupUrl || dupTitle) continue;
+      if (url.isNotEmpty) seenUrls.add(url);
+      if (title.isNotEmpty) seenTitles.add(title);
+      out.add(item);
+    }
+    return out;
+  }
+
+  static String _dedupeKey(String raw) {
+    var key = raw.trim().toLowerCase();
+    if (key.isEmpty) return '';
+    while (key.endsWith('/')) {
+      key = key.substring(0, key.length - 1);
+    }
+    return key;
+  }
+}
+
+/// [MaterialLibrary.filterBlocked] 的返回值(纯数据,便于界面显示过滤计数)
+class BlocklistFilterResult<T> {
+  /// 通过黑名单的条目(保持原顺序)
+  final List<T> kept;
+
+  /// 被用户自己的屏蔽设置过滤掉的条数(0 = 没过滤)
+  final int hidden;
+
+  const BlocklistFilterResult({required this.kept, required this.hidden});
+
+  /// 有没有条被过滤(界面据此显示"已按你的屏蔽设置过滤 N 条")
+  bool get hasHidden => hidden > 0;
+
+  @override
+  String toString() =>
+      'BlocklistFilterResult(kept: ${kept.length}, hidden: $hidden)';
 }

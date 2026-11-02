@@ -2760,6 +2760,15 @@ class DatabaseService {
           where: 'material_id = ?',
           whereArgs: [id],
         );
+        // v3 批 8:译文属于材料正文的派生物,删材料必须一起删 ——
+        // 否则下次导入同 id 材料会读到"上一次的译文"(source_text 能兜住错位,
+        // 但白占空间且可能显示旧译文)。练习历史(exercise_sets/output_attempts)
+        // **不删**:它是用户的学习记录,材料删了也该能回看。
+        await txn.delete(
+          'material_translations',
+          where: 'material_id = ?',
+          whereArgs: [id],
+        );
         return txn.delete('materials', where: 'id = ?', whereArgs: [id]);
       });
     } catch (e) {

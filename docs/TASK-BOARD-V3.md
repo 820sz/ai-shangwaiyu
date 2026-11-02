@@ -17,6 +17,7 @@
 | ~~v2.19.0~~（2026-11-02，未构建） | — | 停在"其余屏统一"阶段的过渡版本号，未打包；内容已并入 v2.20.0 | — |
 | **v2.20.1+80**（2026-11-02） | 批 6 补漏 | **需求自查后修补**：批改结果页显示「折算档位（约 13~15 分档）」+ 助理「开始」不再先勾完成（复盘完成率不再虚高） | `flutter analyze` 0 error/0 warning；全量测试 **1456 passed + 1 skip + 1 已知假失败**；APK 26.0MB，sha256 `75de2d42d747e1bb28ffa7b0a95dd6805a0145c316e75ab35a06f6e4ab311362`；桌面 `ReadFlow-v2.20.1.apk`；GitHub Release：https://github.com/820sz/ai-shangwaiyu/releases/tag/v2.20.1；自查报告：`docs/AUDIT-v3-2026-11-02.md` |
 | **v2.21.0+81**（2026-11-02） | 批 7 · P1 补漏 | 语境选词填空（从读过的材料挖空练词）+ 难度档辅助调整 UI（输入首页/材料中心，一键可逆）+ 考纲词表 859 词（五类考试，接助理"距目标差多少词"+写词阶按目标词表）+ 写译批改接 rubric（维度分+折算档位，旧评语保留） | `flutter analyze` 0 error/0 warning（8 条存量 info）；全量测试 **1515 passed + 1 skip + 1 已知假失败**；APK 27.4MB，sha256 `644a356f5f159fc462f80ce5e722c564e684d7943433dca3da3b96b7274b7aa9`；桌面 `ReadFlow-v2.21.0.apk`；GitHub Release：https://github.com/820sz/ai-shangwaiyu/releases/tag/v2.21.0 |
+| **v2.22.0+82**（2026-11-02） | 批 8 · 补漏（二） | 写句三题型（改写/纠错/连词成句，离线兜底）+ 题库浏览 + 四阶作答形态差异化 + 练习中心分流（旧版降级）+ 材料按目标排序/去重/来源扩展 + 助理 4 条新诊断与复盘指标（按时率/类型产出/连续跳过）+ 阅读器默认字号下调 + JSON Output/思考档/tool-calls refine | `flutter analyze` 0 error/0 warning（8 条存量 info）；全量测试 **1525 passed + 1 skip + 1 已知假失败**；APK 27.5MB，sha256 `6e34d0bfe899d31d7a568c5080d276d1378451d61d6c044ff4bf2505d51aba5c`；桌面 `ReadFlow-v2.22.0.apk`；GitHub Release：https://github.com/820sz/ai-shangwaiyu/releases/tag/v2.22.0 |
 
 ---
 
@@ -183,9 +184,9 @@
 | P1-2 | **难度档辅助调整 UI** | `suggestBand` 接输入首页/材料中心：有真实依据且建议档≠当前档才显示「建议调到 i+X·依据」，一键应用可逆、不弹窗 | bug-hunter | ✅ v2.21.0 |
 | P1-3 | **考纲词表 assets + 距目标差多少词** | 859 词资产（五类考试多标签、rank 取真实词频）+ `exam_vocab.dart` + `goalWordsGap` 接助理 + 写词阶按目标词表入口 | ai-scout | ✅ v2.21.0 |
 | P1-4 | **写译批改接 rubric** | 写作/翻译选 rubric、先依据后分数、维度分+折算档位、解析失败回退旧逻辑、rubric 明细并入 output_attempts | output-scout | ✅ v2.21.0 |
-| P1-5 | 写句阶多题型入口 | 句式改写/错句纠错/连词成句（提示词已有） | 下一批 | 待做 |
-| P1-6 | 材料中心剩余 | 来源扩展、目标影响排序、小 bug 清扫、今日推荐难度标签 | 下一批 | 待做 |
-| P1-7 | 四阶 UI 差异化 + 题库浏览 + 旧 DrillScreen 退役 | D1-8/D1-13/D1-14 | 下一批 | 待做 |
+| P1-5 | 写句阶多题型入口 | 句式改写/错句纠错/连词成句（提示词已有） | lead | ✅ v2.22.0 |
+| P1-6 | 材料中心剩余 | ✅ 目标排序 + 去重 + 来源扩展（nasa/sciencedaily）；⏳ 今日推荐难度标签、黑名单过滤、小 bug 全量清扫留下批 | output-scout/lead | ⚠️ 部分（v2.22.0） |
+| P1-7 | 四阶 UI 差异化 + 题库浏览 + 旧 DrillScreen 退役 | D1-8/D1-13/D1-14 | lead | ✅ v2.22.0（题库 + 四阶形态差异 + 练习中心分流；旧链路保留数据不可见即退役） |
 
 ---
 

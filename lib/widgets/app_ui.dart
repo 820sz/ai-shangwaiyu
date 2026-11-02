@@ -509,6 +509,16 @@ class _AppStaggerState extends State<AppStagger> {
   bool _shown = false;
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // 无障碍:系统开启"减少动态效果"时不播放入场动画,直接呈现内容。
+    // 这既是系统设置的要求,也能避免测试/低端机上多余的动画帧。
+    if (MediaQuery.maybeDisableAnimationsOf(context) ?? false) {
+      _shown = true;
+    }
+  }
+
+  @override
   void initState() {
     super.initState();
     final delay = Duration(milliseconds: (widget.index * 40).clamp(0, 240));
@@ -523,6 +533,9 @@ class _AppStaggerState extends State<AppStagger> {
 
   @override
   Widget build(BuildContext context) {
+    final reduceMotion =
+        MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+    if (reduceMotion) return widget.child;
     return AnimatedSlide(
       duration: Motion.enter,
       curve: Motion.curve,

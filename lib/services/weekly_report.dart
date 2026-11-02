@@ -125,6 +125,125 @@ class ErrorTagBrief {
   const ErrorTagBrief({required this.tag, required this.count, this.lastAt});
 }
 
+/// 周报「输出」块的取数结果 —— 从 `OutputFeedback.outputSnapshot(...)` 的
+/// **原始 Map** 解析而来(纯函数:不碰数据库、不查时间)。
+///
+/// ## E1-9:周报与助理共用同一份数据层,口径只允许一处
+/// 助理侧(`TutorSnapshotService` → `LearnerSnapshotLoader`)和本页都必须:
+/// - **只调** `OutputFeedback.outputSnapshot(...)`,不各自写 SQL / 不各自读别的表;
+/// - `attempts` 按 int 解析、`avgScore` 按 `double?` 解析 —— **null 保持 null**
+///   (没作答 ≠ 0 分,写成 0 会把"没写"误报成"写得烂");
+/// - 保留原始精度,不在这里四舍五入 / 不折算百分比(展示层才 round);
+/// - 窗口天数由调用方传(周报 7 天、助理 30 天):**差异只在窗口,不在算法**。
+///
+/// 这三条被 `test/weekly_report_consistency_test.dart` 钉住:哪天有人在周报里
+/// 另算一套,测试会立刻指出"哪一边和助理对不上"。
+class WeeklyOutputBlock {
+  /// 本周输出练习次数(0 = 没做;不是 null:快照口径里 attempts 恒有值)
+  final int attempts;
+
+  /// rubric 均分(0..100;null = 没有可评分作答,不能写成 0)
+  final double? avgScore;
+
+  /// 上一周均分(可空;用于"较上周 ±x%",没数据就不显示)
+  final double? prevAvgScore;
+
+  /// 各评分维度均分百分比(key = 维度 key)
+  final Map<String, double> dimensions;
+
+  /// 错误热点(已归一到错误档案的既有标签)
+  final List<ErrorTagBrief> errorTags;
+
+  /// 最近一次作答时间(用来把"只做了输出"的那天也算成活跃日)
+  final DateTime? lastAt;
+
+  const WeeklyOutputBlock({
+    this.attempts = 0,
+    this.avgScore,
+    this.prevAvgScore,
+    this.dimensions = const {},
+    this.errorTags = const [],
+    this.lastAt,
+  });
+
+  /// 把 `OutputFeedback.outputSnapshot(...)` 的两份原始结果解析成周报字段。
+  ///
+  /// [current] 是本周窗口,`[previous]` 是上周窗口(只取 `avgScore` 做环比)。
+  /// 传 null / 缺键 / 脏类型都退化成安全默认值:周报可以少一行结论,
+  /// 但不能因为一条脏数据出现假数字。
+  factory WeeklyOutputBlock.fromSnapshots({
+    required Map<String, Object?> current,
+    Map<String, Object?>? previous,
+  }) {
+    return WeeklyOutputBlock(
+      attempts: outputSnapshotInt(current['attempts']),
+      avgScore: outputSnapshotDouble(current['avgScore']),
+      prevAvgScore:
+          previous == null ? null : outputSnapshotDouble(previous['avgScore']),
+      dimensions: _dimensionsOf(current['dimensionAvg']),
+      errorTags: _errorTagsOf(current['topErrorTags']),
+      lastAt: _dateOf(current['lastAt']),
+    );
+  }
+}
+
+/// `outputSnapshot['attempts']` 的**唯一**解析口径(助理快照也按这个读)
+///
+/// 为什么公开:周报与助理同口径这句话必须能被测试/别处引用,而不是各写一个
+/// `(x as num?)?.toInt()` —— 那种"看起来一样"的重复实现正是口径分叉的起点。
+int outputSnapshotInt(Object? raw) {
+  if (raw is int) return raw;
+  if (raw is num) return raw.toInt();
+  return int.tryParse('${raw ?? ''}') ?? 0;
+}
+
+/// `outputSnapshot['avgScore']` 的**唯一**解析口径。
+///
+/// 关键纪律:**没有值就返回 null**,绝不兜底成 0 —— "本周没写"和"写了 0 分"
+/// 在周报/助理里必须是两句不同的话。
+double? outputSnapshotDouble(Object? raw) {
+  if (raw == null) return null;
+  if (raw is num) return raw.toDouble();
+  final text = '$raw'.trim();
+  if (text.isEmpty || text == 'null') return null;
+  return double.tryParse(text);
+}
+
+Map<String, double> _dimensionsOf(Object? raw) {
+  if (raw is! Map) return const {};
+  final out = <String, double>{};
+  for (final entry in raw.entries) {
+    final key = '${entry.key}'.trim();
+    final value = outputSnapshotDouble(entry.value);
+    if (key.isEmpty || value == null) continue;
+    out[key] = value;
+  }
+  return out;
+}
+
+List<ErrorTagBrief> _errorTagsOf(Object? raw) {
+  if (raw is! Map) return const [];
+  final out = <ErrorTagBrief>[];
+  for (final entry in raw.entries) {
+    final tag = '${entry.key}'.trim();
+    final count = outputSnapshotInt(entry.value);
+    if (tag.isEmpty || count <= 0) continue;
+    out.add(ErrorTagBrief(tag: tag, count: count));
+  }
+  // 次数降序、同次数按标签名:与周报正文的排序规则一致,两次渲染不跳
+  out.sort((a, b) {
+    final byCount = b.count.compareTo(a.count);
+    return byCount != 0 ? byCount : a.tag.compareTo(b.tag);
+  });
+  return out;
+}
+
+DateTime? _dateOf(Object? raw) {
+  final text = '${raw ?? ''}'.trim();
+  if (text.isEmpty || text == 'null') return null;
+  return DateTime.tryParse(text);
+}
+
 /// 一周报告的内容(纯数据,渲染与文案都在这里定稿)
 class WeeklyReport {
   final DateTime from, to;

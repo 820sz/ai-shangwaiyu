@@ -3,7 +3,10 @@ import 'package:flutter/material.dart';
 import '../../config/placement_bank.dart';
 import '../../config/theme.dart';
 import '../../models/learner_model.dart';
+import '../../services/ability_recorder.dart';
+import '../../services/database.dart';
 import '../../services/learner_model_store.dart';
+import '../../services/placement_diagnosis.dart';
 import '../../services/vocab_estimator.dart';
 import '../../services/word_frequency.dart';
 import '../../widgets/waiting.dart';
@@ -200,6 +203,23 @@ class _PlacementTestScreenState extends State<PlacementTestScreen> {
       };
       model = model.copyWith(extras: extras);
       await LearnerModelStore.save(model);
+      // E1-10(v2.23):完整版的语法错题按**题目标签**分项写错误档案 ——
+      // 以前只存一个 grammar_score,用户"语法错在哪"没有画像:错误档案不涨、
+      // 助理的语法薄弱点恒为空。口径见 [_recordGrammarTags]。
+      // (不可信作答已在函数开头提前返回,乱点出来的"错题"不会建档。)
+      await _recordGrammarTags();
+      // E1-5(v3 批 8):测试完成 → 能力快照 vocab(test 来源,value=估计值,
+      // evidence 带区间)。写在这里而不是"打开助理时":能力趋势应该在**测量
+      // 发生的时刻**留点;不做助理的用户也能看到词汇量变化。
+      // AbilityRecorder 内部失败静默,不影响"结果已保存"。
+      await AbilityRecorder.recordPlacement(
+        estimate: result.estimate,
+        low: result.low,
+        high: result.high,
+        cefr: result.cefr,
+        falseAlarmRate: result.falseAlarmRate,
+        full: widget.full,
+      );
       if (!mounted) return;
       setState(() {
         _model = model;
@@ -212,6 +232,39 @@ class _PlacementTestScreenState extends State<PlacementTestScreen> {
       // 保存失败不能吞:用户做完 100 题却白做是最糟的体验
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('结果保存失败,请重试:$e')),
+      );
+    }
+  }
+
+  /// 把本次**语法错题**按考点标签写进错误档案(E1-10)。
+  ///
+  /// ## 为什么不能只存 grammar_score
+  /// 一个"语法 60 分"既不能进错误档案(没有分项标签),也不能被助理的
+  /// 语法薄弱点诊断读到 —— 用户知道"我语法不好",但不知道"是时态还是冠词",
+  /// 后续也就没法安排针对性输入。这里按 [kGrammarQuestions] 每题的 `tag`
+  /// (时态/冠词/介词/主谓一致/虚拟语气)分项累加。
+  ///
+  /// ## 口径
+  /// - **只记错题**,并按 tag 去重:同一类考点错两题也只算"这次又错了这一类"
+  ///   一次 —— 与 `OutputFeedback` 的错误回流口径一致(错误档案回答"反复踩了
+  ///   几次坑",不是"这份卷子有几个空填错");
+  /// - evidence 用该类第一道错题的**题干**,错误档案里能回想起是哪题;
+  /// - 只对完整版生效(速测没有语法题);不可信作答在上游已提前返回;
+  /// - 失败静默:`bumpErrorTag` 内部已兜底,写不进也不影响"结果已保存"。
+  Future<void> _recordGrammarTags() async {
+    if (!widget.full) return;
+    // 选取/去重规则在纯函数里(可单测):只记答错的题,同一考点错多题只记一次,
+    // 证据用该类第一道错题的题干。
+    final evidenceByTag = grammarErrorTags(
+      questions: kGrammarQuestions,
+      answers: _gAnswers,
+    );
+    if (evidenceByTag.isEmpty) return; // 语法全对:没有可记的薄弱点
+    for (final entry in evidenceByTag.entries) {
+      await DatabaseService.bumpErrorTag(
+        source: 'placement',
+        tag: entry.key,
+        evidence: entry.value,
       );
     }
   }
@@ -856,6 +909,10 @@ class _PlacementTestScreenState extends State<PlacementTestScreen> {
       }
     }
     if (wrong.isEmpty) return '语法全对 —— 这批高频考点你已经掌握,可以直接进入材料精读。';
-    return '错题考点:${wrong.toSet().join('、')} —— 这些已记进你的薄弱点,后续导师会安排针对性输入。';
+    // 说"已记进薄弱点"必须真的写成功(E1-10 写 error_tags 与保存模型同一路径;
+    // 不可信/保存失败时不能给用户一个假的"已建档")
+    final recorded = _saved && !_unreliable;
+    return '错题考点:${wrong.toSet().join('、')} —— '
+        '${recorded ? '已记进你的薄弱点,后续导师会安排针对性输入。' : '本次结果未保存,这些考点没有写入错误档案。'}';
   }
 }

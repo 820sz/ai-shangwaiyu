@@ -4,6 +4,7 @@ import '../models/learning_record.dart';
 import 'database.dart';
 import 'exam_vocab.dart';
 import 'input_prefs.dart';
+import 'learner_extras_sync.dart';
 import 'learner_snapshot_loader.dart';
 import 'output_feedback.dart';
 import 'tutor_engine.dart';
@@ -289,6 +290,16 @@ class TutorSnapshotService {
       await _persistAbilities(source, at);
     } catch (_) {
       // 快照写失败不影响本次展示
+    }
+
+    // ⑨ 死字段回写(C1-15):extras['reading_wpm'] / extras['vocab_inferred']
+    //    以前只读不写。打开助理是幂等的高频时机 —— 直接把本次快照已经算好的
+    //    值传进去(不再查一次库),值没变时 LearnerExtrasSync 不会写盘。
+    try {
+      await LearnerExtrasSync.syncReadingWpm(avgWpm: snapshot.avgWpm);
+      await LearnerExtrasSync.syncVocabInferred(model: snapshot.model);
+    } catch (_) {
+      // 回写失败只影响个性化精度,不影响助理展示
     }
 
     return TutorDashboard(
