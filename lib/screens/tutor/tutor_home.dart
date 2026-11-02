@@ -171,6 +171,20 @@ class _TutorHomeScreenState extends State<TutorHomeScreen> {
     }
   }
 
+  /// 任务"开始":只标成进行中(started_at),**不勾完成**(E1-6 的补漏)。
+  ///
+  /// 失败静默不弹窗:跳转已经发生,弹一个"标记失败"只会打断用户;
+  /// 下次刷新任务仍显示待做,用户还能再点。
+  Future<void> _startTask(Map<String, Object?> row) async {
+    final id = row['id'];
+    if (id is! int) return;
+    try {
+      await DatabaseService.updateTutorTaskStatus(id, 'active');
+    } catch (_) {
+      // 状态写失败不影响"开始去做"这件事本身
+    }
+  }
+
   /// 任务打勾回填(落库 done_at;失败不静默)
   Future<void> _completeTask(Map<String, Object?> row) async {
     final id = row['id'];
@@ -583,8 +597,15 @@ class _TutorHomeScreenState extends State<TutorHomeScreen> {
                       onPressed: first == null
                           ? null
                           : () {
-                              _completeTask(first);
-                              if (action != null) _jump(action, jumpArg);
+                              // v3 补漏(E1-6):「开始」只把任务标成进行中再跳过去,
+                              // **不再先勾完成** —— 旧实现点"开始"任务就变已完成,
+                              // 用户根本还没做,复盘完成率因此虚高。
+                              if (action != null) {
+                                _startTask(first);
+                                _jump(action, jumpArg);
+                              } else {
+                                _completeTask(first);
+                              }
                             },
                       icon: Icon(
                         action == null ? Icons.check : Icons.play_arrow,

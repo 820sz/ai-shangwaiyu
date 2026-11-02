@@ -356,6 +356,8 @@ class _PracticeFlowScreenState extends State<PracticeFlowScreen> {
               result: _result!,
               title: '第 ${_index + 1} 题 · 批改结果',
               reference: task.reference,
+              // 折算档位用本轮实际使用的 rubric(区间/描述是本地事实源)
+              rubric: _rubricOf(task),
             ),
             const SizedBox(height: Gap.sm),
             Row(

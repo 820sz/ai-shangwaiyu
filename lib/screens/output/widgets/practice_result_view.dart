@@ -26,12 +26,28 @@ class PracticeResultView extends StatelessWidget {
   /// 再看一次参考答案
   final String? reference;
 
+  /// 本轮的评分标准:用来把 100 分制总分**折算成考场档位**
+  /// (用户 2026-11-01:"维度分 + 折算四六级官方档位都要")。
+  ///
+  /// 为什么不从 [ScoredOutput] 里拿:`ScoredOutput` 只解析模型给的档位文字,
+  /// 而"13~15 分档"这类官方区间在 rubric 的 band.description 里 ——
+  /// rubric 是本地唯一事实源,不该让模型复述(会漂移)。
+  final OutputRubric? rubric;
+
   const PracticeResultView({
     super.key,
     required this.result,
     this.title,
     this.reference,
+    this.rubric,
   });
+
+  /// 把 100 分制总分折算到 rubric 的档位(没有 rubric 或档位为空时 null)。
+  RubricBand? get _convertedBand {
+    final rub = rubric;
+    if (rub == null || rub.bands.isEmpty) return null;
+    return bandOf(result.totalScore, rub.bands);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -56,7 +72,7 @@ class PracticeResultView extends StatelessWidget {
             ),
             const SizedBox(height: Gap.xs),
           ],
-          // ① 总分 + 档位
+          // ① 总分 + 档位 + 折算官方档位
           Row(
             children: [
               RadialGauge(
@@ -84,6 +100,21 @@ class PracticeResultView extends StatelessWidget {
                         color: cs.onSurfaceVariant,
                       ),
                     ),
+                    // v3 补漏(用户批注 #9):把 100 分制折算成考场档位。
+                    // 区间与描述来自本地 rubric(band.description 里写着"约 13~15 分档"),
+                    // 不依赖模型复述,避免每次说法不一样。
+                    if (_convertedBand != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        '折算档位：${_convertedBand!.label}'
+                        '${_convertedBand!.description.isEmpty ? '' : ' · ${_convertedBand!.description}'}',
+                        style: AppFont.tagStyle.copyWith(
+                          color: cs.primary,
+                          fontWeight: FontWeight.w600,
+                          height: 1.35,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
