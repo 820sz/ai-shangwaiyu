@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../models/learner_model.dart';
+import 'database.dart';
 import 'learner_model_store.dart';
 import 'material_prefs.dart';
 
@@ -258,6 +259,196 @@ String _pct(double ratio) => '${(ratio * 100).round()}%';
 
 String _lookups(double value) =>
     value == value.roundToDouble() ? '${value.round()}' : value.toStringAsFixed(1);
+
+// ─────────────────────────────────────────────────────────────────────────
+// 展示用(v3 批 7 · P1-2):把 suggestBand 的结论接到界面 —— 读真实信号、
+// 给一条"可一键应用"的建议。算法/阈值仍然只在上面,不在这里分叉。
+// ─────────────────────────────────────────────────────────────────────────
+
+/// 三个行为信号(**读不到就是 null,suggestBand 自己会按"至少 2 个"防猜**)
+class BandSignals {
+  /// 读完率(0..1):最近读过的材料里,读完的比例
+  final double? finishedRatio;
+
+  /// 查词密度:每 100 词查几次词(越高越费劲)
+  final double? avgLookupPer100;
+
+  /// 读后测验正确率(0..1)
+  final double? quizAccuracy;
+
+  const BandSignals({
+    this.finishedRatio,
+    this.avgLookupPer100,
+    this.quizAccuracy,
+  });
+
+  @override
+  String toString() => 'BandSignals(finished: $finishedRatio, '
+      'lookups/100: $avgLookupPer100, quiz: $quizAccuracy)';
+}
+
+/// 难度档辅助调整的**展示用**结果。
+///
+/// 为什么要有这层:UI 需要判断"显不显示/显示什么文案",而这件事有两条固定规则
+/// (有建议 + 建议档≠当前档才显示;文案必须带上依据窗口),两屏各写一遍迟早
+/// 一边显示"建议降到 i+1"、另一边不显示。这里把判断收口,UI 只渲染。
+class BandAdvice {
+  /// 当前难度档(建议相对它计算;用于"建议≠当前档"判断)
+  final DifficultyBand current;
+
+  /// 建议(null = 数据不足 / 信号冲突 / 当前是不限 → **不显示,不占位**)
+  final BandSuggestion? suggestion;
+
+  /// 依据的时间窗口(天)。写进文案"按最近 N 天表现",不写死 30。
+  final int days;
+
+  const BandAdvice({required this.current, this.suggestion, this.days = 30});
+
+  /// 是否值得出现在界面上:有建议,且建议档确实不同于当前档。
+  /// (算法保证不同,但 UI 不依赖隐含保证 —— 同档建议等于白占一行。)
+  bool get shouldShow => suggestion != null && suggestion!.band != current;
+
+  /// 建议正文;不显示时 null(UI 可以直接 `if (advice.line != null)`)。
+  String? get line =>
+      shouldShow ? '按最近 $days 天表现：${suggestion!.text}' : null;
+
+  /// 一键应用按钮文案;不显示时 null。
+  String? get actionLabel => shouldShow ? '调到 ${suggestion!.band.label}' : null;
+
+  @override
+  String toString() => 'BandAdvice(current: ${current.rawValue}, '
+      'show: $shouldShow, suggestion: $suggestion)';
+}
+
+/// 从真实使用数据算三个行为信号(只读;任一来源失败只丢那一项,不抛)。
+///
+/// 口径(与 [InputPrefsThresholds] 一一对应,UI 不得另算):
+/// - [BandSignals.finishedRatio] = 最近 [materialLimit] 份**动过**的材料里读完的比例
+///   (`material_progress.finished_at` 是事实源;入库但从没打开的材料不算分母 ——
+///   否则"收藏了一堆没读"会被误读成"读不下去");
+/// - [BandSignals.avgLookupPer100] = 累计查词 ÷ **估算已读词数** × 100。
+///   已读词数按 `percent × word_count` 估算(percent 是阅读位置百分比);
+///   样本 <200 词直接不给值 —— 读 3 个词查 1 次词会算出 33 次/100 词,那是噪声;
+/// - [BandSignals.quizAccuracy] = 读后测验正确率;没有该 kind 时用非「词汇量测试」
+///   类测验的平均(词汇量测试是水平测量,不代表材料难不难读)。
+Future<BandSignals> loadBandSignals({
+  int days = 30,
+  int materialLimit = 20,
+  DateTime? now,
+}) async {
+  final at = now ?? DateTime.now();
+  final cutoff = at.subtract(Duration(days: days <= 0 ? 30 : days));
+
+  double? finishedRatio;
+  double? avgLookupPer100;
+  double? quizAccuracy;
+
+  try {
+    final rows = await DatabaseService.getRecentMaterials(limit: materialLimit);
+    var started = 0;
+    var finished = 0;
+    var wordsRead = 0.0;
+    var lookups = 0.0;
+    for (final row in rows) {
+      final percent = (row['percent'] as num?)?.toDouble() ?? 0;
+      final finishedAt = DateTime.tryParse('${row['finished_at'] ?? ''}');
+      final updatedAt = DateTime.tryParse('${row['updated_at'] ?? ''}');
+      if (updatedAt == null || updatedAt.isBefore(cutoff)) continue;
+      if (percent <= 0 && finishedAt == null) continue;
+      started++;
+      if (finishedAt != null) finished++;
+      final id = (row['material_id'] as num?)?.toInt() ??
+          (row['id'] as num?)?.toInt();
+      final wordCount = (row['word_count'] as num?)?.toInt() ?? 0;
+      if (id == null || wordCount <= 0) continue;
+      // 查词累计在 material_progress.lookups(阅读器每查一个词 +=1),
+      // getRecentMaterials 不返回这一列,所以按材料补一次读(最多 materialLimit 次)。
+      final progress = await DatabaseService.getMaterialProgress(id);
+      final materialLookups = (progress?['lookups'] as num?)?.toInt() ?? 0;
+      if (materialLookups <= 0) continue;
+      final effectivePercent =
+          finishedAt != null ? 100.0 : percent.clamp(0.0, 100.0);
+      wordsRead += wordCount * effectivePercent / 100;
+      lookups += materialLookups;
+    }
+    if (started > 0) finishedRatio = finished / started;
+    if (wordsRead >= 200) avgLookupPer100 = lookups / wordsRead * 100;
+  } catch (e) {
+    debugPrint('ReadFlow 计算读完率/查词密度失败(已降级): $e');
+  }
+
+  try {
+    final accuracy =
+        await DatabaseService.getQuizAccuracy(days: days <= 0 ? 30 : days);
+    final reading = accuracy['reading_comprehension'];
+    if (reading != null) {
+      quizAccuracy = reading;
+    } else {
+      final values = [
+        for (final entry in accuracy.entries)
+          if (entry.key != 'vocab_placement') entry.value,
+      ];
+      if (values.isNotEmpty) {
+        quizAccuracy = values.reduce((a, b) => a + b) / values.length;
+      }
+    }
+  } catch (e) {
+    debugPrint('ReadFlow 计算读后测验正确率失败(已降级): $e');
+  }
+
+  return BandSignals(
+    finishedRatio: finishedRatio,
+    avgLookupPer100: avgLookupPer100,
+    quizAccuracy: quizAccuracy,
+  );
+}
+
+/// 读当前难度档 + 真实信号,得到一条"要不要调档"的展示建议。
+///
+/// 为什么收在 service 而不是各屏自己拼:输入首页与材料中心必须给出**同一条**
+/// 建议(用户会在两屏之间来回切),两处各读一遍数据必然出现"首页说可以升,
+/// 材料中心没建议"。这里只读、**不写偏好** —— 应用动作由 UI 显式调用
+/// [applyBandSuggestion],用户不点就什么都不改。
+Future<BandAdvice> loadBandAdvice({
+  int days = 30,
+  int materialLimit = 20,
+  DateTime? now,
+}) async {
+  final prefs = InputPreferences.load();
+  // 「不限」没有"当前档"可比,suggestBand 也按同语义返回 null;
+  // 提前返回还能省掉一轮 DB 查询(没选档的用户占大多数)。
+  if (prefs.band.isAny) return BandAdvice(current: prefs.band, days: days);
+  final signals = await loadBandSignals(
+    days: days,
+    materialLimit: materialLimit,
+    now: now,
+  );
+  return BandAdvice(
+    current: prefs.band,
+    days: days,
+    suggestion: suggestBand(
+      finishedRatio: signals.finishedRatio,
+      avgLookupPer100: signals.avgLookupPer100,
+      quizAccuracy: signals.quizAccuracy,
+      current: prefs.band,
+    ),
+  );
+}
+
+/// 一键应用一条难度建议(两个入口共用;写的就是 [MaterialPrefs.band] ——
+/// [InputPreferences.load] 与输出/材料推荐读的是同一个 Hive key,不需要第二套写回)。
+///
+/// 返回是否写入成功;失败静默(false) —— UI 提示"保存失败"即可,不能因此崩。
+Future<bool> applyBandSuggestion(BandSuggestion suggestion) async {
+  try {
+    final prefs = MaterialPrefs.load();
+    await prefs.copyWith(band: suggestion.band.materialBand).save();
+    return true;
+  } catch (e) {
+    debugPrint('ReadFlow 应用难度建议失败(已忽略): $e');
+    return false;
+  }
+}
 
 /// 输入偏好的**不可变值对象**(UI 只读,写走 [saveBand] 或原页面)
 ///

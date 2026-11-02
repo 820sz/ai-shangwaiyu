@@ -5,8 +5,10 @@ import 'package:flutter/material.dart';
 
 import '../../config/design_tokens.dart';
 import '../../models/learner_model.dart';
+import '../../services/cloze_practice.dart';
 import '../../services/database.dart';
 import '../../services/deepseek_api.dart';
+import '../../services/exam_vocab.dart';
 import '../../services/input_prefs.dart';
 import '../../services/learner_model_store.dart';
 import '../../services/output_bank.dart';
@@ -19,6 +21,7 @@ import '../../widgets/graphics/graphics.dart';
 import '../../widgets/material_cover.dart';
 import '../../widgets/waiting.dart';
 import '../review/review_screen.dart';
+import 'cloze_practice_screen.dart';
 import 'practice_flow_screen.dart';
 import 'word_bank_drill_screen.dart';
 
@@ -56,12 +59,37 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
   String _busyLabel = '';
   String? _error;
 
+  /// 按目标记的考纲词表(v3 批 7 P1-3):有目标且 assets 加载成功才出现,
+  /// 让"写词"能按四级/六级/考研/雅思/托福分表练,而不是只吃一个四六级精选池。
+  String? _examId;
+  List<ExamWord> _examWords = const [];
+
   @override
   void initState() {
     super.initState();
     _prefs = InputPreferences.load();
     _model = LearnerModelStore.load();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _loadMaterials());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadMaterials();
+      _loadExamVocab();
+    });
+  }
+
+  /// 读考纲词表(assets 只读一次,失败静默 —— 没有词表时页面照常可用)。
+  Future<void> _loadExamVocab() async {
+    try {
+      await ExamVocab.ensureLoaded();
+      final id = ExamVocab.primaryExam(_prefs.examGoals);
+      if (id == null) return;
+      final words = ExamVocab.wordsFor(id, limit: 400);
+      if (!mounted || words.isEmpty) return;
+      setState(() {
+        _examId = id;
+        _examWords = words;
+      });
+    } catch (_) {
+      // 词表加载失败只是少一条来源,不影响已读材料/内置词表
+    }
   }
 
   Future<void> _loadMaterials() async {
@@ -93,6 +121,102 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
         OutputTier.essay => '两种来源:按目标考试抓真题,或用内置真题风格题目按 rubric 练',
         OutputTier.word => '两种来源:复习你的生词本,或按目标练内置考纲/外刊高频词',
       };
+
+  /// 按目标考试词表练词(v3 批 7 P1-3):用 assets 里的考纲词表,
+  /// 让四六级/考研/雅思/托福考生能按自己的词表练,而不是只有四六级精选池。
+  Future<void> _practiceExamWords() async {
+    if (_busy || _examWords.isEmpty) return;
+    final pool = <WordBankEntry>[
+      for (final w in _examWords) WordBankEntry(w.word, w.zh, w.pos),
+    ];
+    final words = OutputBank.pickWords(pool, 10);
+    if (words.isEmpty) return;
+    final label = ExamVocab.examLabels[_examId ?? ''] ?? '考纲';
+    await appPush(
+      context,
+      (_) => WordBankDrillScreen(words: words, sourceTitle: '$label·考纲词'),
+    );
+  }
+
+  /// 从读过的材料练词(语境选词填空):目标词 = 生词本 ∩ 材料,干扰项取同文真实词。
+  ///
+  /// 用户核心哲学:"背单词功能必须基于输入输出闭环与材料语境。"
+  /// 这是把"背过的词"接回"读过的句子"的桥:生词本没有命中材料时退回考纲精选词
+  /// (仍是材料里出现的词,语境不变),不编句子。
+  Future<void> _practiceCloze() async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _busyLabel = '正在从你读过的材料里挑句子…';
+      _error = null;
+    });
+    try {
+      final materials = _materials.isNotEmpty
+          ? _materials
+          : await OutputSourceService.recentMaterials(limit: 3);
+      if (!mounted) return;
+      if (materials.isEmpty) {
+        setState(() {
+          _busy = false;
+          _error = '还没有读过的材料。先去「输入」读一篇,再回来练语境填空。';
+        });
+        return;
+      }
+      // 目标词优先用生词本(有中文释义、是单词而不是短语/句子)
+      final meanings = <String, String>{};
+      try {
+        final vocab = await DatabaseService.getVocabularies(limit: 500);
+        for (final v in vocab) {
+          if (v.wordType != 'word') continue;
+          final zh = (v.translation ?? '').trim();
+          final word = v.word.trim();
+          if (word.isEmpty || zh.isEmpty) continue;
+          meanings[word] = zh;
+        }
+      } catch (_) {
+        // 生词本读失败就用下面的精选词兜底
+      }
+      // 生词本为空/没命中时:用考纲精选词作目标词池(仍只在本材料句子里挖空)
+      if (meanings.isEmpty) {
+        for (final w in [...OutputBank.cet4Words, ...OutputBank.newsWords]) {
+          meanings[w.word] = w.meaning;
+        }
+      }
+      final bankWords = <String>[
+        for (final w in [...OutputBank.cet4Words, ...OutputBank.newsWords]) w.word,
+      ];
+      ClozeSet? built;
+      for (final material in materials) {
+        final candidate = ClozePractice.build(
+          materialTitle: material.title,
+          materialText: material.text,
+          candidateMeanings: meanings,
+          poolWords: bankWords,
+          count: 6,
+        );
+        if (candidate.length >= 3) {
+          built = candidate;
+          break;
+        }
+      }
+      if (!mounted) return;
+      if (built == null) {
+        setState(() {
+          _busy = false;
+          _error = '这篇材料里没找到足够的目标词。可以先「按目标练词」积累一些,或换一篇材料。';
+        });
+        return;
+      }
+      setState(() => _busy = false);
+      await appPush(context, (_) => ClozePracticeScreen(set: built!));
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = '准备语境填空题失败:$e';
+      });
+    }
+  }
 
   /// 按目标/需求练(内置素材库):不依赖已读材料,离线可用。
   ///
@@ -393,6 +517,76 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
           ),
           const SizedBox(height: Gap.xs),
           if (widget.tier == OutputTier.word) ...[
+            // v3 批 7:语境选词填空 —— 用你读过的句子挖空,替之前"只有孤立词卡"的空档
+            AppCard(
+              variant: AppCardVariant.compact,
+              onTap: _busy ? null : _practiceCloze,
+              child: Row(
+                children: [
+                  Icon(Icons.auto_stories_outlined, size: 18, color: cs.primary),
+                  const SizedBox(width: Gap.xs),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '从读过的材料练词（语境填空）',
+                          style: AppFont.subheadStyle.copyWith(
+                            color: cs.onSurface,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '在你读过的句子里挖掉生词，四选一补回来 —— 词要回到上下文里才算会',
+                          style: AppFont.tagStyle
+                              .copyWith(color: cs.onSurfaceVariant, height: 1.35),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(Icons.chevron_right, size: 18, color: cs.outline),
+                ],
+              ),
+            ),
+            const SizedBox(height: Gap.xs),
+            // 按目标考试词表练(v3 批 7):只有"识别出你的目标 + 词表加载成功"才出现
+            if (_examWords.isNotEmpty) ...[
+              AppCard(
+                variant: AppCardVariant.compact,
+                onTap: _busy ? null : _practiceExamWords,
+                child: Row(
+                  children: [
+                    Icon(Icons.school_outlined, size: 18, color: cs.primary),
+                    const SizedBox(width: Gap.xs),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '按${ExamVocab.examLabels[_examId ?? ''] ?? '考纲'}词表练',
+                            style: AppFont.subheadStyle.copyWith(
+                              color: cs.onSurface,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            '你的目标词表 · ${_examWords.length} 词已收录，拼写与中译英',
+                            style: AppFont.tagStyle.copyWith(
+                              color: cs.onSurfaceVariant,
+                              height: 1.35,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Icon(Icons.chevron_right, size: 18, color: cs.outline),
+                  ],
+                ),
+              ),
+              const SizedBox(height: Gap.xs),
+            ],
             AppCard(
               variant: AppCardVariant.compact,
               onTap: _busy

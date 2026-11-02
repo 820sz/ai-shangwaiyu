@@ -79,6 +79,12 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
   /// 输入偏好统一层(v3 批 2):目标(多选)/兴趣/难度档/时间都从这里读,
   /// 与「输入」首页的「我的需求」是同一份数据 —— 两处显示不能不一致。
   InputPreferences _inputPrefs = InputPreferences.load();
+
+  /// 难度档辅助调整建议(v3 批 7 · P1-2):`suggestBand` 的展示结果。
+  ///
+  /// 为什么放在页面 state 而不是每次 build 现算:算它要读 SQLite(材料进度 +
+  /// 测验准确率),不能在 build 里做;null = 还没算完 / 没有建议,两种都**不占位**。
+  BandAdvice? _bandAdvice;
   bool _onlyFit = false;
   Map<String, SourceHealth> _health = const {};
   bool _probing = false;
@@ -130,7 +136,21 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
       _loadTopics([_availableTopics.first]);
       // 已有的材料里还没中文名的,后台补齐(用户为此提过两次)
       unawaited(_backfillShelfTitles());
+      // 难度档辅助调整:用最近真实行为算一条建议(数据不足时静默不显示)
+      unawaited(_loadBandAdvice());
     });
+  }
+
+  /// 读真实信号并算"要不要调档"的建议(失败静默:建议只是锦上添花,
+  /// 不能因为它读不到就让材料中心打不开)。
+  Future<void> _loadBandAdvice() async {
+    try {
+      final advice = await loadBandAdvice();
+      if (!mounted) return;
+      setState(() => _bandAdvice = advice);
+    } catch (e) {
+      debugPrint('材料中心难度建议读取失败(已忽略): $e');
+    }
   }
 
   Future<void> _loadShelf() async {
@@ -561,6 +581,9 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
     if (!mounted) return;
     _model = LearnerModelStore.load();
     await _loadShelf();
+    // 读完/读了一半会改变"读完率"与查词密度 —— 回来重算建议,
+    // 否则用户刚读完一本,卡上还挂着按旧数据算的建议
+    unawaited(_loadBandAdvice());
   }
 
   Future<void> _import() async {
@@ -1085,7 +1108,30 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
             _prefs.band.description,
             style: AppFont.tagStyle.copyWith(color: muted, height: 1.35),
           ),
+          // 难度档辅助调整(v3 批 7 · P1-2):有真实数据支撑且建议档≠当前档时,
+          // 在卡内多一行"建议 + 一键应用";数据不足时 `shouldShow=false` → 零占位。
+          if (_bandAdvice != null)
+            BandAdviceBanner(
+              advice: _bandAdvice!,
+              onApply: () => _applyBandAdvice(_bandAdvice!),
+            ),
         ],
+      ),
+    );
+  }
+
+  /// 一键应用建议:写偏好(材料中心/输入首页/输出共用同一份)+ 重排材料库,
+  /// 然后收起建议并给一句可逆提示 —— 用户随时能在「调整」里改回。
+  Future<void> _applyBandAdvice(BandAdvice advice) async {
+    final suggestion = advice.suggestion;
+    if (suggestion == null) return;
+    // 先收起建议:档位已经改到建议档,旧提示继续挂在卡上会显得"没生效"
+    setState(() => _bandAdvice = null);
+    await _quickSwitchBand(suggestion.band.materialBand);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('已调到 ${suggestion.band.label},可随时在「调整」里改回'),
       ),
     );
   }
@@ -1098,6 +1144,8 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
       _inputPrefs = _inputPrefs.withBand(
         DifficultyBand.bandOf(band.name),
       );
+      // 用户手动改过档后,旧建议就过期了 —— 立刻收起,避免"建议还在但档已变"
+      _bandAdvice = null;
     });
     await next.save();
     // 全 App 同步:难度档也写进输入偏好层(材料中心/输入首页/输出共用)
@@ -2235,3 +2283,92 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
 /// 词频表在使用前必须先加载(分析依赖它);这里给一个统一的预热入口,
 /// 让调用方(材料中心/阅读器)在打开前调用一次即可。
 Future<void> warmUpWordFrequency() => WordFrequency.ensureLoaded();
+
+/// 难度档「软件辅助调整」建议条(v3 批 7 · P1-2)。
+///
+/// 用户 11/01 批注第 7 条要求「难度档用户自选 + 全 App 同步 + **软件辅助调整**」;
+/// 前两项已在 v2.14 做完,这条把纯函数 `suggestBand` 的结论真的接到界面上:
+/// - **不弹窗、不强制**:只在「我的需求」区多一行;点按钮才真的改档,
+///   不点就什么都不变(与"用户自选"不冲突 —— 软件只给依据,决定权仍在人);
+/// - **不占位**:数据不足/信号冲突/档位=不限时返回零尺寸,不留空行;
+/// - **依据真实**:文案里的读完率/查词密度/正确率全部来自最近真实使用数据。
+///
+/// 为什么做成公开 widget 而不是两屏各写一个私有方法:
+/// 1. 输入首页与材料中心的这条建议必须**一字不差**(口径分叉 = 用户困惑);
+/// 2. widget test 可以直接注入假 [BandAdvice] 渲染"显示/不显示"两种情况,
+///    不必启动 Hive/SQLite(数据读取在 `loadBandAdvice` 里,与渲染解耦)。
+class BandAdviceBanner extends StatelessWidget {
+  /// 展示用建议(含当前档/建议档/文案);`shouldShow=false` 时零尺寸
+  final BandAdvice advice;
+
+  /// 用户点「调到 i+X」时调用(应用动作由所在页面负责:写偏好 + 刷新)
+  final VoidCallback onApply;
+
+  const BandAdviceBanner({
+    super.key,
+    required this.advice,
+    required this.onApply,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // 没有建议就是零尺寸:SizedBox.shrink 不参与布局,不会在卡内留空行
+    if (!advice.shouldShow) return const SizedBox.shrink();
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final line = advice.line;
+    final action = advice.actionLabel;
+    if (line == null || action == null) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: Gap.xs),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.fromLTRB(Gap.sm, Gap.xs, Gap.sm, Gap.xxs),
+        decoration: BoxDecoration(
+          // 用主色低透明度做"系统提示"底色:明暗两套主题都成立,不硬编码颜色
+          color: cs.primary.withAlpha(12),
+          borderRadius: Radii.controlRadius,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.auto_awesome, size: 15, color: cs.primary),
+                const SizedBox(width: Gap.xxs),
+                Expanded(
+                  child: Text(
+                    line,
+                    style: AppFont.tagStyle.copyWith(
+                      color: cs.onSurfaceVariant,
+                      height: 1.45,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: Gap.xs),
+                  minimumSize: const Size(0, 32),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                onPressed: onApply,
+                child: Text(
+                  action,
+                  style: AppFont.tagStyle.copyWith(
+                    color: cs.primary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

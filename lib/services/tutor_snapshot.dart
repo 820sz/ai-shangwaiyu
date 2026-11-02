@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import '../models/learning_record.dart';
 import 'database.dart';
+import 'exam_vocab.dart';
 import 'input_prefs.dart';
 import 'learner_snapshot_loader.dart';
 import 'output_feedback.dart';
@@ -159,6 +160,17 @@ class TutorSnapshotService {
             ? ((vocabHigh - vocabLow) / 2).round()
             : null;
 
+    // 距目标词表还差多少词(批 7 · P1-3):需要"词表资产 + 词汇量基线"两者。
+    // 词表加载失败/没有基线都退回 null(维度里就不出现这条依据),绝不编数字;
+    // 单独 try/catch:词表问题不能把整页五维拖垮。
+    int? goalWordsGap;
+    try {
+      await ExamVocab.ensureLoaded();
+      goalWordsGap = ExamVocab.goalWordsGap(prefs.examGoals, vocabEstimate);
+    } catch (_) {
+      goalWordsGap = null;
+    }
+
     final source = InsightSource(
       vocabEstimate: vocabEstimate,
       vocabCi: vocabCi,
@@ -179,8 +191,7 @@ class TutorSnapshotService {
           ? snapshot.model.dailyMinutes!.value
           : null,
       examGoals: prefs.examGoals,
-      // 距目标词表还差多少词:还没有考纲词表数据源 → 不编
-      goalWordsGap: null,
+      goalWordsGap: goalWordsGap,
     );
 
     final insights = buildTutorInsights(source);

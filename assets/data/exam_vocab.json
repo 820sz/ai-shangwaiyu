@@ -1,0 +1,9601 @@
+{
+  "meta": {
+    "name": "常用考试词精选(四六级/考研/雅思/托福)",
+    "version": 1,
+    "generated_at": "2026-11-02",
+    "license": "人工整理的常用考试词精选,仅用于本 App 练习;不再分发",
+    "source": "词条的中文/词性人工整理;rank 取自 assets/data/en_freq_50k.txt 的全局频次排名(OpenSubtitles 2018 语料,MIT)",
+    "tag_rule": "近似口径(非官方考纲):按全局词频档位近似划分词表广度——cet4(≤4500)/kaoyan(≤5500)/cet6(≤6000)/ielts(≤7000)/toefl(其余全收)。真实考纲组成各有侧重,本字段只用于目标规模估算与按目标挑词。",
+    "count": 859
+  },
+  "words": [
+    {
+      "word": "understand",
+      "zh": "理解",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 235
+    },
+    {
+      "word": "cause",
+      "zh": "原因；导致",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 555
+    },
+    {
+      "word": "serious",
+      "zh": "严肃的；严重的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 588
+    },
+    {
+      "word": "sense",
+      "zh": "感觉；意义",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 638
+    },
+    {
+      "word": "fault",
+      "zh": "过错",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 676
+    },
+    {
+      "word": "explain",
+      "zh": "解释",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 695
+    },
+    {
+      "word": "wonder",
+      "zh": "想知道；奇迹",
+      "pos": "v./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 703
+    },
+    {
+      "word": "worth",
+      "zh": "值得",
+      "pos": "adj./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 706
+    },
+    {
+      "word": "figure",
+      "zh": "数字；人物；认为",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 714
+    },
+    {
+      "word": "suppose",
+      "zh": "假设",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 765
+    },
+    {
+      "word": "evidence",
+      "zh": "证据",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 766
+    },
+    {
+      "word": "imagine",
+      "zh": "想象",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 777
+    },
+    {
+      "word": "attack",
+      "zh": "攻击",
+      "pos": "v./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 794
+    },
+    {
+      "word": "expect",
+      "zh": "期望",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 797
+    },
+    {
+      "word": "entire",
+      "zh": "整个的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 814
+    },
+    {
+      "word": "handle",
+      "zh": "处理；把手",
+      "pos": "v./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 821
+    },
+    {
+      "word": "protect",
+      "zh": "保护",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 825
+    },
+    {
+      "word": "situation",
+      "zh": "情况",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 831
+    },
+    {
+      "word": "simple",
+      "zh": "简单的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 847
+    },
+    {
+      "word": "normal",
+      "zh": "正常的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 863
+    },
+    {
+      "word": "charge",
+      "zh": "收费；控告",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 874
+    },
+    {
+      "word": "honor",
+      "zh": "荣誉",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 875
+    },
+    {
+      "word": "accident",
+      "zh": "事故",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 893
+    },
+    {
+      "word": "major",
+      "zh": "主要的；专业",
+      "pos": "adj./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 907
+    },
+    {
+      "word": "offer",
+      "zh": "提供",
+      "pos": "v./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 909
+    },
+    {
+      "word": "relax",
+      "zh": "放松",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 919
+    },
+    {
+      "word": "scene",
+      "zh": "场景",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 944
+    },
+    {
+      "word": "respect",
+      "zh": "尊重",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 949
+    },
+    {
+      "word": "judge",
+      "zh": "判断；法官",
+      "pos": "v./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 981
+    },
+    {
+      "word": "prove",
+      "zh": "证明",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 987
+    },
+    {
+      "word": "private",
+      "zh": "私人的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 988
+    },
+    {
+      "word": "realize",
+      "zh": "意识到；实现",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 994
+    },
+    {
+      "word": "accept",
+      "zh": "接受",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1011
+    },
+    {
+      "word": "contact",
+      "zh": "联系",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1029
+    },
+    {
+      "word": "huge",
+      "zh": "巨大的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1032
+    },
+    {
+      "word": "continue",
+      "zh": "继续",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1039
+    },
+    {
+      "word": "appreciate",
+      "zh": "欣赏；感激",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1040
+    },
+    {
+      "word": "support",
+      "zh": "支持",
+      "pos": "v./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1083
+    },
+    {
+      "word": "victim",
+      "zh": "受害者",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1097
+    },
+    {
+      "word": "arrest",
+      "zh": "逮捕",
+      "pos": "v./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1109
+    },
+    {
+      "word": "owe",
+      "zh": "欠",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1120
+    },
+    {
+      "word": "patient",
+      "zh": "病人；耐心的",
+      "pos": "n./adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1126
+    },
+    {
+      "word": "blame",
+      "zh": "责备",
+      "pos": "v./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1159
+    },
+    {
+      "word": "otherwise",
+      "zh": "否则",
+      "pos": "adv.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1182
+    },
+    {
+      "word": "favor",
+      "zh": "恩惠；赞成",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1186
+    },
+    {
+      "word": "notice",
+      "zh": "注意",
+      "pos": "v./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1188
+    },
+    {
+      "word": "innocent",
+      "zh": "无辜的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1196
+    },
+    {
+      "word": "guilty",
+      "zh": "有罪的；内疚的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1210
+    },
+    {
+      "word": "duty",
+      "zh": "责任；关税",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1213
+    },
+    {
+      "word": "destroy",
+      "zh": "破坏",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1220
+    },
+    {
+      "word": "according",
+      "zh": "根据",
+      "pos": "adv.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1223
+    },
+    {
+      "word": "admit",
+      "zh": "承认；准许进入",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1229
+    },
+    {
+      "word": "witness",
+      "zh": "目击者；目睹",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1232
+    },
+    {
+      "word": "energy",
+      "zh": "能量；精力",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1245
+    },
+    {
+      "word": "waste",
+      "zh": "浪费",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1247
+    },
+    {
+      "word": "mention",
+      "zh": "提到",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1263
+    },
+    {
+      "word": "pressure",
+      "zh": "压力",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1283
+    },
+    {
+      "word": "treat",
+      "zh": "对待；治疗",
+      "pos": "v./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1293
+    },
+    {
+      "word": "spirit",
+      "zh": "精神",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1296
+    },
+    {
+      "word": "cost",
+      "zh": "花费",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1298
+    },
+    {
+      "word": "suspect",
+      "zh": "怀疑；嫌疑人",
+      "pos": "v./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1327
+    },
+    {
+      "word": "local",
+      "zh": "当地的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1361
+    },
+    {
+      "word": "deserve",
+      "zh": "值得",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1362
+    },
+    {
+      "word": "consider",
+      "zh": "考虑",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1367
+    },
+    {
+      "word": "faith",
+      "zh": "信念",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1380
+    },
+    {
+      "word": "responsible",
+      "zh": "负责的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1383
+    },
+    {
+      "word": "military",
+      "zh": "军事的",
+      "pos": "adj./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1384
+    },
+    {
+      "word": "opportunity",
+      "zh": "机会",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1386
+    },
+    {
+      "word": "advice",
+      "zh": "建议",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1450
+    },
+    {
+      "word": "trial",
+      "zh": "审判；试验",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1460
+    },
+    {
+      "word": "account",
+      "zh": "账户；解释",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1467
+    },
+    {
+      "word": "career",
+      "zh": "职业",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1482
+    },
+    {
+      "word": "challenge",
+      "zh": "挑战",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1501
+    },
+    {
+      "word": "strength",
+      "zh": "力量；优势",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1509
+    },
+    {
+      "word": "serve",
+      "zh": "服务",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1532
+    },
+    {
+      "word": "project",
+      "zh": "项目；投射",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1541
+    },
+    {
+      "word": "character",
+      "zh": "性格；角色",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1552
+    },
+    {
+      "word": "survive",
+      "zh": "幸存",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1560
+    },
+    {
+      "word": "target",
+      "zh": "目标",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1562
+    },
+    {
+      "word": "remain",
+      "zh": "保持；剩下",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1578
+    },
+    {
+      "word": "credit",
+      "zh": "信用；学分",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1583
+    },
+    {
+      "word": "discuss",
+      "zh": "讨论",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1586
+    },
+    {
+      "word": "research",
+      "zh": "研究",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1587
+    },
+    {
+      "word": "view",
+      "zh": "观点；观看",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1589
+    },
+    {
+      "word": "condition",
+      "zh": "条件；状况",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1595
+    },
+    {
+      "word": "audience",
+      "zh": "观众",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1605
+    },
+    {
+      "word": "society",
+      "zh": "社会",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1609
+    },
+    {
+      "word": "release",
+      "zh": "释放；发布",
+      "pos": "v./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1622
+    },
+    {
+      "word": "prepare",
+      "zh": "准备",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1631
+    },
+    {
+      "word": "prefer",
+      "zh": "更喜欢",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1641
+    },
+    {
+      "word": "aware",
+      "zh": "意识到的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1642
+    },
+    {
+      "word": "proof",
+      "zh": "证据",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1650
+    },
+    {
+      "word": "create",
+      "zh": "创造",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1654
+    },
+    {
+      "word": "afford",
+      "zh": "负担得起",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1656
+    },
+    {
+      "word": "focus",
+      "zh": "聚焦",
+      "pos": "v./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1681
+    },
+    {
+      "word": "exist",
+      "zh": "存在",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1684
+    },
+    {
+      "word": "suggest",
+      "zh": "建议；暗示",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1699
+    },
+    {
+      "word": "distance",
+      "zh": "距离",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1701
+    },
+    {
+      "word": "issue",
+      "zh": "问题；发行",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1704
+    },
+    {
+      "word": "process",
+      "zh": "过程；处理",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1706
+    },
+    {
+      "word": "property",
+      "zh": "财产；属性",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1717
+    },
+    {
+      "word": "settle",
+      "zh": "解决；定居",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1719
+    },
+    {
+      "word": "interview",
+      "zh": "面试；采访",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1727
+    },
+    {
+      "word": "ancient",
+      "zh": "古代的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1734
+    },
+    {
+      "word": "introduce",
+      "zh": "介绍",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1743
+    },
+    {
+      "word": "split",
+      "zh": "分裂",
+      "pos": "v./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1745
+    },
+    {
+      "word": "alarm",
+      "zh": "警报；使惊恐",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1751
+    },
+    {
+      "word": "access",
+      "zh": "通道；获取",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1764
+    },
+    {
+      "word": "harm",
+      "zh": "伤害",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1779
+    },
+    {
+      "word": "community",
+      "zh": "社区",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1781
+    },
+    {
+      "word": "damage",
+      "zh": "损害",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1807
+    },
+    {
+      "word": "amount",
+      "zh": "数量；总计",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1815
+    },
+    {
+      "word": "manage",
+      "zh": "管理；设法",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1818
+    },
+    {
+      "word": "safety",
+      "zh": "安全",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1819
+    },
+    {
+      "word": "contract",
+      "zh": "合同；收缩",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1827
+    },
+    {
+      "word": "theory",
+      "zh": "理论",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1846
+    },
+    {
+      "word": "spread",
+      "zh": "传播",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1851
+    },
+    {
+      "word": "regret",
+      "zh": "后悔",
+      "pos": "v./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1879
+    },
+    {
+      "word": "subject",
+      "zh": "主题；受…影响的",
+      "pos": "n./adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1884
+    },
+    {
+      "word": "legal",
+      "zh": "法律的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1885
+    },
+    {
+      "word": "rough",
+      "zh": "粗糙的；大致的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1910
+    },
+    {
+      "word": "obvious",
+      "zh": "明显的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1920
+    },
+    {
+      "word": "fortune",
+      "zh": "财富；运气",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1982
+    },
+    {
+      "word": "avoid",
+      "zh": "避免",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1984
+    },
+    {
+      "word": "familiar",
+      "zh": "熟悉的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 1987
+    },
+    {
+      "word": "period",
+      "zh": "时期",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2004
+    },
+    {
+      "word": "particular",
+      "zh": "特定的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2019
+    },
+    {
+      "word": "proper",
+      "zh": "适当的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2020
+    },
+    {
+      "word": "eventually",
+      "zh": "最终",
+      "pos": "adv.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2034
+    },
+    {
+      "word": "assume",
+      "zh": "假定",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2038
+    },
+    {
+      "word": "request",
+      "zh": "请求",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2042
+    },
+    {
+      "word": "positive",
+      "zh": "积极的；肯定的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2051
+    },
+    {
+      "word": "grant",
+      "zh": "授予；拨款",
+      "pos": "v./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2061
+    },
+    {
+      "word": "deliver",
+      "zh": "递送；发表",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2066
+    },
+    {
+      "word": "regular",
+      "zh": "规律的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2073
+    },
+    {
+      "word": "switch",
+      "zh": "转换；开关",
+      "pos": "v./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2077
+    },
+    {
+      "word": "role",
+      "zh": "角色",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2080
+    },
+    {
+      "word": "appear",
+      "zh": "出现；似乎",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2106
+    },
+    {
+      "word": "courage",
+      "zh": "勇气",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2131
+    },
+    {
+      "word": "disease",
+      "zh": "疾病",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2139
+    },
+    {
+      "word": "threat",
+      "zh": "威胁",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2146
+    },
+    {
+      "word": "physical",
+      "zh": "身体的；物理的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2148
+    },
+    {
+      "word": "source",
+      "zh": "来源",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2150
+    },
+    {
+      "word": "advantage",
+      "zh": "优势",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2168
+    },
+    {
+      "word": "talent",
+      "zh": "天赋",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2194
+    },
+    {
+      "word": "license",
+      "zh": "许可证",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2197
+    },
+    {
+      "word": "concern",
+      "zh": "关心；涉及",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2200
+    },
+    {
+      "word": "available",
+      "zh": "可获得的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2202
+    },
+    {
+      "word": "value",
+      "zh": "价值",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2205
+    },
+    {
+      "word": "desire",
+      "zh": "渴望",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2215
+    },
+    {
+      "word": "disappear",
+      "zh": "消失",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2238
+    },
+    {
+      "word": "rescue",
+      "zh": "营救",
+      "pos": "v./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2242
+    },
+    {
+      "word": "capable",
+      "zh": "有能力的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2243
+    },
+    {
+      "word": "result",
+      "zh": "结果",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2246
+    },
+    {
+      "word": "remove",
+      "zh": "移除",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2255
+    },
+    {
+      "word": "rate",
+      "zh": "比率；评价",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2259
+    },
+    {
+      "word": "vehicle",
+      "zh": "车辆",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2263
+    },
+    {
+      "word": "curious",
+      "zh": "好奇的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2272
+    },
+    {
+      "word": "former",
+      "zh": "以前的；前者的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2283
+    },
+    {
+      "word": "claim",
+      "zh": "声称",
+      "pos": "v./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2302
+    },
+    {
+      "word": "dramatic",
+      "zh": "戏剧性的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2306
+    },
+    {
+      "word": "refuse",
+      "zh": "拒绝",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2307
+    },
+    {
+      "word": "surface",
+      "zh": "表面",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2316
+    },
+    {
+      "word": "popular",
+      "zh": "流行的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2332
+    },
+    {
+      "word": "technology",
+      "zh": "科技",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2350
+    },
+    {
+      "word": "uniform",
+      "zh": "制服；统一的",
+      "pos": "n./adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2368
+    },
+    {
+      "word": "exchange",
+      "zh": "交换",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2372
+    },
+    {
+      "word": "convince",
+      "zh": "使确信",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2375
+    },
+    {
+      "word": "ordinary",
+      "zh": "普通的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2384
+    },
+    {
+      "word": "separate",
+      "zh": "分开；单独的",
+      "pos": "v./adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2394
+    },
+    {
+      "word": "shift",
+      "zh": "转移；轮班",
+      "pos": "v./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2399
+    },
+    {
+      "word": "expert",
+      "zh": "专家；熟练的",
+      "pos": "n./adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2405
+    },
+    {
+      "word": "series",
+      "zh": "系列",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2413
+    },
+    {
+      "word": "rare",
+      "zh": "稀有的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2424
+    },
+    {
+      "word": "solution",
+      "zh": "解决方案",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2430
+    },
+    {
+      "word": "schedule",
+      "zh": "日程",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2431
+    },
+    {
+      "word": "sacrifice",
+      "zh": "牺牲",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2440
+    },
+    {
+      "word": "range",
+      "zh": "范围",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2441
+    },
+    {
+      "word": "effort",
+      "zh": "努力",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2446
+    },
+    {
+      "word": "progress",
+      "zh": "进步",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2460
+    },
+    {
+      "word": "campaign",
+      "zh": "运动；竞选",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2464
+    },
+    {
+      "word": "vision",
+      "zh": "视力；愿景",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2466
+    },
+    {
+      "word": "defend",
+      "zh": "保卫；辩护",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2476
+    },
+    {
+      "word": "trace",
+      "zh": "追踪；痕迹",
+      "pos": "v./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2477
+    },
+    {
+      "word": "senior",
+      "zh": "年长的；资深者",
+      "pos": "adj./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2491
+    },
+    {
+      "word": "incident",
+      "zh": "事件",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2495
+    },
+    {
+      "word": "attitude",
+      "zh": "态度",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2530
+    },
+    {
+      "word": "negative",
+      "zh": "消极的；否定的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2532
+    },
+    {
+      "word": "similar",
+      "zh": "相似的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2537
+    },
+    {
+      "word": "passion",
+      "zh": "热情",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2548
+    },
+    {
+      "word": "hire",
+      "zh": "雇用",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2553
+    },
+    {
+      "word": "device",
+      "zh": "装置",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2565
+    },
+    {
+      "word": "design",
+      "zh": "设计",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2568
+    },
+    {
+      "word": "despite",
+      "zh": "尽管",
+      "pos": "prep.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2576
+    },
+    {
+      "word": "alcohol",
+      "zh": "酒精",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2577
+    },
+    {
+      "word": "conference",
+      "zh": "会议",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2580
+    },
+    {
+      "word": "provide",
+      "zh": "提供",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2581
+    },
+    {
+      "word": "seek",
+      "zh": "寻找",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2583
+    },
+    {
+      "word": "fashion",
+      "zh": "时尚",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2588
+    },
+    {
+      "word": "episode",
+      "zh": "一集；事件",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2590
+    },
+    {
+      "word": "approach",
+      "zh": "方法；接近",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2601
+    },
+    {
+      "word": "authority",
+      "zh": "权威；当局",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2618
+    },
+    {
+      "word": "current",
+      "zh": "当前的；水流",
+      "pos": "adj./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2619
+    },
+    {
+      "word": "failure",
+      "zh": "失败",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2620
+    },
+    {
+      "word": "agency",
+      "zh": "机构",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2627
+    },
+    {
+      "word": "reputation",
+      "zh": "名声",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2632
+    },
+    {
+      "word": "confidence",
+      "zh": "信心",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2633
+    },
+    {
+      "word": "mental",
+      "zh": "精神的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2640
+    },
+    {
+      "word": "secure",
+      "zh": "安全的；获得",
+      "pos": "adj./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2644
+    },
+    {
+      "word": "federal",
+      "zh": "联邦的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2646
+    },
+    {
+      "word": "reward",
+      "zh": "奖励",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2656
+    },
+    {
+      "word": "commit",
+      "zh": "犯（罪）；承诺",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2659
+    },
+    {
+      "word": "detail",
+      "zh": "细节",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2678
+    },
+    {
+      "word": "background",
+      "zh": "背景",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2682
+    },
+    {
+      "word": "ability",
+      "zh": "能力",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2692
+    },
+    {
+      "word": "intend",
+      "zh": "打算",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2701
+    },
+    {
+      "word": "district",
+      "zh": "地区",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2702
+    },
+    {
+      "word": "ignore",
+      "zh": "忽视",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2706
+    },
+    {
+      "word": "useful",
+      "zh": "有用的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2708
+    },
+    {
+      "word": "attempt",
+      "zh": "尝试",
+      "pos": "v./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2709
+    },
+    {
+      "word": "guarantee",
+      "zh": "保证",
+      "pos": "v./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2713
+    },
+    {
+      "word": "policy",
+      "zh": "政策",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2716
+    },
+    {
+      "word": "violent",
+      "zh": "暴力的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2718
+    },
+    {
+      "word": "disaster",
+      "zh": "灾难",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2726
+    },
+    {
+      "word": "revolution",
+      "zh": "革命",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2727
+    },
+    {
+      "word": "perform",
+      "zh": "表演；执行",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2733
+    },
+    {
+      "word": "potential",
+      "zh": "潜在的；潜力",
+      "pos": "adj./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2743
+    },
+    {
+      "word": "committee",
+      "zh": "委员会",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2745
+    },
+    {
+      "word": "advance",
+      "zh": "前进；进步",
+      "pos": "v./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2748
+    },
+    {
+      "word": "deny",
+      "zh": "否认",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2764
+    },
+    {
+      "word": "urgent",
+      "zh": "紧急的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2765
+    },
+    {
+      "word": "assure",
+      "zh": "保证",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2771
+    },
+    {
+      "word": "unique",
+      "zh": "独特的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2775
+    },
+    {
+      "word": "behave",
+      "zh": "表现",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2787
+    },
+    {
+      "word": "struggle",
+      "zh": "挣扎；奋斗",
+      "pos": "v./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2795
+    },
+    {
+      "word": "transfer",
+      "zh": "转移",
+      "pos": "v./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2816
+    },
+    {
+      "word": "quality",
+      "zh": "质量",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2818
+    },
+    {
+      "word": "supply",
+      "zh": "供应",
+      "pos": "v./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2845
+    },
+    {
+      "word": "sensitive",
+      "zh": "敏感的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2846
+    },
+    {
+      "word": "demand",
+      "zh": "需求；要求",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2857
+    },
+    {
+      "word": "civil",
+      "zh": "公民的；文明的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2881
+    },
+    {
+      "word": "express",
+      "zh": "表达；快速的",
+      "pos": "v./adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2885
+    },
+    {
+      "word": "argue",
+      "zh": "争论；主张",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2897
+    },
+    {
+      "word": "option",
+      "zh": "选择",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2900
+    },
+    {
+      "word": "balance",
+      "zh": "平衡",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2922
+    },
+    {
+      "word": "network",
+      "zh": "网络",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2935
+    },
+    {
+      "word": "version",
+      "zh": "版本",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2937
+    },
+    {
+      "word": "defeat",
+      "zh": "击败",
+      "pos": "v./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2942
+    },
+    {
+      "word": "specific",
+      "zh": "具体的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2955
+    },
+    {
+      "word": "crisis",
+      "zh": "危机",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2958
+    },
+    {
+      "word": "stress",
+      "zh": "压力；强调",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 2999
+    },
+    {
+      "word": "arrange",
+      "zh": "安排",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3003
+    },
+    {
+      "word": "launch",
+      "zh": "发射；推出",
+      "pos": "v./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3008
+    },
+    {
+      "word": "insist",
+      "zh": "坚持",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3020
+    },
+    {
+      "word": "classic",
+      "zh": "经典的；经典作品",
+      "pos": "adj./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3022
+    },
+    {
+      "word": "experiment",
+      "zh": "实验",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3039
+    },
+    {
+      "word": "describe",
+      "zh": "描述",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3041
+    },
+    {
+      "word": "attend",
+      "zh": "出席",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3045
+    },
+    {
+      "word": "generation",
+      "zh": "一代人",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3059
+    },
+    {
+      "word": "industry",
+      "zh": "工业；行业",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3062
+    },
+    {
+      "word": "religion",
+      "zh": "宗教",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3075
+    },
+    {
+      "word": "influence",
+      "zh": "影响",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3078
+    },
+    {
+      "word": "fuel",
+      "zh": "燃料",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3079
+    },
+    {
+      "word": "confirm",
+      "zh": "确认",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3103
+    },
+    {
+      "word": "standard",
+      "zh": "标准",
+      "pos": "n./adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3123
+    },
+    {
+      "word": "inform",
+      "zh": "通知",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3128
+    },
+    {
+      "word": "status",
+      "zh": "地位；状态",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3130
+    },
+    {
+      "word": "generous",
+      "zh": "慷慨的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3161
+    },
+    {
+      "word": "link",
+      "zh": "连接",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3167
+    },
+    {
+      "word": "identify",
+      "zh": "识别",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3177
+    },
+    {
+      "word": "routine",
+      "zh": "常规",
+      "pos": "n./adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3183
+    },
+    {
+      "word": "equal",
+      "zh": "平等的；等于",
+      "pos": "adj./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3195
+    },
+    {
+      "word": "proceed",
+      "zh": "继续进行",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3219
+    },
+    {
+      "word": "pattern",
+      "zh": "模式",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3244
+    },
+    {
+      "word": "concentrate",
+      "zh": "集中",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3249
+    },
+    {
+      "word": "environment",
+      "zh": "环境",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3263
+    },
+    {
+      "word": "average",
+      "zh": "平均的；平均数",
+      "pos": "adj./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3265
+    },
+    {
+      "word": "complex",
+      "zh": "复杂的；综合体",
+      "pos": "adj./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3285
+    },
+    {
+      "word": "replace",
+      "zh": "替换",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3287
+    },
+    {
+      "word": "reasonable",
+      "zh": "合理的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3312
+    },
+    {
+      "word": "tradition",
+      "zh": "传统",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3316
+    },
+    {
+      "word": "motive",
+      "zh": "动机",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3321
+    },
+    {
+      "word": "benefit",
+      "zh": "好处；受益",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3335
+    },
+    {
+      "word": "adventure",
+      "zh": "冒险",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3336
+    },
+    {
+      "word": "atmosphere",
+      "zh": "大气；氛围",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3356
+    },
+    {
+      "word": "comment",
+      "zh": "评论",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3376
+    },
+    {
+      "word": "habit",
+      "zh": "习惯",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3381
+    },
+    {
+      "word": "prevent",
+      "zh": "阻止",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3386
+    },
+    {
+      "word": "sample",
+      "zh": "样本；抽样",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3392
+    },
+    {
+      "word": "produce",
+      "zh": "生产",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3398
+    },
+    {
+      "word": "individual",
+      "zh": "个人；个别的",
+      "pos": "n./adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3415
+    },
+    {
+      "word": "limit",
+      "zh": "限制",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3424
+    },
+    {
+      "word": "reveal",
+      "zh": "揭示",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3440
+    },
+    {
+      "word": "intelligent",
+      "zh": "聪明的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3452
+    },
+    {
+      "word": "impact",
+      "zh": "影响",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3460
+    },
+    {
+      "word": "relief",
+      "zh": "宽慰；救济",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3462
+    },
+    {
+      "word": "host",
+      "zh": "主人；主办",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3463
+    },
+    {
+      "word": "occasion",
+      "zh": "场合",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3471
+    },
+    {
+      "word": "complain",
+      "zh": "抱怨",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3486
+    },
+    {
+      "word": "monitor",
+      "zh": "监控；显示器",
+      "pos": "v./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3488
+    },
+    {
+      "word": "resist",
+      "zh": "抵抗",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3503
+    },
+    {
+      "word": "discover",
+      "zh": "发现",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3523
+    },
+    {
+      "word": "previous",
+      "zh": "先前的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3524
+    },
+    {
+      "word": "represent",
+      "zh": "代表",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3536
+    },
+    {
+      "word": "citizen",
+      "zh": "公民",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3540
+    },
+    {
+      "word": "humanity",
+      "zh": "人类；人性",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3550
+    },
+    {
+      "word": "extreme",
+      "zh": "极端的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3554
+    },
+    {
+      "word": "minor",
+      "zh": "次要的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3564
+    },
+    {
+      "word": "scientific",
+      "zh": "科学的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3567
+    },
+    {
+      "word": "intense",
+      "zh": "强烈的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3577
+    },
+    {
+      "word": "respond",
+      "zh": "回应",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3585
+    },
+    {
+      "word": "procedure",
+      "zh": "程序",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3587
+    },
+    {
+      "word": "absolute",
+      "zh": "绝对的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3588
+    },
+    {
+      "word": "investigate",
+      "zh": "调查",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3589
+    },
+    {
+      "word": "stable",
+      "zh": "稳定的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3591
+    },
+    {
+      "word": "session",
+      "zh": "会议；一段时期",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3592
+    },
+    {
+      "word": "increase",
+      "zh": "增加",
+      "pos": "v./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3604
+    },
+    {
+      "word": "commercial",
+      "zh": "商业的；广告",
+      "pos": "adj./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3619
+    },
+    {
+      "word": "scale",
+      "zh": "规模；比例",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3625
+    },
+    {
+      "word": "transport",
+      "zh": "运输",
+      "pos": "v./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3644
+    },
+    {
+      "word": "succeed",
+      "zh": "成功",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3646
+    },
+    {
+      "word": "instance",
+      "zh": "例子",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3663
+    },
+    {
+      "word": "typical",
+      "zh": "典型的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3698
+    },
+    {
+      "word": "strategy",
+      "zh": "策略",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3710
+    },
+    {
+      "word": "moral",
+      "zh": "道德的",
+      "pos": "adj./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3742
+    },
+    {
+      "word": "random",
+      "zh": "随机的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3748
+    },
+    {
+      "word": "tend",
+      "zh": "倾向",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3811
+    },
+    {
+      "word": "propose",
+      "zh": "提议",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3830
+    },
+    {
+      "word": "review",
+      "zh": "复习；评论",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3845
+    },
+    {
+      "word": "connect",
+      "zh": "连接",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3846
+    },
+    {
+      "word": "salary",
+      "zh": "薪水",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3852
+    },
+    {
+      "word": "disturb",
+      "zh": "打扰",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3854
+    },
+    {
+      "word": "maintain",
+      "zh": "维持",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3856
+    },
+    {
+      "word": "wealth",
+      "zh": "财富",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3858
+    },
+    {
+      "word": "profit",
+      "zh": "利润；获益",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3870
+    },
+    {
+      "word": "colleague",
+      "zh": "同事",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3871
+    },
+    {
+      "word": "appeal",
+      "zh": "呼吁；吸引力",
+      "pos": "v./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3889
+    },
+    {
+      "word": "critical",
+      "zh": "关键的；批评的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3891
+    },
+    {
+      "word": "enormous",
+      "zh": "巨大的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3895
+    },
+    {
+      "word": "facility",
+      "zh": "设施",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3932
+    },
+    {
+      "word": "appropriate",
+      "zh": "合适的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3933
+    },
+    {
+      "word": "symbol",
+      "zh": "象征",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3939
+    },
+    {
+      "word": "ultimate",
+      "zh": "最终的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 3997
+    },
+    {
+      "word": "structure",
+      "zh": "结构",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4001
+    },
+    {
+      "word": "admire",
+      "zh": "钦佩",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4010
+    },
+    {
+      "word": "burden",
+      "zh": "负担",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4015
+    },
+    {
+      "word": "abandon",
+      "zh": "放弃；抛弃",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4036
+    },
+    {
+      "word": "concept",
+      "zh": "概念",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4044
+    },
+    {
+      "word": "measure",
+      "zh": "测量；措施",
+      "pos": "v./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4060
+    },
+    {
+      "word": "function",
+      "zh": "功能",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4062
+    },
+    {
+      "word": "foundation",
+      "zh": "基础；基金会",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4065
+    },
+    {
+      "word": "labor",
+      "zh": "劳动",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4066
+    },
+    {
+      "word": "budget",
+      "zh": "预算",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4095
+    },
+    {
+      "word": "temporary",
+      "zh": "临时的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4097
+    },
+    {
+      "word": "effective",
+      "zh": "有效的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4098
+    },
+    {
+      "word": "recover",
+      "zh": "恢复",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4114
+    },
+    {
+      "word": "affect",
+      "zh": "影响",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4125
+    },
+    {
+      "word": "various",
+      "zh": "各种的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4144
+    },
+    {
+      "word": "require",
+      "zh": "要求",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4174
+    },
+    {
+      "word": "achieve",
+      "zh": "实现",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4178
+    },
+    {
+      "word": "constant",
+      "zh": "不断的；恒定的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4186
+    },
+    {
+      "word": "chemical",
+      "zh": "化学的；化学品",
+      "pos": "adj./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4209
+    },
+    {
+      "word": "region",
+      "zh": "地区",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4227
+    },
+    {
+      "word": "operate",
+      "zh": "操作；运转",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4232
+    },
+    {
+      "word": "independent",
+      "zh": "独立的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4277
+    },
+    {
+      "word": "repair",
+      "zh": "修理",
+      "pos": "v./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4281
+    },
+    {
+      "word": "method",
+      "zh": "方法",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4293
+    },
+    {
+      "word": "permit",
+      "zh": "允许；许可证",
+      "pos": "v./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4296
+    },
+    {
+      "word": "technique",
+      "zh": "技术；技巧",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4309
+    },
+    {
+      "word": "skill",
+      "zh": "技能",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4318
+    },
+    {
+      "word": "permanent",
+      "zh": "永久的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4343
+    },
+    {
+      "word": "conduct",
+      "zh": "进行；行为",
+      "pos": "v./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4361
+    },
+    {
+      "word": "reverse",
+      "zh": "反转；相反的",
+      "pos": "v./adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4367
+    },
+    {
+      "word": "priority",
+      "zh": "优先",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4423
+    },
+    {
+      "word": "conflict",
+      "zh": "冲突",
+      "pos": "n./v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4433
+    },
+    {
+      "word": "fee",
+      "zh": "费用",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4445
+    },
+    {
+      "word": "register",
+      "zh": "登记；注册",
+      "pos": "v./n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4453
+    },
+    {
+      "word": "candidate",
+      "zh": "候选人",
+      "pos": "n.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4463
+    },
+    {
+      "word": "immediate",
+      "zh": "立即的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4468
+    },
+    {
+      "word": "develop",
+      "zh": "发展",
+      "pos": "v.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4478
+    },
+    {
+      "word": "severe",
+      "zh": "严重的；严厉的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4480
+    },
+    {
+      "word": "vulnerable",
+      "zh": "脆弱的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4491
+    },
+    {
+      "word": "vital",
+      "zh": "至关重要的",
+      "pos": "adj.",
+      "exams": [
+        "cet4",
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4493
+    },
+    {
+      "word": "announce",
+      "zh": "宣布",
+      "pos": "v.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4508
+    },
+    {
+      "word": "relative",
+      "zh": "相对的；亲戚",
+      "pos": "adj./n.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4530
+    },
+    {
+      "word": "approve",
+      "zh": "批准",
+      "pos": "v.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4536
+    },
+    {
+      "word": "economy",
+      "zh": "经济",
+      "pos": "n.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4586
+    },
+    {
+      "word": "impress",
+      "zh": "给…留下深刻印象",
+      "pos": "v.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4588
+    },
+    {
+      "word": "deposit",
+      "zh": "存款；押金",
+      "pos": "n./v.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4625
+    },
+    {
+      "word": "include",
+      "zh": "包括",
+      "pos": "v.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4636
+    },
+    {
+      "word": "determine",
+      "zh": "决定；确定",
+      "pos": "v.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4642
+    },
+    {
+      "word": "practical",
+      "zh": "实际的",
+      "pos": "adj.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4646
+    },
+    {
+      "word": "rely",
+      "zh": "依赖",
+      "pos": "v.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4670
+    },
+    {
+      "word": "react",
+      "zh": "反应",
+      "pos": "v.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4710
+    },
+    {
+      "word": "protest",
+      "zh": "抗议",
+      "pos": "n./v.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4712
+    },
+    {
+      "word": "embrace",
+      "zh": "拥抱；接受",
+      "pos": "v.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4715
+    },
+    {
+      "word": "communicate",
+      "zh": "交流",
+      "pos": "v.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4719
+    },
+    {
+      "word": "content",
+      "zh": "内容；满足的",
+      "pos": "n./adj.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4744
+    },
+    {
+      "word": "debate",
+      "zh": "辩论",
+      "pos": "n./v.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4750
+    },
+    {
+      "word": "application",
+      "zh": "申请；应用",
+      "pos": "n.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4760
+    },
+    {
+      "word": "profession",
+      "zh": "职业",
+      "pos": "n.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4761
+    },
+    {
+      "word": "aggressive",
+      "zh": "好斗的；积极进取的",
+      "pos": "adj.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4772
+    },
+    {
+      "word": "significant",
+      "zh": "重要的",
+      "pos": "adj.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4774
+    },
+    {
+      "word": "display",
+      "zh": "展示",
+      "pos": "v./n.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4781
+    },
+    {
+      "word": "quote",
+      "zh": "引用",
+      "pos": "v./n.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4794
+    },
+    {
+      "word": "compare",
+      "zh": "比较",
+      "pos": "v.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4799
+    },
+    {
+      "word": "belief",
+      "zh": "信念",
+      "pos": "n.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4824
+    },
+    {
+      "word": "alternative",
+      "zh": "替代方案；可替代的",
+      "pos": "n./adj.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4834
+    },
+    {
+      "word": "cooperate",
+      "zh": "合作",
+      "pos": "v.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4878
+    },
+    {
+      "word": "improve",
+      "zh": "改善",
+      "pos": "v.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4911
+    },
+    {
+      "word": "tension",
+      "zh": "紧张",
+      "pos": "n.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4917
+    },
+    {
+      "word": "narrow",
+      "zh": "狭窄的",
+      "pos": "adj.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4956
+    },
+    {
+      "word": "forbid",
+      "zh": "禁止",
+      "pos": "v.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4957
+    },
+    {
+      "word": "perspective",
+      "zh": "视角",
+      "pos": "n.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4959
+    },
+    {
+      "word": "observe",
+      "zh": "观察",
+      "pos": "v.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4963
+    },
+    {
+      "word": "slight",
+      "zh": "轻微的",
+      "pos": "adj.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 4998
+    },
+    {
+      "word": "genuine",
+      "zh": "真正的",
+      "pos": "adj.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5008
+    },
+    {
+      "word": "depend",
+      "zh": "依赖",
+      "pos": "v.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5028
+    },
+    {
+      "word": "institute",
+      "zh": "机构",
+      "pos": "n.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5029
+    },
+    {
+      "word": "compete",
+      "zh": "竞争",
+      "pos": "v.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5034
+    },
+    {
+      "word": "democracy",
+      "zh": "民主",
+      "pos": "n.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5038
+    },
+    {
+      "word": "formal",
+      "zh": "正式的",
+      "pos": "adj.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5047
+    },
+    {
+      "word": "retire",
+      "zh": "退休",
+      "pos": "v.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5067
+    },
+    {
+      "word": "overcome",
+      "zh": "克服",
+      "pos": "v.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5068
+    },
+    {
+      "word": "strict",
+      "zh": "严格的",
+      "pos": "adj.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5089
+    },
+    {
+      "word": "locate",
+      "zh": "定位",
+      "pos": "v.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5112
+    },
+    {
+      "word": "examine",
+      "zh": "检查",
+      "pos": "v.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5116
+    },
+    {
+      "word": "element",
+      "zh": "元素；要素",
+      "pos": "n.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5143
+    },
+    {
+      "word": "scheme",
+      "zh": "计划；方案",
+      "pos": "n.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5173
+    },
+    {
+      "word": "protocol",
+      "zh": "协议；礼仪",
+      "pos": "n.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5181
+    },
+    {
+      "word": "discipline",
+      "zh": "纪律；学科",
+      "pos": "n.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5192
+    },
+    {
+      "word": "philosophy",
+      "zh": "哲学",
+      "pos": "n.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5197
+    },
+    {
+      "word": "convenient",
+      "zh": "方便的",
+      "pos": "adj.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5232
+    },
+    {
+      "word": "sector",
+      "zh": "部门；行业",
+      "pos": "n.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5250
+    },
+    {
+      "word": "income",
+      "zh": "收入",
+      "pos": "n.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5251
+    },
+    {
+      "word": "accurate",
+      "zh": "准确的",
+      "pos": "adj.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5259
+    },
+    {
+      "word": "ensure",
+      "zh": "确保",
+      "pos": "v.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5285
+    },
+    {
+      "word": "associate",
+      "zh": "联想；同事",
+      "pos": "v./n.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5308
+    },
+    {
+      "word": "mature",
+      "zh": "成熟的",
+      "pos": "adj.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5315
+    },
+    {
+      "word": "enterprise",
+      "zh": "企业",
+      "pos": "n.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5351
+    },
+    {
+      "word": "negotiate",
+      "zh": "谈判",
+      "pos": "v.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5374
+    },
+    {
+      "word": "collapse",
+      "zh": "倒塌；崩溃",
+      "pos": "v./n.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5389
+    },
+    {
+      "word": "domestic",
+      "zh": "国内的；家庭的",
+      "pos": "adj.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5445
+    },
+    {
+      "word": "expose",
+      "zh": "暴露",
+      "pos": "v.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5465
+    },
+    {
+      "word": "sympathy",
+      "zh": "同情",
+      "pos": "n.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5469
+    },
+    {
+      "word": "encounter",
+      "zh": "遭遇",
+      "pos": "v./n.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5475
+    },
+    {
+      "word": "accompany",
+      "zh": "陪伴",
+      "pos": "v.",
+      "exams": [
+        "kaoyan",
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5479
+    },
+    {
+      "word": "establish",
+      "zh": "建立",
+      "pos": "v.",
+      "exams": [
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5554
+    },
+    {
+      "word": "journal",
+      "zh": "杂志；日志",
+      "pos": "n.",
+      "exams": [
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5583
+    },
+    {
+      "word": "essential",
+      "zh": "必要的",
+      "pos": "adj.",
+      "exams": [
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5588
+    },
+    {
+      "word": "climate",
+      "zh": "气候",
+      "pos": "n.",
+      "exams": [
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5590
+    },
+    {
+      "word": "precise",
+      "zh": "精确的",
+      "pos": "adj.",
+      "exams": [
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5598
+    },
+    {
+      "word": "capacity",
+      "zh": "容量；能力",
+      "pos": "n.",
+      "exams": [
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5607
+    },
+    {
+      "word": "opponent",
+      "zh": "对手",
+      "pos": "n.",
+      "exams": [
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5609
+    },
+    {
+      "word": "explore",
+      "zh": "探索",
+      "pos": "v.",
+      "exams": [
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5621
+    },
+    {
+      "word": "assist",
+      "zh": "帮助",
+      "pos": "v.",
+      "exams": [
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5656
+    },
+    {
+      "word": "contain",
+      "zh": "包含",
+      "pos": "v.",
+      "exams": [
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5715
+    },
+    {
+      "word": "volume",
+      "zh": "体积；音量；卷",
+      "pos": "n.",
+      "exams": [
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5761
+    },
+    {
+      "word": "engage",
+      "zh": "参与；吸引",
+      "pos": "v.",
+      "exams": [
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5767
+    },
+    {
+      "word": "mutual",
+      "zh": "相互的",
+      "pos": "adj.",
+      "exams": [
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5771
+    },
+    {
+      "word": "poverty",
+      "zh": "贫困",
+      "pos": "n.",
+      "exams": [
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5792
+    },
+    {
+      "word": "ambition",
+      "zh": "雄心",
+      "pos": "n.",
+      "exams": [
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5795
+    },
+    {
+      "word": "draft",
+      "zh": "草稿",
+      "pos": "n./v.",
+      "exams": [
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5812
+    },
+    {
+      "word": "factor",
+      "zh": "因素",
+      "pos": "n.",
+      "exams": [
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5813
+    },
+    {
+      "word": "reserve",
+      "zh": "预订；储备",
+      "pos": "v./n.",
+      "exams": [
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5824
+    },
+    {
+      "word": "eliminate",
+      "zh": "消除",
+      "pos": "v.",
+      "exams": [
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5834
+    },
+    {
+      "word": "involve",
+      "zh": "涉及",
+      "pos": "v.",
+      "exams": [
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5863
+    },
+    {
+      "word": "reliable",
+      "zh": "可靠的",
+      "pos": "adj.",
+      "exams": [
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5867
+    },
+    {
+      "word": "indicate",
+      "zh": "表明",
+      "pos": "v.",
+      "exams": [
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5872
+    },
+    {
+      "word": "pursue",
+      "zh": "追求",
+      "pos": "v.",
+      "exams": [
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5881
+    },
+    {
+      "word": "occur",
+      "zh": "发生",
+      "pos": "v.",
+      "exams": [
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5897
+    },
+    {
+      "word": "crucial",
+      "zh": "至关重要的",
+      "pos": "adj.",
+      "exams": [
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5905
+    },
+    {
+      "word": "annual",
+      "zh": "每年的",
+      "pos": "adj.",
+      "exams": [
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5906
+    },
+    {
+      "word": "literature",
+      "zh": "文学",
+      "pos": "n.",
+      "exams": [
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5932
+    },
+    {
+      "word": "sequence",
+      "zh": "顺序",
+      "pos": "n.",
+      "exams": [
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5941
+    },
+    {
+      "word": "congratulate",
+      "zh": "祝贺",
+      "pos": "v.",
+      "exams": [
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5948
+    },
+    {
+      "word": "anxiety",
+      "zh": "焦虑",
+      "pos": "n.",
+      "exams": [
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5949
+    },
+    {
+      "word": "tolerate",
+      "zh": "容忍",
+      "pos": "v.",
+      "exams": [
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5951
+    },
+    {
+      "word": "welfare",
+      "zh": "福利",
+      "pos": "n.",
+      "exams": [
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5954
+    },
+    {
+      "word": "scenario",
+      "zh": "情景",
+      "pos": "n.",
+      "exams": [
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5969
+    },
+    {
+      "word": "hesitate",
+      "zh": "犹豫",
+      "pos": "v.",
+      "exams": [
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5981
+    },
+    {
+      "word": "persuade",
+      "zh": "说服",
+      "pos": "v.",
+      "exams": [
+        "cet6",
+        "ielts",
+        "toefl"
+      ],
+      "rank": 5992
+    },
+    {
+      "word": "regard",
+      "zh": "认为；尊重",
+      "pos": "v./n.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6018
+    },
+    {
+      "word": "suitable",
+      "zh": "合适的",
+      "pos": "adj.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6026
+    },
+    {
+      "word": "scholarship",
+      "zh": "奖学金",
+      "pos": "n.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6037
+    },
+    {
+      "word": "initial",
+      "zh": "最初的",
+      "pos": "adj.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6046
+    },
+    {
+      "word": "cultural",
+      "zh": "文化的",
+      "pos": "adj.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6061
+    },
+    {
+      "word": "cease",
+      "zh": "停止",
+      "pos": "v.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6113
+    },
+    {
+      "word": "conscious",
+      "zh": "有意识的",
+      "pos": "adj.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6148
+    },
+    {
+      "word": "accuse",
+      "zh": "指控",
+      "pos": "v.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6166
+    },
+    {
+      "word": "agenda",
+      "zh": "议程",
+      "pos": "n.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6170
+    },
+    {
+      "word": "sincere",
+      "zh": "真诚的",
+      "pos": "adj.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6178
+    },
+    {
+      "word": "weigh",
+      "zh": "称重；权衡",
+      "pos": "v.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6179
+    },
+    {
+      "word": "topic",
+      "zh": "话题",
+      "pos": "n.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6194
+    },
+    {
+      "word": "integrity",
+      "zh": "正直；完整性",
+      "pos": "n.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6231
+    },
+    {
+      "word": "objective",
+      "zh": "目标；客观的",
+      "pos": "n./adj.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6243
+    },
+    {
+      "word": "attract",
+      "zh": "吸引",
+      "pos": "v.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6246
+    },
+    {
+      "word": "restore",
+      "zh": "恢复",
+      "pos": "v.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6256
+    },
+    {
+      "word": "embarrass",
+      "zh": "使尴尬",
+      "pos": "v.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6261
+    },
+    {
+      "word": "encourage",
+      "zh": "鼓励",
+      "pos": "v.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6267
+    },
+    {
+      "word": "relevant",
+      "zh": "相关的",
+      "pos": "adj.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6272
+    },
+    {
+      "word": "expense",
+      "zh": "费用",
+      "pos": "n.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6275
+    },
+    {
+      "word": "identical",
+      "zh": "完全相同的",
+      "pos": "adj.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6280
+    },
+    {
+      "word": "legitimate",
+      "zh": "合法的；正当的",
+      "pos": "adj.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6305
+    },
+    {
+      "word": "digital",
+      "zh": "数字的",
+      "pos": "adj.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6322
+    },
+    {
+      "word": "endure",
+      "zh": "忍受",
+      "pos": "v.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6357
+    },
+    {
+      "word": "substance",
+      "zh": "物质",
+      "pos": "n.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6358
+    },
+    {
+      "word": "possess",
+      "zh": "拥有",
+      "pos": "v.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6384
+    },
+    {
+      "word": "feature",
+      "zh": "特征；以…为特色",
+      "pos": "n./v.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6389
+    },
+    {
+      "word": "reduce",
+      "zh": "减少",
+      "pos": "v.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6396
+    },
+    {
+      "word": "visible",
+      "zh": "可见的",
+      "pos": "adj.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6414
+    },
+    {
+      "word": "divide",
+      "zh": "分开",
+      "pos": "v.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6436
+    },
+    {
+      "word": "discount",
+      "zh": "折扣",
+      "pos": "n./v.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6438
+    },
+    {
+      "word": "subtle",
+      "zh": "微妙的",
+      "pos": "adj.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6461
+    },
+    {
+      "word": "origin",
+      "zh": "起源",
+      "pos": "n.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6472
+    },
+    {
+      "word": "shade",
+      "zh": "阴影",
+      "pos": "n.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6496
+    },
+    {
+      "word": "inevitable",
+      "zh": "不可避免的",
+      "pos": "adj.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6505
+    },
+    {
+      "word": "rival",
+      "zh": "对手；竞争的",
+      "pos": "n./adj.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6507
+    },
+    {
+      "word": "purchase",
+      "zh": "购买",
+      "pos": "v./n.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6510
+    },
+    {
+      "word": "submit",
+      "zh": "提交；屈服",
+      "pos": "v.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6534
+    },
+    {
+      "word": "resident",
+      "zh": "居民",
+      "pos": "n.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6537
+    },
+    {
+      "word": "historical",
+      "zh": "历史的",
+      "pos": "adj.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6554
+    },
+    {
+      "word": "invest",
+      "zh": "投资",
+      "pos": "v.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6577
+    },
+    {
+      "word": "radical",
+      "zh": "激进的；根本的",
+      "pos": "adj.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6579
+    },
+    {
+      "word": "execute",
+      "zh": "执行",
+      "pos": "v.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6592
+    },
+    {
+      "word": "preserve",
+      "zh": "保存",
+      "pos": "v.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6599
+    },
+    {
+      "word": "participate",
+      "zh": "参与",
+      "pos": "v.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6660
+    },
+    {
+      "word": "adjust",
+      "zh": "调整",
+      "pos": "v.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6693
+    },
+    {
+      "word": "decade",
+      "zh": "十年",
+      "pos": "n.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6694
+    },
+    {
+      "word": "finance",
+      "zh": "财政",
+      "pos": "n./v.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6700
+    },
+    {
+      "word": "conviction",
+      "zh": "信念；定罪",
+      "pos": "n.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6727
+    },
+    {
+      "word": "refer",
+      "zh": "提到；参考",
+      "pos": "v.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6756
+    },
+    {
+      "word": "efficient",
+      "zh": "高效的",
+      "pos": "adj.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6763
+    },
+    {
+      "word": "resolve",
+      "zh": "解决；决心",
+      "pos": "v.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6778
+    },
+    {
+      "word": "extend",
+      "zh": "延长",
+      "pos": "v.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6787
+    },
+    {
+      "word": "artificial",
+      "zh": "人工的",
+      "pos": "adj.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6793
+    },
+    {
+      "word": "accomplish",
+      "zh": "完成",
+      "pos": "v.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6794
+    },
+    {
+      "word": "adopt",
+      "zh": "采用；收养",
+      "pos": "v.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6834
+    },
+    {
+      "word": "consult",
+      "zh": "咨询",
+      "pos": "v.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6874
+    },
+    {
+      "word": "barrier",
+      "zh": "障碍",
+      "pos": "n.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6887
+    },
+    {
+      "word": "entertain",
+      "zh": "娱乐；招待",
+      "pos": "v.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6901
+    },
+    {
+      "word": "universal",
+      "zh": "普遍的",
+      "pos": "adj.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6928
+    },
+    {
+      "word": "notion",
+      "zh": "概念",
+      "pos": "n.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6946
+    },
+    {
+      "word": "outcome",
+      "zh": "结果",
+      "pos": "n.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6951
+    },
+    {
+      "word": "satisfy",
+      "zh": "满足",
+      "pos": "v.",
+      "exams": [
+        "ielts",
+        "toefl"
+      ],
+      "rank": 6967
+    },
+    {
+      "word": "organize",
+      "zh": "组织",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 7023
+    },
+    {
+      "word": "horizon",
+      "zh": "地平线；眼界",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 7030
+    },
+    {
+      "word": "merchant",
+      "zh": "商人",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 7035
+    },
+    {
+      "word": "exhibit",
+      "zh": "展出；展品",
+      "pos": "v./n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 7057
+    },
+    {
+      "word": "define",
+      "zh": "定义",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 7063
+    },
+    {
+      "word": "reject",
+      "zh": "拒绝",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 7071
+    },
+    {
+      "word": "publish",
+      "zh": "出版",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 7093
+    },
+    {
+      "word": "predict",
+      "zh": "预测",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 7098
+    },
+    {
+      "word": "acknowledge",
+      "zh": "承认；答谢",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 7116
+    },
+    {
+      "word": "fade",
+      "zh": "褪色；减弱",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 7127
+    },
+    {
+      "word": "rapid",
+      "zh": "快速的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 7198
+    },
+    {
+      "word": "justify",
+      "zh": "证明…正当",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 7205
+    },
+    {
+      "word": "detect",
+      "zh": "察觉",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 7228
+    },
+    {
+      "word": "virtue",
+      "zh": "美德；优点",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 7236
+    },
+    {
+      "word": "asset",
+      "zh": "资产",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 7252
+    },
+    {
+      "word": "workshop",
+      "zh": "研讨会；车间",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 7254
+    },
+    {
+      "word": "expand",
+      "zh": "扩大",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 7264
+    },
+    {
+      "word": "translate",
+      "zh": "翻译",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 7286
+    },
+    {
+      "word": "urban",
+      "zh": "城市的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 7346
+    },
+    {
+      "word": "obligation",
+      "zh": "义务",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 7364
+    },
+    {
+      "word": "reflect",
+      "zh": "反映；思考",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 7372
+    },
+    {
+      "word": "sufficient",
+      "zh": "足够的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 7399
+    },
+    {
+      "word": "offend",
+      "zh": "冒犯",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 7411
+    },
+    {
+      "word": "edition",
+      "zh": "版本",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 7447
+    },
+    {
+      "word": "demonstrate",
+      "zh": "证明；示范",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 7458
+    },
+    {
+      "word": "reform",
+      "zh": "改革",
+      "pos": "n./v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 7492
+    },
+    {
+      "word": "phenomenon",
+      "zh": "现象",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 7537
+    },
+    {
+      "word": "initiative",
+      "zh": "主动性；倡议",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 7651
+    },
+    {
+      "word": "pause",
+      "zh": "暂停",
+      "pos": "v./n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 7663
+    },
+    {
+      "word": "profound",
+      "zh": "深刻的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 7698
+    },
+    {
+      "word": "select",
+      "zh": "选择",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 7755
+    },
+    {
+      "word": "immune",
+      "zh": "免疫的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 7775
+    },
+    {
+      "word": "alter",
+      "zh": "改变",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 7796
+    },
+    {
+      "word": "aspect",
+      "zh": "方面",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 7861
+    },
+    {
+      "word": "relate",
+      "zh": "联系",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 7862
+    },
+    {
+      "word": "fundamental",
+      "zh": "基本的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 7870
+    },
+    {
+      "word": "substitute",
+      "zh": "替代品；替代",
+      "pos": "n./v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 7885
+    },
+    {
+      "word": "authentic",
+      "zh": "真正的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 7890
+    },
+    {
+      "word": "retrieve",
+      "zh": "检索；取回",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 7921
+    },
+    {
+      "word": "transform",
+      "zh": "改变",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 7936
+    },
+    {
+      "word": "elaborate",
+      "zh": "精心制作的；详述",
+      "pos": "adj./v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 7976
+    },
+    {
+      "word": "mechanism",
+      "zh": "机制",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 7994
+    },
+    {
+      "word": "obtain",
+      "zh": "获得",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 8011
+    },
+    {
+      "word": "context",
+      "zh": "语境；背景",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 8058
+    },
+    {
+      "word": "neutral",
+      "zh": "中立的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 8081
+    },
+    {
+      "word": "athlete",
+      "zh": "运动员",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 8105
+    },
+    {
+      "word": "dismiss",
+      "zh": "解雇；驳回",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 8131
+    },
+    {
+      "word": "portion",
+      "zh": "部分",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 8192
+    },
+    {
+      "word": "exceptional",
+      "zh": "例外的；优秀的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 8195
+    },
+    {
+      "word": "estimate",
+      "zh": "估计",
+      "pos": "v./n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 8244
+    },
+    {
+      "word": "confuse",
+      "zh": "使困惑",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 8279
+    },
+    {
+      "word": "verify",
+      "zh": "核实",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 8346
+    },
+    {
+      "word": "dynamic",
+      "zh": "动态的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 8394
+    },
+    {
+      "word": "apparent",
+      "zh": "明显的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 8426
+    },
+    {
+      "word": "promote",
+      "zh": "促进；晋升",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 8520
+    },
+    {
+      "word": "valid",
+      "zh": "有效的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 8530
+    },
+    {
+      "word": "academic",
+      "zh": "学术的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 8611
+    },
+    {
+      "word": "category",
+      "zh": "类别",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 8633
+    },
+    {
+      "word": "inspire",
+      "zh": "激励",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 8750
+    },
+    {
+      "word": "vague",
+      "zh": "模糊的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 8756
+    },
+    {
+      "word": "decline",
+      "zh": "下降；拒绝",
+      "pos": "v./n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 8772
+    },
+    {
+      "word": "yield",
+      "zh": "产生；产量",
+      "pos": "v./n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 8788
+    },
+    {
+      "word": "manipulate",
+      "zh": "操纵",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 8830
+    },
+    {
+      "word": "liberal",
+      "zh": "自由的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 8831
+    },
+    {
+      "word": "equivalent",
+      "zh": "相等的；等价物",
+      "pos": "adj./n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 8876
+    },
+    {
+      "word": "extract",
+      "zh": "提取；摘录",
+      "pos": "v./n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 8949
+    },
+    {
+      "word": "scope",
+      "zh": "范围",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 9019
+    },
+    {
+      "word": "adapt",
+      "zh": "适应；改编",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 9055
+    },
+    {
+      "word": "catastrophe",
+      "zh": "灾难",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 9180
+    },
+    {
+      "word": "surround",
+      "zh": "包围",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 9213
+    },
+    {
+      "word": "contribute",
+      "zh": "贡献；促成",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 9233
+    },
+    {
+      "word": "arise",
+      "zh": "出现",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 9257
+    },
+    {
+      "word": "dispute",
+      "zh": "争论",
+      "pos": "n./v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 9277
+    },
+    {
+      "word": "convert",
+      "zh": "转换",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 9315
+    },
+    {
+      "word": "strategic",
+      "zh": "战略的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 9328
+    },
+    {
+      "word": "employ",
+      "zh": "雇用；使用",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 9374
+    },
+    {
+      "word": "optimistic",
+      "zh": "乐观的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 9381
+    },
+    {
+      "word": "combine",
+      "zh": "结合",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 9703
+    },
+    {
+      "word": "advocate",
+      "zh": "提倡；拥护者",
+      "pos": "v./n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 9773
+    },
+    {
+      "word": "virtual",
+      "zh": "虚拟的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 9795
+    },
+    {
+      "word": "consequence",
+      "zh": "后果",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 9812
+    },
+    {
+      "word": "substantial",
+      "zh": "大量的；实质的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 9818
+    },
+    {
+      "word": "emerge",
+      "zh": "出现",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 9832
+    },
+    {
+      "word": "oppose",
+      "zh": "反对",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 9853
+    },
+    {
+      "word": "external",
+      "zh": "外部的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 9931
+    },
+    {
+      "word": "exploit",
+      "zh": "利用；开发",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 9975
+    },
+    {
+      "word": "prospect",
+      "zh": "前景",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 10041
+    },
+    {
+      "word": "remedy",
+      "zh": "补救",
+      "pos": "n./v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 10047
+    },
+    {
+      "word": "dispose",
+      "zh": "处理",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 10091
+    },
+    {
+      "word": "distinct",
+      "zh": "明显的；不同的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 10186
+    },
+    {
+      "word": "conventional",
+      "zh": "传统的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 10263
+    },
+    {
+      "word": "epidemic",
+      "zh": "流行病；流行的",
+      "pos": "n./adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 10273
+    },
+    {
+      "word": "statistics",
+      "zh": "统计",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 10278
+    },
+    {
+      "word": "install",
+      "zh": "安装",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 10322
+    },
+    {
+      "word": "generate",
+      "zh": "产生",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 10355
+    },
+    {
+      "word": "probable",
+      "zh": "可能的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 10362
+    },
+    {
+      "word": "exaggerate",
+      "zh": "夸大",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 10419
+    },
+    {
+      "word": "acquire",
+      "zh": "获得",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 10470
+    },
+    {
+      "word": "dedicate",
+      "zh": "奉献",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 10476
+    },
+    {
+      "word": "occupy",
+      "zh": "占据",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 10483
+    },
+    {
+      "word": "critic",
+      "zh": "批评家",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 10509
+    },
+    {
+      "word": "prejudice",
+      "zh": "偏见",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 10517
+    },
+    {
+      "word": "sustain",
+      "zh": "维持",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 10573
+    },
+    {
+      "word": "clarify",
+      "zh": "澄清",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 10613
+    },
+    {
+      "word": "attach",
+      "zh": "系上；附上",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 10621
+    },
+    {
+      "word": "impose",
+      "zh": "强加",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 10651
+    },
+    {
+      "word": "revenue",
+      "zh": "收入",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 10652
+    },
+    {
+      "word": "frequent",
+      "zh": "频繁的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 10690
+    },
+    {
+      "word": "flexible",
+      "zh": "灵活的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 10735
+    },
+    {
+      "word": "credibility",
+      "zh": "可信度",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 10748
+    },
+    {
+      "word": "controversial",
+      "zh": "有争议的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 10751
+    },
+    {
+      "word": "dilemma",
+      "zh": "困境",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 10846
+    },
+    {
+      "word": "prominent",
+      "zh": "突出的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 10848
+    },
+    {
+      "word": "qualify",
+      "zh": "使合格",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 10868
+    },
+    {
+      "word": "deliberate",
+      "zh": "故意的；仔细考虑",
+      "pos": "adj./v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 10977
+    },
+    {
+      "word": "intervene",
+      "zh": "干预",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 11013
+    },
+    {
+      "word": "consume",
+      "zh": "消费",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 11098
+    },
+    {
+      "word": "contrast",
+      "zh": "对比",
+      "pos": "n./v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 11123
+    },
+    {
+      "word": "distribute",
+      "zh": "分发",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 11129
+    },
+    {
+      "word": "conclude",
+      "zh": "得出结论；结束",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 11251
+    },
+    {
+      "word": "leisure",
+      "zh": "休闲",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 11276
+    },
+    {
+      "word": "compensate",
+      "zh": "补偿",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 11304
+    },
+    {
+      "word": "absorb",
+      "zh": "吸收；使专心",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 11343
+    },
+    {
+      "word": "racial",
+      "zh": "种族的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 11365
+    },
+    {
+      "word": "remark",
+      "zh": "评论",
+      "pos": "n./v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 11417
+    },
+    {
+      "word": "contemporary",
+      "zh": "当代的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 11590
+    },
+    {
+      "word": "rural",
+      "zh": "农村的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 11615
+    },
+    {
+      "word": "pollution",
+      "zh": "污染",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 11628
+    },
+    {
+      "word": "circumstance",
+      "zh": "情况",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 11689
+    },
+    {
+      "word": "interpret",
+      "zh": "解释；口译",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 11692
+    },
+    {
+      "word": "agriculture",
+      "zh": "农业",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 11713
+    },
+    {
+      "word": "evolve",
+      "zh": "进化",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 11873
+    },
+    {
+      "word": "ethical",
+      "zh": "伦理的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 11911
+    },
+    {
+      "word": "spectrum",
+      "zh": "光谱；范围",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 11916
+    },
+    {
+      "word": "reluctant",
+      "zh": "不情愿的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 11922
+    },
+    {
+      "word": "retain",
+      "zh": "保留",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 11924
+    },
+    {
+      "word": "educate",
+      "zh": "教育",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 11926
+    },
+    {
+      "word": "boundary",
+      "zh": "边界",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 11945
+    },
+    {
+      "word": "hypothesis",
+      "zh": "假设",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 11946
+    },
+    {
+      "word": "viable",
+      "zh": "可行的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 11969
+    },
+    {
+      "word": "criticize",
+      "zh": "批评",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 11977
+    },
+    {
+      "word": "comply",
+      "zh": "遵守",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 12010
+    },
+    {
+      "word": "trend",
+      "zh": "趋势",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 12014
+    },
+    {
+      "word": "appoint",
+      "zh": "任命",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 12045
+    },
+    {
+      "word": "dominate",
+      "zh": "支配",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 12127
+    },
+    {
+      "word": "assign",
+      "zh": "分配",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 12145
+    },
+    {
+      "word": "transmit",
+      "zh": "传输",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 12164
+    },
+    {
+      "word": "margin",
+      "zh": "边缘；利润",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 12209
+    },
+    {
+      "word": "proportion",
+      "zh": "比例",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 12236
+    },
+    {
+      "word": "quantity",
+      "zh": "数量",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 12237
+    },
+    {
+      "word": "eligible",
+      "zh": "符合条件的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 12267
+    },
+    {
+      "word": "transparent",
+      "zh": "透明的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 12280
+    },
+    {
+      "word": "obscure",
+      "zh": "晦涩的；不出名的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 12354
+    },
+    {
+      "word": "prevail",
+      "zh": "盛行；获胜",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 12367
+    },
+    {
+      "word": "fragment",
+      "zh": "片段",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 12532
+    },
+    {
+      "word": "assess",
+      "zh": "评估",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 12545
+    },
+    {
+      "word": "forecast",
+      "zh": "预测",
+      "pos": "n./v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 12580
+    },
+    {
+      "word": "import",
+      "zh": "进口",
+      "pos": "v./n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 12676
+    },
+    {
+      "word": "anticipate",
+      "zh": "预期",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 12679
+    },
+    {
+      "word": "construct",
+      "zh": "建造",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 12735
+    },
+    {
+      "word": "minimal",
+      "zh": "最小的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 12802
+    },
+    {
+      "word": "terminate",
+      "zh": "终止",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 12854
+    },
+    {
+      "word": "devote",
+      "zh": "致力于",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 12860
+    },
+    {
+      "word": "adequate",
+      "zh": "足够的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 12889
+    },
+    {
+      "word": "highlight",
+      "zh": "突出；高光",
+      "pos": "v./n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 12914
+    },
+    {
+      "word": "overlook",
+      "zh": "忽视；俯瞰",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 12936
+    },
+    {
+      "word": "orientation",
+      "zh": "方向；入学教育",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 13034
+    },
+    {
+      "word": "component",
+      "zh": "组成部分",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 13052
+    },
+    {
+      "word": "abstract",
+      "zh": "抽象的；摘要",
+      "pos": "adj./n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 13067
+    },
+    {
+      "word": "resource",
+      "zh": "资源",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 13273
+    },
+    {
+      "word": "enhance",
+      "zh": "增强",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 13425
+    },
+    {
+      "word": "accommodate",
+      "zh": "容纳；使适应",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 13461
+    },
+    {
+      "word": "distinguish",
+      "zh": "区分",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 13511
+    },
+    {
+      "word": "perceive",
+      "zh": "察觉",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 13519
+    },
+    {
+      "word": "manufacture",
+      "zh": "制造",
+      "pos": "v./n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 13536
+    },
+    {
+      "word": "multiply",
+      "zh": "乘；增加",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 13543
+    },
+    {
+      "word": "ethnic",
+      "zh": "种族的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 13607
+    },
+    {
+      "word": "dissolve",
+      "zh": "溶解",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 13619
+    },
+    {
+      "word": "voluntary",
+      "zh": "自愿的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 13764
+    },
+    {
+      "word": "controversy",
+      "zh": "争议",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 13880
+    },
+    {
+      "word": "interact",
+      "zh": "互动",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 13926
+    },
+    {
+      "word": "export",
+      "zh": "出口",
+      "pos": "v./n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 14152
+    },
+    {
+      "word": "conceive",
+      "zh": "构想",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 14161
+    },
+    {
+      "word": "enable",
+      "zh": "使能够",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 14177
+    },
+    {
+      "word": "plausible",
+      "zh": "似乎合理的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 14273
+    },
+    {
+      "word": "advertise",
+      "zh": "做广告",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 14330
+    },
+    {
+      "word": "disrupt",
+      "zh": "扰乱",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 14340
+    },
+    {
+      "word": "theoretical",
+      "zh": "理论的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 14452
+    },
+    {
+      "word": "rigid",
+      "zh": "僵硬的；严格的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 14481
+    },
+    {
+      "word": "undermine",
+      "zh": "削弱",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 14489
+    },
+    {
+      "word": "enforce",
+      "zh": "执行",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 14525
+    },
+    {
+      "word": "imply",
+      "zh": "暗示",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 14532
+    },
+    {
+      "word": "innovation",
+      "zh": "创新",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 14554
+    },
+    {
+      "word": "paradox",
+      "zh": "悖论",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 14555
+    },
+    {
+      "word": "infrastructure",
+      "zh": "基础设施",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 14560
+    },
+    {
+      "word": "apparatus",
+      "zh": "器械；装置",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 14783
+    },
+    {
+      "word": "instruct",
+      "zh": "指导",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 14869
+    },
+    {
+      "word": "implement",
+      "zh": "实施",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 15005
+    },
+    {
+      "word": "evident",
+      "zh": "明显的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 15007
+    },
+    {
+      "word": "incentive",
+      "zh": "激励",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 15113
+    },
+    {
+      "word": "audit",
+      "zh": "审计",
+      "pos": "n./v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 15172
+    },
+    {
+      "word": "skeptical",
+      "zh": "怀疑的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 15324
+    },
+    {
+      "word": "ideology",
+      "zh": "意识形态",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 15325
+    },
+    {
+      "word": "undergo",
+      "zh": "经历",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 15368
+    },
+    {
+      "word": "elect",
+      "zh": "选举",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 15443
+    },
+    {
+      "word": "evaluate",
+      "zh": "评价",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 15445
+    },
+    {
+      "word": "accelerate",
+      "zh": "加速",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 15682
+    },
+    {
+      "word": "compose",
+      "zh": "组成；创作",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 15771
+    },
+    {
+      "word": "indigenous",
+      "zh": "土著的；本地的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 15776
+    },
+    {
+      "word": "amaze",
+      "zh": "使惊奇",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 15888
+    },
+    {
+      "word": "bias",
+      "zh": "偏见",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 16016
+    },
+    {
+      "word": "summary",
+      "zh": "摘要",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 16039
+    },
+    {
+      "word": "commodity",
+      "zh": "商品",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 16100
+    },
+    {
+      "word": "diverse",
+      "zh": "多样的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 16158
+    },
+    {
+      "word": "doctrine",
+      "zh": "教义；学说",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 16640
+    },
+    {
+      "word": "consensus",
+      "zh": "共识",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 17001
+    },
+    {
+      "word": "contradict",
+      "zh": "反驳；与…矛盾",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 17022
+    },
+    {
+      "word": "comprehensive",
+      "zh": "全面的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 17168
+    },
+    {
+      "word": "endeavor",
+      "zh": "努力",
+      "pos": "n./v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 17181
+    },
+    {
+      "word": "induce",
+      "zh": "引起；诱导",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 17396
+    },
+    {
+      "word": "analogy",
+      "zh": "类比",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 17416
+    },
+    {
+      "word": "hierarchy",
+      "zh": "层级",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 17476
+    },
+    {
+      "word": "undertake",
+      "zh": "承担",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 17534
+    },
+    {
+      "word": "exclude",
+      "zh": "排除",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 17671
+    },
+    {
+      "word": "persist",
+      "zh": "坚持",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 17799
+    },
+    {
+      "word": "aesthetic",
+      "zh": "审美的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 17911
+    },
+    {
+      "word": "contemplate",
+      "zh": "沉思；考虑",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 18024
+    },
+    {
+      "word": "cognitive",
+      "zh": "认知的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 18047
+    },
+    {
+      "word": "fluent",
+      "zh": "流利的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 18129
+    },
+    {
+      "word": "decrease",
+      "zh": "减少",
+      "pos": "v./n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 18364
+    },
+    {
+      "word": "abundant",
+      "zh": "丰富的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 18379
+    },
+    {
+      "word": "deficit",
+      "zh": "赤字；不足",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 18487
+    },
+    {
+      "word": "modify",
+      "zh": "修改",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 18549
+    },
+    {
+      "word": "exceed",
+      "zh": "超过",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 18553
+    },
+    {
+      "word": "articulate",
+      "zh": "清晰表达；表达能力强的",
+      "pos": "v./adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 18901
+    },
+    {
+      "word": "endorse",
+      "zh": "支持；背书",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 19113
+    },
+    {
+      "word": "subsequent",
+      "zh": "随后的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 19118
+    },
+    {
+      "word": "prompt",
+      "zh": "迅速的；促使",
+      "pos": "adj./v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 19139
+    },
+    {
+      "word": "minimize",
+      "zh": "使最小化",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 19413
+    },
+    {
+      "word": "incorporate",
+      "zh": "纳入",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 19436
+    },
+    {
+      "word": "collaborate",
+      "zh": "合作",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 19457
+    },
+    {
+      "word": "reinforce",
+      "zh": "加强",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 19497
+    },
+    {
+      "word": "motivate",
+      "zh": "激励",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 19526
+    },
+    {
+      "word": "conserve",
+      "zh": "保护；节约",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 19698
+    },
+    {
+      "word": "emphasize",
+      "zh": "强调",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 20253
+    },
+    {
+      "word": "monetary",
+      "zh": "货币的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 20263
+    },
+    {
+      "word": "facilitate",
+      "zh": "促进",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 20444
+    },
+    {
+      "word": "injure",
+      "zh": "伤害",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 20832
+    },
+    {
+      "word": "subordinate",
+      "zh": "下级的；下属",
+      "pos": "adj./n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 20859
+    },
+    {
+      "word": "framework",
+      "zh": "框架",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 21236
+    },
+    {
+      "word": "simulate",
+      "zh": "模拟",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 21438
+    },
+    {
+      "word": "arbitrary",
+      "zh": "任意的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 21440
+    },
+    {
+      "word": "analyse",
+      "zh": "分析",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 21769
+    },
+    {
+      "word": "ambiguous",
+      "zh": "模糊的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 21775
+    },
+    {
+      "word": "correspond",
+      "zh": "通信；符合",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 22214
+    },
+    {
+      "word": "inherent",
+      "zh": "固有的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 22276
+    },
+    {
+      "word": "elevate",
+      "zh": "提升",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 22705
+    },
+    {
+      "word": "adverse",
+      "zh": "不利的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 22776
+    },
+    {
+      "word": "diminish",
+      "zh": "减少",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 22886
+    },
+    {
+      "word": "complement",
+      "zh": "补充",
+      "pos": "v./n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 22984
+    },
+    {
+      "word": "portray",
+      "zh": "描绘",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 22999
+    },
+    {
+      "word": "constitute",
+      "zh": "构成",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 23268
+    },
+    {
+      "word": "illuminate",
+      "zh": "照亮；阐明",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 23420
+    },
+    {
+      "word": "equilibrium",
+      "zh": "平衡",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 23446
+    },
+    {
+      "word": "coherent",
+      "zh": "连贯的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 23524
+    },
+    {
+      "word": "illustrate",
+      "zh": "说明",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 23689
+    },
+    {
+      "word": "integrate",
+      "zh": "整合",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 23757
+    },
+    {
+      "word": "approximate",
+      "zh": "大约的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 23906
+    },
+    {
+      "word": "utilize",
+      "zh": "利用",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 23931
+    },
+    {
+      "word": "accumulate",
+      "zh": "积累",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 24340
+    },
+    {
+      "word": "converge",
+      "zh": "汇聚",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 24786
+    },
+    {
+      "word": "feasible",
+      "zh": "可行的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 24830
+    },
+    {
+      "word": "validate",
+      "zh": "验证",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 25060
+    },
+    {
+      "word": "gradual",
+      "zh": "逐渐的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 25222
+    },
+    {
+      "word": "amend",
+      "zh": "修订",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 25298
+    },
+    {
+      "word": "discriminate",
+      "zh": "歧视；区分",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 25337
+    },
+    {
+      "word": "consist",
+      "zh": "由…组成",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 25619
+    },
+    {
+      "word": "migrate",
+      "zh": "迁移",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 26099
+    },
+    {
+      "word": "restrict",
+      "zh": "限制",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 26263
+    },
+    {
+      "word": "autonomy",
+      "zh": "自治",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 26369
+    },
+    {
+      "word": "depict",
+      "zh": "描绘",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 26460
+    },
+    {
+      "word": "maximize",
+      "zh": "最大化",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 26471
+    },
+    {
+      "word": "offset",
+      "zh": "抵消",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 27046
+    },
+    {
+      "word": "optimal",
+      "zh": "最优的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 27259
+    },
+    {
+      "word": "discrete",
+      "zh": "离散的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 27723
+    },
+    {
+      "word": "prohibit",
+      "zh": "禁止",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 29660
+    },
+    {
+      "word": "depress",
+      "zh": "使沮丧；压低",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 29669
+    },
+    {
+      "word": "deteriorate",
+      "zh": "恶化",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 30021
+    },
+    {
+      "word": "marginal",
+      "zh": "边缘的；微小的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 30104
+    },
+    {
+      "word": "pragmatic",
+      "zh": "务实的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 30191
+    },
+    {
+      "word": "methodology",
+      "zh": "方法论",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 30387
+    },
+    {
+      "word": "derive",
+      "zh": "源于；获得",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 31119
+    },
+    {
+      "word": "empirical",
+      "zh": "经验的；实证的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 31139
+    },
+    {
+      "word": "compile",
+      "zh": "编译；汇编",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 31317
+    },
+    {
+      "word": "parameter",
+      "zh": "参数",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 31345
+    },
+    {
+      "word": "infer",
+      "zh": "推断",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 31457
+    },
+    {
+      "word": "tentative",
+      "zh": "试探性的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 31525
+    },
+    {
+      "word": "mediate",
+      "zh": "调解",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 31684
+    },
+    {
+      "word": "formulate",
+      "zh": "制定",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 31713
+    },
+    {
+      "word": "variance",
+      "zh": "差异；方差",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 32312
+    },
+    {
+      "word": "distort",
+      "zh": "扭曲",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 32620
+    },
+    {
+      "word": "fascinate",
+      "zh": "使着迷",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 34104
+    },
+    {
+      "word": "synthesis",
+      "zh": "综合；合成",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 34804
+    },
+    {
+      "word": "subsidy",
+      "zh": "补贴",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 35219
+    },
+    {
+      "word": "equip",
+      "zh": "装备",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 37608
+    },
+    {
+      "word": "implicit",
+      "zh": "含蓄的；隐含的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 39879
+    },
+    {
+      "word": "inhibit",
+      "zh": "抑制",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 40494
+    },
+    {
+      "word": "intrinsic",
+      "zh": "内在的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 42381
+    },
+    {
+      "word": "criterion",
+      "zh": "标准",
+      "pos": "n.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 43978
+    },
+    {
+      "word": "precede",
+      "zh": "在…之前",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 46896
+    },
+    {
+      "word": "displace",
+      "zh": "取代；使离开",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 47250
+    },
+    {
+      "word": "cumulative",
+      "zh": "累积的",
+      "pos": "adj.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 47965
+    },
+    {
+      "word": "comprise",
+      "zh": "包含；构成",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 48007
+    },
+    {
+      "word": "erode",
+      "zh": "侵蚀",
+      "pos": "v.",
+      "exams": [
+        "toefl"
+      ],
+      "rank": 48012
+    }
+  ]
+}

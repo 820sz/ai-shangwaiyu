@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -8,10 +9,12 @@ import '../../config/theme.dart';
 import '../../models/bookmark.dart';
 import '../../models/writing_log.dart';
 import '../../providers/bookmark_provider.dart';
+import '../../services/api_endpoint.dart';
 import '../../services/base_api.dart';
 import '../../services/database.dart';
 import '../../services/doubao_api.dart';
 import '../../services/output_feedback.dart';
+import '../../services/output_rubric.dart';
 import '../../services/writing_review_settings.dart';
 import '../../widgets/app_ui.dart';
 import '../../widgets/design_kit.dart' show AppProgressRing;
@@ -35,6 +38,233 @@ class WriteReviewScreen extends StatefulWidget {
 }
 
 enum _Phase { compose, transcribing, reviewing, result, error }
+
+/// 写译批改的练习类型(决定用哪套四六级官方 rubric)。
+///
+/// 为什么需要它:批改页以前只有"手写档 / 电子档"(输入方式),没有"练的是写作
+/// 还是翻译"(题目性质)—— 而四六级写作与翻译是**两套评分维度**(写作看内容/
+/// 结构/语言,翻译看理解/准确/通顺)。用户批注第 9 条要求"维度分 + 折算四六级
+/// 官方档位都给",所以必须先明确这次批的是哪一种。
+enum WriteReviewTaskType {
+  writing('写作', 'cet4_writing'),
+  translation('翻译', 'cet4_translation');
+
+  const WriteReviewTaskType(this.label, this.rubricId);
+
+  /// 界面文案
+  final String label;
+
+  /// 与 `OutputRubric` 内置 id 对齐(cet4_writing / cet4_translation)
+  final String rubricId;
+}
+
+/// 按练习类型取 rubric:**取不到就回落内置第一套**,绝不因为 rubric 缺失白屏。
+OutputRubric writeReviewRubric(WriteReviewTaskType type) {
+  final byId = OutputRubric.byId(type.rubricId);
+  if (byId != null) return byId;
+  final builtin = OutputRubric.builtin();
+  return builtin.isNotEmpty ? builtin.first : _fallbackRubric;
+}
+
+/// 兜底 rubric(内置表为空这种理论上不会发生的情况;给一维也行,不崩)
+final OutputRubric _fallbackRubric = OutputRubric(
+  id: 'cet4_writing',
+  type: 'writing',
+  scoringMode: ScoringMode.aiRubric,
+  dimensions: const <RubricDimension>[
+    RubricDimension(
+      key: 'content',
+      label: '内容切题',
+      weight: 0.5,
+      maxScore: 50,
+      hint: '是否按题目要求展开',
+    ),
+    RubricDimension(
+      key: 'language',
+      label: '语言准确',
+      weight: 0.5,
+      maxScore: 50,
+      hint: '语法/拼写/搭配是否准确',
+    ),
+  ],
+  bands: const <RubricBand>[
+    RubricBand(minScore: 0, maxScore: 100, label: '待提高'),
+  ],
+);
+
+/// 生成写译批改的系统提示词(纯函数,可单测)。
+///
+/// 设计要点:
+/// 1. **复用 [buildScoringPrompt]**:维度分、依据纪律、"先依据后分数"全部沿用
+///    输出练习的同一套(id 对齐、口径一致),写译批改不再自己写一套评分规则;
+/// 2. **同时保留旧字段**:issues/correction/summary/score/error_summary 继续要
+///    —— 结果页的逐条点评、错误分类卡、写译记录都依赖它们;解析 rubric 失败时
+///    这些字段还能走旧解析,保证"不白屏";
+/// 3. 用户在「批改设置」改过提示词时:**保留他的原文**,再把评分段追加在后面
+///    (不静默覆盖用户自定义,这是 v2.13 的设计承诺);
+/// 4. 手写直批时追加 transcript 要求(与旧直批行为一致)。
+String buildWriteReviewPrompt({
+  required WriteReviewTaskType taskType,
+  required OutputRubric rubric,
+  required String userPrompt,
+  bool userCustomized = false,
+  int imageCount = 0,
+}) {
+  final taskText = taskType == WriteReviewTaskType.writing
+      ? '四六级写作:用户提交的是一篇英文作文(正文在随后这条用户消息里)'
+      : '四六级段落翻译:用户提交的是一段中译英译文'
+          '(若用户同时在正文里给出中文原文,请对照原文评判)';
+  final scoringSection = buildScoringPrompt(
+    rubric: rubric,
+    task: taskText,
+    answer: '(用户作答正文见随后这条用户消息,系统提示里不重复)',
+    notes: '本次调用来自「写译批改」页:除维度分外,还必须同时给出旧版批改字段'
+        '(见文末【旧版字段】),两套信息放在同一个 JSON 里。',
+  );
+  final buffer = StringBuffer();
+  final custom = userPrompt.trim();
+  if (userCustomized && custom.isNotEmpty) {
+    // 用户改过提示词:原文置顶,评分段追加在后 —— 既不丢用户的措辞习惯,
+    // 又保证维度分纪律一定生效
+    buffer
+      ..writeln(custom)
+      ..writeln();
+  }
+  buffer
+    ..writeln(scoringSection)
+    ..writeln('【旧版字段——与上面的 dimensions 放在同一个 JSON 里】')
+    ..writeln('1. score:整数 0-100(与 dimensions 的分数合计保持一致);')
+    ..writeln('2. issues:数组,每条 {"original":"照抄作答片段",'
+        '"correction":"改成什么","type":"词汇|语法|表达优化|其他",'
+        '"reason":"中文原因","span":"同 original","suggestion":"同 correction"};')
+    ..writeln('3. correction:修正后的完整英文(没有就空串);')
+    ..writeln('4. summary:中文总评,60 字内,必须引用作答里的事实;')
+    ..writeln('5. error_summary:{"词汇":"","语法":"","表达优化":"","其他":""},'
+        '四类各一句话汇总(没有就空串);')
+    ..writeln('6. 只输出一个 JSON,不要解释、不要在 JSON 外写任何文字。');
+  if (imageCount > 0) {
+    buffer
+      ..writeln()
+      ..writeln(writeReviewHandwrittenSuffix(imageCount));
+  }
+  return buffer.toString();
+}
+
+/// 直接批改手写照片时的追加要求(与旧版行为一致:额外返回 transcript)。
+String writeReviewHandwrittenSuffix(int imageCount) {
+  final multi = imageCount > 1
+      ? '用户上传了 $imageCount 张手写英文照片,请按上传顺序阅读并合并成一篇。'
+      : '用户上传了一张手写英文照片。';
+  return '【本次输入是手写稿照片,不是电子文本】$multi'
+      '请先准确识别照片里的英文(保持段落与换行),再按上面的要求批改;'
+      '识别时逐句看笔迹,看不清的词按上下文补全,不要编造不存在的词。'
+      '在 JSON 里额外返回 "transcript": "识别出的完整英文原文"。';
+}
+
+/// 解析 rubric 评分(先走统一评分层;失败返回 null 由调用方回退旧逻辑)。
+ScoredOutput? parseWriteReviewRubric(
+  String rawContent, {
+  required WriteReviewTaskType taskType,
+}) {
+  return parseScoringResult(
+    rawContent,
+    rubric: writeReviewRubric(taskType),
+  );
+}
+
+/// 把 rubric 的维度问题映射回旧结果页的 issues 结构。
+///
+/// 为什么映射而不是重写结果页:逐条点评、点错处追问、收藏夹都按
+/// `{original, correction, type, reason}` 读数据 —— 保留旧结构,新维度只是
+/// **额外**多一块展示,老功能一个都不动。
+List<Map<String, String>> legacyIssuesFromScored(ScoredOutput scored) {
+  return <Map<String, String>>[
+    for (final issue in scored.issues)
+      <String, String>{
+        'original': issue.span,
+        // 旧卡片把"建议改法"也叫 correction;rubric 层叫 suggestion,同义
+        'correction': issue.suggestion,
+        'type': issue.type.isEmpty ? '其他' : issue.type,
+        'reason': issue.reason,
+      },
+  ];
+}
+
+/// 把 rubric 的 issues 汇总成旧的四类错误汇总(词汇/语法/表达优化/其他)。
+///
+/// 这样"错误分类汇总"卡片与"错误档案回流"都还能用,不因为换成 rubric 就丢。
+Map<String, String> errorSummaryFromScored(ScoredOutput scored) {
+  final buckets = <String, List<String>>{
+    for (final category in WritingLog.categories) category: <String>[],
+  };
+  for (final issue in scored.issues) {
+    final category = _reviewErrorCategoryOf(issue.type);
+    final reason = issue.reason.trim();
+    if (reason.isNotEmpty) buckets[category]!.add(reason);
+  }
+  return <String, String>{
+    for (final category in WritingLog.categories)
+      category: buckets[category]!.take(3).join('；'),
+  };
+}
+
+String _reviewErrorCategoryOf(String rawType) {
+  final type = rawType.trim();
+  if (type.isEmpty) return '其他';
+  if (type.contains('词汇') || type.contains('用词') || type.contains('拼写') ||
+      type.contains('搭配')) {
+    return '词汇';
+  }
+  if (type.contains('语法') || type.contains('时态') || type.contains('从句') ||
+      type.contains('主谓') || type.contains('语序') || type.contains('标点')) {
+    return '语法';
+  }
+  if (type.contains('表达') || type.contains('中式') || type.contains('衔接') ||
+      type.contains('连贯')) {
+    return '表达优化';
+  }
+  return '其他';
+}
+
+/// 折算四六级官方档位(100 分制 → rubric 的官方分档)。
+RubricBand? writeReviewConvertedBand(
+  ScoredOutput scored,
+  OutputRubric rubric,
+) {
+  return bandOf(scored.totalScore, rubric.bands);
+}
+
+/// 把 rubric 结果并入一份 `score_json` 载荷(**不破坏旧键**)。
+///
+/// 为什么单独成纯函数:写译记录的持久化字段以后可能加上 `score_json`,届时
+/// 直接调它就能兼容旧行(旧行没有 rubric 键,新行多出来但旧读取方忽略未知键);
+/// 本轮先用于结果页内存态与可测试的"并入"口径,是否落库见任务汇报的数据口径。
+Map<String, Object?> mergeRubricIntoScoreJson({
+  Map<String, Object?>? existing,
+  required ScoredOutput scored,
+  required OutputRubric rubric,
+}) {
+  final out = <String, Object?>{...?existing};
+  final scoredJson = scored.toJson();
+  final band = writeReviewConvertedBand(scored, rubric);
+  // 已知旧键(score/total_score/band_label/issues/...)一律 putIfAbsent:
+  // 老数据优先,新字段只补充
+  out.putIfAbsent('total_score', () => scored.totalScore);
+  out.putIfAbsent('band_label', () => scored.bandLabel);
+  out.putIfAbsent('issues', () => scoredJson['issues']);
+  out.putIfAbsent('correction', () => scoredJson['correction']);
+  out.putIfAbsent('summary', () => scoredJson['summary']);
+  // rubric 专属键每次都写:它们描述的是"这一次评分用的标准与结果"
+  out['rubric_id'] = rubric.id;
+  out['dimensions'] = scoredJson['dimensions'];
+  out['band'] = <String, Object?>{
+    'label': band?.label ?? scored.bandLabel,
+    if (band != null) 'min_score': band.minScore,
+    if (band != null) 'max_score': band.maxScore,
+    if (band != null) 'description': band.description,
+  };
+  return out;
+}
 
 class _WriteReviewScreenState extends State<WriteReviewScreen> {
   final ImagePicker _picker = ImagePicker();
@@ -76,6 +306,13 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
   /// 设置页保存后刷新。默认值与读写规则统一收在 WritingReviewSettings。
   String _reviewPrompt = WritingReviewSettings.defaultPrompt;
   String _reviewThinking = WritingReviewSettings.defaultThinking;
+
+  /// 本次批改的练习类型(决定用写作还是翻译的 rubric;用户可切)
+  WriteReviewTaskType _taskType = WriteReviewTaskType.writing;
+
+  /// rubric 评分结果:解析成功才有;null = 走旧逻辑,结果页不显示维度分区
+  ScoredOutput? _scored;
+  OutputRubric? _rubric;
 
   late final FollowUpController _followUp;
 
@@ -267,6 +504,103 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
 
   // ── 批改 ──
 
+  /// 组织请求并拿**原始回复文本**。
+  ///
+  /// 为什么不用 `reviewWriting()`:它只回旧字段,模型给的 `dimensions` 会在
+  /// 解析时被丢掉,拿不到 rubric 维度分。这里复用现有 HTTP 基建
+  /// (`buildChatBody` + `postWithReasoningFallback`,不新建 Dio),
+  /// 拿原始文本后先按 rubric 解析、失败再用旧解析回退。
+  Future<String> _requestRawReview({
+    required ApiEndpointConfig cfg,
+    required String systemPrompt,
+    String? text,
+    List<File>? images,
+  }) async {
+    final messages = <Map<String, dynamic>>[
+      {'role': 'system', 'content': systemPrompt},
+    ];
+    if (images != null && images.isNotEmpty) {
+      final uris = await _api.imageDataUrisFor(images);
+      final multi = uris.length > 1;
+      messages.add(<String, dynamic>{
+        'role': 'user',
+        'content': <Map<String, Object?>>[
+          for (final uri in uris)
+            <String, Object?>{
+              'type': 'image_url',
+              'image_url': <String, Object?>{
+                'url': uri,
+                if (shouldSendDetailFlag(cfg.model)) 'detail': 'high',
+              },
+            },
+          <String, Object?>{
+            'type': 'text',
+            'text': multi
+                ? '请批改这些手写稿照片里的英文(按顺序阅读,合并成一篇)'
+                : '请批改这张手写稿照片里的英文',
+          },
+        ],
+      });
+    } else {
+      messages.add(<String, dynamic>{'role': 'user', 'content': text ?? ''});
+    }
+    final body = BaseApiService.buildChatBody(
+      cfg: cfg,
+      temperature: 0,
+      maxTokens: 8192,
+      thinkingLevel: _reviewThinking,
+      messages: messages,
+    );
+    final response = await _api.postWithReasoningFallback(
+      '/chat/completions',
+      body,
+      cfg: cfg,
+    );
+    return BaseApiService.extractContentWithReasoning(response.data);
+  }
+
+  String _buildSystemPrompt({required int imageCount}) {
+    return buildWriteReviewPrompt(
+      taskType: _taskType,
+      rubric: writeReviewRubric(_taskType),
+      userPrompt: _reviewPrompt,
+      userCustomized: WritingReviewSettings.isPromptCustomized,
+      imageCount: imageCount,
+    );
+  }
+
+  /// 解析原始回复:rubric 成功 → 维度分 + 旧字段一起进结果页;
+  /// rubric 失败 → 旧解析回退(旧字段存在就照旧显示,不白屏)。
+  void _applyRawReview(String raw) {
+    final rubric = writeReviewRubric(_taskType);
+    final scored = parseWriteReviewRubric(raw, taskType: _taskType);
+    final fallback = DoubaoApiService.parseWritingReview(raw);
+    if (scored != null) {
+      _applyResult(
+        <String, dynamic>{
+          // 成功时分数以 rubric 总分为准(维度分相加,可解释),并保留旧字段
+          'score': '${scored.totalScore.round()}',
+          'correction': scored.correction ?? '',
+          'summary': scored.summary,
+          'issues': legacyIssuesFromScored(scored),
+          'error_summary': errorSummaryFromScored(scored),
+          'transcript': fallback['transcript'] ?? '',
+        },
+        scored: scored,
+        rubric: rubric,
+      );
+      return;
+    }
+    if (fallback.isEmpty) {
+      // 两套都解析不出来 = 模型没给可用 JSON:如实报错(带原文片段便于诊断)
+      final excerpt = raw.trim();
+      throw Exception('AI 返回格式异常(原文前400字)：\n'
+          '${excerpt.length > 400 ? excerpt.substring(0, 400) : excerpt}');
+    }
+    // 回退旧逻辑:没有维度分,但分数/总评/逐条点评照常显示
+    _applyResult(fallback);
+  }
+
   /// 文本批改(电子档,或手写档先转成的电子稿)。
   Future<void> _review() async {
     final text = _textCtrl.text.trim();
@@ -285,17 +619,18 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
       _reviewFromImages = false;
       _reviewModel = cfg.model;
       _transcript = '';
+      _scored = null;
+      _rubric = null;
       _promptedSave = false;
       _saved = false;
     });
     try {
-      final result = await _api.reviewWriting(
-        text,
-        endpoint: cfg,
-        systemPrompt: _reviewPrompt,
-        thinkingLevel: _reviewThinking,
+      final raw = await _requestRawReview(
+        cfg: cfg,
+        systemPrompt: _buildSystemPrompt(imageCount: 0),
+        text: text,
       );
-      _applyResult(result);
+      _applyRawReview(raw);
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -316,23 +651,29 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
       return;
     }
     final cfg = DoubaoApiService.reviewWritingEndpoint(requireVision: true);
+    if (!modelSupportsImages(cfg.model)) {
+      // 与旧链路同样的前置校验:不支持看图的模型直接说清原因,不浪费一次请求
+      _toast('当前批改模型不支持看图，请换视觉模型，或先「识别为电子档」');
+      return;
+    }
     setState(() {
       _phase = _Phase.reviewing;
       _error = null;
       _reviewFromImages = true;
       _reviewModel = cfg.model;
       _transcript = '';
+      _scored = null;
+      _rubric = null;
       _promptedSave = false;
       _saved = false;
     });
     try {
-      final result = await _api.reviewWritingImages(
-        _images,
-        endpoint: cfg,
-        systemPrompt: _reviewPrompt,
-        thinkingLevel: _reviewThinking,
+      final raw = await _requestRawReview(
+        cfg: cfg,
+        systemPrompt: _buildSystemPrompt(imageCount: _images.length),
+        images: _images,
       );
-      _applyResult(result);
+      _applyRawReview(raw);
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -343,14 +684,34 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
   }
 
   /// 批改成功后的统一收尾(文本批改 / 手写直批都走这里,避免两套状态更新漂移)。
-  void _applyResult(Map<String, dynamic> result) {
+  ///
+  /// [scored]/[rubric] 非空 = rubric 解析成功:结果页会多出"维度分 + 折算档位",
+  /// 并把 rubric 结果并入 `_result['score_json']`(旧键不动);为空 = 旧逻辑回退。
+  void _applyResult(
+    Map<String, dynamic> result, {
+    ScoredOutput? scored,
+    OutputRubric? rubric,
+  }) {
     if (!mounted) return;
     final transcript = (result['transcript'] ?? '').toString().trim();
+    final merged = <String, dynamic>{...result};
+    if (scored != null && rubric != null) {
+      merged['score'] = '${scored.totalScore.round()}';
+      merged['score_json'] = mergeRubricIntoScoreJson(
+        existing: _result['score_json'] is Map
+            ? Map<String, Object?>.from(_result['score_json'] as Map)
+            : null,
+        scored: scored,
+        rubric: rubric,
+      );
+    }
     setState(() {
-      _result = result;
-      _issues = (result['issues'] as List<Map<String, String>>?) ?? [];
+      _result = merged;
+      _scored = scored;
+      _rubric = rubric;
+      _issues = (merged['issues'] as List<Map<String, String>>?) ?? [];
       _errorSummary =
-          (result['error_summary'] as Map<String, String>?) ?? {};
+          (merged['error_summary'] as Map<String, String>?) ?? {};
       _transcript = _reviewFromImages ? transcript : '';
       // 直接批改手写图时模型会带回 transcript:补进「我的原文」,
       // 用户能核对有没有看错字,也能接着在电子稿上改。
@@ -430,6 +791,30 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
         }
       } catch (_) {
         // 回流失败不影响"记录已保存"这个结果
+      }
+      // v2.21(批 7 · P1-4):rubric 结果落进全 App 唯一的 score_json 载体
+      // (`output_attempts`),让「写篇」与输出练习同口径进入输出统计/能力项;
+      // `writing_logs` 行保持旧结构(记录页不用改,旧字段一个不丢)。
+      // 失败静默:记录已经保存成功,不能因为统计落库失败反过来报"保存失败"。
+      if (_scored != null && _rubric != null) {
+        try {
+          await DatabaseService.insertOutputAttempt(<String, Object?>{
+            // 没有 exercise_set/item:写译批改不是题组题,用 mode 标明来源
+            'mode': 'writing_review',
+            'answer': _textCtrl.text.trim(),
+            'score_json': jsonEncode(mergeRubricIntoScoreJson(
+              existing: _result['score_json'] is Map
+                  ? Map<String, Object?>.from(_result['score_json'] as Map)
+                  : null,
+              scored: _scored!,
+              rubric: _rubric!,
+            )),
+            'seconds': 0,
+            'created_at': DateTime.now().toIso8601String(),
+          });
+        } catch (_) {
+          // 统计落库失败不影响"记录已保存"
+        }
       }
       return true;
     } catch (e) {
@@ -680,6 +1065,41 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
           ],
           selected: {_materialType},
           onSelectionChanged: (s) => setState(() => _materialType = s.first),
+        ),
+        const SizedBox(height: Gap.sm),
+
+        // 练习类型:决定用四六级写作还是翻译的评分标准(两套维度不同)
+        Row(
+          children: [
+            Text(
+              '练习类型',
+              style: theme.textTheme.titleSmall
+                  ?.copyWith(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(width: Gap.xs),
+            Text(
+              '决定用哪套评分维度',
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+            ),
+          ],
+        ),
+        const SizedBox(height: Gap.xxs),
+        SegmentedButton<WriteReviewTaskType>(
+          segments: const [
+            ButtonSegment(
+              value: WriteReviewTaskType.writing,
+              icon: Icon(Icons.edit_note, size: 16),
+              label: Text('写作'),
+            ),
+            ButtonSegment(
+              value: WriteReviewTaskType.translation,
+              icon: Icon(Icons.translate, size: 16),
+              label: Text('翻译'),
+            ),
+          ],
+          selected: {_taskType},
+          onSelectionChanged: (s) => setState(() => _taskType = s.first),
         ),
         const SizedBox(height: Gap.sm),
 
@@ -1019,25 +1439,48 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
         AppCard(
           color: scoreColor.withAlpha(12),
           padding: const EdgeInsets.all(Gap.md),
-          child: Row(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _scoreBadge(
-                score: score,
-                scoreTxt: scoreTxt,
-                color: scoreColor,
+              Row(
+                children: [
+                  _scoreBadge(
+                    score: score,
+                    scoreTxt: scoreTxt,
+                    color: scoreColor,
+                  ),
+                  const SizedBox(width: Gap.md),
+                  Expanded(
+                    child: Text(
+                      (_result['summary'] ?? '').toString().isEmpty
+                          ? '批改完成'
+                          : _result['summary'].toString(),
+                      style: theme.textTheme.bodyMedium?.copyWith(height: 1.5),
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(width: Gap.md),
-              Expanded(
-                child: Text(
-                  (_result['summary'] ?? '').toString().isEmpty
-                      ? '批改完成'
-                      : _result['summary'].toString(),
-                  style: theme.textTheme.bodyMedium?.copyWith(height: 1.5),
+              // rubric 成功时说明"这个分数怎么来的"(维度分相加,不是模型随口给)
+              if (_scored != null) ...[
+                const SizedBox(height: Gap.xs),
+                Text(
+                  '以上 $scoreTxt 分是 rubric 总分'
+                  '(四六级${_taskType.label}评分标准,各维度先依据后分数)',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                    height: 1.4,
+                  ),
                 ),
-              ),
+              ],
             ],
           ),
         ),
+
+        // rubric 维度分 + 折算档位(解析成功才出现;失败自动回退旧布局)
+        if (_scored != null && _rubric != null) ...[
+          const SizedBox(height: Gap.sm),
+          _buildRubricSection(theme, _scored!, _rubric!),
+        ],
 
         // 错误分类汇总
         if (hasSummary) ...[
@@ -1138,6 +1581,136 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
             ),
             // 文案与 AppBar 的「保存记录」/退出弹窗的「保存为写译记录」对齐(P2-29)
             label: Text(_saved ? '已保存到写译记录' : '保存为写译记录'),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// rubric 维度分 + 折算四六级官方档位(写译批改与输出练习同口径)。
+  ///
+  /// 用户批注第 9 条:"评分:维度分 + 折算四六级官方档位都给" ——
+  /// 顶部圆环给"多少分",这里给"分从哪来"(每个维度的依据)与"折算成考场档位"。
+  /// 维度没评的显示"未评"而不是 0 分(0 分是"评了但很烂",两者不同)。
+  Widget _buildRubricSection(
+    ThemeData theme,
+    ScoredOutput scored,
+    OutputRubric rubric,
+  ) {
+    final muted = theme.colorScheme.onSurfaceVariant;
+    final band = writeReviewConvertedBand(scored, rubric);
+    final totalMax = rubric.totalScore <= 0 ? 100.0 : rubric.totalScore;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        AppSectionTitle(
+          title: '维度分（四六级${_taskType.label}）',
+          subtitle: '每个维度先给依据、再给分',
+        ),
+        AppCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '总分 ${scored.totalScore.toStringAsFixed(1)} / '
+                      '${totalMax.toStringAsFixed(0)}',
+                      style: AppFont.subheadStyle,
+                    ),
+                  ),
+                  Text(
+                    '${scored.ratedDimensionCount}/${scored.dimensions.length} 维已评',
+                    style: AppFont.tagStyle.copyWith(color: muted),
+                  ),
+                ],
+              ),
+              const SizedBox(height: Gap.xs),
+              for (final dimension in scored.dimensions) ...[
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        dimension.label.isEmpty
+                            ? dimension.key
+                            : dimension.label,
+                        style: AppFont.metaStyle.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      dimension.isScored
+                          ? '${dimension.score!.toStringAsFixed(1)} / '
+                              '${dimension.maxScore.toStringAsFixed(0)}'
+                          : '未评',
+                      style: AppFont.tagStyle.copyWith(
+                        color: dimension.isScored
+                            ? theme.colorScheme.primary
+                            : muted,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 3),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(3),
+                  child: LinearProgressIndicator(
+                    value: dimension.isScored && dimension.maxScore > 0
+                        ? (dimension.score! / dimension.maxScore)
+                            .clamp(0.0, 1.0)
+                        : 0,
+                    minHeight: 4,
+                    backgroundColor:
+                        theme.colorScheme.outlineVariant.withAlpha(80),
+                  ),
+                ),
+                if (dimension.hasEvidence) ...[
+                  const SizedBox(height: 3),
+                  Text(
+                    '依据:${dimension.evidence}',
+                    style: AppFont.tagStyle.copyWith(
+                      color: muted,
+                      height: 1.35,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: Gap.xs),
+              ],
+              if (band != null)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(Gap.xs),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.primary.withAlpha(14),
+                    borderRadius: Radii.controlRadius,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '折算四六级官方档位:${band.label}',
+                        style: AppFont.metaStyle.copyWith(
+                          color: theme.colorScheme.primary,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      if (band.description.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          band.description,
+                          style: AppFont.tagStyle.copyWith(
+                            color: muted,
+                            height: 1.35,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+            ],
           ),
         ),
       ],

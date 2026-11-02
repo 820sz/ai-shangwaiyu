@@ -12,6 +12,7 @@ import '../../models/saved_session.dart';
 import '../../services/doubao_api.dart';
 import '../../services/api_endpoint.dart';
 import '../../services/learner_model_store.dart';
+import '../../services/input_prefs.dart';
 import '../../services/material_library.dart';
 import '../../services/material_prefs.dart';
 import '../../widgets/app_ui.dart';
@@ -53,6 +54,10 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
   /// 这里就是"同步"的入口之一(材料中心、推荐、题目都读同一个 prefs)。
   MaterialPrefs _prefs = MaterialPrefs.load();
 
+  /// 难度档辅助调整建议(v3 批 7 · P1-2):suggestBand 的展示结果。
+  /// null = 还没算完 / 没有建议 —— 两种情况都不占位(不留空行)。
+  BandAdvice? _bandAdvice;
+
   /// 多图累积
   final List<File> _pendingImages = [];
   static const _maxImages = 10;
@@ -76,7 +81,20 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
       if (!mounted) return;
       context.read<VocabProvider>().loadVocabularies();
       _loadShelf();
+      // 难度档辅助调整:首帧后用真实行为算一条建议(数据不足时静默不显示)
+      _loadBandAdvice();
     });
+  }
+
+  /// 读真实信号并算"要不要调档"的建议(失败静默:建议只是辅助,不能因此白屏)。
+  Future<void> _loadBandAdvice() async {
+    try {
+      final advice = await loadBandAdvice();
+      if (!mounted) return;
+      setState(() => _bandAdvice = advice);
+    } catch (e) {
+      debugPrint('输入首页难度建议读取失败(已忽略): $e');
+    }
   }
 
   /// 加载"在读材料"(失败静默:首页不能因为一次书架查询失败就白屏)。
@@ -112,6 +130,8 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
     );
     if (!mounted) return;
     _loadShelf();
+    // 阅读会改变"读完率/查词密度" → 难度建议要按新数据重算
+    _loadBandAdvice();
   }
 
   void _openMaterialCenter() {
@@ -119,7 +139,10 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
       context,
       MaterialPageRoute(builder: (_) => const MaterialCenterScreen()),
     ).then((_) {
-      if (mounted) _loadShelf();
+      if (!mounted) return;
+      _loadShelf();
+      // 材料中心里可能改了难度档 → 回来重算建议(首页不能拿着旧档的结论)
+      _loadBandAdvice();
     });
   }
 
@@ -215,43 +238,80 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
         vertical: Gap.sm,
       ),
       onTap: _showNeedSheet,
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 38,
-            height: 38,
-            decoration: BoxDecoration(
-              color: cs.primary.withAlpha(14),
-              borderRadius: BorderRadius.circular(Radii.control),
-            ),
-            child: Icon(Icons.tune, size: 19, color: cs.primary),
-          ),
-          const SizedBox(width: Gap.sm),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '我的需求',
-                  style: AppFont.subheadStyle.copyWith(
-                    color: cs.onSurface,
-                    fontWeight: FontWeight.w700,
-                  ),
+          Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: cs.primary.withAlpha(14),
+                  borderRadius: BorderRadius.circular(Radii.control),
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  '$goalText · 难度 ${_prefs.band.label}（${_prefs.band.description}）',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppFont.metaStyle.copyWith(
-                    color: cs.onSurfaceVariant,
-                  ),
+                child: Icon(Icons.tune, size: 19, color: cs.primary),
+              ),
+              const SizedBox(width: Gap.sm),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '我的需求',
+                      style: AppFont.subheadStyle.copyWith(
+                        color: cs.onSurface,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '$goalText · 难度 ${_prefs.band.label}（${_prefs.band.description}）',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppFont.metaStyle.copyWith(
+                        color: cs.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+              Icon(Icons.chevron_right, size: 20, color: cs.outline),
+            ],
           ),
-          Icon(Icons.chevron_right, size: 20, color: cs.outline),
+          // 难度档辅助调整(v3 批 7 · P1-2):有真实数据支撑且建议档≠当前档时
+          // 才显示;没建议时 BandAdviceBanner 返回零尺寸 → 卡内不留空行。
+          if (_bandAdvice != null)
+            BandAdviceBanner(
+              advice: _bandAdvice!,
+              onApply: () => _applyBandAdvice(_bandAdvice!),
+            ),
         ],
+      ),
+    );
+  }
+
+  /// 一键应用难度建议:写偏好(与材料中心/输出共用同一份)+ 收起建议 + 可逆提示。
+  ///
+  /// 为什么不重新计算一遍建议:用户刚采纳了"升一档",立刻再算大概率又给出
+  /// "升一档"(读完率还是高),会变成连环弹建议 —— 收起,等下次进页面再说。
+  Future<void> _applyBandAdvice(BandAdvice advice) async {
+    final suggestion = advice.suggestion;
+    if (suggestion == null) return;
+    final next = _prefs.copyWith(band: suggestion.band.materialBand);
+    setState(() {
+      _prefs = next;
+      _bandAdvice = null;
+    });
+    final ok = await applyBandSuggestion(suggestion);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          ok
+              ? '已调到 ${suggestion.band.label},可随时在「我的需求」里改回'
+              : '保存失败,请重试',
+        ),
       ),
     );
   }
@@ -309,7 +369,11 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
       ),
     );
     if (picked == null || !mounted || picked == _prefs.band) return;
-    setState(() => _prefs = _prefs.copyWith(band: picked));
+    setState(() {
+      _prefs = _prefs.copyWith(band: picked);
+      // 用户手动选过档后,按旧档算出的建议立刻过期 —— 收起,避免看到矛盾信息
+      _bandAdvice = null;
+    });
     await _prefs.save();
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -1228,6 +1292,8 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
       setState(() => _pendingImages.clear());
       // 重新加载学习材料列表
       await context.read<VocabProvider>().loadVocabularies();
+      // await 之后 context 可能已失效(用户返回时页面被销毁),用前再确认一次
+      if (!mounted) return;
       if (saved == true) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
