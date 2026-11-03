@@ -1531,7 +1531,6 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
   // ═══════════════ 底部操作栏 ═══════════════
 
   Widget _buildBottomBar(ThemeData theme) {
-    final cs = theme.colorScheme;
     final skin = V4Skin.of(context);
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
