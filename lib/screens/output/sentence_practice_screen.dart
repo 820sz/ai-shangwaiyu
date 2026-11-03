@@ -1,10 +1,14 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../../config/design_tokens.dart';
 import '../../config/theme.dart';
+import '../../services/doubao_api.dart';
 import '../../services/output_composer.dart';
 import '../../services/output_rubric.dart';
 import '../../services/sentence_practice.dart';
+import '../../widgets/answer_image_input.dart';
 import '../../widgets/app_ui.dart';
 import '../../widgets/design_kit.dart';
 import '../../widgets/graphics/graphics.dart';
@@ -35,6 +39,11 @@ class _SentencePracticeScreenState extends State<SentencePracticeScreen> {
   final _recorder = const SentencePracticeRecorder();
   final _answerCtrl = TextEditingController();
   final _stopwatch = Stopwatch();
+  final DoubaoApiService _api = DoubaoApiService();
+
+  /// v2.24:作答可拍照上传;提交时先转写成文字再走原评分/纠错逻辑
+  final List<File> _answerImages = <File>[];
+  bool _transcribing = false;
 
   bool _loading = true;
   String? _error;
@@ -146,9 +155,35 @@ class _SentencePracticeScreenState extends State<SentencePracticeScreen> {
     }
   }
 
+  void _toast(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        content: Text(message),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+      ));
+  }
+
   Future<void> _submitRewrite() async {
-    final answer = _answerCtrl.text.trim();
-    if (answer.isEmpty) return;
+    var answer = _answerCtrl.text.trim();
+    final images = List<File>.of(_answerImages);
+    if ((answer.isEmpty && images.isEmpty) || _transcribing) return;
+    if (images.isNotEmpty) {
+      setState(() => _transcribing = true);
+      try {
+        final transcript = await _api.transcribeAnswer(images);
+        answer = mergeAnswerWithTranscript(answer, transcript);
+      } catch (e) {
+        if (!mounted) return;
+        setState(() => _transcribing = false);
+        _toast('图片转写失败:$e');
+        return;
+      }
+      if (!mounted) return;
+      setState(() => _transcribing = false);
+    }
     final task = _rewriteTasks[_index];
     setState(() => _answeredCount++);
     // 有 AI 才评分;没有就纯对照(不编分数)
@@ -166,7 +201,10 @@ class _SentencePracticeScreenState extends State<SentencePracticeScreen> {
           scored: scored,
         );
         if (!mounted) return;
-        setState(() => _scored = scored);
+        setState(() {
+          _scored = scored;
+          _answerImages.clear();
+        });
         if (scored != null) setState(() => _correctCount++);
         return;
       } catch (_) {
@@ -178,7 +216,10 @@ class _SentencePracticeScreenState extends State<SentencePracticeScreen> {
       answer: answer,
     );
     if (!mounted) return;
-    setState(() => _answeredCount--);
+    setState(() {
+      _answeredCount--;
+      _answerImages.clear();
+    });
     _showReference();
   }
 
@@ -199,8 +240,23 @@ class _SentencePracticeScreenState extends State<SentencePracticeScreen> {
   bool _offlineShown = false;
 
   Future<void> _submitCorrection() async {
-    final answer = _answerCtrl.text.trim();
-    if (answer.isEmpty) return;
+    var answer = _answerCtrl.text.trim();
+    final images = List<File>.of(_answerImages);
+    if ((answer.isEmpty && images.isEmpty) || _transcribing) return;
+    if (images.isNotEmpty) {
+      setState(() => _transcribing = true);
+      try {
+        final transcript = await _api.transcribeAnswer(images);
+        answer = mergeAnswerWithTranscript(answer, transcript);
+      } catch (e) {
+        if (!mounted) return;
+        setState(() => _transcribing = false);
+        _toast('图片转写失败:$e');
+        return;
+      }
+      if (!mounted) return;
+      setState(() => _transcribing = false);
+    }
     final injected = _corrections[_index];
     final check = checkCorrection(answer: answer, injected: injected);
     final wrong = !check.correct;
@@ -214,6 +270,7 @@ class _SentencePracticeScreenState extends State<SentencePracticeScreen> {
     if (!mounted) return;
     setState(() {
       _check = check;
+      _answerImages.clear();
       _answeredCount++;
       if (check.correct) {
         _correctCount++;
@@ -261,6 +318,7 @@ class _SentencePracticeScreenState extends State<SentencePracticeScreen> {
       _orderCorrect = null;
       _picked = [];
       _answerCtrl.clear();
+      _answerImages.clear();
       _offlineReference = null;
       _offlineShown = false;
     });
@@ -274,6 +332,7 @@ class _SentencePracticeScreenState extends State<SentencePracticeScreen> {
       _orderCorrect = null;
       _picked = [];
       _answerCtrl.clear();
+      _answerImages.clear();
       _offlineReference = null;
       _offlineShown = false;
       _correctCount = 0;
@@ -391,6 +450,16 @@ class _SentencePracticeScreenState extends State<SentencePracticeScreen> {
                   ),
                   onChanged: (_) => setState(() {}),
                 ),
+                const SizedBox(height: Gap.xs),
+                AnswerImageInput(
+                  images: _answerImages,
+                  enabled: !_offlineShown && !_transcribing,
+                  onChanged: (next) => setState(() {
+                    _answerImages
+                      ..clear()
+                      ..addAll(next);
+                  }),
+                ),
                 if (_offlineShown && _offlineReference != null) ...[
                   const SizedBox(height: Gap.xs),
                   Text(
@@ -407,9 +476,11 @@ class _SentencePracticeScreenState extends State<SentencePracticeScreen> {
                     width: double.infinity,
                     height: 46,
                     child: FilledButton(
-                      onPressed:
-                          _answerCtrl.text.trim().isEmpty ? null : _submitRewrite,
-                      child: const Text('提交'),
+                      onPressed: (_answerCtrl.text.trim().isEmpty &&
+                              _answerImages.isEmpty)
+                          ? null
+                          : _submitRewrite,
+                      child: Text(_transcribing ? '正在转写图片…' : '提交'),
                     ),
                   ),
               ],
@@ -481,16 +552,27 @@ class _SentencePracticeScreenState extends State<SentencePracticeScreen> {
                 ),
                 onChanged: (_) => setState(() {}),
               ),
+              const SizedBox(height: Gap.xs),
+              AnswerImageInput(
+                images: _answerImages,
+                enabled: check == null && !_transcribing,
+                onChanged: (next) => setState(() {
+                  _answerImages
+                    ..clear()
+                    ..addAll(next);
+                }),
+              ),
               const SizedBox(height: Gap.sm),
               if (check == null)
                 SizedBox(
                   width: double.infinity,
                   height: 46,
                   child: FilledButton(
-                    onPressed: _answerCtrl.text.trim().isEmpty
+                    onPressed: (_answerCtrl.text.trim().isEmpty &&
+                            _answerImages.isEmpty)
                         ? null
                         : _submitCorrection,
-                    child: const Text('提交'),
+                    child: Text(_transcribing ? '正在转写图片…' : '提交'),
                   ),
                 )
               else ...[
