@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 
@@ -7,9 +8,11 @@ import '../../config/design_tokens.dart';
 import '../../models/learner_model.dart';
 import '../../services/ability_recorder.dart';
 import '../../services/database.dart';
+import '../../services/doubao_api.dart';
 import '../../services/output_composer.dart';
 import '../../services/output_feedback.dart';
 import '../../services/output_rubric.dart';
+import '../../widgets/answer_image_input.dart';
 import '../../widgets/app_ui.dart';
 import '../../widgets/waiting.dart';
 import 'widgets/practice_result_view.dart';
@@ -43,6 +46,11 @@ class _PracticeFlowScreenState extends State<PracticeFlowScreen> {
   final TextEditingController _answerCtrl = TextEditingController();
   final Stopwatch _stopwatch = Stopwatch();
   final OutputComposer _composer = OutputComposer();
+  final DoubaoApiService _api = DoubaoApiService();
+
+  /// v2.24:作答可以拍照上传(用户 2026-11-03 要求)—— 提交时先转写再批改
+  final List<File> _answerImages = <File>[];
+  bool _transcribing = false;
 
   int _index = 0;
   bool _scoring = false;
@@ -92,13 +100,23 @@ class _PracticeFlowScreenState extends State<PracticeFlowScreen> {
   }
 
   Future<void> _submit() async {
-    final answer = _answerCtrl.text.trim();
-    if (answer.isEmpty || _scoring) return;
+    var answer = _answerCtrl.text.trim();
+    final images = List<File>.of(_answerImages);
+    if ((answer.isEmpty && images.isEmpty) || _scoring || _transcribing) return;
     setState(() {
       _scoring = true;
+      _transcribing = images.isNotEmpty;
       _error = null;
     });
     try {
+      // ① 有图片 → 先转写成文字(中英/手写/截图都行),再走同一套 rubric 批改。
+      //    这样评分口径不变,图片只是另一种输入方式。
+      if (images.isNotEmpty) {
+        final transcript = await _api.transcribeAnswer(images);
+        answer = mergeAnswerWithTranscript(answer, transcript);
+        if (!mounted) return;
+        setState(() => _transcribing = false);
+      }
       final rubric = _rubricOf(_task);
       final scored = await _composer.score(
         rubric: rubric,
@@ -109,6 +127,7 @@ class _PracticeFlowScreenState extends State<PracticeFlowScreen> {
       if (scored == null) {
         setState(() {
           _scoring = false;
+          _transcribing = false;
           _error = '批改没有返回可用结果。可以再点一次「提交批改」重试。';
         });
         return;
@@ -117,12 +136,15 @@ class _PracticeFlowScreenState extends State<PracticeFlowScreen> {
       if (!mounted) return;
       setState(() {
         _scoring = false;
+        _transcribing = false;
         _result = scored;
+        _answerImages.clear();
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _scoring = false;
+        _transcribing = false;
         _error = '批改失败:$e';
       });
     }
@@ -188,6 +210,7 @@ class _PracticeFlowScreenState extends State<PracticeFlowScreen> {
       _result = null;
       _error = null;
       _answerCtrl.clear();
+      _answerImages.clear();
       _stopwatch
         ..reset()
         ..start();
@@ -328,16 +351,33 @@ class _PracticeFlowScreenState extends State<PracticeFlowScreen> {
                     onChanged: (_) => setState(() {}),
                   ),
                   const SizedBox(height: Gap.xs),
+                  // v2.24:不想打字/手写稿 → 拍照或从相册选,提交时先转写再批改
+                  AnswerImageInput(
+                    images: _answerImages,
+                    enabled: !_scoring && !_transcribing,
+                    onChanged: (next) => setState(() {
+                      _answerImages
+                        ..clear()
+                        ..addAll(next);
+                    }),
+                  ),
+                  const SizedBox(height: Gap.xs),
                   Row(
                     children: [
                       Text(
-                        '${_wordCount(_answerCtrl.text)} 词',
+                        '${_wordCount(_answerCtrl.text)} 词'
+                        '${_answerImages.isEmpty ? '' : ' · 附图 ${_answerImages.length} 张'}',
                         style: AppFont.tagStyle.copyWith(
                           color: cs.onSurfaceVariant,
                         ),
                       ),
                       const Spacer(),
-                      if (_scoring)
+                      if (_transcribing)
+                        Text(
+                          '正在转写图片…',
+                          style: AppFont.tagStyle.copyWith(color: cs.primary),
+                        )
+                      else if (_scoring)
                         Text(
                           '正在按 rubric 批改…',
                           style: AppFont.tagStyle.copyWith(color: cs.primary),
@@ -353,11 +393,16 @@ class _PracticeFlowScreenState extends State<PracticeFlowScreen> {
                     width: double.infinity,
                     height: 48,
                     child: FilledButton.icon(
-                      onPressed: (_scoring || _answerCtrl.text.trim().isEmpty)
+                      onPressed: (_scoring ||
+                              _transcribing ||
+                              (_answerCtrl.text.trim().isEmpty &&
+                                  _answerImages.isEmpty))
                           ? null
                           : _submit,
                       icon: const Icon(Icons.fact_check_outlined, size: 18),
-                      label: const Text('提交批改'),
+                      label: Text(_transcribing
+                          ? '正在转写图片…'
+                          : (_answerImages.isEmpty ? '提交批改' : '转写并提交批改')),
                     ),
                   ),
                   if (_error != null) ...[
@@ -393,6 +438,7 @@ class _PracticeFlowScreenState extends State<PracticeFlowScreen> {
                       // 看完结果想再写一遍:清空答案重新作答
                       _result = null;
                       _answerCtrl.clear();
+                      _answerImages.clear();
                       _stopwatch
                         ..reset()
                         ..start();

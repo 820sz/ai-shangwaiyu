@@ -841,6 +841,71 @@ ${TranslationPolicy.discipline}
     return content;
   }
 
+  /// 通用「作答图片转写」(v2.24,用户 2026-11-03:"所有输出练习…都要支持图片上传,
+  /// 现在只能打字")。
+  ///
+  /// 与 [transcribeWriting] 的区别:那个是"手写英文写作"专用提示词;这个用于任意
+  /// 作答照片(写句/答题/翻译练习的草稿纸、截图),中英混排、保留公式与换行。
+  /// 转写结果由调用方拼进原答案(文本 + 图片转写)再走原有批改链路 ——
+  /// 这样所有评测口径不用改,图片只是"另一种输入方式"。
+  Future<String> transcribeAnswer(
+    List<File> imageFiles, {
+    ApiEndpointConfig? endpoint,
+  }) async {
+    if (imageFiles.isEmpty) throw Exception('没有可识别的图片');
+    final cfg = endpoint ?? reviewWritingEndpoint(requireVision: true);
+    if (!cfg.isConfigured) {
+      throw Exception('请先在设置中配置 API Key');
+    }
+    if (!modelSupportsImages(cfg.model)) {
+      throw Exception('当前模型 ${cfg.model} 不支持看图,请在设置里换成支持图片的模型');
+    }
+    final uris = await imageDataUrisFor(imageFiles);
+    final multi = uris.length > 1;
+    final body = BaseApiService.buildChatBody(
+      cfg: cfg,
+      temperature: 0,
+      maxTokens: 4096,
+      thinkingLevel: 'disabled',
+      messages: [
+        {
+          'role': 'system',
+          'content': '你是答案转写助手。用户上传了自己作答的照片(可能是手写英文/中文、'
+              '草稿纸或屏幕截图)。请准确转写其中的答案文字:保留段落与换行、公式、'
+              '标点与大小写;不解释、不翻译、不点评、不加引号。',
+        },
+        {
+          'role': 'user',
+          'content': [
+            for (final uri in uris)
+              {
+                'type': 'image_url',
+                'image_url': {
+                  'url': uri,
+                  if (shouldSendDetailFlag(cfg.model)) 'detail': 'high',
+                },
+              },
+            {
+              'type': 'text',
+              'text': multi
+                  ? '请按顺序转写这些图片里的作答内容,合并为一份连续文本。'
+                  : '请转写这张图片里的作答内容。',
+            },
+          ],
+        },
+      ],
+    );
+
+    final response = await postWithReasoningFallback('/chat/completions', body,
+        cfg: cfg);
+    final content =
+        BaseApiService.extractContentWithReasoning(response.data).trim();
+    if (content.isEmpty) {
+      throw Exception('没能从图片里转写出文字:换一张更清晰的照片,或直接打字提交');
+    }
+    return content;
+  }
+
   /// 写译批改使用的槽位(纯逻辑,可单测)。
   ///
   /// - 普通文本批改:优先副槽位(专项文本模型,便宜快),未配置用主槽位;
