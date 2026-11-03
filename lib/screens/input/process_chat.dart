@@ -8,6 +8,7 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../config/constants.dart';
+import '../../config/design_tokens.dart';
 import '../../config/theme.dart';
 import '../../config/v4_theme.dart';
 import '../../models/saved_session.dart';
@@ -1302,15 +1303,16 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
               // 重新识别(v1.8.0 用户要求):校准与补漏合成一个动作——
               // 对全部图片重新完整识别(逐行扫描+高清+自检),结果整组替换。
               // 不再让用户面对"校准 vs 补漏"的选择题。
-              IconButton(
-                icon: const Icon(Icons.auto_awesome),
+              V4IconAction(
+                icon: Icons.auto_awesome,
                 tooltip: '重新识别',
-                onPressed: _recalibrate,
+                onTap: _recalibrate,
               ),
-              IconButton(
-                icon: const Icon(Icons.checklist),
+              const SizedBox(width: Gap.xs),
+              V4IconAction(
+                icon: Icons.checklist,
                 tooltip: '全选/全不选',
-                onPressed: () {
+                onTap: () {
                   setState(() {
                     if (_selected.length == _results.length) {
                       _selected.clear();
@@ -1322,30 +1324,29 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                   });
                 },
               ),
-              // 选中操作（右上角，长按选中后出现）：
-              // 取消选择 + 删除——一次清空所有选中,不用逐个长按取消
+              const SizedBox(width: Gap.xs),
+              // 选中操作（右上角，长按选中后出现）：取消选择 + 删除
               if (_selected.isNotEmpty) ...[
-                TextButton(
-                  onPressed: () {
-                    setState(() => _selected.clear());
-                  },
-                  child: Text(
-                    '取消选择(${_selected.length})',
-                    style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
-                  ),
+                V4IconAction(
+                  icon: Icons.close_rounded,
+                  tooltip: '取消选择(${_selected.length})',
+                  onTap: () => setState(() => _selected.clear()),
                 ),
-                IconButton(
-                  icon: Icon(
-                    Icons.delete_outline,
-                    color: AppTheme.dangerColor(context),
-                  ),
+                const SizedBox(width: Gap.xs),
+                V4IconAction(
+                  icon: Icons.delete_outline,
                   tooltip: '删除选中的 ${_selected.length} 个词汇',
-                  onPressed: _deleteSelected,
+                  onTap: _deleteSelected,
                 ),
+                const SizedBox(width: Gap.xs),
               ],
-              // 详细/总览切换 — 带中文标签，颜色跟随 AppBar 前景色
-              TextButton.icon(
-                onPressed: () {
+              // 详细/总览切换 — 图标化,避免在果冻头上塞文字按钮
+              V4IconAction(
+                icon: _displayMode == _DisplayMode.detailed
+                    ? Icons.view_module
+                    : Icons.view_agenda,
+                tooltip: _displayMode == _DisplayMode.detailed ? '总览' : '详细',
+                onTap: () {
                   setState(() {
                     final wasDetailed = _displayMode == _DisplayMode.detailed;
                     _displayMode = wasDetailed
@@ -1353,16 +1354,6 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                         : _DisplayMode.detailed;
                   });
                 },
-                icon: Icon(
-                  _displayMode == _DisplayMode.detailed
-                      ? Icons.view_agenda
-                      : Icons.view_module,
-                  size: 18,
-                ),
-                label: Text(
-                  _displayMode == _DisplayMode.detailed ? '总览' : '详细',
-                  style: const TextStyle(fontSize: 12),
-                ),
               ),
             ],
           ],
@@ -1437,7 +1428,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
       case _StreamPhase.results:
         return widget.analysisMode == AppConstants.analysisModeFullText
             ? '全文翻译'
-            : '识别结果 (${_selected.length}/${_results.length})';
+            : '识别结果';
       case _StreamPhase.error:
         return widget.analysisMode == AppConstants.analysisModeFullText
             ? '翻译失败'
@@ -1541,11 +1532,14 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
 
   Widget _buildBottomBar(ThemeData theme) {
     final cs = theme.colorScheme;
+    final skin = V4Skin.of(context);
     return Container(
-      padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+      // v4:底栏从"页面底色 + 灰线"改成"白玻璃条 + 细边",与内页卡片同语言
       decoration: BoxDecoration(
-        color: theme.scaffoldBackgroundColor,
-        border: Border(top: BorderSide(color: theme.colorScheme.outlineVariant)),
+        color: skin.surface,
+        border: Border(top: BorderSide(color: skin.hairline)),
+        boxShadow: skin.shadow,
       ),
       child: Row(
         children: [
@@ -1635,10 +1629,12 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                 if (mounted) setState(() {});
               },
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 10, vertical: 7),
                 decoration: BoxDecoration(
-                  border: Border.all(color: theme.colorScheme.outlineVariant),
-                  borderRadius: BorderRadius.circular(8),
+                  color: skin.surfaceAlt,
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: skin.hairline),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -1646,21 +1642,25 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                     Icon(
                       Icons.model_training,
                       size: 14,
-                      color: theme.colorScheme.onSurfaceVariant,
+                      color: skin.accent,
                     ),
-                    const SizedBox(width: 2),
+                    const SizedBox(width: 3),
                     Flexible(
                       child: Text(
                         '模型',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          color: skin.inkSoft,
+                        ),
                       ),
                     ),
                     Icon(
-                      Icons.arrow_drop_up,
+                      Icons.expand_less_rounded,
                       size: 14,
-                      color: theme.colorScheme.onSurfaceVariant,
+                      color: skin.inkFaint,
                     ),
                   ],
                 ),
@@ -1699,16 +1699,21 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
               avatar: Icon(
                 Icons.chat_bubble_outline,
                 size: 16,
-                color: cs.primary,
+                color: skin.accent,
               ),
               label: Text(
                 '追问',
-                style: TextStyle(fontSize: 12, color: cs.onSurface),
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: skin.ink,
+                ),
               ),
               onPressed: _openFollowUp,
               visualDensity: VisualDensity.compact,
-              backgroundColor: cs.surface,
-              side: BorderSide(color: cs.outlineVariant),
+              shape: const StadiumBorder(),
+              backgroundColor: skin.surfaceAlt,
+              side: BorderSide(color: skin.hairline),
             ),
           ),
         ],
@@ -2677,6 +2682,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
     ThemeData theme,
   ) {
     final cs = theme.colorScheme;
+    final skin = V4Skin.of(context);
     final barColor = AppTheme.wordTypeColor(context, item.wordType);
 
     return GestureDetector(
@@ -2698,15 +2704,21 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         curve: Curves.easeOut,
         child: AnimatedContainer(
           duration: _motionDuration(const Duration(milliseconds: 140)),
-          margin: const EdgeInsets.only(bottom: 8),
-          padding: const EdgeInsets.all(12),
+          margin: const EdgeInsets.only(bottom: 10),
+          padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+          // v4(2026-11-04):详细词卡换成"白卡果冻"—— 白底 + 柔影 + 大圆角,
+          // 选中时才出现主色描边;不再是灰色硬边框卡片。
           decoration: BoxDecoration(
-            color: isSel ? cs.primary.withAlpha(8) : theme.colorScheme.surface,
-            borderRadius: BorderRadius.circular(10),
+            color: isSel
+                ? Color.alphaBlend(
+                    cs.primary.withValues(alpha: 0.06), skin.surface)
+                : skin.surface,
+            borderRadius: BorderRadius.circular(18),
             border: Border.all(
-              color: isSel ? barColor.withAlpha(80) : theme.colorScheme.outlineVariant,
-              width: isSel ? 1.5 : 1,
+              color: isSel ? barColor.withValues(alpha: 0.55) : skin.hairline,
+              width: isSel ? 1.4 : 1,
             ),
+            boxShadow: skin.shadow,
           ),
           child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -2716,18 +2728,18 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
               children: [
                 // 序号徽章（第1个标1）
                 Container(
-                  width: 22,
-                  height: 22,
+                  width: 24,
+                  height: 24,
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
-                    color: barColor.withAlpha(22),
-                    borderRadius: BorderRadius.circular(11),
+                    color: barColor.withValues(alpha: 0.13),
+                    borderRadius: BorderRadius.circular(999),
                   ),
                   child: Text(
                     '${index + 1}',
                     style: TextStyle(
                       fontSize: 11,
-                      fontWeight: FontWeight.w700,
+                      fontWeight: FontWeight.w800,
                       color: barColor,
                     ),
                   ),
@@ -2745,8 +2757,11 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                     // (2026-08-10 用户实测终局修复:maxLines:null + visible)
                     maxLines: null,
                     overflow: TextOverflow.visible,
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
+                    style: TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.2,
+                      color: skin.ink,
                     ),
                   ),
                 ),
@@ -2759,7 +2774,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                     child: Icon(
                       Icons.edit_outlined,
                       size: 15,
-                      color: theme.colorScheme.onSurfaceVariant,
+                      color: skin.inkFaint,
                     ),
                   ),
                 ),
@@ -2776,7 +2791,7 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                       size: 15,
                       color: _isVocabBookmarked(item)
                           ? AppTheme.amber(context)
-                          : theme.colorScheme.onSurfaceVariant,
+                          : skin.inkFaint,
                     ),
                   ),
                 ),
@@ -2814,24 +2829,26 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
             ],
             // 释义
             if (item.translation != null && item.translation!.isNotEmpty) ...[
-              const SizedBox(height: 6),
+              const SizedBox(height: 8),
               Text(
                 item.translation!,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.onSurface,
+                style: TextStyle(
+                  fontSize: 14,
+                  height: 1.5,
+                  color: skin.ink,
                 ),
               ),
             ],
             // 例句
             if (item.originalSentence != null &&
                 item.originalSentence!.isNotEmpty) ...[
-              const SizedBox(height: 6),
+              const SizedBox(height: 8),
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.all(8),
+                padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: theme.colorScheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(6),
+                  color: skin.surfaceAlt,
+                  borderRadius: BorderRadius.circular(12),
                 ),
                 // 冗长例句限行 3 行 + 展开;出处句中目标词加粗
                 // (2026-08-10 用户需求:例句精简 + 词汇标粗)
@@ -2840,7 +2857,8 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                   highlightWord: item.word,
                   style: TextStyle(
                     fontSize: 12,
-                    color: theme.colorScheme.onSurfaceVariant,
+                    height: 1.55,
+                    color: skin.inkSoft,
                     fontStyle: FontStyle.italic,
                   ),
                 ),
@@ -2848,17 +2866,17 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
             ],
             // 语法
             if (item.grammarNote != null && item.grammarNote!.isNotEmpty) ...[
-              const SizedBox(height: 4),
+              const SizedBox(height: 6),
               Text(
                 item.grammarNote!,
-                style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
+                style: TextStyle(fontSize: 12, color: skin.inkSoft),
               ),
             ],
             // 底部提示
-            const SizedBox(height: 4),
+            const SizedBox(height: 6),
             Text(
               '点击询问 AI 详解 · 长按选中',
-              style: TextStyle(fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
+              style: TextStyle(fontSize: 10.5, color: skin.inkFaint),
             ),
           ],
           ),
