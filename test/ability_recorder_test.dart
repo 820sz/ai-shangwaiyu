@@ -107,7 +107,10 @@ void main() {
   });
 
   test('练习作答同日 upsert:同一天只留一行取最新值;不同天各留一行', () async {
-    final today = DateTime.now();
+    // 固定一个"安全时刻"(当日 12:00)而不是 DateTime.now():
+    // 原测试在凌晨 00:00–02:00 跑时,today-2h 已经跨到昨天,
+    // 会误判"同日 upsert"失败(2026-11-04 00:05 全量跑真实踩到)。
+    final today = DateTime(2026, 6, 15, 12, 0);
     await AbilityRecorder.recordOutputScore(
       score: 60,
       maxScore: 100,
