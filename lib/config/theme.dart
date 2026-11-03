@@ -275,18 +275,29 @@ class AppTheme {
         unselectedLabelStyle: const TextStyle(fontSize: 12),
       ),
 
-      // AppBar:v2.12 改成**与页面同色 + 左对齐大标题**。
-      // 为什么:旧版是"卡片色 + 居中标题 + 18px",每个页面顶上都像一条工具条,
-      // 把页面切碎了;阅读类 App 的做法是让标题成为内容的一部分(样图就是这样)。
+      // AppBar:v4(2026-11-04) 全局果冻头 —— 所有还没逐个迁移的内页
+      // 也能拿到"渐变感底色 + 26 圆角 + 深墨标题",不再是"白底工具条"。
+      // (V4JellyAppBar 会覆盖成真正的渐变头;这里兜住存量 AppBar。)
       appBarTheme: AppBarTheme(
-        backgroundColor: bg,
-        foregroundColor: titleColor,
+        backgroundColor: Color.alphaBlend(
+          skin.pastelAt(0).first.withValues(alpha: 0.55),
+          skin.pageBg,
+        ),
+        foregroundColor: skin.ink,
         elevation: 0,
         scrolledUnderElevation: 0,
         centerTitle: false,
+        surfaceTintColor: Colors.transparent,
+        iconTheme: IconThemeData(color: skin.ink),
+        actionsIconTheme: IconThemeData(color: skin.ink),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(
+            bottom: Radius.circular(skin.cardRadius),
+          ),
+        ),
         titleTextStyle: TextStyle(
-          color: titleColor,
-          fontSize: AppFont.title,
+          color: skin.ink,
+          fontSize: 18,
           fontWeight: FontWeight.w800,
           letterSpacing: -0.3,
         ),

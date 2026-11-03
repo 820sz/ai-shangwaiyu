@@ -193,47 +193,80 @@ class AppSectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
+    final skin = V4Skin.of(context);
     return Padding(
       padding: const EdgeInsets.only(top: Gap.lg, bottom: Gap.sm),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (indexLabel != null) ...[
-                  Text(
-                    indexLabel!,
-                    style: AppFont.tagStyle.copyWith(
-                      color: AppTheme.faintText(context),
-                      letterSpacing: 1.2,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                ],
-                Text(
-                  title,
-                  style: AppFont.headingStyle.copyWith(color: cs.onSurface),
+          // v4(2026-11-04):区块头从"两行大黑字(编号换行)"改成
+          // "编号胶囊 + 一行大标题",右侧动作变成淡底胶囊 ——
+          // 这是之前和渲染图不符最明显的一处(材料中心/我的/助理/输出都在用)。
+          if (indexLabel != null) ...[
+            Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+              decoration: BoxDecoration(
+                color: skin.accent.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Text(
+                indexLabel!,
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.6,
+                  color: skin.accent,
                 ),
-              ],
+              ),
+            ),
+            const SizedBox(width: Gap.xs),
+          ],
+          Expanded(
+            child: Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w900,
+                letterSpacing: -0.2,
+                color: skin.ink,
+              ),
             ),
           ),
           ?trailing,
-          if (actionLabel != null)
-            TextButton(
-              onPressed: onAction,
-              style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                minimumSize: const Size(0, 32),
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              child: Text(
-                actionLabel!,
-                style: AppFont.metaStyle.copyWith(color: cs.primary),
+          if (actionLabel != null) ...[
+            const SizedBox(width: Gap.xs),
+            InkWell(
+              onTap: onAction,
+              borderRadius: BorderRadius.circular(999),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: skin.surfaceAlt,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Text(
+                      actionLabel!,
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        color: skin.accent,
+                      ),
+                    ),
+                    const SizedBox(width: 2),
+                    Icon(Icons.chevron_right_rounded,
+                        size: 14, color: skin.accent),
+                  ],
+                ),
               ),
             ),
+          ],
         ],
       ),
     );

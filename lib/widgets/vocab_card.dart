@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import '../config/design_tokens.dart';
 import '../config/theme.dart';
+import '../config/v4_theme.dart';
 import '../models/vocabulary.dart';
 import '../services/tts_service.dart';
 
@@ -22,16 +24,28 @@ class VocabCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final skin = V4Skin.of(context);
     final inSelection = selected != null;
 
-    return Card(
-      color: inSelection && selected!
-          ? theme.colorScheme.primary.withAlpha(15)
-          : null,
+    // v4(2026-11-04):从 M3 Card 改成"白卡果冻"(与词条详情/识图结果同语言):
+    // 白底 + 18 圆角 + 柔影;多选选中才出现主色描边。
+    return Container(
+      margin: const EdgeInsets.fromLTRB(Gap.md, 0, Gap.md, Gap.xs),
+      decoration: BoxDecoration(
+        color: inSelection && selected!
+            ? Color.alphaBlend(
+                skin.accent.withValues(alpha: 0.06), skin.surface)
+            : skin.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: inSelection && selected! ? theme.colorScheme.primary : skin.hairline,
+        ),
+        boxShadow: skin.shadow,
+      ),
+      clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
         onLongPress: onLongPress,
-        borderRadius: BorderRadius.circular(12),
         child: Padding(
           padding: const EdgeInsets.all(14),
           child: Row(

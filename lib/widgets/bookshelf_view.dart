@@ -631,31 +631,31 @@ class _ShelfPalette {
     required this.glow,
   });
 
-  /// 深色主题:**深胡桃木** —— 比页面(#12141A)亮一档,书脊才"跳"得出来;
+  /// 深色主题:**深靛蓝** —— 比页面亮一档,书脊才"跳"得出来;
   /// 搁板正面再亮一点点,用来交代"这块板有厚度"。
   static const _ShelfPalette _dark = _ShelfPalette(
-    wood: Color(0xFF2A2119),
-    alcove: Color(0xFF1F1913),
-    plankTop: Color(0xFF6A4F35),
-    plankFront: Color(0xFF3B2C1F),
+    wood: Color(0xFF232838),
+    alcove: Color(0xFF181C28),
+    plankTop: Color(0xFF323850),
+    plankFront: Color(0xFF262B3D),
     plankShadow: Color(0xCC000000),
-    alcoveEdge: Color(0xFF14100C),
+    alcoveEdge: Color(0xFF12151F),
     slotHint: Color(0x1FFFFFFF),
     slotHintGlyph: Color(0x33FFFFFF),
-    glow: Color(0xFF6BA8E8), // 深色主色(AppTheme.darkPrimary)
+    glow: Color(0xFF8C9AFF), // 果冻果冻紫(深色)
   );
 
-  /// 浅色主题:浅橡木(木色不能太黄,否则像旧木头家具而不是书架)
+  /// 浅色主题:v4 果冻色(淡紫书架 + 白搁板 + 主色光晕),不再是"木家具"。
   static const _ShelfPalette _light = _ShelfPalette(
-    wood: Color(0xFFE4D6C3),
-    alcove: Color(0xFFD6C6B0),
-    plankTop: Color(0xFFC4A276),
-    plankFront: Color(0xFF9C7B52),
-    plankShadow: Color(0x40000000),
-    alcoveEdge: Color(0xFFB49C7C),
-    slotHint: Color(0x22000000),
-    slotHintGlyph: Color(0x44000000),
-    glow: Color(0xFF4A90D9), // 浅色强调色(AppTheme.highlight)
+    wood: Color(0xFFEDEFFF),
+    alcove: Color(0xFFE5E8FB),
+    plankTop: Color(0xFFFFFFFF),
+    plankFront: Color(0xFFD7DBF3),
+    plankShadow: Color(0x2E4C5AF0),
+    alcoveEdge: Color(0xFFD2D6EF),
+    slotHint: Color(0x1A4C5AF0),
+    slotHintGlyph: Color(0x664C5AF0),
+    glow: Color(0xFF4C5AF0), // 果冻主色
   );
 
   /// 取当前主题那一档。
