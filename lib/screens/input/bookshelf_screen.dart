@@ -23,16 +23,19 @@ import 'package:flutter/material.dart';
 
 import '../../config/design_tokens.dart';
 import '../../config/theme.dart';
+import '../../config/v4_theme.dart';
 import '../../services/bookshelf.dart';
 import '../../services/database.dart';
 import '../../services/deepseek_api.dart';
 import '../../services/material_library.dart';
 import '../../widgets/app_ui.dart';
+import '../../widgets/art_cover.dart';
 import '../../widgets/bookshelf_view.dart';
 import '../../widgets/confirm_destructive.dart';
 import '../../widgets/design_kit.dart';
 import '../../widgets/graphics/graphics.dart';
 import '../../widgets/material_cover.dart';
+import '../../widgets/v4/v4_kit.dart';
 import '../../widgets/waiting.dart';
 import 'material_center_screen.dart';
 import 'material_reader_screen.dart';
@@ -249,41 +252,77 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final skin = V4Skin.of(context);
+    final hasBooks = !_loading && _error == null && _books.isNotEmpty;
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('书架'),
-        actions: [
-          if (!_loading && _error == null && _books.isNotEmpty)
-            PopupMenuButton<BookshelfSort>(
-              tooltip: '排列',
-              icon: const Icon(Icons.swap_vert),
-              initialValue: _sort,
-              onSelected: _applySort,
-              itemBuilder: (_) => [
-                for (final s in BookshelfSort.values)
-                  PopupMenuItem(
-                    value: s,
-                    child: Row(
-                      children: [
-                        Icon(
-                          s == _sort
-                              ? Icons.radio_button_checked
-                              : Icons.radio_button_unchecked,
-                          size: 16,
-                          color: s == _sort
-                              ? Theme.of(context).colorScheme.primary
-                              : Theme.of(context).colorScheme.outline,
+      backgroundColor: skin.pageBg,
+      body: SafeArea(
+        bottom: false,
+        child: Column(
+          children: <Widget>[
+            // v4(2026-11-03):内页头图化 —— 书架不再是一个白底 AppBar,
+            // 与材料中心/阅读器同一套果冻头。排序收进头图右侧玻璃圆键。
+            V4DetailHeader(
+              domain: GraphicDomain.book,
+              title: '书架',
+              subtitle: _loading
+                  ? '正在打开书架…'
+                  : '共 ${_countOf(BookshelfFilter.all)} 本'
+                      ' · 在读 ${_countOf(BookshelfFilter.reading)}'
+                      ' · 已读完 ${_countOf(BookshelfFilter.finished)}',
+              actions: <Widget>[
+                if (hasBooks)
+                  PopupMenuButton<BookshelfSort>(
+                    tooltip: '排列',
+                    initialValue: _sort,
+                    onSelected: _applySort,
+                    itemBuilder: (_) => <PopupMenuEntry<BookshelfSort>>[
+                      for (final s in BookshelfSort.values)
+                        PopupMenuItem<BookshelfSort>(
+                          value: s,
+                          child: Row(
+                            children: <Widget>[
+                              Icon(
+                                s == _sort
+                                    ? Icons.radio_button_checked
+                                    : Icons.radio_button_unchecked,
+                                size: 16,
+                                color: s == _sort
+                                    ? Theme.of(context).colorScheme.primary
+                                    : Theme.of(context)
+                                        .colorScheme
+                                        .outline,
+                              ),
+                              const SizedBox(width: Gap.xs),
+                              Text(s.label),
+                            ],
+                          ),
                         ),
-                        const SizedBox(width: Gap.xs),
-                        Text(s.label),
-                      ],
+                    ],
+                    child: Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: skin.dark
+                            ? skin.surfaceAlt.withValues(alpha: 0.85)
+                            : Colors.white.withValues(alpha: 0.85),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(Icons.swap_vert,
+                          size: 19, color: skin.ink),
                     ),
                   ),
               ],
             ),
-        ],
+            Expanded(
+              child: RefreshIndicator(
+                onRefresh: _load,
+                child: _buildBody(),
+              ),
+            ),
+          ],
+        ),
       ),
-      body: _buildBody(),
     );
   }
 
@@ -291,7 +330,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     if (_loading) {
       // 用骨架屏而不是转圈(本项目已全面换掉转圈,见 widgets/waiting.dart)
       return ListView(
-        padding: Insets.page,
+        padding: const EdgeInsets.fromLTRB(Gap.page, Gap.md, Gap.page, Gap.xl),
         children: const [
           AppCard(child: SkeletonLines(lines: 3, seed: 0)),
           SizedBox(height: Gap.md),
@@ -301,64 +340,53 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     }
     if (_error != null) {
       return ListView(
-        padding: Insets.page,
+        padding: const EdgeInsets.fromLTRB(Gap.page, Gap.md, Gap.page, Gap.xl),
         children: [
           AppErrorCard(message: '书架没打开:$_error', onRetry: _load),
         ],
       );
     }
     final visible = _visibleBooks;
-    return RefreshIndicator(
-      onRefresh: _load,
-      child: ListView(
-        padding: Insets.page,
-        children: [
-          if (_books.isEmpty)
-            _emptyShelf()
-          else ...[
-            AppSectionTitle(
-              title: '我的书架',
-              subtitle: '共 ${_countOf(BookshelfFilter.all)} 本'
-                  ' · 在读 ${_countOf(BookshelfFilter.reading)}'
-                  ' · 已读完 ${_countOf(BookshelfFilter.finished)}',
-              padding: const EdgeInsets.only(top: Gap.xs, bottom: Gap.xs),
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(Gap.page, Gap.md, Gap.page, Gap.xl),
+      children: [
+        if (_books.isEmpty)
+          _emptyShelf()
+        else ...[
+          _filterChips(),
+          const SizedBox(height: Gap.sm),
+          if (visible.isEmpty)
+            AppCard(
+              child: AppEmptyState(
+                icon: Icons.filter_alt_outlined,
+                art: EmptyArtKind.floatingPages,
+                title: '这个分组还没有书',
+                hint: '「${_filter.label}」里暂时没有书 —— 换个分组,或去材料中心加一本',
+                action: TextButton.icon(
+                  onPressed: () =>
+                      setState(() => _filter = BookshelfFilter.all),
+                  icon: const Icon(Icons.grid_view_outlined, size: 16),
+                  label: const Text('查看全部'),
+                ),
+              ),
+            )
+          else
+            BookshelfView(
+              books: visible,
+              onTapBook: _openBook,
+              onLongPressBook: _showBookSheet,
             ),
-            _filterChips(),
-            const SizedBox(height: Gap.sm),
-            if (visible.isEmpty)
-              AppCard(
-                child: AppEmptyState(
-                  icon: Icons.filter_alt_outlined,
-                  art: EmptyArtKind.floatingPages,
-                  title: '这个分组还没有书',
-                  hint: '「${_filter.label}」里暂时没有书 —— 换个分组,或去材料中心加一本',
-                  action: TextButton.icon(
-                    onPressed: () =>
-                        setState(() => _filter = BookshelfFilter.all),
-                    icon: const Icon(Icons.grid_view_outlined, size: 16),
-                    label: const Text('查看全部'),
-                  ),
-                ),
-              )
-            else
-              BookshelfView(
-                books: visible,
-                onTapBook: _openBook,
-                onLongPressBook: _showBookSheet,
+          const SizedBox(height: Gap.md),
+          if (visible.isNotEmpty)
+            Text(
+              '点一本书继续读,长按可以移出书架或看封面',
+              textAlign: TextAlign.center,
+              style: AppFont.metaStyle.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
-            const SizedBox(height: Gap.md),
-            if (visible.isNotEmpty)
-              Text(
-                '点一本书继续读,长按可以移出书架或看封面',
-                textAlign: TextAlign.center,
-                style: AppFont.metaStyle.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-              ),
-          ],
-          const SizedBox(height: Gap.xl),
+            ),
         ],
-      ),
+      ],
     );
   }
 
@@ -595,8 +623,8 @@ class _CoverSheet extends StatelessWidget {
             ),
             const SizedBox(height: Gap.sm),
             // 真封面(deeper 尺寸这里给足了:168 → 240,才看得出画面)
-            MaterialCover(
-              seed: book.title,
+            ArtCover(
+              title: book.title,
               kind: book.kind,
               // v2.11:书架长按「查看封面」是全 App 唯一"该给大图"的地方 ——
               // 这里以前没传 imageUrl,于是永远只有程序化色块。

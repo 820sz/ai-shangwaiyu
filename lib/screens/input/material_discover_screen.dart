@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../widgets/v4/v4_kit.dart';
 import 'package:provider/provider.dart';
 
 import '../../config/design_tokens.dart';
@@ -11,8 +12,8 @@ import '../../services/material_discovery.dart';
 import '../../services/material_library.dart';
 import '../../services/original_search.dart';
 import '../../widgets/app_ui.dart';
+import '../../widgets/art_cover.dart';
 import '../../widgets/design_kit.dart';
-import '../../widgets/material_cover.dart';
 import '../../widgets/search_timeline.dart';
 import '../../widgets/waiting.dart';
 import 'material_reader_screen.dart';
@@ -218,7 +219,7 @@ class _MaterialDiscoverScreenState extends State<MaterialDiscoverScreen> {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
     return Scaffold(
-      appBar: AppBar(title: const Text('按我的需求找材料')),
+      appBar: V4JellyAppBar(title: '按我的需求找材料'),
       body: ListView(
         controller: _scrollCtrl,
         padding: Insets.page,
@@ -421,8 +422,8 @@ class _MaterialDiscoverScreenState extends State<MaterialDiscoverScreen> {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            MaterialCover(
-              seed: c.title,
+            ArtCover(
+              title: c.title,
               kind: c.kind,
               imageUrl: c.imageUrl,
               width: 72,

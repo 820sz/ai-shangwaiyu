@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 import '../../config/constants.dart';
 import '../../config/design_tokens.dart';
 import '../../config/theme.dart';
+import '../../config/v4_theme.dart';
 import '../../models/bookmark.dart';
 import '../../models/vocabulary.dart';
 import '../../providers/bookmark_provider.dart';
@@ -29,6 +30,7 @@ import '../../widgets/audio_player_bar.dart';
 import '../../widgets/material_blocks.dart';
 import '../../widgets/reader_action_bar.dart';
 import '../../widgets/reader_text.dart';
+import '../../widgets/v4/v4_kit.dart';
 import '../../widgets/waiting.dart';
 import '../../widgets/word_action_sheet.dart';
 import 'dictation_screen.dart';
@@ -2141,8 +2143,10 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
         nav.pop();
       },
       child: Scaffold(
-      appBar: AppBar(
-        title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
+      // v4(2026-11-03):阅读器保留 AppBar 的导航语义,但换成**果冻头**:
+      // 渐变底 + 26 圆角 + 深墨标题,和材料中心/输入首页同一套语言。
+      appBar: V4JellyAppBar(
+        title: title,
         actions: [
           // v2.10(用户 10/4 第 4 条):**加入书架** —— 明明白白一个按钮,
           // 不用翻"更多"菜单(用户说的是"在文章内部增加一个 ui 即加入书架")
@@ -2292,18 +2296,33 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
                         ),
                       ),
                     Expanded(
-                      child: ListView.builder(
-                        // v2.12.2:用列表视口的真实矩形判断"哪几段可见"
-                        // (设备/字号/行距不同,按滚动比例猜会把范围翻错)
-                        // v2.13.1:列表项 = **段落单元**(翻译/可见性/译文的最小
-                        // 单元),不再是 2500 词的正文块 —— 这样每一段原文下面
-                        // 才能单独出现译文与进度。
-                        key: _listKey,
-                        controller: _scrollCtrl,
-                        padding: const EdgeInsets.fromLTRB(
-                            Gap.md, Gap.sm, Gap.md, 80),
-                        itemCount: _units.length,
-                        itemBuilder: (_, index) => _buildUnit(theme, index),
+                      // v4(2026-11-03):阅读区做成"纸面" —— 上方 24 圆角 +
+                      // 细边,正文印在白纸上;页面底色在四周露一圈,层次更像书。
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: V4Skin.of(context).surface,
+                          borderRadius: const BorderRadius.vertical(
+                            top: Radius.circular(24),
+                          ),
+                          border: Border(
+                            top: BorderSide(
+                              color: V4Skin.of(context).hairline,
+                            ),
+                          ),
+                        ),
+                        child: ListView.builder(
+                          // v2.12.2:用列表视口的真实矩形判断"哪几段可见"
+                          // (设备/字号/行距不同,按滚动比例猜会把范围翻错)
+                          // v2.13.1:列表项 = **段落单元**(翻译/可见性/译文的最小
+                          // 单元),不再是 2500 词的正文块 —— 这样每一段原文下面
+                          // 才能单独出现译文与进度。
+                          key: _listKey,
+                          controller: _scrollCtrl,
+                          padding: const EdgeInsets.fromLTRB(
+                              Gap.md, Gap.sm, Gap.md, 80),
+                          itemCount: _units.length,
+                          itemBuilder: (_, index) => _buildUnit(theme, index),
+                        ),
                       ),
                     ),
                     // ── 翻译控制条(v2.12.2 重做)──
@@ -2479,39 +2498,47 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     }
 
     if (pending && translation == null) {
+      final skin = V4Skin.of(context);
       return Padding(
         padding: const EdgeInsets.only(top: Gap.xs),
         child: Container(
+          // 便签骨架:先摆出译文卡片的形状,不转圈
           decoration: BoxDecoration(
-            border: Border(
-              left: BorderSide(color: cs.outlineVariant, width: 2),
-            ),
+            color: skin.surfaceAlt,
+            borderRadius: BorderRadius.circular(14),
           ),
-          padding: const EdgeInsets.only(left: Gap.sm, top: 2),
+          padding: const EdgeInsets.fromLTRB(10, 8, 4, 6),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // 骨架屏占住"译文将要出现的位置":用户先看到形状,不是转圈
               SkeletonLines(
                 lines: 2,
                 withTitle: false,
                 lineHeight: 10,
                 seed: index,
               ),
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton(
-                  style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: Gap.xs),
-                    minimumSize: const Size(0, 24),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              const SizedBox(height: 2),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '正在翻译这段…',
+                      style: TextStyle(fontSize: AppFont.tag, color: skin.inkFaint),
+                    ),
                   ),
-                  onPressed: () => _cancelChunkTranslation(index),
-                  child: const Text(
-                    '取消这段',
-                    style: TextStyle(fontSize: AppFont.tag),
+                  TextButton(
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: Gap.xs),
+                      minimumSize: const Size(0, 24),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    onPressed: () => _cancelChunkTranslation(index),
+                    child: const Text(
+                      '取消这段',
+                      style: TextStyle(fontSize: AppFont.tag),
+                    ),
                   ),
-                ),
+                ],
               ),
             ],
           ),
@@ -2521,18 +2548,38 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
 
     if (translation == null) return const SizedBox.shrink();
 
+    final skin = V4Skin.of(context);
     return Padding(
       padding: const EdgeInsets.only(top: Gap.xs),
       child: Container(
+        // v4(2026-11-03):逐段译文从"左侧竖线 + 灰字"改成"译文便签":
+        // 淡主色卡 + 「译」徽标,与原文段落明确分工(像贴着的一张便签)。
         decoration: BoxDecoration(
-          border: Border(
-            left: BorderSide(color: cs.primary, width: 2.5),
-          ),
+          color: Color.alphaBlend(
+              skin.accent.withValues(alpha: 0.055), skin.surface),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: skin.accent.withValues(alpha: 0.16)),
         ),
-        padding: const EdgeInsets.only(left: Gap.sm),
+        padding: const EdgeInsets.fromLTRB(10, 8, 2, 8),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            Container(
+              margin: const EdgeInsets.only(top: 2, right: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+              decoration: BoxDecoration(
+                color: skin.accent.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Text(
+                '译',
+                style: TextStyle(
+                  fontSize: 9,
+                  fontWeight: FontWeight.w800,
+                  color: skin.accent,
+                ),
+              ),
+            ),
             Expanded(
               child: Tooltip(
                 message: '点译文可追问 AI;右侧「…」可重翻这一段',

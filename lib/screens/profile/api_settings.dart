@@ -5,6 +5,7 @@ import '../../config/constants.dart';
 import '../../config/design_tokens.dart';
 import '../../services/api_endpoint.dart';
 import '../../services/doubao_api.dart';
+import '../../services/material_art.dart';
 import '../../widgets/app_ui.dart';
 import '../../widgets/design_kit.dart';
 import '../../widgets/waiting.dart';
@@ -49,10 +50,14 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
   bool _primaryTesting = false;
   bool _secondaryTesting = false;
 
+  /// 材料自动配图策略(设置项;默认只抓取、不花钱)
+  CoverArtMode _artMode = CoverArtMode.crawl;
+
   @override
   void initState() {
     super.initState();
     _box = Hive.box(AppConstants.hiveBoxSettings);
+    _artMode = MaterialArt.mode;
     _primaryKeyCtrl = TextEditingController(
       text:
           _box.get(AppConstants.keyDoubaoApiKey, defaultValue: '') as String? ??
@@ -696,9 +701,79 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
               ],
             ),
           ),
+          const SizedBox(height: Gap.md),
+
+          // ── 04 材料自动配图 ──
+          //
+          // 用户 2026-11-03:"材料那些封面尽量能让 AI 抓取并配上材料自身的插图
+          // 或者封面,不然整个软件太素了"。默认只抓取(**免费**):书从豆瓣拿书封、
+          // 其他材料从 360 图片拿相关插图,抓到落盘缓存;AI 生图按张计费,默认关。
+          AppSectionHeader(
+            indexLabel: '04',
+            title: '材料自动配图',
+            trailing: AppTag(
+              _artMode == CoverArtMode.off ? '已关闭' : '已开启',
+              tone: _artMode == CoverArtMode.off
+                  ? AppTagTone.neutral
+                  : AppTagTone.success,
+            ),
+          ),
+          Text(
+            '给没有配图的材料自动找一张自己的图:书优先取书封,其它取相关插图,'
+            '抓到后缓存在本机(不重复联网)。',
+            style: AppFont.tagStyle.copyWith(color: muted, height: 1.5),
+          ),
+          const SizedBox(height: Gap.sm),
+          AppCard(
+            child: Column(
+              children: <Widget>[
+                _artModeTile(
+                  CoverArtMode.crawl,
+                  '抓取书封 / 插图(免费)',
+                  '书用豆瓣封面,其他用图片搜索;抓不到就用程序化封面',
+                ),
+                _artModeTile(
+                  CoverArtMode.crawlThenAi,
+                  '抓不到时让 AI 生成插图',
+                  MaterialArt.aiAvailable
+                      ? '走方舟 Seedream,按张计费(约几毛/张);生成一次后永久缓存'
+                      : '当前端点不是火山方舟,生图不可用(需要 ark- Key + 方舟端点)',
+                ),
+                _artModeTile(
+                  CoverArtMode.off,
+                  '关闭自动配图',
+                  '只用材料源自带的图;没有就用程序化封面',
+                ),
+              ],
+            ),
+          ),
           const SizedBox(height: Gap.lg),
         ],
       ),
+    );
+  }
+
+  Future<void> _setArtMode(CoverArtMode? mode) async {
+    if (mode == null) return;
+    setState(() => _artMode = mode);
+    await MaterialArt.setMode(mode);
+  }
+
+  /// 配图策略的单选项(不用 RadioListTile:Flutter 3.44 起它的
+  /// groupValue/onChanged 已废弃,换成"图标 + ListTile"零迁移成本)
+  Widget _artModeTile(CoverArtMode mode, String title, String subtitle) {
+    final selected = _artMode == mode;
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: Icon(
+        selected ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+        color: selected
+            ? Theme.of(context).colorScheme.primary
+            : Theme.of(context).colorScheme.outline,
+      ),
+      title: Text(title),
+      subtitle: Text(subtitle),
+      onTap: () => _setArtMode(mode),
     );
   }
 }

@@ -337,7 +337,8 @@ Widget _cell(ThemeData theme, String caption, Widget child) {
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
         // 固定舞台高度:三个组件高度不同,给统一容器才能横向对齐比较
-        SizedBox(height: 300, child: Center(child: child)),
+        // (v4 果冻按钮变高到 52,舞台从 300 提到 320)
+        SizedBox(height: 320, child: Center(child: child)),
         const SizedBox(height: 6),
         Text(
           caption,

@@ -1,10 +1,11 @@
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
 import '../config/design_tokens.dart';
+import '../config/v4_theme.dart';
 import '../services/material_source.dart';
-import 'graphics/graphics.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 纯函数层:封面的"内容规则"全部放这里(不碰 BuildContext,可单测)
@@ -81,8 +82,23 @@ List<Color> coverPalette(String seed, Brightness brightness) {
 ///
 /// [small] 为 false 时放宽到 10 字符/4 汉字 —— 大卡本来走标题全文,
 /// 这一支只作为"标题放不下时的兜底"(例如真图占位、极窄卡)。
-String coverMonogram(String title, {required bool small}) {
+/// 极小的封面(短边 < 110)只放**一个字/首字母**的"字标" ——
+/// 大段中文截断短语在 52~96px 的封面里会像坏掉的占位符(v3 终版修),
+/// 单字标则是设计过的封面语言(像字母书脊),也保证封面不是纯色块。
+String coverMonogramSingle(String title) {
   final s = _monoSource(title);
+  if (s.trim().isEmpty) return '·';
+  // 跳过纯标点/符号,取第一个可读字符
+  for (final rune in s.runes) {
+    final ch = String.fromCharCode(rune);
+    if (RegExp(r'[\u4e00-\u9fa5A-Za-z0-9]').hasMatch(ch)) {
+      return ch.toUpperCase();
+    }
+  }
+  return '·';
+}
+
+String coverMonogram(String title, {required bool small}) {  final s = _monoSource(title);
   if (s.isEmpty) return '·'; // 空标题也给个字符:封面绝不能是一块什么都没有的色块
   final tokens = _dropLeadingNoise(s.split(' ').where((t) => t.isNotEmpty).toList());
   if (tokens.isEmpty) return '·';
@@ -408,6 +424,15 @@ class MaterialCover extends StatelessWidget {
   /// 左下角等级徽标(如 'Lv8');为空不显示
   final String? levelLabel;
 
+  /// 已下载到本机的配图(自动配图/缓存);优先于 [imageUrl]。
+  ///
+  /// 为什么给本地文件而不是直接给 url:抓来的图常带防盗链/图床限制,
+  /// 每次渲染都联网既慢又可能 403;落到本地文件后滚列表是零网络。
+  final String? localImagePath;
+
+  /// 源头图加载失败(图床被墙/防盗链/404)时的回调:交给上层去"抓一张图"。
+  final VoidCallback? onImageError;
+
   const MaterialCover({
     super.key,
     required this.seed,
@@ -417,10 +442,13 @@ class MaterialCover extends StatelessWidget {
     this.height = 168,
     this.radius = Radii.card,
     this.levelLabel,
+    this.localImagePath,
+    this.onImageError,
   });
 
   @override
   Widget build(BuildContext context) {
+    final skin = V4Skin.of(context);
     return ClipRRect(
       borderRadius: BorderRadius.circular(radius),
       child: SizedBox(
@@ -438,8 +466,11 @@ class MaterialCover extends StatelessWidget {
             final short = math.min(w, h);
             final showLevel = coverShowLevelBadge(levelLabel, short);
             final chrome = _CoverChrome.of(w, h, showLevel: showLevel);
-            final hasImage = coverHasImage(imageUrl);
+            final localPath = (localImagePath ?? '').trim();
+            final hasLocal = localPath.isNotEmpty && File(localPath).existsSync();
+            final hasImage = hasLocal || coverHasImage(imageUrl);
             final large = coverIsLarge(h);
+            final onImage = hasImage;
             // v2.11:按**真实渲染尺寸 × 设备像素比**解码(见下面 Image.network 的注释)
             final dpr = MediaQuery.devicePixelRatioOf(context);
             final decodeW = (math.max(w, h) * dpr).round();
@@ -448,32 +479,45 @@ class MaterialCover extends StatelessWidget {
               fit: StackFit.expand,
               children: [
                 // ① + ② + ③ 程序化封面(真图会整个盖住它,包括里面的标题文字)
-                _procedural(w, h, chrome, large),
+                _procedural(skin, w, h, chrome, large),
                 if (hasImage) ...[
-                  Image.network(
-                    imageUrl!.trim(),
-                    fit: BoxFit.cover,
-                    // v2.11:小卡按**设备像素**解码,别把 2000px 的原图整张读进内存。
-                    // 为什么必须给:列表里同时有十几张封面,而项目里**没有**
-                    // 磁盘缓存依赖(见 pubspec 血泪教训:加插件后 APK 可能构建不过),
-                    // 只能靠 Flutter 默认的内存 ImageCache —— 不限制解码尺寸时,
-                    // 一张 2000×1084 的头图 decoded 后是 ~8MB,十几张就把缓存冲爆,
-                    // 表现为"滚动时图反复消失重下"。
-                    cacheWidth: decodeW > 0 ? decodeW : null,
-                    // 加载中/失败都返回透明占位:露出的就是下层程序化封面,
-                    // 既不会白块,也不必把封面重画一遍
-                    loadingBuilder: (context, child, progress) =>
-                        progress == null ? child : const SizedBox.expand(),
-                    errorBuilder: (context, error, stackTrace) =>
-                        const SizedBox.expand(),
-                  ),
+                  if (hasLocal)
+                    Image.file(
+                      File(localPath),
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) =>
+                          const SizedBox.expand(),
+                    )
+                  else
+                    Image.network(
+                      imageUrl!.trim(),
+                      fit: BoxFit.cover,
+                      // v2.11:小卡按**设备像素**解码,别把 2000px 的原图整张读进内存。
+                      // 为什么必须给:列表里同时有十几张封面,而项目里**没有**
+                      // 磁盘缓存依赖(见 pubspec 血泪教训:加插件后 APK 可能构建不过),
+                      // 只能靠 Flutter 默认的内存 ImageCache —— 不限制解码尺寸时,
+                      // 一张 2000×1084 的头图 decoded 后是 ~8MB,十几张就把缓存冲爆,
+                      // 表现为"滚动时图反复消失重下"。
+                      cacheWidth: decodeW > 0 ? decodeW : null,
+                      // 加载中/失败都返回透明占位:露出的就是下层程序化封面,
+                      // 既不会白块,也不必把封面重画一遍
+                      loadingBuilder: (context, child, progress) =>
+                          progress == null ? child : const SizedBox.expand(),
+                      errorBuilder: (context, error, stackTrace) {
+                        // 图挂了:通知上层去抓一张(只通知一次,由上层去重)
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          onImageError?.call();
+                        });
+                        return const SizedBox.expand();
+                      },
+                    ),
                   _imageScrim(),
                 ],
                 // ④ 类型徽标:左上
                 Positioned(
                   left: chrome.pad,
                   top: chrome.pad,
-                  child: _kindChip(chrome),
+                  child: _kindChip(chrome, skin: skin, onImage: onImage),
                 ),
                 // ④ 难度胶囊:左下(与类型徽标一上一下,永不重叠)
                 if (showLevel)
@@ -487,12 +531,20 @@ class MaterialCover extends StatelessWidget {
                   Positioned(
                     right: chrome.pad,
                     bottom: chrome.pad + 4,
-                    child: _kindText(chrome),
+                    child: _kindText(chrome,
+                        color: onImage ? Colors.white : skin.inkSoft),
                   ),
-                // ⑤ 外廓 1px 描边 + 顶边内阴影:小卡在深色背景上不"糊"进卡片
+                // ⑤ 外廓 1px 描边(浅色封面靠一笔细线定边界)
                 Positioned.fill(
                   child: IgnorePointer(
-                    child: CustomPaint(painter: _CoverEdgePainter(radius: radius)),
+                    child: CustomPaint(
+                      painter: _CoverEdgePainter(
+                        radius: radius,
+                        color: skin.dark
+                            ? Colors.white.withValues(alpha: 0.16)
+                            : skin.ink.withValues(alpha: 0.10),
+                      ),
+                    ),
                   ),
                 ),
               ],
@@ -503,62 +555,126 @@ class MaterialCover extends StatelessWidget {
     );
   }
 
-  /// 程序化封面:图形身份层 + 顶部提亮/底部压暗 + 主体文字。
+  /// 程序化封面(v4 · 明亮果冻):从"深色神秘块"改成**浅色印刷封面**。
   ///
-  /// v3(2026-11-01 批 1):底座从"渐变 + 手写纹理"换成图形资产系统的
-  /// [MaterialCoverArt] —— 用户连着几轮说封面是"色块 + 文字",根因是全 App
-  /// 没有任何自绘图形。现在每种材料类型有各自的几何身份(书脊/点阵/报头/
-  /// 考卷/声波/便签),真图缺失时也不再是一块纯色。
-  /// 文字仍由本组件叠在上面:身份图层**不画字**(避免和标题打架)。
-  Widget _procedural(double w, double h, _CoverChrome c, bool large) {
-    final text = large
-        ? coverTitleSnippet(seed, maxChars: c.titleChars)
-        : coverMonogram(seed, small: true);
-    final body = text.isEmpty ? coverKindLabel(kind) : text; // 空标题兜底,绝不空白
+  /// 为什么换:深色封面在果冻界面里像一块块"黑砖头",而且单字标深底白字
+  /// 看起来像占位符(用户反复提"封面简陋/意义不明")。这一版:
+  /// 1. **底**:按标题稳定取色的糖果纸面(同一篇永远同一色),不再是深色渐变;
+  /// 2. **身份**:左侧一道域色书脊 + 按 kind 的几何纹理(极淡墨线,第二眼才看见);
+  /// 3. **字**:墨色主体 —— 大卡用标题片段(浅底深字读得清),小卡用单字标;
+  /// 4. **徽标**:白玻璃胶囊装种类与难度,浅底上仍然清楚;
+  /// 5. **真图优先**:有网图仍整张盖住(加载中/失败露出下面这层,永不白块)。
+  Widget _procedural(V4Skin skin, double w, double h, _CoverChrome c, bool large) {
+    // v4:单字标只留给真正的缩略图(<72);72~110 的中卡改成"能认出来的词",
+    // 让"书架上的那一本"有区分度 —— 单字在不同文章间几乎没有区分度。
+    //
+    // 标题全文只给**宽卡**(w≥168 且 h≥120):96×128 这种竖窄封面塞标题会
+    // 在字母中间断行(「The Ele / ments…」),比字标更难看。
+    final tiny = math.min(w, h) < 72;
+    final useTitle = large && w >= 168;
+    final text = tiny
+        ? coverMonogramSingle(seed)
+        : (useTitle
+            ? coverTitleSnippet(seed, maxChars: c.titleChars)
+            : _mediumMonogram(seed));
+    final body = text.isEmpty ? coverKindLabel(kind) : text;
+    final ink = skin.ink;
+    final pastel = skin.pastelAt(coverPaletteIndex(seed));
+    final spine = Color.lerp(pastel.first, ink, 0.62) ?? ink;
     return Stack(
       fit: StackFit.expand,
       children: [
-        // ① 类型身份图(几何纹理 + 类型渐变色,深色主题自动压暗一档)
+        // ① 糖果纸面
         Positioned.fill(
-          child: MaterialCoverArt(
-            kind: MaterialKindArt.fromId(kind),
-            seed: seed,
-            width: w,
-            height: h,
-            radius: 0, // 外层 ClipRRect 已经裁过圆角
+          child: DecoratedBox(
+            decoration: BoxDecoration(gradient: skin.pastelFill(coverPaletteIndex(seed))),
           ),
         ),
-        // ② 顶部一点"光"、底部压暗:底部压暗是白字对比度的保险(暗面本来已经够深)
-        DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [
-                Colors.white.withAlpha(20),
-                Colors.white.withAlpha(0),
-                Colors.black.withAlpha(52),
-              ],
-              stops: const [0.0, 0.46, 1.0],
+        // ② 类型几何纹理(极淡墨线:只在看第二眼时出现)
+        Positioned.fill(
+          child: CustomPaint(
+            painter: CoverTexturePainter(
+              kind: kind,
+              color: ink.withValues(alpha: skin.dark ? 0.16 : 0.085),
             ),
           ),
         ),
-        // ③ 主体文字:大卡标题(底部对齐) / 小卡单字(居中)
+        // ③ 左侧书脊:给每一张封面一条"装订线",缩略图因此有了封面气质
         Positioned(
-          left: c.pad,
-          right: c.pad,
-          top: large ? c.pad + c.chipHeight + 8 : c.pad + c.chipHeight + 3,
-          bottom: large
-              ? c.pad + c.levelHeight + 8
-              : c.pad + (c.hasLevel ? c.levelHeight + 3 : 0),
-          child: large ? _titleBlock(body, c) : _monoBlock(body, c),
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: math.max(3.0, math.min(w, h) * 0.045),
+          child: ColoredBox(color: spine.withValues(alpha: 0.62)),
         ),
+        // ④ 大卡:一圈内框,像印刷品的裁切线(小卡不加,免得挤)
+        if (large)
+          Positioned.fill(
+            child: IgnorePointer(
+              child: Padding(
+                padding: EdgeInsets.all(c.pad * 0.55),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    border: Border.all(
+                      color: ink.withValues(alpha: 0.10),
+                      width: 0.8,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        // ⑤ 主体文字
+        if (body.isNotEmpty)
+          Positioned(
+            left: c.pad,
+            right: c.pad,
+            top: useTitle ? c.pad + c.chipHeight + 8 : c.pad + c.chipHeight + 3,
+            bottom: useTitle
+                ? c.pad + c.levelHeight + 8
+                : c.pad + (c.hasLevel ? c.levelHeight + 3 : 0),
+            child: useTitle
+                ? _titleBlock(body, c, ink)
+                : _monoBlock(body, c, ink),
+          ),
       ],
     );
   }
 
+  /// 中卡字标:优先"能认出来的短词/2~3 个汉字"。
+  ///
+  /// 英文:取第一个有意义的实词(跳过 the/of 这类功能词);**词本身超过 8 个
+  /// 字母**时(会被截成「Photosyn」)退回单字母书脊字 —— 宁可极简,
+  /// 也不要半截字。
+  String _mediumMonogram(String seed) {
+    final mono = coverMonogram(seed, small: true);
+    final asciiOnly = mono.runes.every((r) => r < 0x80);
+    if (!asciiOnly) {
+      // 中文:中卡给 4 个字(比 3 个字更像一个词/短语,如「随着疫情」),
+      // 至少 2 个字才收,否则退回通用单字标。
+      final tokens = _dropLeadingNoise(
+        _monoSource(seed).split(' ').where((t) => t.isNotEmpty).toList(),
+      );
+      if (tokens.isNotEmpty && _isCjk(tokens.first.runes.first)) {
+        final run = _cjkMonogram(tokens.first, 4);
+        if (run.runes.length >= 2) return run;
+      }
+      return mono;
+    }
+    final tokens = _dropLeadingNoise(
+      _monoSource(seed).split(' ').where((t) => t.isNotEmpty).toList(),
+    );
+    for (final t in tokens) {
+      if (!_isWordLike(t) || t.runes.length < 4) continue;
+      // 10 个字母以内直接当封面词(「Attention」可读);再长就太挤,退回单字母。
+      if (t.runes.length > 10) return coverMonogramSingle(seed);
+      return _titleCase(t);
+    }
+    return mono;
+  }
+
   /// 大卡标题:底部对齐,最多 [titleMaxLines] 行
-  Widget _titleBlock(String text, _CoverChrome c) {
+  Widget _titleBlock(String text, _CoverChrome c, Color color) {
     return FittedBox(
       // 第三道保险:字号/行数都算过了,真放不下时整体等比缩小,绝不溢出
       fit: BoxFit.scaleDown,
@@ -572,20 +688,17 @@ class MaterialCover extends StatelessWidget {
           style: TextStyle(
             fontSize: c.titleFont, // 第一道保险:字号随尺寸算,且有上限
             height: 1.32, // 中文要多留行高,1.32 是"不挤也不散"的甜点
-            fontWeight: FontWeight.w700,
-            color: Colors.white.withAlpha(245),
+            fontWeight: FontWeight.w800,
+            color: color,
             letterSpacing: 0.2,
-            shadows: const [
-              Shadow(color: Color(0x66000000), blurRadius: 6, offset: Offset(0, 1)),
-            ],
           ),
         ),
       ),
     );
   }
 
-  /// 小卡单字:居中,一行;汉字给足字距,拉丁词收紧一点
-  Widget _monoBlock(String text, _CoverChrome c) {
+  /// 小卡字标:居中,一行;汉字给足字距,拉丁词收紧一点
+  Widget _monoBlock(String text, _CoverChrome c, Color color) {
     final cjk = text.isNotEmpty && _isCjk(text.runes.first);
     return FittedBox(
       fit: BoxFit.scaleDown,
@@ -599,12 +712,9 @@ class MaterialCover extends StatelessWidget {
         style: TextStyle(
           fontSize: c.monoFont,
           height: 1.12,
-          fontWeight: FontWeight.w700,
-          color: Colors.white.withAlpha(248),
-          letterSpacing: c.monoFont * (cjk ? 0.10 : 0.02),
-          shadows: const [
-            Shadow(color: Color(0x73000000), blurRadius: 7, offset: Offset(0, 2)),
-          ],
+          fontWeight: FontWeight.w900,
+          color: color,
+          letterSpacing: c.monoFont * (cjk ? 0.08 : 0.02),
         ),
       ),
     );
@@ -617,7 +727,20 @@ class MaterialCover extends StatelessWidget {
   /// 直接吃掉半张封面(实测 2.0 倍时难度胶囊宽到 55/78),而且会让
   /// `_CoverChrome` 算出的壳层高度对不上真实排版,进而压到主体文字。
   /// 真正的信息(种类/难度)在封面右边的卡片正文里还有一份,不靠这里。
-  Widget _kindChip(_CoverChrome c) {
+  Widget _kindChip(_CoverChrome c, {required V4Skin skin, required bool onImage}) {
+    final fg = onImage ? Colors.white : skin.ink;
+    // 浅色封面 = 白玻璃胶囊;深色主题下的深色封面 = 深色玻璃胶囊 ——
+    // 两种底色上用同一套"白字/深字"会互相隐身,必须按皮肤取。
+    final chipBg = onImage
+        ? Colors.black.withAlpha(120)
+        : skin.dark
+            ? skin.surfaceAlt.withValues(alpha: 0.9)
+            : Colors.white.withValues(alpha: 0.86);
+    final chipBorder = onImage
+        ? Colors.white.withValues(alpha: 0.16)
+        : skin.dark
+            ? skin.hairline
+            : Colors.white.withValues(alpha: 0.9);
     return MediaQuery.withNoTextScaling(
       child: ConstrainedBox(
         constraints: BoxConstraints(maxWidth: c.bodyWidth),
@@ -627,9 +750,9 @@ class MaterialCover extends StatelessWidget {
             vertical: c.chipPadV,
           ),
           decoration: BoxDecoration(
-            color: Colors.black.withAlpha(120),
+            color: chipBg,
             borderRadius: BorderRadius.circular(999), // 胶囊
-            border: Border.all(color: Colors.white.withAlpha(40), width: 0.8),
+            border: Border.all(color: chipBorder, width: 0.8),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -637,7 +760,7 @@ class MaterialCover extends StatelessWidget {
               Icon(
                 coverKindIcon(kind),
                 size: c.chipIcon,
-                color: Colors.white.withAlpha(240),
+                color: fg,
               ),
               if (c.chipWithText) ...[
                 const SizedBox(width: 3.5),
@@ -649,8 +772,8 @@ class MaterialCover extends StatelessWidget {
                     style: TextStyle(
                       fontSize: c.chipFont,
                       height: 1.05,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.white.withAlpha(242),
+                      fontWeight: FontWeight.w700,
+                      color: fg,
                       letterSpacing: 0.2,
                     ),
                   ),
@@ -693,7 +816,7 @@ class MaterialCover extends StatelessWidget {
   }
 
   /// 大卡右下角那行种类小字(与左下的难度胶囊左右对称)
-  Widget _kindText(_CoverChrome c) {
+  Widget _kindText(_CoverChrome c, {required Color color}) {
     return MediaQuery.withNoTextScaling(
       child: Text(
         coverKindLabel(kind),
@@ -702,8 +825,8 @@ class MaterialCover extends StatelessWidget {
         style: TextStyle(
           fontSize: c.levelFont,
           height: 1.05,
-          fontWeight: FontWeight.w500,
-          color: Colors.white.withAlpha(186),
+          fontWeight: FontWeight.w600,
+          color: color,
           letterSpacing: 0.4,
         ),
       ),
@@ -846,9 +969,12 @@ class _CoverChrome {
 /// - 线条间距下限 9px —— 52 的小卡上按比例画会把线挤成一片灰雾;
 /// - 只画 5~8 笔,列表里一屏十几张封面也不会掉帧。
 class CoverTexturePainter extends CustomPainter {
-  const CoverTexturePainter({required this.kind});
+  const CoverTexturePainter({required this.kind, this.color = Colors.white});
 
   final String kind;
+
+  /// 纹理颜色(v4:浅色封面上用深墨低透明度;旧深色封面默认白色)
+  final Color color;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -859,8 +985,9 @@ class CoverTexturePainter extends CustomPainter {
     final stroke = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = math.max(0.8, short / 110)
-      ..color = Colors.white.withAlpha(22);
-    final fill = Paint()..color = Colors.white.withAlpha(20);
+      ..color = color;
+    final fill = Paint()
+      ..color = color.withValues(alpha: color.a * 0.82);
 
     if (kind == 'book') {
       _book(canvas, size, step, stroke, fill);
@@ -977,46 +1104,28 @@ class CoverTexturePainter extends CustomPainter {
 /// 为什么必须有:封面块本身很深,在深色主题的卡片上几乎同色,没这一笔
 /// 小卡就"糊"在卡片里(用户上一版截图正是这个问题)。
 class _CoverEdgePainter extends CustomPainter {
-  const _CoverEdgePainter({required this.radius});
+  const _CoverEdgePainter({required this.radius, required this.color});
 
   final double radius;
+  final Color color;
 
   @override
   void paint(Canvas canvas, Size size) {
     final rect = Offset.zero & size;
     final r = math.max(0.0, radius);
-    final outer = RRect.fromRectAndRadius(rect, Radius.circular(r));
 
     canvas.drawRRect(
       RRect.fromRectAndRadius(rect.deflate(0.5), Radius.circular(r)),
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1
-        ..shader = LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [Colors.white.withAlpha(58), Colors.white.withAlpha(16)],
-        ).createShader(rect),
+        ..color = color,
     );
-
-    final shadeH = math.min(size.height * 0.22, 16.0);
-    final shadeRect = Rect.fromLTWH(0, 0, size.width, shadeH);
-    canvas.save();
-    canvas.clipRRect(outer);
-    canvas.drawRect(
-      shadeRect,
-      Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [Colors.black.withAlpha(40), Colors.black.withAlpha(0)],
-        ).createShader(shadeRect),
-    );
-    canvas.restore();
   }
 
   @override
-  bool shouldRepaint(covariant _CoverEdgePainter old) => old.radius != radius;
+  bool shouldRepaint(covariant _CoverEdgePainter old) =>
+      old.radius != radius || old.color != color;
 }
 
 /// 材料"等级"与元信息(v2.8,参考软件的 `Lv8` 徽标)。

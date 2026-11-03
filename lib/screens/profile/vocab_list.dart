@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../config/design_tokens.dart';
+import '../../config/v4_theme.dart';
 import '../../providers/vocab_provider.dart';
 import '../../services/word_frequency.dart';
+import '../../widgets/graphics/graphics.dart';
+import '../../widgets/v4/v4_kit.dart';
 import '../../widgets/vocab_card.dart';
 import '../input/widgets/category_picker.dart';
 import '../input/widgets/sub_category_input.dart';
@@ -180,92 +184,93 @@ class _VocabListScreenState extends State<VocabListScreen> {
           .toList();
     }
 
+    final skin = V4Skin.of(context);
     return Scaffold(
-      appBar: AppBar(
-        surfaceTintColor: Colors.transparent,
-        scrolledUnderElevation: 1,
-        title: _selectionMode
-            ? Text('已选 ${_selectedIds.length} 项')
-            : _showSearch
-                ? TextField(
-                    controller: _searchCtrl,
-                    autofocus: true,
-                    // 颜色走主题(AppBar 前景色):深色模式下写死近黑会变成"看不见的输入框"
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                    ),
-                    cursorColor: theme.colorScheme.primary,
-                    cursorWidth: 2,
-                    decoration: InputDecoration(
-                      hintText: '搜索生词…',
-                      hintStyle: TextStyle(
-                        color: theme.colorScheme.onSurfaceVariant,
-                        fontSize: 18,
-                        fontWeight: FontWeight.w400,
+      backgroundColor: skin.pageBg,
+      body: SafeArea(
+        bottom: false,
+        child: Column(
+          children: <Widget>[
+            // v4(2026-11-03):生词本换成内页果冻头;搜索框从 AppBar 里挪出来
+            // 变成头图下的一行标准输入框(主题自带果冻样式),多选动作收进玻璃圆键。
+            V4DetailHeader(
+              domain: GraphicDomain.language,
+              title: _selectionMode ? '已选 ${_selectedIds.length} 项' : '生词本',
+              subtitle: _selectionMode
+                  ? '选中的词可以批量移动或删除'
+                  : '共 ${vocab.vocabularies.length} 个生词 · 点词看详情,长按可多选',
+              leading: _selectionMode
+                  ? V4IconAction(
+                      icon: Icons.close_rounded,
+                      tooltip: '退出多选',
+                      onTap: _exitSelectionMode,
+                    )
+                  : null,
+              leadingBack: !_selectionMode,
+              actions: <Widget>[
+                if (_selectionMode) ...<Widget>[
+                  V4IconAction(
+                    icon: Icons.drive_file_move_outlined,
+                    tooltip: '移动到其他分类',
+                    onTap: _batchMove,
+                  ),
+                  V4IconAction(
+                    icon: Icons.delete_outline,
+                    tooltip: '批量删除',
+                    onTap: _batchDelete,
+                  ),
+                  V4IconAction(
+                    icon: Icons.select_all,
+                    tooltip: '全选',
+                    onTap: () {
+                      setState(() {
+                        if (_selectedIds.length == items.length) {
+                          _selectedIds.clear();
+                          _selectionMode = false;
+                        } else {
+                          _selectedIds
+                              .addAll(items.map((v) => v.id!).toList());
+                        }
+                      });
+                    },
+                  ),
+                ] else
+                  V4IconAction(
+                    icon: _showSearch ? Icons.close : Icons.search,
+                    tooltip: '搜索生词',
+                    onTap: () {
+                      setState(() {
+                        _showSearch = !_showSearch;
+                        if (!_showSearch) {
+                          _searchQuery = '';
+                          _searchCtrl.clear();
+                        }
+                      });
+                    },
+                  ),
+              ],
+            ),
+            Expanded(
+              child: Column(
+                children: <Widget>[
+                  if (_showSearch && !_selectionMode)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                          Gap.page, Gap.xs, Gap.page, Gap.xs),
+                      child: TextField(
+                        controller: _searchCtrl,
+                        autofocus: true,
+                        style: const TextStyle(
+                            fontSize: 14, fontWeight: FontWeight.w600),
+                        decoration: const InputDecoration(
+                          hintText: '搜索生词…',
+                          prefixIcon: Icon(Icons.search, size: 18),
+                          isDense: true,
+                        ),
+                        onChanged: (v) => setState(() => _searchQuery = v),
+                        onSubmitted: (_) => setState(() {}),
                       ),
-                      border: InputBorder.none,
-                      isDense: true,
-                      filled: false,
                     ),
-                    onChanged: (v) => setState(() => _searchQuery = v),
-                    onSubmitted: (_) => setState(() {}),
-                  )
-                : const Text('生词本',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                    )),
-        leading: _selectionMode
-            ? IconButton(
-                icon: const Icon(Icons.close),
-                onPressed: _exitSelectionMode,
-              )
-            : null,
-        actions: [
-          if (_selectionMode) ...[
-            IconButton(
-              icon: const Icon(Icons.drive_file_move_outlined),
-              tooltip: '移动到其他分类',
-              onPressed: _batchMove,
-            ),
-            IconButton(
-              icon: const Icon(Icons.delete_outline),
-              tooltip: '批量删除',
-              onPressed: _batchDelete,
-            ),
-            IconButton(
-              icon: const Icon(Icons.select_all),
-              tooltip: '全选',
-              onPressed: () {
-                setState(() {
-                  if (_selectedIds.length == items.length) {
-                    _selectedIds.clear();
-                    _selectionMode = false;
-                  } else {
-                    _selectedIds.addAll(items.map((v) => v.id!).toList());
-                  }
-                });
-              },
-            ),
-          ] else ...[
-            IconButton(
-              icon: Icon(_showSearch ? Icons.close : Icons.search),
-              onPressed: () {
-                setState(() {
-                  _showSearch = !_showSearch;
-                  if (!_showSearch) {
-                    _searchQuery = '';
-                    _searchCtrl.clear();
-                  }
-                });
-              },
-            ),
-          ],
-        ],
-      ),
-      body: Column(
-        children: [
           if (!_selectionMode) ...[
             // 筛选栏（选择模式下隐藏）
             _buildFilterBar(vocab, theme),
@@ -339,7 +344,11 @@ class _VocabListScreenState extends State<VocabListScreen> {
                     },
                   ),
           ),
-        ],
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

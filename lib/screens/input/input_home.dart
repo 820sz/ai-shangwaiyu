@@ -16,14 +16,19 @@ import '../../services/input_prefs.dart';
 import '../../services/material_library.dart';
 import '../../services/material_prefs.dart';
 import '../../widgets/app_ui.dart';
-import '../../widgets/material_cover.dart';
+import '../../widgets/art_cover.dart';
+import '../../widgets/design_kit.dart';
+import '../../widgets/graphics/graphics.dart';
+import '../../widgets/v4/v4_kit.dart';
 import '../../widgets/waiting.dart';
 import 'material_import_flow.dart';
 import 'material_discover_screen.dart';
 import 'material_reader_screen.dart';
 import 'process_chat.dart';
 import 'widgets/ai_article_section.dart';
+import 'material_category_screen.dart';
 import 'material_center_screen.dart';
+import '../../services/material_topics.dart';
 import 'widgets/analysis_mode_picker.dart';
 import 'widgets/imported_materials_section.dart';
 import 'widgets/material_preview_dialog.dart';
@@ -53,6 +58,9 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
   /// 输入偏好(难度档等)。用户 11/01:难度要能自选,并且全 App 同步 ——
   /// 这里就是"同步"的入口之一(材料中心、推荐、题目都读同一个 prefs)。
   MaterialPrefs _prefs = MaterialPrefs.load();
+
+  /// 当前选中的题材 tab(v4):只影响 tab 高亮,点击即进分类页。
+  String _selectedTopicId = 'sci_tech';
 
   /// 难度档辅助调整建议(v3 批 7 · P1-2):suggestBand 的展示结果。
   /// null = 还没算完 / 没有建议 —— 两种情况都不占位(不留空行)。
@@ -159,66 +167,153 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final cs = theme.colorScheme;
+    final topics = MaterialTopic.all.take(6).toList();
+    final v4Topics = v4TopicsFrom([
+      for (final t in topics) (id: t.id, label: t.label),
+    ]);
 
-    return Scaffold(
-      // v2.12(前端全面升级):**去掉 AppBar**。
-      // 旧版顶上是居中的「输入」二字,像一条工具条,把页面切碎了;
-      // 样图(扇贝)的做法是让标题成为内容的一部分:大字号 + 一行日期/引导,
-      // 页面看起来"像一页纸"而不是"一个功能面板"。
-      body: SafeArea(
-        bottom: false,
-        child: SingleChildScrollView(
-          padding: Insets.page,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // ① 页面标题区
-              Padding(
-                padding: const EdgeInsets.only(top: Gap.xs, bottom: Gap.sm),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+    // v4(2026-11-02 用户定案"前端重做";11-03 选定「明亮果冻」基调):
+    // 整页换成新的视觉语言 —— 果冻头图 + 题材 tabs + 糖果色动作砖 + 白卡列表。
+    final goalText = (LearnerModelStore.load().goal?.value ?? '').trim();
+    return V4PageScaffold(
+      domain: GraphicDomain.news,
+      eyebrow: _dateLine(),
+      title: '输入',
+      subtitle: '读和听，才是输入。找不到想读的，去材料中心挑一篇。',
+      showAppBarBack: false,
+      chips: [
+        V4GlassChip(icon: Icons.speed, label: '难度 ${_prefs.band.label}'),
+        if (goalText.isNotEmpty)
+          V4GlassChip(
+            icon: Icons.flag_outlined,
+            label: goalText.length > 10 ? '${goalText.substring(0, 10)}…' : goalText,
+          ),
+      ],
+      actions: [
+        V4PillButton(
+          label: '材料中心',
+          light: true,
+          icon: Icons.explore_outlined,
+          onTap: _openMaterialCenter,
+        ),
+      ],
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 题材 tabs:点一个直接进对应分类页
+          V4TopicTabs(
+            topics: v4Topics,
+            selectedId: _selectedTopicId,
+            onSelected: (t) {
+              setState(() => _selectedTopicId = t.id);
+              final topic = topics.firstWhere((m) => m.id == t.id);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => MaterialCategoryScreen(topic: topic),
+                ),
+              ).then((_) {
+                if (!mounted) return;
+                _loadShelf();
+                _loadBandAdvice();
+              });
+            },
+          ),
+          const SizedBox(height: Gap.sm),
+          // 我的需求(目标 + 难度档)
+          AppStagger(index: 0, child: _buildNeedBar(theme)),
+          const SizedBox(height: Gap.sm),
+          // 今天读什么:继续读 / 去材料中心
+          AppStagger(index: 1, child: _buildTodayReading(theme)),
+          const SizedBox(height: Gap.sm),
+          // 快速入口:四块动作砖(材料中心/AI 找/拍照/链接)
+          AppStagger(
+            index: 2,
+            child: Column(
+              children: [
+                Row(
                   children: [
-                    Text(
-                      '输入',
-                      style: AppFont.displayStyle.copyWith(color: cs.onSurface),
+                    Expanded(
+                      child: V4ActionTile(
+                        icon: Icons.explore_outlined,
+                        title: '材料中心',
+                        subtitle: '按题材/难度找材料',
+                        primary: true,
+                        domain: GraphicDomain.news,
+                        onTap: _openMaterialCenter,
+                      ),
                     ),
-                    const SizedBox(height: 6),
-                    Text(
-                      _todayLine(),
-                      style: AppFont.metaStyle.copyWith(
-                        color: cs.onSurfaceVariant,
+                    const SizedBox(width: Gap.xs),
+                    Expanded(
+                      child: V4ActionTile(
+                        icon: Icons.auto_awesome,
+                        title: 'AI 找材料',
+                        subtitle: '说出需求自动找',
+                        domain: GraphicDomain.academic,
+                        onTap: _openAiDiscover,
                       ),
                     ),
                   ],
                 ),
-              ),
-              // ② 我的需求(目标 + 难度档):输入的第一件事是"我想读多难"
-              AppStagger(index: 0, child: _buildNeedBar(theme)),
-              const SizedBox(height: Gap.sm),
-              // ③ 今天输入什么:继续读 / 去材料中心(输入这一栏的主行动)
-              AppStagger(index: 1, child: _buildTodayReading(theme)),
-              const SizedBox(height: Gap.sm),
-              // ④ 其他输入方式(拍照识词 / 链接导入):v3 起降为第二层级
-              AppStagger(index: 2, child: _buildCaptureSectionCard(theme)),
-              // ⑤ 原有功能区块:各自是折叠卡(标题在它们自己身上,不重复加标题)
-              const SizedBox(height: Gap.sm),
-              const AppStagger(index: 3, child: AiArticleSection()),
-              const AppStagger(index: 4, child: ImportedMaterialsSection()),
-              const AppStagger(index: 5, child: MyMaterialsSection()),
-              const SizedBox(height: Gap.lg),
-            ],
+                const SizedBox(height: Gap.xs),
+                Row(
+                  children: [
+                    Expanded(
+                      child: V4ActionTile(
+                        icon: Icons.add_photo_alternate_outlined,
+                        title: '拍照/相册',
+                        subtitle: '纸面、屏幕变材料',
+                        domain: GraphicDomain.language,
+                        onTap: _pickImageSource,
+                      ),
+                    ),
+                    const SizedBox(width: Gap.xs),
+                    Expanded(
+                      child: V4ActionTile(
+                        icon: Icons.link,
+                        title: '链接导入',
+                        subtitle: '网页 / 论文 / 期刊',
+                        domain: GraphicDomain.culture,
+                        onTap: _importFromLink,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
-        ),
+          // 模型/识图参数 + 待提交图片:保留原交互,但收进"导入材料"区块
+          AppStagger(index: 3, child: _buildCaptureSectionCard(theme)),
+          const SizedBox(height: Gap.xs),
+          const V4SectionTitle(
+            indexLabel: '01',
+            title: 'AI 生词定制文章',
+            subtitle: '把当天的生词编成一篇可读文章',
+          ),
+          const AppStagger(index: 4, child: AiArticleSection()),
+          const V4SectionTitle(
+            indexLabel: '02',
+            title: '材料导入',
+            subtitle: '拍照、链接、文件都汇总在这里',
+          ),
+          const AppStagger(index: 5, child: ImportedMaterialsSection()),
+          const V4SectionTitle(
+            indexLabel: '03',
+            title: '我的词汇本',
+            subtitle: '按分类看生词与复习进度',
+          ),
+          const AppStagger(index: 6, child: MyMaterialsSection()),
+          const SizedBox(height: Gap.lg),
+        ],
       ),
     );
   }
 
-  /// 标题下面那行日期/引导(样图「星期四 · 10月1日」的同款位置)。
-  String _todayLine() {
+  /// 日期眉标(只留日期与星期,给大标题做"眉";引导语在大标题下方)。
+  String _dateLine() {
     final now = DateTime.now();
     const week = ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日'];
-    return '${now.month} 月 ${now.day} 日 · ${week[now.weekday - 1]} · 读和听，才是输入';
+    return '${now.month} 月 ${now.day} 日 · ${week[now.weekday - 1]}';
   }
 
   /// 我的需求条(v3 批 2)。
@@ -444,85 +539,166 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
       );
     }
     final title = item.titleCn.isNotEmpty ? item.titleCn : item.title;
+    // v3 终版重做:继续读卡从"小图 + 两行字 + 两个按钮"升级为**今日阅读海报**:
+    // 大封面（带投影）、字号层级、真实进度条、明确的「材料中心」入口。
+    final progress = (item.percent.clamp(0, 100)) / 100.0;
     return AppCard(
       variant: AppCardVariant.hero,
       onTap: () => _openShelfItem(item),
-      child: Row(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          MaterialCover(
-            seed: title,
-            kind: item.kind,
-            imageUrl: item.coverUrl,
-            width: 84,
-            height: 112,
-            levelLabel: item.cefr.isEmpty ? null : item.cefr,
+          Row(
+            children: [
+              Text(
+                '继续读',
+                style: AppFont.tagStyle.copyWith(
+                  color: cs.primary,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.4,
+                ),
+              ),
+              const Spacer(),
+              if (item.cefr.isNotEmpty)
+                AppTag(item.cefr, tone: AppTagTone.primary),
+            ],
           ),
-          const SizedBox(width: Gap.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '继续读',
-                  style: AppFont.tagStyle.copyWith(
-                    color: cs.primary,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.4,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  title,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppFont.subheadStyle.copyWith(
-                    color: cs.onSurface,
-                    fontWeight: FontWeight.w800,
-                    height: 1.35,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  _shelfMeta(item),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppFont.metaStyle.copyWith(
-                    color: cs.onSurfaceVariant,
-                  ),
-                ),
-                const SizedBox(height: Gap.sm),
-                Row(
-                  children: [
-                    FilledButton(
-                      onPressed: () => _openShelfItem(item),
-                      child: const Text('接着读'),
-                    ),
-                    const SizedBox(width: Gap.xs),
-                    TextButton(
-                      onPressed: _openMaterialCenter,
-                      child: const Text('换一份'),
+          const SizedBox(height: Gap.sm),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 带投影的大封面:让"在读的那一本"有实体感(不再是扁方块)
+              Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(Radii.card),
+                  boxShadow: [
+                    BoxShadow(
+                      color: cs.shadow.withAlpha(46),
+                      blurRadius: 18,
+                      offset: const Offset(0, 8),
                     ),
                   ],
                 ),
-              ],
-            ),
+                child: ArtCover(
+                  title: title,
+                  kind: item.kind,
+                  imageUrl: item.coverUrl,
+                  width: 96,
+                  height: 128,
+                  levelLabel: item.cefr.isEmpty ? null : item.cefr,
+                ),
+              ),
+              const SizedBox(width: Gap.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppFont.subheadStyle.copyWith(
+                        color: cs.onSurface,
+                        fontWeight: FontWeight.w800,
+                        height: 1.3,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      children: [
+                        if (item.percent > 0)
+                          AppTag('已读 ${item.percent.round()}%'),
+                        if (item.coverage != null && item.coverage! > 0)
+                          AppTag('覆盖率 ${(item.coverage! * 100).round()}%'),
+                        if (item.estMinutes > 0)
+                          AppTag('约 ${item.estMinutes} 分钟'),
+                      ],
+                    ),
+                    const SizedBox(height: Gap.sm),
+                    // 真实进度条:让"读到哪"成为视觉主体,而不是一行小字
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(3),
+                      child: LinearProgressIndicator(
+                        value: progress,
+                        minHeight: 5,
+                        backgroundColor: cs.outlineVariant.withAlpha(70),
+                      ),
+                    ),
+                    const SizedBox(height: Gap.sm),
+                    Wrap(
+                      spacing: Gap.xs,
+                      runSpacing: Gap.xs,
+                      children: [
+                        FilledButton(
+                          onPressed: () => _openShelfItem(item),
+                          child: const Text('接着读'),
+                        ),
+                        OutlinedButton(
+                          onPressed: _openMaterialCenter,
+                          child: const Text('材料中心'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ],
       ),
     );
   }
 
-  /// 继续读卡的元信息:只报真实数据(没有覆盖率就不写)。
-  String _shelfMeta(ShelfItem item) {
-    final parts = <String>[];
-    if (item.percent > 0) parts.add('已读 ${item.percent.round()}%');
-    final coverage = item.coverage;
-    if (coverage != null && coverage > 0) {
-      parts.add('覆盖率 ${(coverage * 100).round()}%');
-    }
-    if (item.estMinutes > 0) parts.add('约 ${item.estMinutes} 分钟');
-    return parts.isEmpty ? '还没开始读' : parts.join(' · ');
+  /// 输入方式动作砖(v3 终版):等宽两张,主行动实心、次行动描边。
+  Widget _captureActionTile(
+    ThemeData theme, {
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required bool primary,
+    required VoidCallback onTap,
+  }) {
+    final cs = theme.colorScheme;
+    final fg = primary ? cs.onPrimary : cs.onSurface;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(Radii.card),
+      child: Container(
+        padding: const EdgeInsets.all(Gap.sm),
+        decoration: BoxDecoration(
+          color: primary ? cs.primary : cs.surfaceContainerHighest.withAlpha(80),
+          borderRadius: BorderRadius.circular(Radii.card),
+          border: primary
+              ? null
+              : Border.all(color: cs.outlineVariant, width: 0.8),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, size: 22, color: primary ? cs.onPrimary : cs.primary),
+            const SizedBox(height: Gap.xs),
+            Text(
+              title,
+              style: AppFont.subheadStyle.copyWith(
+                color: fg,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              subtitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppFont.tagStyle.copyWith(
+                color: primary ? cs.onPrimary.withAlpha(210) : cs.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   /// 拍照识文卡片(v2.6 重做;v2.7 升级为「上传分析材料」,用户第 3 条)。
@@ -591,31 +767,36 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
           ),
           const SizedBox(height: Gap.md),
 
-          // ① v2.10(用户 10/4 第 1 条):拍照与相册合并成一个入口。
-          // v2.12:**整宽主按钮**(样图的主按钮都是整宽) —— 一屏一个主行动,
-          // 不再让用户在两个并排按钮里先判断"我这算哪种"。
-          SizedBox(
-            width: double.infinity,
-            height: 52,
-            child: FilledButton.icon(
-              onPressed: _pickImageSource,
-              icon: const Icon(Icons.add_photo_alternate_outlined, size: 20),
-              label: const Text('拍照 / 从相册上传'),
-            ),
-          ),
-          const SizedBox(height: Gap.xs),
-          // ② 次行动:外部链接导入(整宽描边按钮,层级明显低于主行动)
-          SizedBox(
-            width: double.infinity,
-            height: 48,
-            child: OutlinedButton.icon(
-              onPressed: _importFromLink,
-              icon: const Icon(Icons.link, size: 18),
-              label: const Text('导入外部链接'),
-            ),
+          // ① v2.10:拍照与相册合并成一个入口。
+          // v3 终版:整宽大蓝按钮改成**两张等宽动作砖**（图标+标题+一句说明）:
+          // 视觉更轻、信息更清楚，也避免"整屏一个巨大的蓝块"的廉价感。
+          Row(
+            children: [
+              Expanded(
+                child: _captureActionTile(
+                  theme,
+                  icon: Icons.add_photo_alternate_outlined,
+                  title: '拍照识文',
+                  subtitle: '纸面 / 屏幕 → 可读材料',
+                  primary: true,
+                  onTap: _pickImageSource,
+                ),
+              ),
+              const SizedBox(width: Gap.xs),
+              Expanded(
+                child: _captureActionTile(
+                  theme,
+                  icon: Icons.link,
+                  title: '链接导入',
+                  subtitle: '网页 / 论文 / 期刊',
+                  primary: false,
+                  onTap: _importFromLink,
+                ),
+              ),
+            ],
           ),
 
-          const SizedBox(height: Gap.xs),
+          const SizedBox(height: Gap.sm),
           // ③ 参数行:模型 / 思考档(识图前即可切换)
           _buildModelThinkingRow(theme),
 

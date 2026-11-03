@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../../../config/constants.dart';
 import '../../../config/theme.dart';
+import '../../../config/v4_theme.dart';
 import '../../../services/api_endpoint.dart';
 import '../../../services/base_api.dart';
 import '../../../services/doubao_api.dart';
@@ -600,6 +601,7 @@ class _FollowUpSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final skin = V4Skin.of(context);
     return DraggableScrollableSheet(
       initialChildSize: 0.6,
       minChildSize: 0.3,
@@ -623,26 +625,23 @@ class _FollowUpSheet extends StatelessWidget {
               ),
             ),
           ),
-          // 标题栏
+          // 身份行(v4):标题 + 模型槽位 + 新建 + 历史
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            padding: const EdgeInsets.fromLTRB(16, 2, 10, 6),
             child: Row(
               children: [
-                Icon(
-                  Icons.chat_bubble_outline,
-                  size: 18,
-                  color: theme.colorScheme.primary,
-                ),
-                const SizedBox(width: 6),
                 Text(
                   title,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
+                  style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.2,
+                    color: skin.ink,
                   ),
                 ),
                 const SizedBox(width: 8),
                 CompactModelPicker(controller: controller),
+                const Spacer(),
                 ValueListenableBuilder<List<FollowUpMessage>>(
                   valueListenable: controller.messages,
                   builder: (_, msgs, _) {
@@ -650,32 +649,36 @@ class _FollowUpSheet extends StatelessWidget {
                     return GestureDetector(
                       onTap: controller.clear,
                       child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 6),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
                         child: Text(
                           '新建',
                           style: TextStyle(
-                            fontSize: 11,
-                            color: theme.colorScheme.primary,
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w700,
+                            color: skin.accent,
                           ),
                         ),
                       ),
                     );
                   },
                 ),
-                const Spacer(),
                 if (controller.savedConversations.isNotEmpty)
                   GestureDetector(
                     onTap: () => _showHistoryPicker(context, controller),
-                    child: Icon(
-                      Icons.history,
-                      size: 18,
-                      color: theme.colorScheme.onSurfaceVariant,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: Icon(
+                        Icons.history,
+                        size: 18,
+                        color: skin.inkFaint,
+                      ),
                     ),
                   ),
               ],
             ),
           ),
-          const Divider(),
+          Divider(height: 1, color: skin.hairline),
           // 消息列表
           Expanded(
             child: ValueListenableBuilder<List<FollowUpMessage>>(
@@ -792,10 +795,18 @@ class _FollowUpSheet extends StatelessWidget {
                       ValueListenableBuilder<bool>(
                         valueListenable: controller.loading,
                         builder: (ctx, loading, _) {
+                          final skin = V4Skin.of(ctx);
+                          final base = IconButton.styleFrom(
+                            shape: const CircleBorder(),
+                            minimumSize: const Size(40, 40),
+                            padding: EdgeInsets.zero,
+                          );
                           if (loading) {
                             return IconButton.filled(
-                              style: IconButton.styleFrom(
-                                backgroundColor: theme.colorScheme.error,
+                              style: base.copyWith(
+                                backgroundColor: WidgetStatePropertyAll<Color>(
+                                  theme.colorScheme.error,
+                                ),
                               ),
                               onPressed: controller.stop,
                               tooltip: '停止生成',
@@ -803,10 +814,19 @@ class _FollowUpSheet extends StatelessWidget {
                             );
                           }
                           return IconButton.filled(
+                            style: base.copyWith(
+                              backgroundColor:
+                                  WidgetStatePropertyAll<Color>(skin.accent),
+                            ),
                             onPressed: !hasText
                                 ? null
                                 : () => controller.send(controller.inputCtrl.text),
-                            icon: const Icon(Icons.send, size: 18),
+                            tooltip: '发送',
+                            icon: Icon(
+                              Icons.arrow_upward_rounded,
+                              size: 18,
+                              color: skin.onAccent,
+                            ),
                           );
                         },
                       ),
@@ -836,7 +856,7 @@ class _FollowUpSheet extends StatelessWidget {
   }
 
   Widget _buildBubble(BuildContext context, FollowUpMessage msg, int index) {
-    final theme = Theme.of(context);
+    final skin = V4Skin.of(context);
     if (msg.role != 'user') {
       return AiFollowUpBubble(
         message: msg,
@@ -848,7 +868,7 @@ class _FollowUpSheet extends StatelessWidget {
       );
     }
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.only(bottom: 10),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment: MainAxisAlignment.end,
@@ -859,14 +879,18 @@ class _FollowUpSheet extends StatelessWidget {
                   _showEditDialog(context, controller, index, msg.content),
               child: Container(
                 constraints: BoxConstraints(
-                  maxWidth: MediaQuery.of(context).size.width * 0.75,
+                  maxWidth: MediaQuery.of(context).size.width * 0.78,
                 ),
-                padding: const EdgeInsets.fromLTRB(12, 8, 6, 8),
+                padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
                 decoration: BoxDecoration(
-                  color: Theme.of(
-                    context,
-                  ).colorScheme.primary.withAlpha(20),
-                  borderRadius: BorderRadius.circular(12),
+                  gradient: skin.accentFill,
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(18),
+                    topRight: Radius.circular(18),
+                    bottomLeft: Radius.circular(18),
+                    bottomRight: Radius.circular(6),
+                  ),
+                  boxShadow: skin.shadow,
                 ),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -875,9 +899,9 @@ class _FollowUpSheet extends StatelessWidget {
                       child: Text(
                         msg.content,
                         style: TextStyle(
-                          fontSize: 13,
-                          color: Theme.of(context).colorScheme.onSurface,
-                          height: 1.4,
+                          fontSize: 13.5,
+                          color: skin.onAccent,
+                          height: 1.45,
                         ),
                       ),
                     ),
@@ -894,7 +918,7 @@ class _FollowUpSheet extends StatelessWidget {
                         child: Icon(
                           Icons.edit_outlined,
                           size: 14,
-                          color: theme.colorScheme.onSurfaceVariant,
+                          color: skin.onAccent.withValues(alpha: 0.72),
                         ),
                       ),
                     ),
@@ -1233,16 +1257,25 @@ class CompactModelPicker extends StatelessWidget {
         controller.slotNotifier.value = controller.slot;
       },
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+        padding: const EdgeInsets.fromLTRB(6, 4, 8, 4),
         decoration: BoxDecoration(
-          border: Border.all(color: theme.colorScheme.outlineVariant),
-          borderRadius: BorderRadius.circular(6),
+          color: V4Skin.of(context).surfaceAlt,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: theme.colorScheme.outlineVariant.withValues(alpha: 0.7),
+          ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
+            aiAvatar(
+              radius: 8,
+              modelName: controller.model,
+              context: context,
+            ),
+            const SizedBox(width: 5),
             Text(
-              isSecondary ? '副·' : '主·',
+              isSecondary ? '副·' : '',
               style: TextStyle(
                 fontSize: 9,
                 color: theme.colorScheme.onSurfaceVariant,
@@ -1250,12 +1283,17 @@ class CompactModelPicker extends StatelessWidget {
               ),
             ),
             Text(
-              controller.model.length > 16
-                  ? '${controller.model.substring(0, 16)}…'
+              controller.model.length > 14
+                  ? '${controller.model.substring(0, 14)}…'
                   : controller.model,
-              style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurfaceVariant),
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+                color: V4Skin.of(context).inkSoft,
+              ),
             ),
-            Icon(Icons.arrow_drop_down, size: 14, color: theme.colorScheme.onSurfaceVariant),
+            Icon(Icons.expand_more_rounded,
+                size: 14, color: V4Skin.of(context).inkFaint),
           ],
         ),
       ),

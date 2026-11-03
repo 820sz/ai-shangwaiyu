@@ -23,11 +23,15 @@ import '../../services/material_topics.dart';
 import '../../services/original_search.dart';
 import '../../services/word_frequency.dart';
 import '../../widgets/app_ui.dart';
+import '../../widgets/art_cover.dart';
 import '../../widgets/bookshelf_view.dart';
 import '../../widgets/collapsible_section.dart';
 import '../../widgets/design_kit.dart';
+import '../../widgets/graphics/graphics.dart';
 import '../../widgets/material_cover.dart';
+import '../../widgets/v4/v4_kit.dart';
 import '../../widgets/waiting.dart';
+import '../../config/v4_theme.dart';
 import 'category_material_screen.dart';
 import 'material_category_screen.dart';
 import 'material_discover_screen.dart';
@@ -933,6 +937,7 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final skin = V4Skin.of(context);
     final muted = theme.colorScheme.onSurfaceVariant;
     // v3 批 8 去重 + 按目标优先排序(拍板 #1 后半);v2.23 补 url/title 级去重。
     var shelf = (_onlyFit && !_prefs.band.isAny)
@@ -968,6 +973,7 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
     return SectionPrefsScope(
       notifier: _sectionPrefs,
       child: Scaffold(
+        backgroundColor: skin.pageBg,
         // v2.12(前端全面升级):去掉 AppBar —— 标题变成内容的一部分(大标题 + 一句话),
         // 右上的两个操作(区块管理 / 导入)跟着标题走。样图的发现页也是这种结构。
         body: SafeArea(
@@ -975,8 +981,33 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
           child: ListView(
             // 记住滚动位置:收起/展开后不会跳回顶部
             key: const PageStorageKey<String>('material_center'),
-            padding: Insets.page,
+            padding: EdgeInsets.zero,
             children: [
+            // v4(2026-11-03):内页头改成**果冻头图**,与主屏同一套语言:
+            // 圆角渐变 + 玻璃返回键 + 大标题 + 右侧两个玻璃圆键。
+            V4DetailHeader(
+              domain: GraphicDomain.news,
+              title: '材料中心',
+              subtitle: '选一篇,今天就读它',
+              actions: <Widget>[
+                V4IconAction(
+                  icon: Icons.view_agenda_outlined,
+                  tooltip: '区块管理(恢复被隐藏的功能区)',
+                  onTap: _showSectionManager,
+                ),
+                V4IconAction(
+                  icon: Icons.add_circle_outline,
+                  tooltip: '导入材料(文件 / 图片 / 链接 / 粘贴)',
+                  onTap: _import,
+                ),
+              ],
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                  Gap.page, Gap.md, Gap.page, Gap.xl),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
             // ── v2.12 信息架构(用户 10/5 骂"分类逻辑是一坨屎")──
             //
             // 上一版我按自己的功能名把页面分成「找材料 / 在读 / 我的东西」三组
@@ -988,41 +1019,8 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
             //      大图卡 → 横滑卡流 → 题材结果 → 网格 → 书架 → 横卡列表),
             //      靠形态差异和编号标题产生节奏,而不是靠"折叠横杠";
             //   ③ 每个区块自身的折叠/隐藏机制(v2.9)原样保留。
-            // ① 页面标题 + 操作(替代 AppBar)
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '材料中心',
-                        style: AppFont.displayStyle.copyWith(
-                          color: theme.colorScheme.onSurface,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        '选一篇,今天就读它',
-                        style: AppFont.metaStyle.copyWith(color: muted),
-                      ),
-                    ],
-                  ),
-                ),
-                IconButton(
-                  tooltip: '区块管理(恢复被隐藏的功能区)',
-                  onPressed: _showSectionManager,
-                  icon: const Icon(Icons.view_agenda_outlined),
-                ),
-                IconButton(
-                  tooltip: '导入材料(文件 / 图片 / 链接 / 粘贴)',
-                  onPressed: _import,
-                  icon: const Icon(Icons.add_circle_outline),
-                ),
-              ],
-            ),
-            const SizedBox(height: Gap.sm),
+            // ① 页面标题 + 操作已上移为 V4DetailHeader(v4)
+            const SizedBox(height: Gap.xs),
 
             // ── v2.13(用户 2026-10-20 的结构要求)──
             // 「用户偏好需求 —— 提供材料(而不是现在的先给材料,"个性化找资源"在最下面),
@@ -1207,6 +1205,9 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
             AppStagger(index: 6, child: _buildMoreWaysCard(theme, muted)),
 
             const SizedBox(height: Gap.lg),
+                ],
+              ),
+            ),
           ],
           ),
         ),
@@ -1670,8 +1671,9 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            MaterialCover(
-              seed: item.title,
+            // v4.3:自动配图 —— 没图就去抓这张材料自己的书封/插图
+            ArtCover(
+              title: item.title,
               kind: kind,
               imageUrl: item.imageUrl,
               height: 186,
@@ -2536,6 +2538,7 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
       title: s.title,
       subtitle: metaText,
       dateText: s.progressLabel,
+      autoArt: true,
       tags: [
         if (cov != null) AppTag('已知 ${(cov * 100).toStringAsFixed(0)}%'),
         if (fit.isNotEmpty)

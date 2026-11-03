@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../../config/constants.dart';
 import '../../config/design_tokens.dart';
 import '../../config/theme.dart';
+import '../../config/v4_theme.dart';
 import '../../models/bookmark.dart';
 import '../../providers/bookmark_provider.dart';
 import '../../widgets/app_ui.dart';
@@ -13,6 +14,7 @@ import '../../widgets/confirm_destructive.dart';
 import '../../widgets/design_kit.dart';
 import '../../widgets/error_state.dart';
 import '../../widgets/graphics/graphics.dart';
+import '../../widgets/v4/v4_kit.dart';
 import '../input/material_center_screen.dart';
 // 复用追问气泡那套"克制的 Markdown 样式":正文一律 onSurface,
 // 只有链接用主色,层级靠字重 —— 详见 calmMarkdownSheet 的注释。
@@ -44,15 +46,31 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final skin = V4Skin.of(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('收藏夹')),
-      body: Consumer<BookmarkProvider>(
-        builder: (context, bp, _) => AnimatedSwitcher(
-          // A1:加载/失败/空/列表之间的切换给 180ms easeOut,
-          // 不再硬切(高频操作不加动画,这里是低频的状态切换)
-          duration: const Duration(milliseconds: 180),
-          switchInCurve: Curves.easeOut,
-          child: _buildBody(context, bp),
+      backgroundColor: skin.pageBg,
+      body: SafeArea(
+        bottom: false,
+        child: Column(
+          children: <Widget>[
+            // v4(2026-11-03):内页头图化 —— 与材料中心/书架/阅读器同一套果冻头
+            V4DetailHeader(
+              domain: GraphicDomain.note,
+              title: '收藏夹',
+              subtitle: '追问、词条、阅读记录都归在这里,按来源找回来',
+            ),
+            Expanded(
+              child: Consumer<BookmarkProvider>(
+                builder: (context, bp, _) => AnimatedSwitcher(
+                  // A1:加载/失败/空/列表之间的切换给 180ms easeOut,
+                  // 不再硬切(高频操作不加动画,这里是低频的状态切换)
+                  duration: const Duration(milliseconds: 180),
+                  switchInCurve: Curves.easeOut,
+                  child: _buildBody(context, bp),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

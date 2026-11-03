@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../../config/constants.dart';
 import '../../config/design_tokens.dart';
 import '../../config/theme.dart';
+import '../../config/v4_theme.dart';
 import '../../models/vocabulary.dart';
 import '../../providers/vocab_provider.dart';
 import '../../services/database.dart';
@@ -15,6 +16,8 @@ import '../../services/tts_service.dart';
 import '../../services/tutor_engine.dart' show TutorEngine;
 import '../../utils/review_deck.dart';
 import '../../widgets/app_ui.dart';
+import '../../widgets/graphics/graphics.dart';
+import '../../widgets/v4/v4_kit.dart';
 
 /// 复习题型(v2.1 扩展):
 /// - [recognize] 认词:看词回想释义(原来的卡片方式)
@@ -442,34 +445,52 @@ class _ReviewScreenState extends State<ReviewScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final skin = V4Skin.of(context);
     return Scaffold(
-      appBar: AppBar(
-        title: Text(_fsrsMode ? '今日复习' : '自由复习'),
-        actions: [
-          if (!_fsrsMode && _deck.isNotEmpty && !_finished)
-            IconButton(
-              tooltip: '打乱重来',
-              icon: const Icon(Icons.shuffle, size: 20),
-              onPressed: () {
-                _clearProgress();
-                _buildDeck();
-              },
+      backgroundColor: skin.pageBg,
+      body: SafeArea(
+        bottom: false,
+        child: Column(
+          children: <Widget>[
+            // v4(2026-11-03):复习页换成内页果冻头;"打乱/重算"收成玻璃圆键。
+            V4DetailHeader(
+              domain: GraphicDomain.exam,
+              title: _fsrsMode ? '今日复习' : '自由复习',
+              subtitle: _fsrsMode
+                  ? '按记忆强度排的到期队列,先过该忘的'
+                  : '按书籍/类型自由刷词,不计入记忆曲线',
+              actions: <Widget>[
+                if (!_fsrsMode && _deck.isNotEmpty && !_finished)
+                  V4IconAction(
+                    icon: Icons.shuffle,
+                    tooltip: '打乱重来',
+                    onTap: () {
+                      _clearProgress();
+                      _buildDeck();
+                    },
+                  ),
+                if (_fsrsMode)
+                  V4IconAction(
+                    icon: Icons.refresh,
+                    tooltip: '重新计算队列',
+                    onTap: _loadQueue,
+                  ),
+              ],
             ),
-          if (_fsrsMode)
-            IconButton(
-              tooltip: '重新计算队列',
-              icon: const Icon(Icons.refresh, size: 20),
-              onPressed: _loadQueue,
+            Expanded(
+              child: Column(
+                children: <Widget>[
+                  _buildModeBar(theme),
+                  Expanded(
+                    child: _fsrsMode
+                        ? _buildQueueBody(theme)
+                        : _buildFreeBody(theme),
+                  ),
+                ],
+              ),
             ),
-        ],
-      ),
-      body: Column(
-        children: [
-          _buildModeBar(theme),
-          Expanded(
-            child: _fsrsMode ? _buildQueueBody(theme) : _buildFreeBody(theme),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

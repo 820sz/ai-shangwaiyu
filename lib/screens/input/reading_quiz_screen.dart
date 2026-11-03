@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../widgets/v4/v4_kit.dart';
 
 import '../../config/theme.dart';
 import '../../services/database.dart';
@@ -121,8 +122,8 @@ class _ReadingQuizScreenState extends State<ReadingQuizScreen> {
 
     final q = widget.questions[_index];
     return Scaffold(
-      appBar: AppBar(
-        title: Text('读后测验 · ${_index + 1}/${widget.questions.length}'),
+      appBar: V4JellyAppBar(
+        title: '读后测验 · ${_index + 1}/${widget.questions.length}',
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(4),
           child: LinearProgressIndicator(
@@ -183,7 +184,7 @@ class _ReadingQuizScreenState extends State<ReadingQuizScreen> {
 
   Widget _buildResult(ThemeData theme, Color muted) {
     return Scaffold(
-      appBar: AppBar(title: const Text('读后测验结果')),
+      appBar: V4JellyAppBar(title: '读后测验结果'),
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [

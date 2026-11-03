@@ -17,9 +17,9 @@ import '../../services/output_source.dart';
 import '../../services/sentence_practice.dart';
 import '../../widgets/app_page_route.dart';
 import '../../widgets/app_ui.dart';
+import '../../widgets/art_cover.dart';
 import '../../widgets/design_kit.dart';
 import '../../widgets/graphics/graphics.dart';
-import '../../widgets/material_cover.dart';
 import '../../widgets/waiting.dart';
 import '../review/review_screen.dart';
 import 'cloze_practice_screen.dart';
@@ -448,24 +448,44 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
       body: ListView(
         padding: Insets.page,
         children: [
+          // v3 终版:题目来自哪里、这阶练什么,用一张带图形的引导卡说清,
+          // 而不是一段小字(用户 11/02:"前端看不出区别/太素")。
           AppCard(
-            variant: AppCardVariant.accent,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            variant: AppCardVariant.hero,
+            child: Row(
               children: [
-                Text(
-                  '题目来自你读过的材料',
-                  style: AppFont.subheadStyle.copyWith(
-                    color: cs.onSurface,
-                    fontWeight: FontWeight.w800,
-                  ),
+                OutputTierGraphic(
+                  tier: switch (widget.tier) {
+                    OutputTier.word => OutputTierArt.word,
+                    OutputTier.sentence => OutputTierArt.sentence,
+                    OutputTier.paragraph => OutputTierArt.paragraph,
+                    OutputTier.essay => OutputTierArt.essay,
+                  },
+                  size: 64,
+                  showPanel: true,
+                  semanticLabel: _tierTitle,
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  _tierHint,
-                  style: AppFont.tagStyle.copyWith(
-                    color: cs.onSurfaceVariant,
-                    height: 1.4,
+                const SizedBox(width: Gap.md),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '这一阶练什么',
+                        style: AppFont.tagStyle.copyWith(
+                          color: cs.primary,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        _tierHint,
+                        style: AppFont.metaStyle.copyWith(
+                          color: cs.onSurface,
+                          height: 1.45,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -808,16 +828,27 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
             children: [
               Text(
                 '从你读过的材料出题',
-                style: AppFont.metaStyle.copyWith(
+                style: AppFont.subheadStyle.copyWith(
                   color: cs.onSurface,
                   fontWeight: FontWeight.w700,
                 ),
               ),
+              const SizedBox(width: Gap.xs),
+              if (!_loadingMaterials && _materials.isNotEmpty)
+                Text(
+                  '${_materials.length} 篇',
+                  style: AppFont.tagStyle.copyWith(color: cs.onSurfaceVariant),
+                ),
               const Spacer(),
               if (_loadingMaterials)
                 Text(
                   '正在读取…',
                   style: AppFont.tagStyle.copyWith(color: cs.onSurfaceVariant),
+                )
+              else if (_materials.isNotEmpty)
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('去输入'),
                 ),
             ],
           ),
@@ -872,11 +903,11 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
                   onTap: _busy ? null : () => _composeFromMaterial(material),
                   child: Row(
                     children: [
-                      MaterialCover(
-                        seed: material.title,
+                      ArtCover(
+                        title: material.title,
                         kind: material.kind,
-                        width: 56,
-                        height: 74,
+                        width: 52,
+                        height: 70,
                         levelLabel:
                             material.cefr.isEmpty ? null : material.cefr,
                       ),
@@ -889,15 +920,19 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
                               material.title,
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
-                              style: AppFont.subheadStyle.copyWith(
+                              style: AppFont.metaStyle.copyWith(
                                 color: cs.onSurface,
                                 fontWeight: FontWeight.w700,
                                 height: 1.3,
                               ),
                             ),
                             const SizedBox(height: 3),
+                            // 一行元信息:材料名 · CEFR · 覆盖率(超过就省略,
+                            // 不在卡里堆三行小字 —— 用户反馈"排版丑"多半来自这里)
                             Text(
                               describeSources(material),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                               style: AppFont.tagStyle.copyWith(
                                 color: cs.onSurfaceVariant,
                               ),

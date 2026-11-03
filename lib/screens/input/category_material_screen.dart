@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../widgets/v4/v4_kit.dart';
 import 'package:provider/provider.dart';
 
 import '../../models/learner_model.dart';
@@ -374,8 +375,8 @@ class _CategoryMaterialScreenState extends State<CategoryMaterialScreen> {
     return DefaultTabController(
       length: 2,
       child: Scaffold(
-        appBar: AppBar(
-          title: Text(widget.category),
+        appBar: V4JellyAppBar(
+          title: widget.category,
           actions: [
             // v2.8(用户第 6(5) 条):分类区里的 **AI 对话入口** ——
             // "在每个找材料分类区点击后增加 ai 对话的功能,方便用户自行补充需求、

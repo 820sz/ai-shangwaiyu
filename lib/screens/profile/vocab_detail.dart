@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../config/design_tokens.dart';
 import '../../config/theme.dart';
+import '../../config/v4_theme.dart';
 import '../../models/vocabulary.dart';
 import '../../providers/vocab_provider.dart';
 import '../../services/tts_service.dart';
+import '../../widgets/graphics/graphics.dart';
+import '../../widgets/v4/v4_kit.dart';
 import '../input/widgets/example_sentence.dart';
 
 class VocabDetailScreen extends StatefulWidget {
@@ -27,56 +31,47 @@ class _VocabDetailScreenState extends State<VocabDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final skin = V4Skin.of(context);
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('生词详情'),
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          // 单词大字:截断词条回退显示完整句子(F8,与列表/横幅一致)
-          // v1.5.0:点单词本体即朗读(系统 TTS);右侧另有喇叭按钮
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: GestureDetector(
+      backgroundColor: skin.pageBg,
+      body: SafeArea(
+        bottom: false,
+        child: Column(
+          children: <Widget>[
+            // v4(2026-11-03):词条详情换成内页果冻头 —— 词本身是主角(标题),
+            // 朗读收成头图上的玻璃圆键,省掉一行重复的大字。
+            V4DetailHeader(
+              domain: GraphicDomain.language,
+              title: _vocab.displayFull,
+              subtitle: '生词详情 · 出现 ${_vocab.occurrenceCount} 次',
+              actions: <Widget>[
+                V4IconAction(
+                  icon: Icons.volume_up_outlined,
+                  tooltip: '朗读',
                   onTap: _speak,
-                  child: Text(
-                    // v2.4:带次数(apple(×2))与原型备注(taming(tame))
-                    _vocab.displayFull,
-                    style: theme.textTheme.headlineMedium
-                        ?.copyWith(fontWeight: FontWeight.bold),
-                  ),
                 ),
-              ),
-              IconButton(
-                onPressed: _speak,
-                tooltip: '朗读',
-                icon: Icon(
-                  Icons.volume_up_outlined,
-                  color: theme.colorScheme.primary,
-                  size: 24,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          // 音标(v1.5.0 AI 补全生成;v2.0 起同时显示英/美两套)
-          // 只有一边 → 只显示那一边(不加标签);两边都空 → 整块不渲染
-          if (_vocab.displayPhonetic != null)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 4),
-              child: Text(
-                _vocab.displayPhonetic!,
-                style: TextStyle(
-                  fontSize: 16,
-                  fontStyle: FontStyle.italic,
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
+              ],
             ),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(
+                    Gap.page, Gap.md, Gap.page, Gap.xl),
+                children: <Widget>[
+                  // 音标(v1.5.0 AI 补全生成;v2.0 起同时显示英/美两套)
+                  // 只有一边 → 只显示那一边(不加标签);两边都空 → 整块不渲染
+                  if (_vocab.displayPhonetic != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Text(
+                        _vocab.displayPhonetic!,
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontStyle: FontStyle.italic,
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
           const SizedBox(height: 4),
           if (_vocab.translation != null && _vocab.translation!.isNotEmpty)
             Text(
@@ -192,7 +187,11 @@ class _VocabDetailScreenState extends State<VocabDetailScreen> {
               ),
             ],
           ),
-        ],
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

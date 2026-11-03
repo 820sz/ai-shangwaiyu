@@ -1,77 +1,76 @@
 import 'package:flutter/material.dart';
 
 import 'design_tokens.dart';
+import 'v4_theme.dart';
 
-/// 简约、高效的 ReadFlow 主题(v2.2 起支持深色)。
+/// 简约、高效的 ReadFlow 主题(v2.2 起支持深色;v4 起换「明亮果冻」皮肤)。
 ///
 /// 深色不是"把浅色反一下":三个坑必须避开 ——
 /// 1. **底色不用纯黑**。纯黑上放白字会发光晕(尤其 PMOLED/LCD),长时间阅读更累;
-///    这里用 #12141A(近黑的冷灰),正文用 #E6E8EC 而不是纯白,夜间不刺眼。
-/// 2. **层次靠亮度差,不靠阴影**。深色下阴影几乎看不见,所以卡片(#1B1F27)、
-///    输入框(#262B35)都比底色**亮**一档,层级关系与浅色版一致(卡片在页面上浮起)。
-/// 3. **主色要换**。浅色的主色是近黑 #1A1A2E,放在深底上等于隐形;
-///    深色版主色换成亮蓝,并把 onPrimary 交给 M3 调色板(深色模式里
+///    这里用 #0E1017(近黑的冷灰),正文用 #E9EDF3 而不是纯白,夜间不刺眼。
+/// 2. **层次靠亮度差,不靠阴影**。深色下阴影几乎看不见,所以卡片(#171A24)、
+///    输入框(#1F2330)都比底色**亮**一档,层级关系与浅色版一致。
+/// 3. **主色要换**。浅色的靛蓝 #4C5AF0 放在深底上会发闷;
+///    深色版主色换成亮靛 #A9B4FF,并把 onPrimary 交给深墨(深色模式里
 ///    实心按钮是"亮底深字",保证对比度)。
 ///
+/// v4(2026-11-03 用户选定「明亮果冻」):视觉基调的**令牌**收敛到 [V4Skin],
+/// 这里只负责 Material 主题的映射 —— 以后换皮肤只改 [V4Skin],不用动页面。
+///
 /// 对比度(实测 WCAG 比值,正文标准 4.5:1):
-/// 正文/底色 ≈ 14.6;次要文字/卡片 ≈ 6.5;主色/底色 ≈ 7.4。
+/// 正文/底色 ≈ 15+;次要文字/卡片 ≈ 5.8;主色/白字 ≈ 5.2。
 class AppTheme {
   AppTheme._();
 
-  // ── 浅色色板(v2.12 前端升级:暖白 + 蓝主色)──
+  // ── 浅色色板(v4 明亮果冻:冷白底 + 靛蓝主色 + 糖果色点缀)──
   //
-  // 为什么从"冷白 + 近黑主色"换成"暖白 + 蓝主色"(依据见 docs/FRONTEND-UPGRADE-PLAN.md):
-  // 1. **背景换成暖白 #FDFCF9**:用户给的样图里,阅读类 App 的底都是温润的近白,
-  //    冷灰白(#F8F9FA)在真机上会显得"医院感/工具感",不利于长时间阅读;
-  // 2. **主色换成蓝 #1F63D8**:旧主色是近黑 #1A1A2E —— 它做按钮时像"次要/禁用",
-  //    用户反复说"一眼看不到该选什么"。蓝色主按钮是这类产品的通用语言(样图也是),
-  //    但这里选的是**偏深的蓝**(对白底 5.4:1,过 WCAG AA),不是样图那种亮蓝,
-  //    以守住"高级"而不是"廉价活泼";
-  // 3. 层级仍然靠**墨黑文字 + 留白**拉开,不是靠更多颜色。
-  static const Color primary = Color(0xFF1F63D8);
-  static const Color primaryPressed = Color(0xFF1A53B8);
-  static const Color accent = Color(0xFF0F3460);
-  static const Color highlight = Color(0xFF4A90D9);
-  static const Color background = Color(0xFFFDFCF9);
+  // 为什么从"暖白 + 蓝"换成"冷白 + 靛蓝":
+  // 1. 果冻基调的底必须是**干净的冷白**,糖果色块才显得亮、不脏;
+  // 2. 主色换成偏紫的靛蓝 #4C5AF0 —— 比普通蓝更有"设计感",且与
+  //    粉/薄荷/天蓝三块果冻色是同一族(色相相邻,不打架);
+  // 3. 层级仍靠**深墨文字 + 留白 + 柔影**拉开,不靠更多颜色。
+  static const Color primary = Color(0xFF4C5AF0);
+  static const Color primaryPressed = Color(0xFF3E4AD6);
+  static const Color accent = Color(0xFF2B2E52);
+  static const Color highlight = Color(0xFF7B7CFF);
+  static const Color background = Color(0xFFF6F6FD);
   static const Color surface = Colors.white;
 
   /// 次级面板(分组底、输入框底、页签未选中区)
-  static const Color surfaceAlt = Color(0xFFF5F2EC);
-  static const Color textPrimary = Color(0xFF14161A);
-  static const Color textSecondary = Color(0xFF5F6672);
+  static const Color surfaceAlt = Color(0xFFEFF1FB);
+  static const Color textPrimary = Color(0xFF1C1E2E);
+  static const Color textSecondary = Color(0xFF5F6478);
   static const Color success = Color(0xFF157F35);
   static const Color error = Color(0xFFC62828);
-  static const Color divider = Color(0xFFEDEAE3);
+  static const Color divider = Color(0xFFE4E7F5);
 
-  // ── 深色色板 ──
+  // ── 深色色板(果冻·夜)──
   //
-  // 比旧版再深一点(#12141A → #0F1115):深色下"高级感"来自**更暗的底 + 更亮的卡**,
-  // 而不是整体发灰。三层亮度差保持:页面 < 卡片 < 输入框(theme_test 有闸门)。
-  static const Color darkBackground = Color(0xFF0F1115);
+  // 深色下"高级感"来自**更暗的底 + 更亮的卡**,而不是整体发灰。
+  // 三层亮度差保持:页面 < 卡片 < 输入框(theme_test 有闸门)。
+  static const Color darkBackground = Color(0xFF0E1017);
 
   /// 卡片/AppBar/导航栏表面(比底色亮一档)
-  static const Color darkSurface = Color(0xFF171A20);
+  static const Color darkSurface = Color(0xFF171A24);
 
   /// 输入框、Chip 等"再亮一档"的填充色
-  static const Color darkSurfaceVariant = Color(0xFF1F232B);
-  static const Color darkTextPrimary = Color(0xFFECEEF2);
-  static const Color darkTextSecondary = Color(0xFFA6AEBB);
-  static const Color darkDivider = Color(0xFF262B34);
+  static const Color darkSurfaceVariant = Color(0xFF1F2330);
+  static const Color darkTextPrimary = Color(0xFFEAEDF6);
+  static const Color darkTextSecondary = Color(0xFFA2A9BC);
+  static const Color darkDivider = Color(0xFF2A2F3F);
 
-  /// 深色主色(亮蓝,对深底 8:1)
-  static const Color darkPrimary = Color(0xFF7FA8FF);
-  static const Color darkAccent = Color(0xFFA9C6FF);
+  /// 深色主色(亮靛,对深底 9:1+)
+  static const Color darkPrimary = Color(0xFFA9B4FF);
+  static const Color darkAccent = Color(0xFFB49CFF);
 
-  // ── 描边色(v2.4 修"浅色下看不清")──────────────────────────────
+  // ── 描边色(浅色下"看得见"是硬要求,见 theme_test)──────────────
   //
-  // 用户实测:识图保存弹窗里的目录卡片"完全是泛白的"。根因是描边太淡 ——
-  // M3 由近黑种子生成的浅色 outlineVariant 对白底只有 **1.70:1**,
-  // 而卡片底(surface 白)与页面底(#F8F9FA)本来就几乎同色:
-  // 没有可辨认的边界,整块就"泛白"。WCAG 对非文字元素的要求是 3:1。
-  static const Color outlineLight = Color(0xFF6E6A72); // 白底 5.2:1(输入框/交互边界)
-  static const Color outlineVariantLight = Color(0xFF8F8A93); // 白底 3.4:1(卡片/分隔)
+  // 用户实测:描边太淡,卡片/输入框就"完全是泛白的"。
+  // WCAG 对非文字元素的要求是 3:1,这里按色相往靛蓝偏了一点,与主色同族。
+  static const Color outlineLight = Color(0xFF6A6D84); // 白底 5.0:1(输入框/交互边界)
+  static const Color outlineVariantLight = Color(0xFF8E90A8); // 白底 3.15:1(卡片/分隔)
 
-  /// 深色下的描边:比原来的 #2E3440 稍亮一点,边界更清楚但不会显得重
+  /// 深色下的描边:比底色亮,边界清楚但不显得重
   static const Color darkOutline = Color(0xFF5A6270);
   static const Color darkOutlineVariant = Color(0xFF3D4553);
 
@@ -253,6 +252,9 @@ class AppTheme {
     /// 页签指示器必须是**同一个蓝**,否则会出现两种蓝(用户说的"配色杂乱")。
     final accentColor = dark ? darkPrimary : primary;
 
+    /// v4 视觉基调令牌(明亮果冻)。换皮肤 = 换这一行,不用动页面。
+    final skin = dark ? V4Skin.jellyDark : V4Skin.jellyLight;
+
     return ThemeData(
       useMaterial3: true,
       brightness: brightness,
@@ -290,14 +292,16 @@ class AppTheme {
         ),
       ),
 
-      // 卡片:v2.12 **elevation 归零**(阴影改由 AppCard 用 AppShadow 画:
-      // M3 的 elevation 在浅色下是"染色"不是投影,做不出样图那种柔和阴影)。
-      // 圆角 16 → 20(样图的大卡圆角),margin 保持不动 —— 约 50 个页面依赖它。
+      // 卡片:v4 果冻卡 = **26 圆角 + 白面 + 柔影**(阴影由 AppCard 画:
+      // M3 的 elevation 在浅色下是"染色"不是投影,做不出果冻那种柔光)。
+      // margin 保持不动 —— 约 50 个页面依赖它。
       cardTheme: CardThemeData(
         color: card,
         elevation: 0,
         shadowColor: Colors.transparent,
-        shape: const RoundedRectangleBorder(borderRadius: Radii.cardRadius),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(skin.cardRadius),
+        ),
         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       ),
 
@@ -318,40 +322,58 @@ class AppTheme {
         },
       ),
 
-      // 按钮:v2.12 主按钮 = **48 高 + 14 圆角 + 15 号半粗**。
-      // 为什么加高:旧版 44 高的按钮在单手操作时"点不准",而且样图里的主按钮
-      // 都是整宽、明显偏高的形状 —— 主行动必须在视觉上"够大"。
+      // 按钮:v4 果冻按钮 = **胶囊(999) + 52 高 + 15 号半粗**。
+      // 果冻基调的大圆角必须落到所有系统控件上,否则页面里会混着"方按钮"。
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
           backgroundColor: accentColor,
-          foregroundColor: dark ? const Color(0xFF0B1220) : Colors.white,
-          minimumSize: const Size(0, 48),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
+          foregroundColor: dark ? const Color(0xFF14161F) : Colors.white,
+          minimumSize: const Size(0, 52),
+          shape: const RoundedRectangleBorder(
+            borderRadius: Radii.pillRadius,
           ),
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-          textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+          textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+        ),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: titleColor,
+          minimumSize: const Size(0, 48),
+          shape: const RoundedRectangleBorder(
+            borderRadius: Radii.pillRadius,
+          ),
+          side: BorderSide(color: scheme.outline, width: 1),
+          textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+        ),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(
+          foregroundColor: accentColor,
+          shape: const RoundedRectangleBorder(
+            borderRadius: Radii.pillRadius,
+          ),
+          textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
         ),
       ),
 
-      // 输入框:v2.12 圆角 12、浅色底改成暖灰(比页面稍暗一档 = "凹进去"),
-      // 比"与页面同色只靠描边"更清楚,也更有材质层次
+      // 输入框:v4 圆角 16、浅色底用淡靛灰(比页面稍深一档 = "凹进去")
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: dark ? darkSurfaceVariant : surfaceAlt,
         contentPadding:
-            const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
         hintStyle: TextStyle(color: mutedColor),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(skin.controlRadius),
           borderSide: BorderSide(color: scheme.outline),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(skin.controlRadius),
           borderSide: BorderSide(color: scheme.outline),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(skin.controlRadius),
           borderSide: BorderSide(color: accentColor, width: 2),
         ),
       ),
@@ -364,7 +386,7 @@ class AppTheme {
       // 混色压在半透明底上,浅色下就是"白底浅灰字"。这里统一钉成 onSurface
       // (对 surface 4.5:1+),并把描边从 outlineVariant 提到 outline(3:1+)。
       chipTheme: ChipThemeData(
-        backgroundColor: dark ? darkSurfaceVariant : surface,
+        backgroundColor: dark ? darkSurfaceVariant : surfaceAlt,
         selectedColor: accentColor.withAlpha(dark ? 60 : 30),
         secondarySelectedColor: accentColor.withAlpha(dark ? 60 : 30),
         labelStyle: TextStyle(
@@ -389,16 +411,30 @@ class AppTheme {
         shape: const RoundedRectangleBorder(borderRadius: Radii.pillRadius),
       ),
 
-      // 弹窗:同卡片色 + 大圆角(与 hero 卡同一档)
+      // 弹窗/弹层:v4 用 30 大圆角(与 hero 卡同一档)
       dialogTheme: DialogThemeData(
         backgroundColor: card,
-        shape: const RoundedRectangleBorder(borderRadius: Radii.sheetRadius),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(skin.heroRadius - 2),
+        ),
+      ),
+      bottomSheetTheme: BottomSheetThemeData(
+        backgroundColor: card,
+        showDragHandle: true,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(
+            top: Radius.circular(skin.heroRadius),
+          ),
+        ),
       ),
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.fixed,
-        backgroundColor: dark ? darkSurfaceVariant : const Color(0xFF323232),
+        backgroundColor: dark ? darkSurfaceVariant : const Color(0xFF23263A),
         contentTextStyle: TextStyle(
           color: dark ? darkTextPrimary : Colors.white,
+        ),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(skin.controlRadius),
         ),
       ),
       tabBarTheme: TabBarThemeData(
@@ -418,6 +454,9 @@ class AppTheme {
               : null,
         ),
       ),
+
+      // v4 视觉基调令牌:所有 v4 组件与页面从这里取颜色/圆角/阴影/渐变。
+      extensions: <ThemeExtension<dynamic>>[skin],
     );
   }
 }

@@ -20,7 +20,9 @@ import 'package:flutter/material.dart';
 
 import '../config/design_tokens.dart';
 import '../config/theme.dart';
+import '../config/v4_theme.dart';
 import 'app_ui.dart';
+import 'art_cover.dart';
 import 'graphics/graphics.dart';
 import 'material_cover.dart';
 
@@ -54,15 +56,18 @@ class AppTag extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = _toneColor(context, tone);
+    final skin = V4Skin.of(context);
     final bg = outlined
         ? Colors.transparent
-        : Color.alphaBlend(color.withAlpha(20), Colors.transparent);
+        : Color.alphaBlend(color.withValues(alpha: 0.12), skin.surface);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
         color: bg,
         borderRadius: Radii.pillRadius,
-        border: outlined ? Border.all(color: color.withAlpha(120)) : null,
+        border: outlined
+            ? Border.all(color: color.withValues(alpha: 0.55), width: 1)
+            : null,
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -73,7 +78,10 @@ class AppTag extends StatelessWidget {
           ],
           Text(
             label,
-            style: AppFont.tagStyle.copyWith(color: color),
+            style: AppFont.tagStyle.copyWith(
+              color: color,
+              fontWeight: FontWeight.w700,
+            ),
           ),
         ],
       ),
@@ -266,32 +274,45 @@ class AppContentTabs extends StatelessWidget {
         separatorBuilder: (_, _) => const SizedBox(width: Gap.lg),
         itemBuilder: (context, i) {
           final selected = i == index;
-          return InkWell(
-            onTap: () => onChanged(i),
-            borderRadius: Radii.controlRadius,
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                AnimatedDefaultTextStyle(
-                  duration: Motion.tap,
-                  style: AppFont.subheadStyle.copyWith(
-                    color: selected ? cs.primary : cs.onSurfaceVariant,
-                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                  ),
-                  child: Text(tabs[i]),
-                ),
-                const SizedBox(height: 6),
-                AnimatedContainer(
+          final skin = V4Skin.of(context);
+          return Padding(
+            padding: EdgeInsets.only(
+              left: i == 0 ? horizontalPadding.left : 0,
+              right: i == tabs.length - 1 ? horizontalPadding.right : 0,
+            ),
+            child: GestureDetector(
+              onTap: () => onChanged(i),
+              behavior: HitTestBehavior.opaque,
+              child: Center(
+                child: AnimatedContainer(
                   duration: Motion.transition,
                   curve: Motion.curve,
-                  height: 3,
-                  width: selected ? 18 : 0,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                   decoration: BoxDecoration(
-                    color: cs.primary,
+                    gradient: selected ? skin.accentFill : null,
+                    color: selected ? null : skin.surfaceAlt,
                     borderRadius: Radii.pillRadius,
+                    boxShadow: selected
+                        ? <BoxShadow>[
+                            BoxShadow(
+                              color: skin.accent.withValues(alpha: 0.28),
+                              blurRadius: 12,
+                              offset: const Offset(0, 5),
+                            ),
+                          ]
+                        : null,
+                  ),
+                  child: Text(
+                    tabs[i],
+                    style: AppFont.subheadStyle.copyWith(
+                      fontSize: 14,
+                      color: selected ? skin.onAccent : cs.onSurfaceVariant,
+                      fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                    ),
                   ),
                 ),
-              ],
+              ),
             ),
           );
         },
@@ -341,6 +362,9 @@ class AppHeroCard extends StatelessWidget {
   /// 整卡点击(打开详情);不传则只有主按钮可点
   final VoidCallback? onTap;
 
+  /// 自动配图:材料没自带图时自动抓一张(书封/插图),抓不到再回程序化封面
+  final bool autoArt;
+
   const AppHeroCard({
     super.key,
     this.imageUrl,
@@ -356,6 +380,7 @@ class AppHeroCard extends StatelessWidget {
     this.actionIcon = Icons.play_arrow_rounded,
     this.onAction,
     this.onTap,
+    this.autoArt = false,
   });
 
   @override
@@ -375,14 +400,23 @@ class AppHeroCard extends StatelessWidget {
             child: Stack(
               fit: StackFit.expand,
               children: [
-                MaterialCover(
-                  seed: seed,
-                  kind: kind,
-                  imageUrl: imageUrl,
-                  width: double.infinity,
-                  height: imageHeight,
-                  radius: 0,
-                ),
+                autoArt
+                    ? ArtCover(
+                        title: seed,
+                        kind: kind,
+                        imageUrl: imageUrl,
+                        width: double.infinity,
+                        height: imageHeight,
+                        radius: 0,
+                      )
+                    : MaterialCover(
+                        seed: seed,
+                        kind: kind,
+                        imageUrl: imageUrl,
+                        width: double.infinity,
+                        height: imageHeight,
+                        radius: 0,
+                      ),
                 // 底部渐变:让白字压在亮图上也可读(只覆盖下 40%)
                 Positioned(
                   left: 0,
@@ -502,6 +536,9 @@ class AppWideCard extends StatelessWidget {
   /// 右上角额外动作(如「⋯」),不传不显示
   final Widget? trailing;
 
+  /// 自动配图:材料没自带图时自动抓一张(书封/插图),抓不到再回程序化封面
+  final bool autoArt;
+
   const AppWideCard({
     super.key,
     required this.title,
@@ -515,6 +552,7 @@ class AppWideCard extends StatelessWidget {
     this.level,
     this.onTap,
     this.trailing,
+    this.autoArt = false,
   });
 
   @override
@@ -586,14 +624,23 @@ class AppWideCard extends StatelessWidget {
               ],
               ClipRRect(
                 borderRadius: Radii.controlRadius,
-                child: MaterialCover(
-                  seed: seed,
-                  kind: kind,
-                  imageUrl: imageUrl,
-                  width: imageSize,
-                  height: imageSize,
-                  radius: 0,
-                ),
+                child: autoArt
+                    ? ArtCover(
+                        title: seed,
+                        kind: kind,
+                        imageUrl: imageUrl,
+                        width: imageSize,
+                        height: imageSize,
+                        radius: 0,
+                      )
+                    : MaterialCover(
+                        seed: seed,
+                        kind: kind,
+                        imageUrl: imageUrl,
+                        width: imageSize,
+                        height: imageSize,
+                        radius: 0,
+                      ),
               ),
             ],
           ),
@@ -687,6 +734,7 @@ class AppProgressRing extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final skin = V4Skin.of(context);
     final cs = Theme.of(context).colorScheme;
     final fg = color ?? cs.primary;
     return SizedBox(
@@ -696,7 +744,7 @@ class AppProgressRing extends StatelessWidget {
         painter: _RingPainter(
           value: value.clamp(0, 1),
           color: fg,
-          track: cs.outlineVariant.withAlpha(90),
+          track: skin.hairline,
           stroke: stroke,
         ),
         child: Center(

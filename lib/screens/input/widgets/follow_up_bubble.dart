@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
@@ -5,9 +7,11 @@ import 'package:provider/provider.dart';
 import '../../../config/constants.dart';
 import '../../../config/design_tokens.dart';
 import '../../../config/theme.dart';
+import '../../../config/v4_theme.dart';
 import '../../../models/bookmark.dart';
 import '../../../providers/bookmark_provider.dart';
 import '../../../widgets/waiting.dart';
+import '../../../widgets/whale_thinking.dart';
 import 'follow_up_models.dart';
 
 /// 追问 AI 气泡:模型标签 + 可折叠思考过程 + Markdown 渲染正文。
@@ -34,10 +38,11 @@ class _AiFollowUpBubbleState extends State<AiFollowUpBubble> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final skin = V4Skin.of(context);
     final msg = widget.message;
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.only(bottom: 10),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -50,9 +55,13 @@ class _AiFollowUpBubbleState extends State<AiFollowUpBubble> {
                 maxWidth: MediaQuery.of(context).size.width * 0.88,
               ),
               padding: const EdgeInsets.all(14),
+              // v4(2026-11-03):AI 气泡从"灰底方角"改成"白卡果冻":
+              // 浅色下白 > 页面底,深色下用 skin.surface;思考块/正文/光标
+              // 三级信息靠底色与间距分层,不再靠更多颜色。
               decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(12),
+                color: skin.surface,
+                borderRadius: BorderRadius.circular(18),
+                boxShadow: skin.shadow,
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -69,8 +78,8 @@ class _AiFollowUpBubbleState extends State<AiFollowUpBubble> {
                               msg.model!,
                               style: TextStyle(
                                 fontSize: 10,
-                                // P2-31:次要文字对比度不足 → 用主题的次要文字色(深浅色都达 AA)
-                                color: theme.colorScheme.onSurfaceVariant,
+                                fontWeight: FontWeight.w700,
+                                color: skin.inkFaint,
                               ),
                             ),
                           )
@@ -147,11 +156,73 @@ class _AiFollowUpBubbleState extends State<AiFollowUpBubble> {
                       '（AI 未返回内容）',
                       style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
                     ),
+                  // 流式光标 + "生成中":用户随时知道"还在写"以及"写到哪了"。
+                  // 停止按钮不放在气泡里 —— 那是输入栏的职责(避免气泡里出现
+                  // 会随重渲染闪烁的操作),这里只做状态指示。
+                  if (msg.streaming && msg.content.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Row(
+                        children: <Widget>[
+                          const _StreamingCaret(),
+                          const SizedBox(width: 6),
+                          Text(
+                            '生成中…',
+                            style: TextStyle(
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w600,
+                              color: skin.accent,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                 ],
               ),
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// 流式光标:一条随主色呼吸的细竖线(不做夸张闪烁,避免"眼花缭乱")
+class _StreamingCaret extends StatefulWidget {
+  const _StreamingCaret();
+
+  @override
+  State<_StreamingCaret> createState() => _StreamingCaretState();
+}
+
+class _StreamingCaretState extends State<_StreamingCaret>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 780),
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final skin = V4Skin.of(context);
+    return AnimatedBuilder(
+      animation: _c,
+      builder: (context, _) => Opacity(
+        opacity: 0.35 + _c.value * 0.65,
+        child: Container(
+          width: 2.5,
+          height: 14,
+          decoration: BoxDecoration(
+            color: skin.accent,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
       ),
     );
   }
@@ -215,8 +286,14 @@ class _AiBookmarkStar extends StatelessWidget {
   }
 }
 
-/// 可折叠思考过程块：标题条点击切换展开/收起；展开时限制高度可滚动
-class ThinkingBlock extends StatelessWidget {
+/// 可折叠思考过程块(v4,2026-11-03 重做)。
+///
+/// 变化:
+/// - 💭 emoji → **鲸鱼尾**(用户指定的"思考中"形象,与全 App 一致);
+/// - 暖黄底 → 果冻淡染卡(淡紫),深/浅色主题都走 skin;
+/// - 流式时标题显示 **"思考中 · Ns"** 计时,让"它在想"这件事可感知;
+/// - 展开区底部做渐隐,暗示"还有内容、可继续读"(而不是硬截断)。
+class ThinkingBlock extends StatefulWidget {
   final String text;
   final bool expanded;
   final bool streaming;
@@ -231,56 +308,114 @@ class ThinkingBlock extends StatelessWidget {
   });
 
   @override
+  State<ThinkingBlock> createState() => _ThinkingBlockState();
+}
+
+class _ThinkingBlockState extends State<ThinkingBlock> {
+  Timer? _timer;
+  int _seconds = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.streaming) _startTimer();
+  }
+
+  @override
+  void didUpdateWidget(covariant ThinkingBlock oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.streaming && !oldWidget.streaming) {
+      _seconds = 0;
+      _startTimer();
+    } else if (!widget.streaming && oldWidget.streaming) {
+      _timer?.cancel();
+      _timer = null;
+    }
+  }
+
+  void _startTimer() {
+    _timer?.cancel();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      setState(() => _seconds++);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final skin = V4Skin.of(context);
+    final pastel = skin.pastelAt(3);
     return Container(
-      margin: const EdgeInsets.only(bottom: 6),
+      margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
-        color: AppTheme.warningColor(context).withAlpha(10),
-        borderRadius: BorderRadius.circular(8),
+        color: Color.alphaBlend(pastel.first.withValues(alpha: 0.14), skin.surface),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: pastel.first.withValues(alpha: 0.35)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
+        children: <Widget>[
           // 标题条
           InkWell(
-            onTap: onToggle,
-            borderRadius: BorderRadius.circular(8),
+            onTap: widget.onToggle,
+            borderRadius: BorderRadius.circular(14),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              padding: const EdgeInsets.fromLTRB(10, 7, 8, 6),
               child: Row(
-                children: [
-                  const Text('💭', style: TextStyle(fontSize: 11)),
-                  const SizedBox(width: 4),
+                children: <Widget>[
+                  WhaleThinking(size: 16, color: skin.accentAlt),
+                  const SizedBox(width: 5),
                   Text(
-                    streaming ? '思考过程（生成中）' : '思考过程',
+                    widget.streaming
+                        ? (_seconds == 0
+                            ? '思考中…'
+                            : '思考中 · ${_seconds}s')
+                        : '思考过程',
                     style: TextStyle(
-                      fontSize: 11,
-                      color: AppTheme.warningColor(context),
-                      fontWeight: FontWeight.w600,
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w800,
+                      color: skin.accentAlt,
                     ),
                   ),
                   const Spacer(),
                   Icon(
-                    expanded ? Icons.expand_less : Icons.expand_more,
+                    widget.expanded
+                        ? Icons.expand_less_rounded
+                        : Icons.expand_more_rounded,
                     size: 16,
-                    color: AppTheme.warningColor(context),
+                    color: skin.accentAlt,
                   ),
                 ],
               ),
             ),
           ),
-          if (expanded)
+          if (widget.expanded)
             ConstrainedBox(
               constraints: const BoxConstraints(maxHeight: 180),
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
-                child: Text(
-                  text,
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: AppTheme.warningColor(context),
-                    fontFamily: 'monospace',
-                    height: 1.4,
+              child: ShaderMask(
+                // 底部渐隐:内容长时不会被一条硬线"切掉"
+                shaderCallback: (rect) => const LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: <Color>[Colors.black, Colors.transparent],
+                  stops: <double>[0.72, 1],
+                ).createShader(rect),
+                blendMode: BlendMode.dstIn,
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+                  child: Text(
+                    widget.text,
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      height: 1.55,
+                      color: skin.inkSoft,
+                    ),
                   ),
                 ),
               ),

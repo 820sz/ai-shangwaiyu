@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../widgets/v4/v4_kit.dart';
 import 'package:provider/provider.dart';
 
 import '../../models/material_recommendation.dart';
@@ -61,8 +62,8 @@ class _LearnerProfileScreenState extends State<LearnerProfileScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('学习画像'),
+      appBar: V4JellyAppBar(
+        title: '学习画像',
         actions: [
           TextButton(onPressed: _save, child: const Text('保存')),
         ],

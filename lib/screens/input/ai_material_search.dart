@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import '../../widgets/v4/v4_kit.dart';
 import 'package:dio/dio.dart';
 import 'package:provider/provider.dart';
 
@@ -297,8 +298,8 @@ class _AiMaterialSearchScreenState extends State<AiMaterialSearchScreen> {
     );
     final hidden = _saved.length - visible.length;
     return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.category),
+      appBar: V4JellyAppBar(
+        title: widget.category,
         actions: [
           IconButton(
             tooltip: '不想看的题材',

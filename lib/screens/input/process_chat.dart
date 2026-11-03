@@ -2,12 +2,14 @@ import 'dart:async';
 import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import '../../widgets/v4/v4_kit.dart';
 import 'package:provider/provider.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../config/constants.dart';
 import '../../config/theme.dart';
+import '../../config/v4_theme.dart';
 import '../../models/saved_session.dart';
 import '../../models/vocab_occurrence.dart';
 import '../../models/vocabulary.dart';
@@ -1291,8 +1293,8 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
         }
       },
       child: Scaffold(
-        appBar: AppBar(
-          title: Text(_appBarTitle),
+        appBar: V4JellyAppBar(
+          title: _appBarTitle,
           actions: [
             // 暂存入口已移入返回确认弹窗的「暂时离开」——不再占用 AppBar
             if (_phase == _StreamPhase.results &&
@@ -1375,10 +1377,20 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
                   children: [
                     ListView(
                       controller: _scrollCtrl,
-                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
                       children: [
+                        // v4(2026-11-03):扫描工作台 —— 识别状态一眼可见
+                        _buildScanHeader(theme),
+                        const SizedBox(height: 10),
                         _buildUserBubble(theme),
-                        const SizedBox(height: 16),
+                        if (_phase == _StreamPhase.results &&
+                            widget.analysisMode !=
+                                AppConstants.analysisModeFullText) ...[
+                          const SizedBox(height: 14),
+                          _buildChecklistHeader(theme),
+                          const SizedBox(height: 2),
+                        ],
+                        const SizedBox(height: 12),
                         Container(
                           key: _aiSectionKey,
                           child: _buildAiSection(theme),
@@ -1920,6 +1932,147 @@ class _ProcessChatScreenState extends State<ProcessChatScreen>
       _thinkingExpanded = false;
     });
     _startStreaming();
+  }
+
+  /// v4(2026-11-03) 扫描工作台顶部:识别状态卡(照片存档 / 进行到哪 / 结果数)
+  Widget _buildScanHeader(ThemeData theme) {
+    final skin = V4Skin.of(context);
+    final count = _images.length;
+    final (IconData icon, Color color, String title, String subtitle) =
+        switch (_phase) {
+      _StreamPhase.connecting => (
+          Icons.wifi_tethering_rounded,
+          skin.accent,
+          '正在连接模型…',
+          count > 0 ? '共 $count 张照片已存档,准备识别' : '没有图片副本,仅恢复识别结果',
+        ),
+      _StreamPhase.streaming => (
+          Icons.auto_awesome,
+          skin.accent,
+          'AI 正在逐行识别…',
+          '图上的词会边识别边出现,不用等全部完成',
+        ),
+      _StreamPhase.results => (
+          Icons.check_circle_rounded,
+          const Color(0xFF2F8A5B),
+          '识别完成 · ${_results.length} 个词',
+          count > 0 ? '$count 张照片已存档 · 可回看对照' : '仅恢复识别结果',
+        ),
+      _StreamPhase.error => (
+          Icons.error_outline_rounded,
+          AppTheme.dangerColor(context),
+          '识别失败',
+          '点右上角重试,或检查 API 设置',
+        ),
+    };
+    final inProgress = _phase == _StreamPhase.connecting ||
+        _phase == _StreamPhase.streaming;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: skin.surface,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: skin.shadow,
+      ),
+      child: Row(
+        children: <Widget>[
+          if (inProgress)
+            WhaleThinking(size: 20, color: skin.accent)
+          else
+            Icon(icon, size: 20, color: color),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Row(
+                  children: <Widget>[
+                    Flexible(
+                      child: Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                          color: skin.ink,
+                        ),
+                      ),
+                    ),
+                    if (_phase == _StreamPhase.results &&
+                        widget.analysisMode !=
+                            AppConstants.analysisModeFullText) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: skin.accent.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          '已选 ${_selected.length}',
+                          style: TextStyle(
+                            fontSize: 9.5,
+                            fontWeight: FontWeight.w800,
+                            color: skin.accent,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 10.5, color: skin.inkSoft),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 校对清单分组头:结果很多时给"这是一份待核对的清单"的预期
+  Widget _buildChecklistHeader(ThemeData theme) {
+    final skin = V4Skin.of(context);
+    return Row(
+      children: <Widget>[
+        Text(
+          '校对清单',
+          style: TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w800,
+            color: skin.ink,
+          ),
+        ),
+        const SizedBox(width: 6),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          decoration: BoxDecoration(
+            color: skin.accent.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Text(
+            '${_results.length} 个',
+            style: TextStyle(
+              fontSize: 9.5,
+              fontWeight: FontWeight.w800,
+              color: skin.accent,
+            ),
+          ),
+        ),
+        const Spacer(),
+        Text(
+          '勾选后保存 · 点词看详情',
+          style: TextStyle(fontSize: 10.5, color: skin.inkFaint),
+        ),
+      ],
+    );
   }
 
   Widget _buildUserBubble(ThemeData theme) {

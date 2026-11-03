@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../app.dart';
 import '../../config/design_tokens.dart';
 import '../../config/theme.dart';
+import '../../config/v4_theme.dart';
 import '../../models/learner_model.dart';
 import '../../models/material_recommendation.dart' show LearnerProfile;
 import '../../providers/stats_provider.dart';
@@ -17,6 +18,8 @@ import '../../services/widget_service.dart';
 import '../../widgets/app_ui.dart';
 import '../../widgets/bottom_nav.dart';
 import '../../widgets/design_kit.dart';
+import '../../widgets/graphics/graphics.dart';
+import '../../widgets/v4/v4_kit.dart';
 import '../../widgets/waiting.dart';
 import '../input/learner_preferences_screen.dart';
 import '../review/review_screen.dart';
@@ -224,6 +227,49 @@ class _TutorHomeScreenState extends State<TutorHomeScreen> {
   // 只保留"今天做什么 + 诊断 + 入口卡"。系统提示与证据包也一并搬走,
   // 避免两处各写一份、说法不一致。
 
+  /// 助理页统一外壳:主屏级果冻头 + 内容区。
+  ///
+  /// 为什么抽一个 _page:这一页有"骨架 / 读不到 / 正常"三种返回,以前只有正常态
+  /// 有 AppBar —— 加载中会突然变成一块没有标题的白屏。统一外壳后三态都有头。
+  Widget _page(Widget body) {
+    final skin = V4Skin.of(context);
+    return Scaffold(
+      backgroundColor: skin.pageBg,
+      body: SafeArea(
+        bottom: false,
+        child: Column(
+          children: <Widget>[
+            V4HeroHeader(
+              domain: GraphicDomain.academic,
+              eyebrow: '诊断 · 规划 · 复盘',
+              title: '学习助理',
+              subtitle: '先问清楚你的目标和水平,再给能执行的建议',
+              chips: <Widget>[
+                const V4GlassChip(
+                  icon: Icons.insights_outlined,
+                  label: '本地诊断,不花 API',
+                ),
+              ],
+              actions: <Widget>[
+                V4IconAction(
+                  icon: Icons.block,
+                  tooltip: '不想看的题材',
+                  onTap: _openPreferences,
+                ),
+                V4IconAction(
+                  icon: Icons.refresh,
+                  tooltip: '重新诊断',
+                  onTap: _refresh,
+                ),
+              ],
+            ),
+            Expanded(child: body),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -231,43 +277,32 @@ class _TutorHomeScreenState extends State<TutorHomeScreen> {
     if (_loading) {
       // v2.12:这里以前是裸 `CircularProgressIndicator` —— 违反项目铁律
       // (界面里不许出现转圈,统一用等待三件套)。改成骨架屏,形状接近真实内容。
-      return const Padding(
-        padding: Insets.page,
-        child: SkeletonLines(lines: 6, seed: 0),
+      return _page(
+        const Padding(
+          padding: Insets.page,
+          child: SkeletonLines(lines: 6, seed: 0),
+        ),
       );
     }
     final snap = _snapshot;
     if (snap == null) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('诊断数据暂时读不到'),
-            const SizedBox(height: 8),
-            FilledButton(onPressed: _refresh, child: const Text('重试')),
-          ],
+      return _page(
+        Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              const Text('诊断数据暂时读不到'),
+              const SizedBox(height: 8),
+              FilledButton(onPressed: _refresh, child: const Text('重试')),
+            ],
+          ),
         ),
       );
     }
     final findings = TutorEngine.diagnose(snap);
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('学习助理'),
-        actions: [
-          IconButton(
-            tooltip: '不想看的题材',
-            onPressed: _openPreferences,
-            icon: const Icon(Icons.block),
-          ),
-          IconButton(
-            tooltip: '重新诊断',
-            onPressed: _refresh,
-            icon: const Icon(Icons.refresh),
-          ),
-        ],
-      ),
-      body: ListView(
+    return _page(
+      ListView(
         padding: Insets.page,
         children: [
           // ── ① AI 助理沟通(先用)──────────────────────────────

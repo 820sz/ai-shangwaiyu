@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:readflow/config/design_tokens.dart';
 import 'package:readflow/config/theme.dart';
+import 'package:readflow/config/v4_theme.dart';
 import 'package:readflow/widgets/app_ui.dart';
 import 'package:readflow/widgets/bottom_nav.dart';
 
@@ -48,52 +49,59 @@ void main() {
       return container.decoration! as BoxDecoration;
     }
 
-    testWidgets('plain:圆角 20 + 柔和小阴影 + 内边距 16(浅色)', (tester) async {
+    testWidgets('plain:圆角走皮肤(26)+ 柔影 + 内边距 16(浅色)', (tester) async {
       await tester.pumpWidget(host(const AppCard(child: Text('x'))));
       final m = surf(tester);
       expect(
         (m.borderRadius as BorderRadius).topLeft.x,
-        Radii.card,
-        reason: 'v2.12 卡片圆角从 16 提到 20(样图的大卡圆角)',
+        V4Skin.jellyLight.cardRadius,
+        reason: 'v4 果冻卡圆角是 26(从 20 再放大一档)',
       );
       expect(
         decoOf(tester).boxShadow,
         isNotEmpty,
-        reason: '浅色下必须能看到柔和阴影 —— 这是"高级感"的主要来源之一',
+        reason: '浅色下必须能看到柔影 —— 果冻质感的主要来源之一',
       );
+      expect(decoOf(tester).color, V4Skin.jellyLight.surface);
       expect(padOf(tester), Insets.card);
     });
 
-    testWidgets('plain 在深色下没有阴影(层级靠表面亮度差)', (tester) async {
+    testWidgets('plain 在深色下：卡面比底色亮、且仍有柔影', (tester) async {
       await tester.pumpWidget(
         host(const AppCard(child: Text('x')), dark: true),
       );
       expect(
         decoOf(tester).boxShadow,
-        isEmpty,
-        reason: '深色下阴影几乎看不见,堆了只会变脏 —— 既有主题原则',
+        isNotEmpty,
+        reason: '深色果冻用黑色柔影托底,卡片仍是"浮起"的',
+      );
+      expect(
+        decoOf(tester).color,
+        isNot(AppTheme.darkTheme.scaffoldBackgroundColor),
+        reason: '卡片色必须与页面底不同(层级)',
       );
     });
 
-    testWidgets('hero:圆角 24 + 更重的阴影 + 染底(一屏一个的主角)', (tester) async {
+    testWidgets('hero:圆角 32 + 渐变染底 + 更重的阴影(一屏一个的主角)', (tester) async {
       await tester.pumpWidget(
         host(const AppCard(variant: AppCardVariant.hero, child: Text('x'))),
       );
       final m = surf(tester);
-      expect((m.borderRadius as BorderRadius).topLeft.x, Radii.hero);
+      expect((m.borderRadius as BorderRadius).topLeft.x,
+          V4Skin.jellyLight.heroRadius);
       expect(decoOf(tester).boxShadow, isNotEmpty);
-      // 主角卡必须有底色差异(深色下阴影为空时,靠这层染底区分)
-      expect(m.color, isNotNull);
+      // 主角卡用"白→淡靛"渐变,不再是纯色块
+      expect(decoOf(tester).gradient, isNotNull);
     });
 
-    testWidgets('accent:有染底,但阴影仍是静置档(不抢主角地位)', (tester) async {
+    testWidgets('accent:有渐变染底,圆角与普通卡一致(不抢主角地位)', (tester) async {
       await tester.pumpWidget(
         host(const AppCard(variant: AppCardVariant.accent, child: Text('x'))),
       );
-      expect(surf(tester).color, isNotNull);
+      expect(decoOf(tester).gradient, isNotNull);
       expect(
         (surf(tester).borderRadius as BorderRadius).topLeft.x,
-        Radii.card,
+        V4Skin.jellyLight.cardRadius,
         reason: 'accent 不该变大圆角 —— 那是 hero 的待遇',
       );
     });
@@ -114,7 +122,7 @@ void main() {
           child: Text('x'),
         )),
       );
-      expect(surf(tester).color, red);
+      expect(decoOf(tester).color, red);
     });
   });
 
@@ -157,7 +165,7 @@ void main() {
   });
 
   group('底部导航的轻动效(用户要求"高级但不眼花缭乱")', () {
-    testWidgets('选中项有指示条与缩放,未选中没有', (tester) async {
+    testWidgets('选中项是果冻胶囊,未选中是图标+文字;不弹跳、不报错', (tester) async {
       await tester.pumpWidget(MaterialApp(
         theme: AppTheme.lightTheme,
         home: Scaffold(
@@ -168,8 +176,13 @@ void main() {
         ),
       ));
       await tester.pump(const Duration(milliseconds: 400));
-      expect(find.byType(AnimatedScale), findsNWidgets(4));
-      expect(find.byType(AnimatedContainer), findsNWidgets(4));
+      // 四个 tab 都在(文案没变)
+      for (final label in ['输入', '输出', '我的', '助理']) {
+        expect(find.text(label), findsOneWidget);
+      }
+      // 选中项用"实心图标",未选中是描边图标 —— 视觉上"指哪打哪"
+      expect(find.byIcon(Icons.auto_stories_rounded), findsOneWidget);
+      expect(find.byIcon(Icons.auto_stories_outlined), findsNothing);
       expect(tester.takeException(), isNull);
     });
   });

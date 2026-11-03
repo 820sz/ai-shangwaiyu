@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import '../../widgets/v4/v4_kit.dart';
 import 'package:provider/provider.dart';
 
 import '../../config/constants.dart';
@@ -313,8 +314,8 @@ class _MaterialRecommendationDetailScreenState
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(
-        title: Text(_rec.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+      appBar: V4JellyAppBar(
+        title: _rec.title,
         actions: [
           IconButton(
             tooltip: '收藏',

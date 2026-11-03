@@ -87,28 +87,38 @@ class QuickReplyBar extends StatelessWidget {
         separatorBuilder: (_, _) => const SizedBox(width: 6),
         itemBuilder: (_, i) {
           final r = replies[i];
+          // v4:快捷提问做成"果冻胶囊"——淡主色底 + 主色图标 + 深色文字,
+          // 比 M3 默认 chip 更轻,一眼能看出"点一下就能发"。
           return ActionChip(
             avatar: Icon(
               _iconOf(r.label),
-              size: 15,
+              size: 14,
               color: theme.colorScheme.primary,
             ),
-            label: Text(r.label, style: const TextStyle(fontSize: 12)),
+            label: Text(
+              r.label,
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w600,
+                color: theme.colorScheme.onSurface,
+              ),
+            ),
             onPressed: enabled ? () => onPick(r.prompt) : null,
             visualDensity: VisualDensity.compact,
             materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            // v2.6(用户实测:"追问抽屉的快捷回复看不清"):
-            // M3 的 chip 默认底是 surfaceContainerLow、文字 onSurfaceVariant 混色,
-            // 抽屉本身又是 surface 色 —— 白底白字只差一点,浅色下几乎看不见。
-            // 这里显式给足对比:文字用 onSurface(4.5:1+)、底用 surface、
-            // 描边用 outline(3:1+),深浅两套主题都达标。
-            backgroundColor: theme.colorScheme.surface,
-            labelStyle: TextStyle(
-              fontSize: 12,
-              color: theme.colorScheme.onSurface,
-              fontWeight: FontWeight.w500,
+            shape: const StadiumBorder(),
+            backgroundColor: Color.alphaBlend(
+              theme.colorScheme.primary.withValues(alpha: 0.07),
+              theme.colorScheme.surface,
             ),
-            side: BorderSide(color: theme.colorScheme.outline),
+            labelStyle: TextStyle(
+              fontSize: 11.5,
+              color: theme.colorScheme.onSurface,
+              fontWeight: FontWeight.w600,
+            ),
+            side: BorderSide(
+              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.8),
+            ),
           );
         },
       ),

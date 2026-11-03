@@ -7,6 +7,7 @@ import '../../../services/learner_model_store.dart';
 import '../../../services/material_library.dart';
 import '../../../services/material_source.dart';
 import '../../../widgets/app_ui.dart';
+import '../../../widgets/art_cover.dart';
 import '../../../widgets/material_cover.dart';
 import '../../../widgets/waiting.dart';
 import '../material_import_flow.dart';
@@ -370,8 +371,8 @@ class _ImportedMaterialsSectionState extends State<ImportedMaterialsSection> {
         onTap: () => _openReader(m.id),
         child: Row(
           children: [
-            MaterialCover(
-              seed: m.title,
+            ArtCover(
+              title: m.title,
               kind: m.kind,
               // v2.11:导入列表以前也没传图(导入的链接材料同样可能有头图)
               imageUrl: MaterialSourceService.coverFor(

@@ -42,16 +42,31 @@ Widget aiAvatar({
     );
   }
 
-  // 有品牌 Logo 路径 → ClipOval + Image.asset（加载失败时 errorBuilder 兜底）
+  // 有品牌 Logo 路径 → 白底托 + ClipOval(v4:糖果色/深色卡片上都能认出来)
   if (asset != null) {
-    return ClipOval(
-      child: Image.asset(
-        asset,
-        width: size,
-        height: size,
-        fit: BoxFit.cover,
-        errorBuilder: (context, err, stack) =>
-            _avatarFallback(radius, color, name),
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      width: size,
+      height: size,
+      padding: EdgeInsets.all(radius * 0.10),
+      decoration: BoxDecoration(
+        color: cs.surface,
+        shape: BoxShape.circle,
+        // 极淡描边:让"白底 logo"在浅色卡片上也有边界,但不抢品牌色
+        border: Border.all(
+          color: cs.outlineVariant.withValues(alpha: 0.7),
+          width: 0.8,
+        ),
+      ),
+      child: ClipOval(
+        child: Image.asset(
+          asset,
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+          errorBuilder: (context, err, stack) =>
+              _avatarFallback(radius, color, name),
+        ),
       ),
     );
   }

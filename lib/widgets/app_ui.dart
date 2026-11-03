@@ -11,6 +11,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../config/design_tokens.dart';
+import '../config/v4_theme.dart';
 import 'graphics/graphics.dart';
 import 'waiting.dart';
 
@@ -69,6 +70,7 @@ class AppCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
+    final skin = V4Skin.of(context);
     final isHero = variant == AppCardVariant.hero;
     final isCompact = variant == AppCardVariant.compact;
     final isAccent = variant == AppCardVariant.accent;
@@ -77,16 +79,37 @@ class AppCard extends StatelessWidget {
         (isHero
             ? Insets.hero
             : (isCompact || dense ? Insets.tile : Insets.card));
-    final radius = isHero ? Radii.heroRadius : Radii.cardRadius;
-    final bg = color ??
-        (isHero
-            // 主角卡:在 surface 上叠一点 primary —— 亮暗两套都成立,不硬编码色值
-            ? Color.alphaBlend(
-                cs.primary.withAlpha(AppSurface.raisedTintAlpha), cs.surface)
+    final radius = BorderRadius.circular(isHero ? skin.heroRadius : skin.cardRadius);
+
+    // v4 果冻卡:白面 + 柔影;hero 卡在表面上加一层极淡的果冻渐层,
+    // accent 卡是"选中/进行中"的淡染色 —— 都从皮肤取色,深浅两套自动成立。
+    final Color? flatBg = color ??
+        (isHero || isAccent
+            ? null
+            : (theme.cardTheme.color ?? cs.surface));
+    final Gradient? gradient = color != null
+        ? null
+        : (isHero
+            ? LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: <Color>[
+                  skin.surface,
+                  Color.alphaBlend(
+                      skin.accent.withValues(alpha: 0.07), skin.surface),
+                ],
+              )
             : isAccent
-                ? Color.alphaBlend(
-                    cs.primary.withAlpha(AppSurface.accentTintAlpha), cs.surface)
-                : (theme.cardTheme.color ?? cs.surface));
+                ? LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: <Color>[
+                      Color.alphaBlend(
+                          skin.accent.withValues(alpha: 0.12), skin.surface),
+                      skin.surface,
+                    ],
+                  )
+                : null);
 
     final content = Padding(
       key: paddingKey,
@@ -96,14 +119,15 @@ class AppCard extends StatelessWidget {
 
     return Container(
       margin: margin ?? const EdgeInsets.only(bottom: Gap.xs),
-      // 阴影画在容器上:深色下 AppShadow 返回空列表(层级靠表面亮度差)
       decoration: BoxDecoration(
+        color: flatBg,
+        gradient: gradient,
         borderRadius: radius,
-        boxShadow: isHero ? AppShadow.md(context) : AppShadow.sm(context),
+        boxShadow: isHero ? skin.heroShadow : skin.shadow,
       ),
       child: Material(
         key: surfaceKey,
-        color: bg,
+        color: Colors.transparent,
         borderRadius: radius,
         clipBehavior: Clip.antiAlias,
         child: onTap == null
@@ -111,8 +135,8 @@ class AppCard extends StatelessWidget {
             : InkWell(
                 onTap: onTap,
                 // 水波纹用主色的低透明度:既有反馈,又不改变卡面颜色
-                splashColor: cs.primary.withAlpha(18),
-                highlightColor: cs.primary.withAlpha(10),
+                splashColor: cs.primary.withValues(alpha: 0.10),
+                highlightColor: cs.primary.withValues(alpha: 0.05),
                 child: content,
               ),
       ),
@@ -253,9 +277,18 @@ class AppActionTile extends StatelessWidget {
       color: highlight ? theme.colorScheme.primary.withAlpha(12) : null,
       child: Row(
         children: [
-          Icon(icon,
-              size: 22,
-              color: dim ? muted : (iconColor ?? theme.colorScheme.primary)),
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: (iconColor ?? theme.colorScheme.primary)
+                  .withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(13),
+            ),
+            child: Icon(icon,
+                size: 20,
+                color: dim ? muted : (iconColor ?? theme.colorScheme.primary)),
+          ),
           const SizedBox(width: Gap.sm),
           Expanded(
             child: Column(

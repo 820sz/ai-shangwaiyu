@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../widgets/v4/v4_kit.dart';
 import 'package:hive/hive.dart';
 
 import '../../config/constants.dart';
@@ -218,8 +219,8 @@ class _LearnerPreferencesScreenState extends State<LearnerPreferencesScreen> {
     final theme = Theme.of(context);
     final muted = theme.colorScheme.onSurfaceVariant;
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('学习偏好'),
+      appBar: V4JellyAppBar(
+        title: '学习偏好',
         actions: [TextButton(onPressed: _save, child: const Text('保存'))],
       ),
       body: ListView(

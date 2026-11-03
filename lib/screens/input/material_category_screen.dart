@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../config/design_tokens.dart';
+import '../../config/v4_theme.dart';
 import '../../models/learner_model.dart';
 import '../../services/learner_model_store.dart';
 import '../../services/material_source.dart';
@@ -8,7 +9,7 @@ import '../../services/material_topics.dart';
 import '../../services/original_search.dart';
 import '../../widgets/app_ui.dart';
 import '../../widgets/design_kit.dart';
-import '../../widgets/graphics/graphics.dart';
+import '../../widgets/v4/v4_kit.dart';
 import '../../widgets/waiting.dart';
 import 'ai_material_search.dart';
 import 'material_import_flow.dart';
@@ -112,143 +113,127 @@ class _MaterialCategoryScreenState extends State<MaterialCategoryScreen> {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final skin = V4Skin.of(context);
     return Scaffold(
-      appBar: AppBar(title: Text(widget.topic.label)),
-      body: ListView(
-        padding: Insets.page,
-        children: [
-          // ① 题材头图:一眼知道"这个分类里是什么"
-          //
-          // v3(批 1):从"色块 + 图标"换成**领域身份图形**(与首页大分区卡同一套
-          // 几何语言,点进来不换视觉语法)。图形 88 是头图档位,左侧留白更稳。
-          AppCard(
-            variant: AppCardVariant.hero,
-            padding: const EdgeInsets.all(Gap.md),
-            child: Row(
-              children: [
-                DomainGraphic(
-                  domain: graphicDomainOfTopic(widget.topic),
-                  size: 88,
-                  showPanel: true,
-                  semanticLabel: widget.topic.label,
+      backgroundColor: skin.pageBg,
+      body: SafeArea(
+        bottom: false,
+        child: ListView(
+          padding: EdgeInsets.zero,
+          children: <Widget>[
+            // ① 题材头图(v4 果冻内页头):图标域色 + 题材名 + 一句人话说明
+            V4DetailHeader(
+              domain: graphicDomainOfTopic(widget.topic),
+              title: widget.topic.label,
+              subtitle: widget.topic.description,
+              actions: <Widget>[
+                V4IconAction(
+                  icon: Icons.refresh_rounded,
+                  tooltip: '重新找',
+                  onTap: _loading ? null : _load,
                 ),
-                const SizedBox(width: Gap.md),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        widget.topic.label,
-                        style: AppFont.headingStyle.copyWith(
-                          color: cs.onSurface,
-                          fontWeight: FontWeight.w800,
+              ],
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                  Gap.page, Gap.md, Gap.page, Gap.xl),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  // ② 子分区:内容源(点一下只在这个源里找)
+                  const AppSectionHeader(title: '在这些来源里找', indexLabel: '01'),
+                  Wrap(
+                    spacing: Gap.xs,
+                    runSpacing: Gap.xs,
+                    children: <Widget>[
+                      for (final s in _sourceChoices)
+                        FilterChip(
+                          label: Text(s.label,
+                              style: const TextStyle(fontSize: 12)),
+                          selected: _sources.contains(s.id),
+                          onSelected: (v) {
+                            setState(() {
+                              if (v) {
+                                _sources.add(s.id);
+                              } else {
+                                _sources.remove(s.id);
+                              }
+                            });
+                            _load();
+                          },
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: Gap.sm),
+                  Row(
+                    children: <Widget>[
+                      Expanded(
+                        child: Text(
+                          _loading
+                              ? '正在按「${widget.topic.label}」找材料…'
+                              : '找到 ${_hits.length} 篇${_note.isEmpty ? '' : ' · $_note'}',
+                          style: AppFont.metaStyle
+                              .copyWith(color: cs.onSurfaceVariant),
                         ),
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        widget.topic.description,
-                        style: AppFont.metaStyle.copyWith(
-                          color: cs.onSurfaceVariant,
-                          height: 1.45,
-                        ),
+                      TextButton.icon(
+                        onPressed: _loading ? null : _load,
+                        icon: const Icon(Icons.refresh, size: 16),
+                        label: const Text('重新找'),
                       ),
                     ],
                   ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: Gap.md),
+                  const SizedBox(height: Gap.xs),
 
-          // ② 子分区:内容源(点一下只在这个源里找)
-          const AppSectionHeader(title: '在这些来源里找', indexLabel: '01'),
-          Wrap(
-            spacing: Gap.xs,
-            runSpacing: Gap.xs,
-            children: [
-              for (final s in _sourceChoices)
-                FilterChip(
-                  label: Text(s.label, style: const TextStyle(fontSize: 12)),
-                  selected: _sources.contains(s.id),
-                  onSelected: (v) {
-                    setState(() {
-                      if (v) {
-                        _sources.add(s.id);
-                      } else {
-                        _sources.remove(s.id);
-                      }
-                    });
-                    _load();
-                  },
-                ),
-            ],
-          ),
-          const SizedBox(height: Gap.sm),
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  _loading
-                      ? '正在按「${widget.topic.label}」找材料…'
-                      : '找到 ${_hits.length} 篇${_note.isEmpty ? '' : ' · $_note'}',
-                  style: AppFont.metaStyle.copyWith(color: cs.onSurfaceVariant),
-                ),
-              ),
-              TextButton.icon(
-                onPressed: _loading ? null : _load,
-                icon: const Icon(Icons.refresh, size: 16),
-                label: const Text('重新找'),
-              ),
-            ],
-          ),
-          const SizedBox(height: Gap.xs),
+                  // ③ 材料列表
+                  if (_loading)
+                    const SkeletonLines(lines: 5, seed: 3)
+                  else if (_error != null)
+                    AppErrorCard(message: _error!, onRetry: _load)
+                  else if (_hits.isEmpty)
+                    const AppEmptyState(
+                      icon: Icons.travel_explore_outlined,
+                      title: '这个范围里暂时没找到',
+                      hint: '取消几个来源筛选,或者换个说法让 AI 去找',
+                    )
+                  else
+                    for (var i = 0; i < _hits.length; i++)
+                      AppStagger(index: i, child: _hitCard(cs, _hits[i])),
 
-          // ③ 材料列表
-          if (_loading)
-            const SkeletonLines(lines: 5, seed: 3)
-          else if (_error != null)
-            AppErrorCard(message: _error!, onRetry: _load)
-          else if (_hits.isEmpty)
-            const AppEmptyState(
-              icon: Icons.travel_explore_outlined,
-              title: '这个范围里暂时没找到',
-              hint: '取消几个来源筛选,或者换个说法让 AI 去找',
-            )
-          else
-            for (var i = 0; i < _hits.length; i++)
-              AppStagger(index: i, child: _hitCard(cs, _hits[i])),
-
-          const SizedBox(height: Gap.md),
-          // ④ 换个说法找:AI 中文检索(本页不重造轮子)
-          AppCard(
-            variant: AppCardVariant.compact,
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => AiMaterialSearchScreen(
-                  category: widget.topic.label,
-                ),
-              ),
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.auto_awesome, size: 20, color: cs.primary),
-                const SizedBox(width: Gap.xs),
-                Expanded(
-                  child: Text(
-                    '用中文说需求,让 AI 去公开源找${widget.topic.label}的材料',
-                    style: AppFont.metaStyle.copyWith(
-                      color: cs.onSurface,
-                      fontWeight: FontWeight.w600,
+                  const SizedBox(height: Gap.md),
+                  // ④ 换个说法找:AI 中文检索(本页不重造轮子)
+                  AppCard(
+                    variant: AppCardVariant.compact,
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => AiMaterialSearchScreen(
+                          category: widget.topic.label,
+                        ),
+                      ),
+                    ),
+                    child: Row(
+                      children: <Widget>[
+                        Icon(Icons.auto_awesome, size: 20, color: cs.primary),
+                        const SizedBox(width: Gap.xs),
+                        Expanded(
+                          child: Text(
+                            '用中文说需求,让 AI 去公开源找${widget.topic.label}的材料',
+                            style: AppFont.metaStyle.copyWith(
+                              color: cs.onSurface,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        Icon(Icons.chevron_right, size: 20, color: cs.outline),
+                      ],
                     ),
                   ),
-                ),
-                Icon(Icons.chevron_right, size: 20, color: cs.outline),
-              ],
+                ],
+              ),
             ),
-          ),
-          const SizedBox(height: Gap.lg),
-        ],
+          ],
+        ),
       ),
     );
   }

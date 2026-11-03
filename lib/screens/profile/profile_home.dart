@@ -7,6 +7,7 @@ import '../../providers/bookmark_provider.dart';
 import '../../config/constants.dart';
 import '../../config/design_tokens.dart';
 import '../../config/theme.dart';
+import '../../config/v4_theme.dart';
 import '../../models/learner_model.dart';
 import '../../services/api_endpoint.dart';
 import '../../services/database.dart';
@@ -24,6 +25,7 @@ import '../../widgets/design_kit.dart';
 import '../../widgets/graphics/graphics.dart';
 import '../../widgets/stats_chart.dart';
 import '../../widgets/update_dialog.dart';
+import '../../widgets/v4/v4_kit.dart';
 import '../../services/update_service.dart';
 import 'vocab_list.dart';
 import 'stats_page.dart';
@@ -84,16 +86,37 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final stats = context.watch<StatsProvider>();
+    final skin = V4Skin.of(context);
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('我的'),
-      ),
-      body: RefreshIndicator(
-        onRefresh: _loadAll,
-        child: ListView(
-          padding: Insets.page,
-          children: [
+      backgroundColor: skin.pageBg,
+      body: SafeArea(
+        bottom: false,
+        child: Column(
+          children: <Widget>[
+            // v4(2026-11-03):「我的」主屏换成主屏级果冻头 —— 和输入/输出同一套语言
+            V4HeroHeader(
+              domain: GraphicDomain.custom,
+              eyebrow: '学习资产 · 数据 · 设置',
+              title: '我的',
+              subtitle: '词库、统计、备份都在这里;数据只存在这台手机上',
+              chips: <Widget>[
+                V4GlassChip(
+                  icon: Icons.menu_book_outlined,
+                  label: '生词 ${stats.totalVocab}',
+                ),
+                V4GlassChip(
+                  icon: Icons.local_fire_department_outlined,
+                  label: '连续 ${stats.streakDays} 天',
+                ),
+              ],
+            ),
+            Expanded(
+              child: RefreshIndicator(
+                onRefresh: _loadAll,
+                child: ListView(
+                  padding: Insets.page,
+                  children: [
             // ── 个性化名片(v2.8,用户第 9 条):头像 / 背景 / 签名 / 词汇量 ──
             ProfileNameCard(vocabCount: stats.totalVocab),
 
@@ -298,6 +321,10 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
             // 这种谁都能说的话,还要花一次付费 API 调用。
             // 现在"今天该做什么"由学习助理页按本地诊断给出:结论带数字依据、
             // 可点、可打勾、会随数据变化。两者定位重叠,留一个真的。
+                  ],
+                ),
+              ),
+            ),
           ],
         ),
       ),

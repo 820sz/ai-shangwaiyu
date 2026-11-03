@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../config/design_tokens.dart';
+import '../../config/v4_theme.dart';
 import '../../models/learner_model.dart';
 import '../../services/drill_catalog.dart';
 import '../../services/drill_planner.dart';
@@ -10,6 +11,7 @@ import '../../services/output_composer.dart';
 import '../../widgets/app_page_route.dart';
 import '../../widgets/app_ui.dart';
 import '../../widgets/design_kit.dart';
+import '../../widgets/v4/v4_kit.dart';
 import '../../widgets/waiting.dart';
 import '../review/review_screen.dart';
 import '../writing/write_review_screen.dart';
@@ -46,6 +48,13 @@ class OutputHomeScreen extends StatefulWidget {
 
 class _OutputHomeScreenState extends State<OutputHomeScreen> {
   LearnerModel _model = LearnerModel();
+
+  /// 与「输入」页同款的日期眉标
+  String _dateLine() {
+    final now = DateTime.now();
+    const week = ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日'];
+    return '${now.month} 月 ${now.day} 日 · ${week[now.weekday - 1]}';
+  }
 
   /// 两个练习模式各自的进度摘要(卡片上要显示真实进度)
   final Map<DrillMode, DrillSummary> _summaries = {};
@@ -268,6 +277,7 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final skin = V4Skin.of(context);
     final muted = theme.colorScheme.onSurfaceVariant;
     final goals = DrillCatalog.normalizeAll([
       ..._model.goals,
@@ -281,9 +291,14 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
         child: ListView(
           padding: Insets.page,
           children: [
-            // ① 标题
-            Padding(
-              padding: const EdgeInsets.only(top: Gap.xs, bottom: Gap.sm),
+            // ① 头图(v4 果冻 · 2026-11-03):渐变卡 + 大标题 + 练习中心
+            Container(
+              decoration: BoxDecoration(
+                gradient: skin.heroFill,
+                borderRadius: BorderRadius.circular(skin.heroRadius),
+              ),
+              padding:
+                  const EdgeInsets.fromLTRB(Gap.md, Gap.md, Gap.md, Gap.lg),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -292,23 +307,43 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
+                          _dateLine(),
+                          style: AppFont.tagStyle.copyWith(
+                            color: skin.inkSoft,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 10.5,
+                            letterSpacing: 1.6,
+                          ),
+                        ),
+                        const SizedBox(height: Gap.xs),
+                        Text(
                           '输出',
                           style: AppFont.displayStyle.copyWith(
-                            color: theme.colorScheme.onSurface,
+                            color: skin.ink,
+                            fontSize: 34,
+                            height: 1.1,
+                            letterSpacing: -1.2,
+                            fontWeight: FontWeight.w900,
                           ),
                         ),
                         const SizedBox(height: 6),
                         Text(
                           '写词 → 写句 → 写段 → 写篇 · 四阶并行，从哪阶开始都行',
-                          style: AppFont.metaStyle.copyWith(color: muted),
+                          style: AppFont.bodyStyle.copyWith(
+                            color: skin.inkSoft,
+                            fontSize: 13,
+                            height: 1.6,
+                          ),
                         ),
                       ],
                     ),
                   ),
-                  TextButton.icon(
-                    onPressed: _openPracticeCenter,
-                    icon: const Icon(Icons.tune, size: 16),
-                    label: const Text('练习中心'),
+                  const SizedBox(width: Gap.xs),
+                  V4PillButton(
+                    label: '练习中心',
+                    light: true,
+                    icon: Icons.tune,
+                    onTap: _openPracticeCenter,
                   ),
                 ],
               ),
