@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../config/design_tokens.dart';
 import '../../config/v4_theme.dart';
+import '../../services/database.dart';
 import '../../services/external_link.dart';
 import '../../services/learner_model_store.dart';
 import '../../services/material_library.dart';
@@ -12,12 +13,13 @@ import '../../services/material_prefs.dart';
 import '../../services/material_source.dart';
 import '../../services/material_taxonomy.dart';
 import '../../services/original_search.dart';
-import '../../widgets/graphics/graphics.dart';
+
 import '../../widgets/material_cover.dart';
-import '../../widgets/v4/v4_kit.dart';
+
 import 'material_browse_screen.dart';
 import 'material_hub/material_hub_home_view.dart';
 import 'material_import_flow.dart';
+import 'bookshelf_screen.dart';
 import 'material_library_screen.dart';
 import 'material_reader_screen.dart';
 
@@ -49,6 +51,10 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
   bool _loading = true;
   bool _loadingDaily = false;
   int _shuffle = 0;
+  int _bookshelfCount = 0;
+
+  /// 0 = 大头部完全展开;1 = 已滚到顶、只留紧凑条
+  double _collapseT = 0;
 
   @override
   void initState() {
@@ -60,10 +66,12 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
     setState(() => _loading = true);
     MaterialNeed need = const MaterialNeed();
     var shelf = <ShelfItem>[];
+    var books = 0;
     try {
       need = MaterialNeed.load();
       shelf = await MaterialLibrary.shelf(limit: 300);
       shelf = need.rank(shelf);
+      books = (await DatabaseService.bookshelfItems()).length;
     } catch (_) {
       // 读库失败不阻塞页面:空态里给"去导入/去找"的出口
     }
@@ -71,6 +79,7 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
     setState(() {
       _need = need;
       _shelf = shelf;
+      _bookshelfCount = books;
       _loading = false;
     });
     await _loadDaily();
@@ -236,6 +245,22 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
     });
   }
 
+  void _openBookshelf() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const BookshelfScreen()),
+    ).then((_) {
+      if (mounted) unawaited(_load());
+    });
+  }
+
+  void _onScrollOffset(double px) {
+    final t = (px / 120).clamp(0.0, 1.0);
+    if ((t - _collapseT).abs() > 0.02 && mounted) {
+      setState(() => _collapseT = t);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final skin = V4Skin.of(context);
@@ -243,69 +268,242 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
       backgroundColor: skin.pageBg,
       body: SafeArea(
         bottom: false,
-        child: Column(
+        child: Stack(
           children: <Widget>[
-            V4DetailHeader(
-              domain: GraphicDomain.book,
-              title: '材料中心',
-              subtitle: _need.isEmpty
-                  ? '选一篇,今天就读它 · 设一下需求,全 App 按它推'
-                  : '按你的需求推:${_need.summary}',
-              actions: <Widget>[
-                V4IconAction(
-                  icon: Icons.tune_rounded,
-                  tooltip: '编辑我的需求',
-                  onTap: () => _openDirection(MaterialTaxonomy.need),
-                ),
-                const SizedBox(width: Gap.xs),
-                V4IconAction(
-                  icon: Icons.add_rounded,
-                  tooltip: '导入材料',
-                  onTap: () async {
-                    await MaterialImportFlow.run(
-                      context,
-                      model: LearnerModelStore.load(),
-                    );
-                    if (mounted) await _load();
-                  },
-                ),
-              ],
-            ),
-            Expanded(
-              child: _loading
-                  ? const Center(
+            // 大头部放进滚动内容里:下滑会跟着滚走,不再永久悬在顶部
+            if (_loading)
+              ListView(
+                padding: EdgeInsets.zero,
+                children: <Widget>[
+                  _hubHeader(skin),
+                  const Padding(
+                    padding: EdgeInsets.all(Gap.xl),
+                    child: Center(
                       child: Text('正在打开材料中心…',
-                          style: TextStyle(fontSize: 12)))
-                  : RefreshIndicator(
-                      onRefresh: _load,
-                      child: MaterialHubHomeView(
-                        daily: _daily,
-                        need: _need,
-                        libraryCount: _shelf.length,
-                        loadingDaily: _loadingDaily,
-                        onOpenDaily: _openDaily,
-                        onOpenOriginal: (d) async {
-                          if (d.url.isEmpty) return;
-                          final ok = await launchExternalUrl(d.url);
-                          if (!ok) {
-                            if (!mounted) return;
-                            ScaffoldMessenger.of(this.context)
-                              ..hideCurrentSnackBar()
-                              ..showSnackBar(const SnackBar(
-                                content: Text('打不开这篇的原文链接,可以点卡片进软件内阅读'),
-                                behavior: SnackBarBehavior.floating,
-                              ));
-                          }
-                        },
-                        onShuffleDaily: _shuffleDaily,
-                        onOpenNeed: () => _openDirection(MaterialTaxonomy.need),
-                        onOpenDirection: _openDirection,
-                        onOpenLibrary: _openLibrary,
-                      ),
+                          style: TextStyle(fontSize: 12)),
                     ),
+                  ),
+                ],
+              )
+            else
+              RefreshIndicator(
+                onRefresh: _load,
+                child: MaterialHubHomeView(
+                  header: _hubHeader(skin),
+                  daily: _daily,
+                  need: _need,
+                  libraryCount: _shelf.length,
+                  bookshelfCount: _bookshelfCount,
+                  loadingDaily: _loadingDaily,
+                  onScrollOffset: _onScrollOffset,
+                  onOpenDaily: _openDaily,
+                  onOpenOriginal: (d) async {
+                    if (d.url.isEmpty) return;
+                    final ok = await launchExternalUrl(d.url);
+                    if (!ok) {
+                      if (!mounted) return;
+                      ScaffoldMessenger.of(this.context)
+                        ..hideCurrentSnackBar()
+                        ..showSnackBar(const SnackBar(
+                          content: Text('打不开这篇的原文链接,可以点卡片进软件内阅读'),
+                          behavior: SnackBarBehavior.floating,
+                        ));
+                    }
+                  },
+                  onShuffleDaily: _shuffleDaily,
+                  onOpenNeed: () => _openDirection(MaterialTaxonomy.need),
+                  onOpenDirection: _openDirection,
+                  onOpenLibrary: _openLibrary,
+                  onOpenBookshelf: _openBookshelf,
+                ),
+              ),
+            // 下滑后的紧凑顶栏
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: IgnorePointer(
+                ignoring: _collapseT < 0.6,
+                child: AnimatedOpacity(
+                  duration: const Duration(milliseconds: 160),
+                  opacity: _collapseT >= 0.6 ? 1 : 0,
+                  child: _compactBar(context, skin),
+                ),
+              ),
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// 材料中心的果冻大头部:标题、需求摘要、编辑需求/导入两个动作
+  Widget _hubHeader(V4Skin skin) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(Gap.xs, Gap.xs, Gap.xs, Gap.xs),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: <Color>[
+            Color.alphaBlend(
+                skin.pastelAt(1).first.withValues(alpha: 0.75), skin.pageBg),
+            Color.alphaBlend(
+                skin.pastelAt(0).first.withValues(alpha: 0.55), skin.pageBg),
+            Color.alphaBlend(
+                skin.pastelAt(2).first.withValues(alpha: 0.45), skin.pageBg),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(28),
+      ),
+      child: Stack(
+        children: <Widget>[
+          Positioned(
+            right: -28,
+            top: -34,
+            child: Container(
+              width: 150,
+              height: 150,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white.withValues(alpha: 0.22),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(Gap.md, Gap.sm, Gap.md, Gap.md),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Row(
+                  children: <Widget>[
+                    _hubCircle(
+                      skin,
+                      icon: Icons.arrow_back_rounded,
+                      onTap: () => Navigator.maybePop(context),
+                    ),
+                    const Spacer(),
+                    _hubCircle(
+                      skin,
+                      icon: Icons.tune_rounded,
+                      onTap: () => _openDirection(MaterialTaxonomy.need),
+                    ),
+                    const SizedBox(width: Gap.xs),
+                    _hubCircle(
+                      skin,
+                      icon: Icons.add_rounded,
+                      onTap: () async {
+                        await MaterialImportFlow.run(
+                          context,
+                          model: LearnerModelStore.load(),
+                        );
+                        if (mounted) await _load();
+                      },
+                    ),
+                  ],
+                ),
+                const SizedBox(height: Gap.md),
+                Text(
+                  '材料中心',
+                  style: TextStyle(
+                    fontSize: 34,
+                    height: 1.05,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.8,
+                    color: skin.ink,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  _need.isEmpty
+                      ? '选一篇,今天就读它 · 设一下需求,全 App 按它推'
+                      : '按你的需求推:${_need.summary}',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    height: 1.5,
+                    color: skin.inkSoft,
+                  ),
+                ),
+                const SizedBox(height: Gap.sm),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _hubCircle(V4Skin skin,
+      {required IconData icon, required VoidCallback onTap}) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 38,
+        height: 38,
+        decoration: BoxDecoration(
+          color: skin.surface.withValues(alpha: 0.9),
+          shape: BoxShape.circle,
+          boxShadow: skin.shadow,
+        ),
+        child: Icon(icon, size: 19, color: skin.ink),
+      ),
+    );
+  }
+
+  /// 下滑后出现的紧凑顶栏:返回 + 标题 + 两个动作
+  Widget _compactBar(BuildContext context, V4Skin skin) {
+    return Container(
+      decoration: BoxDecoration(
+        color: skin.pageBg.withValues(alpha: 0.94),
+        border: Border(bottom: BorderSide(color: skin.hairline)),
+      ),
+      padding: EdgeInsets.only(
+        top: MediaQuery.of(context).padding.top,
+        left: Gap.sm,
+        right: Gap.sm,
+        bottom: 6,
+      ),
+      child: Row(
+        children: <Widget>[
+          _hubCircle(
+            skin,
+            icon: Icons.arrow_back_rounded,
+            onTap: () => Navigator.maybePop(context),
+          ),
+          const SizedBox(width: Gap.xs),
+          Expanded(
+            child: Text(
+              '材料中心',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w900,
+                letterSpacing: -0.3,
+                color: skin.ink,
+              ),
+            ),
+          ),
+          _hubCircle(
+            skin,
+            icon: Icons.tune_rounded,
+            onTap: () => _openDirection(MaterialTaxonomy.need),
+          ),
+          const SizedBox(width: Gap.xs),
+          _hubCircle(
+            skin,
+            icon: Icons.add_rounded,
+            onTap: () async {
+              await MaterialImportFlow.run(
+                context,
+                model: LearnerModelStore.load(),
+              );
+              if (mounted) await _load();
+            },
+          ),
+        ],
       ),
     );
   }

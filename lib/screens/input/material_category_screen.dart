@@ -11,7 +11,7 @@ import '../../widgets/app_ui.dart';
 import '../../widgets/design_kit.dart';
 import '../../widgets/v4/v4_kit.dart';
 import '../../widgets/waiting.dart';
-import 'ai_material_search.dart';
+import 'material_discover_screen.dart';
 import 'material_import_flow.dart';
 import 'widgets/material_topic_card.dart';
 
@@ -201,14 +201,15 @@ class _MaterialCategoryScreenState extends State<MaterialCategoryScreen> {
                       AppStagger(index: i, child: _hitCard(cs, _hits[i])),
 
                   const SizedBox(height: Gap.md),
-                  // ④ 换个说法找:AI 中文检索(本页不重造轮子)
+                  // ④ 换个说法找:真实爬取(公开源 + DS 官方搜索,不编材料)
                   AppCard(
                     variant: AppCardVariant.compact,
                     onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) => AiMaterialSearchScreen(
-                          category: widget.topic.label,
+                        builder: (_) => MaterialDiscoverScreen(
+                          initialNeed:
+                              '按「${widget.topic.label}」方向找真实材料,要能抓到原文',
                         ),
                       ),
                     ),

@@ -19,7 +19,7 @@ import '../../widgets/app_ui.dart';
 import '../../widgets/design_kit.dart';
 import '../../widgets/material_cover.dart';
 import '../../widgets/search_timeline.dart';
-import 'ai_material_search.dart';
+import 'material_discover_screen.dart';
 import 'material_reader_screen.dart';
 
 /// 「按你的水平找材料」的方向页(v2.4,D1 用户要求)。
@@ -830,11 +830,13 @@ class _CategoryMaterialScreenState extends State<CategoryMaterialScreen> {
           onPressed: () => Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (_) => AiMaterialSearchScreen(category: widget.category),
+              builder: (_) => MaterialDiscoverScreen(
+                initialNeed: '按「${widget.category}」方向找真实材料,要能抓到原文',
+              ),
             ),
           ),
-          icon: const Icon(Icons.auto_awesome, size: 18),
-          label: const Text('让 AI 按我的水平整理一份'),
+          icon: const Icon(Icons.travel_explore, size: 18),
+          label: const Text('按我的水平找真实原文'),
         ),
         const SizedBox(height: Gap.sm),
         Text(

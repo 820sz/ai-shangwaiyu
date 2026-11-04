@@ -1002,6 +1002,100 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
   }
 
   /// 阅读设置面板:字号 / 行距 —— 边调边生效(不用"确定"按钮),退出时已落盘
+  /// 正文前的大标题卡(v5):来源/难度/翻译进度都放在滚动内容里,
+  /// 下滑会跟着正文一起滚走 —— 不再是"永远悬在顶部"的信息条。
+  Widget _readingLead(
+    BuildContext context,
+    ThemeData theme,
+    dynamic a,
+    String title,
+  ) {
+    final skin = V4Skin.of(context);
+    final kind = '${_material?['kind'] ?? 'article'}';
+    final pct = (_scrollCtrl.hasClients &&
+            _scrollCtrl.position.hasContentDimensions &&
+            _scrollCtrl.position.maxScrollExtent > 0)
+        ? (_scrollCtrl.offset / _scrollCtrl.position.maxScrollExtent * 100)
+            .clamp(0.0, 100.0)
+            .round()
+        : 0;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: Gap.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: skin.accent.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  MaterialLibrary.kindLabel(kind),
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    color: skin.accent,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+              if (_showTranslation)
+                Text(
+                  '已翻 ${_translations.length}/${_units.length} 段',
+                  style: TextStyle(fontSize: 10, color: skin.inkFaint),
+                ),
+              const Spacer(),
+              Text(
+                '$pct%',
+                style: TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w700,
+                    color: skin.inkSoft),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            title,
+            maxLines: 4,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 26,
+              height: 1.22,
+              fontWeight: FontWeight.w900,
+              letterSpacing: -0.5,
+              color: skin.ink,
+            ),
+          ),
+          const SizedBox(height: 10),
+          if (a != null)
+            Wrap(
+              spacing: 6,
+              runSpacing: 4,
+              children: <Widget>[
+                _metaPill(
+                    context, Icons.text_snippet_outlined, '${a.wordCount} 词'),
+                _metaPill(context, Icons.schedule, '约 ${a.estMinutes} 分钟'),
+                _metaPill(context, Icons.signal_cellular_alt, a.cefr),
+                _metaPill(
+                  context,
+                  Icons.donut_small_outlined,
+                  '已知 ${(a.knownTokenRatio * 100).toStringAsFixed(0)}%',
+                ),
+                _metaPill(context, Icons.auto_awesome_outlined, a.hint),
+              ],
+            ),
+          const SizedBox(height: 12),
+          Container(height: 1, color: skin.hairline),
+        ],
+      ),
+    );
+  }
+
   /// 阅读器顶部材料元信息小胶囊(v5:词数/时长/等级/认知率/难度建议)
   Widget _metaPill(BuildContext context, IconData icon, String label) {
     final skin = V4Skin.of(context);
@@ -2366,35 +2460,10 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
                 )
               : Column(
                   children: [
-                    // 听力材料(播客/TED)在顶部给播放条:边听边看稿
                     if (AudioService.looksPlayable(_material?['audio_url'] as String?))
                       AudioPlayerBar(
                         url: '${_material!['audio_url']}',
                         title: '${_material!['title'] ?? ''}',
-                      ),
-                    if (a != null)
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(
-                            Gap.md, Gap.xs, Gap.md, Gap.xs),
-                        child: Wrap(
-                          spacing: 6,
-                          runSpacing: 4,
-                          children: <Widget>[
-                            _metaPill(context,
-                                Icons.text_snippet_outlined, '${a.wordCount} 词'),
-                            _metaPill(context, Icons.schedule,
-                                '约 ${a.estMinutes} 分钟'),
-                            _metaPill(context, Icons.signal_cellular_alt,
-                                a.cefr),
-                            _metaPill(
-                              context,
-                              Icons.donut_small_outlined,
-                              '已知 ${(a.knownTokenRatio * 100).toStringAsFixed(0)}%',
-                            ),
-                            _metaPill(
-                                context, Icons.auto_awesome_outlined, a.hint),
-                          ],
-                        ),
                       ),
                     Expanded(
                       // v4(2026-11-03):阅读区做成"纸面" —— 上方 24 圆角 +
@@ -2417,12 +2486,16 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
                           // v2.13.1:列表项 = **段落单元**(翻译/可见性/译文的最小
                           // 单元),不再是 2500 词的正文块 —— 这样每一段原文下面
                           // 才能单独出现译文与进度。
+                          // v5(用户 11/04):标题/来源/难度信息也放进滚动内容里,
+                          // 下滑时会滚走,不再永久悬在正文上方。
                           key: _listKey,
                           controller: _scrollCtrl,
                           padding: const EdgeInsets.fromLTRB(
                               Gap.md, Gap.sm, Gap.md, 80),
-                          itemCount: _units.length,
-                          itemBuilder: (_, index) => _buildUnit(theme, index),
+                          itemCount: _units.length + 1,
+                          itemBuilder: (_, index) => index == 0
+                              ? _readingLead(context, theme, a, title)
+                              : _buildUnit(theme, index - 1),
                         ),
                       ),
                     ),

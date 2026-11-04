@@ -8,7 +8,7 @@ import '../../services/material_prefs.dart';
 import '../../services/material_taxonomy.dart';
 import '../../widgets/design_kit.dart';
 import '../../widgets/v4/v4_kit.dart';
-import 'ai_material_search.dart';
+import 'material_discover_screen.dart';
 import 'material_reader_screen.dart';
 
 /// 材料中心二级浏览页(v5 · P2 骨架):
@@ -228,8 +228,9 @@ class _MaterialBrowseScreenState extends State<MaterialBrowseScreen> {
     );
   }
 
-  /// AI 补长尾(用户 11/04 要求:分类找到后还能"按这个方向再找")。
-  /// 复用现有 AI 找材料页:把当前维度/子分类拼成 category 传进去。
+  /// 按方向补长尾(用户 11/04):分类找到后还能"按这个方向再找"。
+  /// 走 v3 的真实爬取流程(AI 出检索计划 → DeepSeek 官方搜索/公开源 → 抓回正文),
+  /// 不再用旧的"AI 凭空编写推荐"。
   String _aiCategoryLabel() {
     final picked = _def.subtopics
         .where((s) => _selected.contains(s.id))
@@ -243,7 +244,10 @@ class _MaterialBrowseScreenState extends State<MaterialBrowseScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => AiMaterialSearchScreen(category: _aiCategoryLabel()),
+        builder: (_) => MaterialDiscoverScreen(
+          initialNeed: '按「${_aiCategoryLabel()}」方向找真实材料:'
+              '要能抓到原文,难度适配我的水平',
+        ),
       ),
     );
   }

@@ -21,7 +21,11 @@ class MaterialHubHomeView extends StatefulWidget {
   final List<MaterialHubDaily> daily;
   final MaterialNeed need;
   final int libraryCount;
+  final int bookshelfCount;
   final bool loadingDaily;
+
+  /// 由材料中心传入的"大头部" —— 放进滚动列表里,下滑时自然缩小/滚走
+  final Widget? header;
 
   final ValueChanged<MaterialHubDaily> onOpenDaily;
   final ValueChanged<MaterialHubDaily>? onOpenOriginal;
@@ -29,18 +33,24 @@ class MaterialHubHomeView extends StatefulWidget {
   final VoidCallback onOpenNeed;
   final void Function(MaterialDirectionDef) onOpenDirection;
   final VoidCallback onOpenLibrary;
+  final VoidCallback? onOpenBookshelf;
+  final ValueChanged<double>? onScrollOffset;
 
   const MaterialHubHomeView({
     super.key,
     required this.daily,
     required this.need,
     required this.libraryCount,
+    this.bookshelfCount = 0,
     required this.onOpenDaily,
     required this.onShuffleDaily,
     required this.onOpenNeed,
     required this.onOpenDirection,
     required this.onOpenLibrary,
+    this.header,
+    this.onOpenBookshelf,
     this.onOpenOriginal,
+    this.onScrollOffset,
     this.loadingDaily = false,
   });
 
@@ -80,47 +90,85 @@ class _MaterialHubHomeViewState extends State<MaterialHubHomeView> {
       _page = 0;
       if (_dailyCtrl.hasClients) _dailyCtrl.jumpToPage(0);
     }
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(Gap.page, Gap.sm, Gap.page, Gap.xl),
-      children: <Widget>[
-        _dailyHeader(skin),
-        const SizedBox(height: Gap.xs),
-        _dailyCarousel(skin),
-        const SizedBox(height: Gap.md),
-        _needCard(skin),
-        const SizedBox(height: Gap.md),
-        Row(
-          children: <Widget>[
-            Expanded(
-              child: _directionCard(
-                skin,
-                MaterialTaxonomy.topic,
-                subtitle: '科技 / 商业 / 文化…',
-              ),
+    return NotificationListener<ScrollNotification>(
+      onNotification: (n) {
+        if (n is ScrollUpdateNotification || n is ScrollEndNotification) {
+          widget.onScrollOffset?.call(n.metrics.pixels);
+        }
+        return false;
+      },
+      child: ListView(
+        padding: EdgeInsets.zero,
+        children: <Widget>[
+          if (widget.header != null) widget.header!,
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+                Gap.page, Gap.sm, Gap.page, Gap.xl),
+            child: Column(
+              children: <Widget>[
+                _dailyHeader(skin),
+                const SizedBox(height: Gap.xs),
+                _dailyCarousel(skin),
+                const SizedBox(height: Gap.md),
+                _needCard(skin),
+                const SizedBox(height: Gap.md),
+                Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: _directionCard(
+                        skin,
+                        MaterialTaxonomy.topic,
+                        subtitle: '科技 / 商业 / 文化…',
+                      ),
+                    ),
+                    const SizedBox(width: Gap.sm),
+                    Expanded(
+                      child: _directionCard(
+                        skin,
+                        MaterialTaxonomy.form,
+                        subtitle: '教材 / 书 / 外刊 / 论文…',
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: Gap.sm),
+                _directionCard(
+                  skin,
+                  MaterialTaxonomy.scene,
+                  subtitle: '应试 / 出国旅游 / 生活聊天 / 生产力英语',
+                  wide: true,
+                ),
+                const SizedBox(height: Gap.md),
+                Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: _resourceCard(
+                        skin,
+                        icon: Icons.collections_bookmark_outlined,
+                        title: '我的书架',
+                        meta: '${widget.bookshelfCount} 本',
+                        onTap: widget.onOpenBookshelf,
+                      ),
+                    ),
+                    const SizedBox(width: Gap.sm),
+                    Expanded(
+                      child: _resourceCard(
+                        skin,
+                        icon: Icons.folder_copy_outlined,
+                        title: '我的材料库',
+                        meta: '${widget.libraryCount} 篇',
+                        onTap: widget.onOpenLibrary,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ),
-            const SizedBox(width: Gap.sm),
-            Expanded(
-              child: _directionCard(
-                skin,
-                MaterialTaxonomy.form,
-                subtitle: '教材 / 书 / 外刊 / 论文…',
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: Gap.sm),
-        _directionCard(
-          skin,
-          MaterialTaxonomy.scene,
-          subtitle: '应试 / 出国旅游 / 生活聊天 / 生产力英语',
-          wide: true,
-        ),
-        const SizedBox(height: Gap.md),
-        _libraryCard(skin),
-      ],
+          ),
+        ],
+      ),
     );
   }
-
   Widget _dailyHeader(V4Skin skin) {
     return Row(
       children: <Widget>[
@@ -639,6 +687,68 @@ class _MaterialHubHomeViewState extends State<MaterialHubHomeView> {
     String? subtitle,
     bool wide = false,
   }) {
+    // 双列小卡:图标在左上、标题/说明各自整行 —— 不再出现"按题/材"这种
+    // 被挤成两行的标题(用户 11/04 真机反馈排版过挤)
+    if (!wide) {
+      return InkWell(
+        onTap: () => widget.onOpenDirection(def),
+        borderRadius: BorderRadius.circular(20),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+          decoration: BoxDecoration(
+            color: skin.surface,
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: skin.shadow,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Row(
+                children: <Widget>[
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: skin
+                          .pastelAt(def.id.index)
+                          .first
+                          .withValues(alpha: 0.55),
+                      borderRadius: BorderRadius.circular(13),
+                    ),
+                    child: Icon(def.icon, size: 20, color: skin.ink),
+                  ),
+                  const Spacer(),
+                  Icon(Icons.chevron_right_rounded,
+                      size: 18, color: skin.inkFaint),
+                ],
+              ),
+              const SizedBox(height: Gap.xs),
+              Text(
+                _shortLabel(def),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.2,
+                    color: skin.ink),
+              ),
+              const SizedBox(height: 2),
+              SizedBox(
+                height: 28,
+                child: Text(
+                  subtitle ?? def.subtitle,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: 10.5, height: 1.3, color: skin.inkSoft),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
     return InkWell(
       onTap: () => widget.onOpenDirection(def),
       borderRadius: BorderRadius.circular(20),
@@ -668,6 +778,8 @@ class _MaterialHubHomeViewState extends State<MaterialHubHomeView> {
                 children: <Widget>[
                   Text(
                     _shortLabel(def),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w800,
@@ -676,7 +788,7 @@ class _MaterialHubHomeViewState extends State<MaterialHubHomeView> {
                   const SizedBox(height: 2),
                   Text(
                     subtitle ?? def.subtitle,
-                    maxLines: wide ? 1 : 2,
+                    maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                         fontSize: 10.5, height: 1.35, color: skin.inkSoft),
@@ -691,35 +803,55 @@ class _MaterialHubHomeViewState extends State<MaterialHubHomeView> {
     );
   }
 
-  Widget _libraryCard(V4Skin skin) {
+  /// 书架/材料库的入口小卡(两个并排,数量一眼可见)
+  Widget _resourceCard(
+    V4Skin skin, {
+    required IconData icon,
+    required String title,
+    required String meta,
+    required VoidCallback? onTap,
+  }) {
     return InkWell(
-      onTap: widget.onOpenLibrary,
-      borderRadius: BorderRadius.circular(20),
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(18),
       child: Container(
-        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
         decoration: BoxDecoration(
           color: skin.surfaceAlt,
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(18),
         ),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            Icon(Icons.folder_copy_outlined, size: 20, color: skin.accent),
-            const SizedBox(width: Gap.sm),
-            Expanded(
-              child: Text('我的材料库',
-                  style: TextStyle(
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w800,
-                      color: skin.ink)),
-            ),
+            Icon(icon, size: 20, color: skin.accent),
+            const SizedBox(height: 8),
             Text(
-              '${widget.libraryCount} 篇 · 管理',
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  color: skin.accent),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                  color: skin.ink),
             ),
-            Icon(Icons.chevron_right_rounded, size: 18, color: skin.inkFaint),
+            const SizedBox(height: 1),
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: Text(
+                    meta,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w700,
+                        color: skin.inkSoft),
+                  ),
+                ),
+                Icon(Icons.chevron_right_rounded,
+                    size: 15, color: skin.inkFaint),
+              ],
+            ),
           ],
         ),
       ),

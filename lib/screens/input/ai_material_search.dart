@@ -494,53 +494,63 @@ class _AiMaterialSearchScreenState extends State<AiMaterialSearchScreen> {
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-        title: Row(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        // 标题独占整行,标签放第二行 —— 之前把标签塞在标题 Row 里,
+        // 中文标题被挤成"Atomi / c / Habit / s"这种逐字换行(真机反馈)
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(
-              child: Text(
-                r.title,
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
+            Text(
+              r.title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 15,
+                height: 1.3,
+                fontWeight: FontWeight.w700,
               ),
             ),
-            // v2.4(D3 用户要求):AI 整理/编写的内容必须**明确标注** ——
-            // 用户实测反馈过"全是 ai 二手改写的,无法考究真实度",
-            // 所以这里不能让它看起来像一本书的原文推荐。
-            Container(
-              margin: const EdgeInsets.only(left: 4),
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-              decoration: BoxDecoration(
-                color: AppTheme.amber(context).withAlpha(34),
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: Text(
-                'AI 编写',
-                style: TextStyle(
-                  fontSize: 10,
-                  color: AppTheme.amber(context),
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-            if (r.level.isNotEmpty)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.primary.withAlpha(18),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Text(
-                  r.level,
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: theme.colorScheme.primary,
-                    fontWeight: FontWeight.w600,
+            const SizedBox(height: 5),
+            Wrap(
+              spacing: 6,
+              runSpacing: 4,
+              children: [
+                // v2.4(D3 用户要求):AI 整理/编写的内容必须明确标注
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: AppTheme.amber(context).withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    'AI 编写',
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: AppTheme.amber(context),
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
-              ),
+                if (r.level.isNotEmpty)
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.primary.withValues(alpha: 0.10),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      r.level,
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: theme.colorScheme.primary,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ],
         ),
         subtitle: Padding(
