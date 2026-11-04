@@ -295,7 +295,7 @@ class _WordActionSheetState extends State<_WordActionSheet> {
                     children: [
                       Text(widget.word,
                           style: theme.textTheme.headlineSmall
-                              ?.copyWith(fontWeight: FontWeight.w700)),
+                              ?.copyWith(fontWeight: FontWeight.w900)),
                       if (phonetic.isNotEmpty) ...[
                         const SizedBox(height: Gap.xxs),
                         Text(phonetic,

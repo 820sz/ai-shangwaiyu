@@ -8,6 +8,7 @@ import '../../services/material_prefs.dart';
 import '../../services/material_taxonomy.dart';
 import '../../widgets/design_kit.dart';
 import '../../widgets/v4/v4_kit.dart';
+import 'ai_material_search.dart';
 import 'material_reader_screen.dart';
 
 /// 材料中心二级浏览页(v5 · P2 骨架):
@@ -220,8 +221,73 @@ class _MaterialBrowseScreenState extends State<MaterialBrowseScreen> {
                       ],
                       onTap: () => _openReader(s),
                     ),
+                const SizedBox(height: Gap.md),
+                _aiLongTailCard(skin),
               ],
             ),
+    );
+  }
+
+  /// AI 补长尾(用户 11/04 要求:分类找到后还能"按这个方向再找")。
+  /// 复用现有 AI 找材料页:把当前维度/子分类拼成 category 传进去。
+  String _aiCategoryLabel() {
+    final picked = _def.subtopics
+        .where((s) => _selected.contains(s.id))
+        .map((s) => s.label)
+        .join('、');
+    if (picked.isNotEmpty) return picked;
+    return _def.label.replaceAll('找材料', '');
+  }
+
+  void _openAiSearch() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => AiMaterialSearchScreen(category: _aiCategoryLabel()),
+      ),
+    );
+  }
+
+  Widget _aiLongTailCard(V4Skin skin) {
+    return InkWell(
+      onTap: _openAiSearch,
+      borderRadius: BorderRadius.circular(18),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+        decoration: BoxDecoration(
+          color: skin.surfaceAlt,
+          borderRadius: BorderRadius.circular(18),
+        ),
+        child: Row(
+          children: <Widget>[
+            Icon(Icons.auto_awesome, size: 18, color: skin.accent),
+            const SizedBox(width: Gap.sm),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    '没找到想要的?让 AI 补长尾',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                      color: skin.ink,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '按「${_aiCategoryLabel()}」这个方向,用公开源 + AI 再找一批',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 10.5, color: skin.inkSoft),
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right_rounded, size: 18, color: skin.inkFaint),
+          ],
+        ),
+      ),
     );
   }
 

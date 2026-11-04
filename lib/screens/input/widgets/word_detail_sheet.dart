@@ -24,7 +24,7 @@ void showWordDetailSheet({
     useSafeArea: true,
     isScrollControlled: true,
     shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
     ),
     builder: (ctx) => DraggableScrollableSheet(
       initialChildSize: 0.45,
@@ -182,7 +182,7 @@ void showWordDetailSheet({
 }
 
 TextStyle _sectionTitle(ThemeData theme) {
-  return TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: theme.colorScheme.onSurfaceVariant);
+  return TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, letterSpacing: 0.2, color: theme.colorScheme.onSurfaceVariant);
 }
 
 /// 系统 TTS 朗读;失败(无语音引擎)提示一次,不打断查看。
@@ -210,9 +210,9 @@ Widget _tag(String label, Color color) {
     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
     decoration: BoxDecoration(
       color: color.withAlpha(20),
-      borderRadius: BorderRadius.circular(4),
+      borderRadius: BorderRadius.circular(999),
     ),
-    child: Text(label, style: TextStyle(fontSize: 12, color: color, fontWeight: FontWeight.w500)),
+    child: Text(label, style: TextStyle(fontSize: 10.5, color: color, fontWeight: FontWeight.w700)),
   );
 }
 

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../config/constants.dart';
+import '../../../config/v4_theme.dart';
 
 /// 分类选择 BottomSheet — 返回分类名字符串，用户取消返回 null
 Future<String?> showCategoryPicker(BuildContext context) {
@@ -12,7 +13,7 @@ Future<String?> showCategoryPicker(BuildContext context) {
     isScrollControlled: true,
     useSafeArea: true,
     shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
     ),
     builder: (ctx) => _CategoryPickerSheet(bottomSafe: bottomSafe),
   );
@@ -42,6 +43,7 @@ class _CategoryPickerSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final skin = V4Skin.of(context);
     return Padding(
       padding: EdgeInsets.fromLTRB(16, 12, 16, 24 + bottomSafe),
       // 内容超高时允许滚动,不再溢出
@@ -54,24 +56,27 @@ class _CategoryPickerSheet extends StatelessWidget {
               width: 40,
               height: 4,
               decoration: BoxDecoration(
-                color: theme.colorScheme.outlineVariant,
+                color: skin.hairline,
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
             const SizedBox(height: 16),
             Text(
               '选择保存分类',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w600,
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w900,
+                letterSpacing: -0.2,
+                color: skin.ink,
               ),
             ),
             const SizedBox(height: 6),
             Text(
-              '将生词归类，方便后续复习和查找',
-              style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              '将生词归类,方便后续复习和查找',
+              style: TextStyle(fontSize: 11.5, color: skin.inkSoft),
             ),
             const SizedBox(height: 16),
-            // 分类网格（2列）
+            // 分类网格(2列)
             ..._buildGrid(context, theme),
           ],
         ),
@@ -130,32 +135,44 @@ class _CategoryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final skin = V4Skin.of(context);
     return GestureDetector(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
         decoration: BoxDecoration(
-          color: theme.colorScheme.surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: theme.colorScheme.outlineVariant),
+          color: skin.surface,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: skin.hairline),
+          boxShadow: skin.shadow,
         ),
         child: Column(
           children: [
-            Icon(icon, size: 28, color: theme.colorScheme.primary),
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: skin.surfaceAlt,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Icon(icon, size: 22, color: skin.accent),
+            ),
             const SizedBox(height: 8),
             Text(
               name,
-              style: theme.textTheme.titleSmall?.copyWith(
-                fontWeight: FontWeight.w600,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+                color: skin.ink,
               ),
             ),
             const SizedBox(height: 2),
             Text(
               subtitle,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
+              style: TextStyle(
+                color: skin.inkSoft,
                 fontSize: 10,
+                height: 1.3,
               ),
               textAlign: TextAlign.center,
               maxLines: 1,

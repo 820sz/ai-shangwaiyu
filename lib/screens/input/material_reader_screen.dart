@@ -1002,14 +1002,50 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
   }
 
   /// 阅读设置面板:字号 / 行距 —— 边调边生效(不用"确定"按钮),退出时已落盘
+  /// 阅读设置/目录弹层共用的小胶囊(v5:与材料中心/书架筛选同一套果冻样式)
+  Widget _sheetChip(
+    BuildContext ctx,
+    String label, {
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    final skin = V4Skin.of(ctx);
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(999),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected
+              ? skin.accent.withValues(alpha: 0.13)
+              : skin.surfaceAlt,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: selected
+                ? skin.accent.withValues(alpha: 0.5)
+                : skin.hairline,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: selected ? FontWeight.w800 : FontWeight.w500,
+            color: selected ? skin.accent : skin.inkSoft,
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _showReaderSettings() async {
     await showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSheet) {
-          final theme = Theme.of(ctx);
-          final muted = theme.colorScheme.onSurfaceVariant;
+          final skin = V4Skin.of(ctx);
+          final muted = skin.inkSoft;
           void apply(double scale, double height) {
             setSheet(() {});
             setState(() {
@@ -1027,19 +1063,29 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text('阅读设置',
-                      style: theme.textTheme.titleMedium
-                          ?.copyWith(fontWeight: FontWeight.w700)),
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: -0.2,
+                        color: skin.ink,
+                      )),
                   const SizedBox(height: Gap.md),
-                  Text('字号', style: theme.textTheme.bodySmall?.copyWith(color: muted)),
+                  Text('字号',
+                      style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          color: muted)),
                   const SizedBox(height: Gap.xs),
                   Wrap(
                     spacing: Gap.xs,
+                    runSpacing: Gap.xs,
                     children: [
                       for (final s in ReaderSettings.fontScales)
-                        ChoiceChip(
-                          label: Text(ReaderSettings.scaleLabel(s)),
+                        _sheetChip(
+                          ctx,
+                          ReaderSettings.scaleLabel(s),
                           selected: _fontScale == s,
-                          onSelected: (_) {
+                          onTap: () {
                             ReaderSettings.setFontScale(s);
                             apply(s, _lineHeight);
                           },
@@ -1047,16 +1093,25 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
                     ],
                   ),
                   const SizedBox(height: Gap.md),
-                  Text('行距', style: theme.textTheme.bodySmall?.copyWith(color: muted)),
+                  Text('行距',
+                      style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          color: muted)),
                   const SizedBox(height: Gap.xs),
                   Wrap(
                     spacing: Gap.xs,
+                    runSpacing: Gap.xs,
                     children: [
-                      for (var i = 0; i < ReaderSettings.lineHeights.length; i++)
-                        ChoiceChip(
-                          label: Text(ReaderSettings.lineHeightLabels[i]),
-                          selected: _lineHeight == ReaderSettings.lineHeights[i],
-                          onSelected: (_) {
+                      for (var i = 0;
+                          i < ReaderSettings.lineHeights.length;
+                          i++)
+                        _sheetChip(
+                          ctx,
+                          ReaderSettings.lineHeightLabels[i],
+                          selected:
+                              _lineHeight == ReaderSettings.lineHeights[i],
+                          onTap: () {
                             final h = ReaderSettings.lineHeights[i];
                             ReaderSettings.setLineHeight(h);
                             apply(_fontScale, h);
@@ -1070,8 +1125,8 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
                     width: double.infinity,
                     padding: const EdgeInsets.all(Gap.sm),
                     decoration: BoxDecoration(
-                      color: theme.colorScheme.surfaceContainerHighest,
-                      borderRadius: Radii.controlRadius,
+                      color: skin.surfaceAlt,
+                      borderRadius: BorderRadius.circular(14),
                     ),
                     child: Text(
                       'The quick brown fox jumps over the lazy dog. '
@@ -1079,7 +1134,7 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
                       style: TextStyle(
                         fontSize: ReaderSettings.baseFontSize * _fontScale,
                         height: _lineHeight,
-                        color: theme.colorScheme.onSurface,
+                        color: skin.ink,
                       ),
                     ),
                   ),
@@ -1226,6 +1281,7 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
       showDragHandle: true,
       isScrollControlled: true,
       builder: (ctx) {
+        final skin = V4Skin.of(ctx);
         final chunks = _chunks;
         return SafeArea(
           child: ConstrainedBox(
@@ -1240,19 +1296,24 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
                   padding: const EdgeInsets.fromLTRB(Gap.md, 0, Gap.md, Gap.xs),
                   child: Row(
                     children: [
-                      Icon(Icons.list_alt, size: 18, color: theme.colorScheme.primary),
+                      Icon(Icons.list_alt,
+                          size: 18, color: skin.accent),
                       const SizedBox(width: 6),
                       Text(
                         '目录',
-                        style: theme.textTheme.titleMedium
-                            ?.copyWith(fontWeight: FontWeight.w700),
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -0.2,
+                          color: skin.ink,
+                        ),
                       ),
                       const Spacer(),
                       if (chunks.isNotEmpty)
                         Text(
                           '共 ${chunks.length} 节',
-                          style: theme.textTheme.bodySmall
-                              ?.copyWith(color: muted),
+                          style: TextStyle(
+                              fontSize: 11, color: skin.inkSoft),
                         ),
                     ],
                   ),
@@ -1282,33 +1343,31 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
                         final current = i == _lastChunkIndex;
                         return ListTile(
                           dense: true,
-                          contentPadding: EdgeInsets.zero,
+                          contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 4, vertical: 2),
                           leading: Icon(
                             current
                                 ? Icons.radio_button_checked
                                 : Icons.radio_button_unchecked,
                             size: 18,
-                            color: current
-                                ? theme.colorScheme.primary
-                                : muted,
+                            color: current ? skin.accent : skin.inkFaint,
                           ),
                           title: Text(
                             title.isEmpty ? '第 ${i + 1} 节' : title,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.bodyMedium?.copyWith(
+                            style: TextStyle(
+                              fontSize: 13.5,
                               fontWeight:
-                                  current ? FontWeight.w700 : FontWeight.w500,
-                              color: current
-                                  ? theme.colorScheme.primary
-                                  : null,
+                                  current ? FontWeight.w800 : FontWeight.w500,
+                              color: current ? skin.accent : skin.ink,
                             ),
                           ),
                           subtitle: Text(
                             '${words > 0 ? '约 $words 词' : text.isEmpty ? '' : '${text.length} 字符'}'
                             '${current ? ' · 正在读' : ''}',
-                            style: theme.textTheme.bodySmall
-                                ?.copyWith(color: muted),
+                            style: TextStyle(
+                                fontSize: 10.5, color: skin.inkSoft),
                           ),
                           onTap: () {
                             Navigator.pop(ctx);

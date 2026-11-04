@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
 import '../../config/design_tokens.dart';
+import '../../config/v4_theme.dart';
 import '../../models/learner_model.dart';
 import '../../providers/vocab_provider.dart';
 import '../../services/doubao_api.dart';
@@ -66,30 +67,89 @@ class MaterialImportFlow {
       context: context,
       showDragHandle: true,
       builder: (ctx) {
-        final theme = Theme.of(ctx);
+        final skin = V4Skin.of(ctx);
         return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(Gap.md, 0, Gap.md, Gap.xs),
-                child: Text(title,
-                    style: theme.textTheme.titleMedium
-                        ?.copyWith(fontWeight: FontWeight.w700)),
-              ),
-              for (final c in channels)
-                ListTile(
-                  leading: Icon(c.icon, color: theme.colorScheme.primary),
-                  title: Text(c.label),
-                  subtitle: Text(c.description,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      )),
-                  onTap: () => Navigator.pop(ctx, c),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(Gap.md, 0, Gap.md, Gap.md),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.2,
+                    color: skin.ink,
+                  ),
                 ),
-              const SizedBox(height: Gap.xs),
-            ],
+                const SizedBox(height: 2),
+                Text(
+                  '四种方式最后都进同一个材料库',
+                  style: TextStyle(fontSize: 11.5, color: skin.inkSoft),
+                ),
+                const SizedBox(height: Gap.sm),
+                // v5:通道选择改成"白卡 + 淡底图标块"的果冻行,不再用默认 ListTile
+                for (final c in channels)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: Gap.xs),
+                    child: InkWell(
+                      onTap: () => Navigator.pop(ctx, c),
+                      borderRadius: BorderRadius.circular(18),
+                      child: Container(
+                        padding: const EdgeInsets.all(Gap.sm),
+                        decoration: BoxDecoration(
+                          color: skin.surface,
+                          borderRadius: BorderRadius.circular(18),
+                          border: Border.all(color: skin.hairline),
+                          boxShadow: skin.shadow,
+                        ),
+                        child: Row(
+                          children: <Widget>[
+                            Container(
+                              width: 40,
+                              height: 40,
+                              decoration: BoxDecoration(
+                                color: skin.surfaceAlt,
+                                borderRadius: BorderRadius.circular(13),
+                              ),
+                              child: Icon(c.icon,
+                                  size: 20, color: skin.accent),
+                            ),
+                            const SizedBox(width: Gap.sm),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: <Widget>[
+                                  Text(
+                                    c.label,
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w700,
+                                      color: skin.ink,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    c.description,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                        fontSize: 11, color: skin.inkSoft),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Icon(Icons.chevron_right_rounded,
+                                size: 18, color: skin.inkFaint),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
         );
       },

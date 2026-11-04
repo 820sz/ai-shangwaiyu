@@ -141,10 +141,8 @@ class _VocabDetailScreenState extends State<VocabDetailScreen> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: theme.colorScheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(10),
-                  border:
-                      Border.all(color: theme.colorScheme.outlineVariant),
+                  color: V4Skin.of(context).surfaceAlt,
+                  borderRadius: BorderRadius.circular(16),
                 ),
                 child: ExampleSentence(
                   sentence: _vocab.originalSentence!,
@@ -224,15 +222,29 @@ class _SectionTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final skin = V4Skin.of(context);
 
-    return Text(
-      title,
-      style: TextStyle(
-        fontSize: 13,
-        fontWeight: FontWeight.w600,
-        color: theme.colorScheme.onSurfaceVariant,
-      ),
+    return Row(
+      children: <Widget>[
+        Container(
+          width: 3,
+          height: 13,
+          decoration: BoxDecoration(
+            color: skin.accent,
+            borderRadius: BorderRadius.circular(999),
+          ),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          title,
+          style: TextStyle(
+            fontSize: 12.5,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 0.1,
+            color: skin.inkSoft,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -244,22 +256,26 @@ class _InfoTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final skin = V4Skin.of(context);
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
+      padding: const EdgeInsets.symmetric(vertical: 7),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
             width: 72,
-            // P2-31:次要文字对比度不足 → 用主题的次要文字色(深浅色都达 AA)
             child: Text(label,
-                style: TextStyle(
-                    color: theme.colorScheme.onSurfaceVariant, fontSize: 14)),
+                style: TextStyle(color: skin.inkFaint, fontSize: 12.5)),
           ),
           Expanded(
-            child: Text(value, style: const TextStyle(fontSize: 14)),
+            child: Text(value,
+                style: TextStyle(
+                  fontSize: 13.5,
+                  height: 1.4,
+                  fontWeight: FontWeight.w600,
+                  color: skin.ink,
+                )),
           ),
         ],
       ),
@@ -284,7 +300,7 @@ class _MasteryButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final skin = V4Skin.of(context);
     final isSelected = current == level;
     return Expanded(
       child: GestureDetector(
@@ -293,28 +309,28 @@ class _MasteryButton extends StatelessWidget {
           padding: const EdgeInsets.symmetric(vertical: 12),
           decoration: BoxDecoration(
             color: isSelected
-                ? color.withAlpha(30)
-                : theme.colorScheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(10),
+                ? color.withValues(alpha: 0.14)
+                : skin.surface,
+            borderRadius: BorderRadius.circular(16),
             border: Border.all(
-              color: isSelected ? color : theme.colorScheme.outlineVariant,
-              width: isSelected ? 2 : 1,
+              color: isSelected ? color : skin.hairline,
+              width: isSelected ? 1.5 : 1,
             ),
+            boxShadow: isSelected ? null : skin.shadow,
           ),
           child: Column(
             children: [
               Icon(
-                isSelected ? Icons.check_circle : Icons.circle_outlined,
-                color:
-                    isSelected ? color : theme.colorScheme.onSurfaceVariant,
+                isSelected ? Icons.check_circle_rounded : Icons.circle_outlined,
+                color: isSelected ? color : skin.inkFaint,
                 size: 20,
               ),
               const SizedBox(height: 4),
               Text(
                 label,
                 style: TextStyle(
-                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                  color: isSelected ? color : theme.colorScheme.onSurface,
+                  fontWeight: isSelected ? FontWeight.w800 : FontWeight.w500,
+                  color: isSelected ? color : skin.inkSoft,
                   fontSize: 12,
                 ),
               ),
