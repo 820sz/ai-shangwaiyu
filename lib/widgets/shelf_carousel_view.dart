@@ -2,29 +2,30 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-import '../config/design_tokens.dart';
 import '../config/v4_theme.dart';
 import '../services/bookshelf.dart';
+import 'material_cover.dart';
 
-/// 书架形态 B · **3D 轮播书架**(2026-11-04 用户拍板双形态之一)。
+/// 书架形态 B · **3D 立体轮播书架**(v5 · 第二版,对齐用户参考图)。
 ///
-/// 参考用户给的「轻小说文库 3D 书架」:一排书脊朝外、中间一本最大,
-/// 左右滑动切换,点中间的书打开。
+/// 用户参考图(轻小说文库 W8 书架)的关键不是"一次一本大书",而是:
+/// 1. **一排书脊同时立在书架上**(书脊朝外、密密麻麻,能看到每本书的侧标题);
+/// 2. 中间选中那本**被抽出来、微微倾斜地展示封面**(立体感来自封面卡 + 阴影 + 透视);
+/// 3. 左右滑动/点书脊切换"被抽出来"的那本。
 ///
-/// 与旧平面书架的差别:
-/// - 旧版是"多排平面搁板 + 书脊自绘";这版是**单排 3D 轮播**,书脊上的标题竖排,
-///   适合快速扫标题找书;
-/// - v2.13 曾尝试 3D 但因**没裁剪**导致书脊文字溢出、被回退;本实现:
-///   ① 外层 `ClipRect`;② 每本用 `Transform` 的透视但**不做 translate 出界**;
-///   ③ 只渲染 PageView 当前槽位(±1 由 PageView 自己管理),不额外铺全量书。
+/// v5 第一版做成了 PageView 一次一本,和参考图差得远(用户 11/04 指出)。
+/// 本文件按参考图重写:
+/// - `SingleChildScrollView + Row` 铺**一排书脊**,宽度/高度按书名与进度稳定生成;
+/// - 滚动到视口中心的那本 = 选中,顶部用 `Matrix4` 透视**倾斜抽出封面**;
+/// - 点书脊 = 滚到它;点封面 = 打开阅读器;长按 = 原书架弹层。
 ///
-/// 点击/长按行为由 [BookshelfScreen] 注入,与详细书架完全一致。
+/// 裁剪:外层 `ClipRect`(v2.13 3D 回退的坑),书脊不超出书架面。
 class ShelfCarouselView extends StatefulWidget {
   final List<BookshelfBook> books;
   final ValueChanged<BookshelfBook>? onTapBook;
   final ValueChanged<BookshelfBook>? onLongPressBook;
 
-  /// 渲染测试用:关掉联网抓封面(本组件不抓图,仅保留参数对位)
+  /// 渲染测试用:关掉联网抓封面(本组件封面走 MaterialCover,不主动抓图)
   final bool enableCoverFetch;
 
   const ShelfCarouselView({
@@ -40,122 +41,234 @@ class ShelfCarouselView extends StatefulWidget {
 }
 
 class _ShelfCarouselViewState extends State<ShelfCarouselView> {
-  late final PageController _ctrl = PageController(viewportFraction: 0.46);
-  int _page = 0;
+  final ScrollController _ctrl = ScrollController();
+  int _selected = 0;
+  double _viewportWidth = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl.addListener(_onScroll);
+    // 参考图构图:把"被抽出来"的那本放在中间,左右都能看到书脊
+    _selected = widget.books.isEmpty ? 0 : widget.books.length ~/ 2;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _centerOn(_selected, animate: false);
+    });
+  }
 
   @override
   void dispose() {
+    _ctrl.removeListener(_onScroll);
     _ctrl.dispose();
     super.dispose();
+  }
+
+  // ── 布局口径(纯函数)────────────────────────────────────────────
+  // 书脊宽度/高度按书名与进度稳定生成:同一本书每次进来姿势一致,不会"跳"。
+  double _spineWidth(int i) {
+    final seed = _seedOf(widget.books[i]);
+    return 22 + (seed % 11).toDouble(); // 22~32
+  }
+
+  double _spineHeight(int i) {
+    final seed = _seedOf(widget.books[i]);
+    final h = 150 + (seed % 71); // 150~220
+    return math.min(h.toDouble(), _maxSpineHeight);
+  }
+
+  static const double _maxSpineHeight = 220;
+  static const double _bookBottomGap = 30; // 书底离容器底(给搁板+阴影)
+  static const double _featuredHeight = 176;
+
+  int _seedOf(BookshelfBook b) {
+    final s = '${b.materialId}:${b.title}'.runes.fold<int>(
+          0,
+          (a, b2) => (a * 31 + b2) & 0x7fffffff,
+        );
+    return s;
+  }
+
+  double _gap(int i) => 2.5;
+
+  /// 第 i 本书在 Row 里的左偏移
+  double _offsetOf(int i) {
+    var x = 0.0;
+    for (var k = 0; k < i; k++) {
+      x += _spineWidth(k) + _gap(k);
+    }
+    return x;
+  }
+
+  void _onScroll() {
+    if (!_ctrl.hasClients || _viewportWidth <= 0) return;
+    final center = _ctrl.offset + _viewportWidth / 2;
+    var idx = 0;
+    for (var i = 0; i < widget.books.length; i++) {
+      final left = _offsetOf(i);
+      final right = left + _spineWidth(i);
+      if (center >= left && center <= right) {
+        idx = i;
+        break;
+      }
+      if (center > right) idx = math.min(i + 1, widget.books.length - 1);
+    }
+    if (idx != _selected) setState(() => _selected = idx);
+  }
+
+  Future<void> _centerOn(int i, {bool animate = true}) async {
+    if (!_ctrl.hasClients) return;
+    final target = (_offsetOf(i) + _spineWidth(i) / 2) - _viewportWidth / 2;
+    final clamped =
+        target.clamp(0.0, _ctrl.position.maxScrollExtent).toDouble();
+    if (animate) {
+      await _ctrl.animateTo(
+        clamped,
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOut,
+      );
+    } else {
+      _ctrl.jumpTo(clamped);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final skin = V4Skin.of(context);
     if (widget.books.isEmpty) return const SizedBox.shrink();
-    return Column(
-      children: <Widget>[
-        SizedBox(
-          height: 300,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        _viewportWidth = constraints.maxWidth;
+        final selected =
+            widget.books[_selected.clamp(0, widget.books.length - 1)];
+        return SizedBox(
+          height: _maxSpineHeight + _featuredHeight + _bookBottomGap + 16,
           child: Stack(
-            alignment: Alignment.center,
+            clipBehavior: Clip.hardEdge,
             children: <Widget>[
-              // 书桌/搁板底色(淡果冻),让书脊有"立起来"的参照
+              // 书架背景:淡果冻纸面(参考图是奶白/纸感,这里用主题浅底)
+              Positioned.fill(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: Color.alphaBlend(
+                      skin.pastelAt(0).first.withValues(alpha: 0.25),
+                      skin.pageBg,
+                    ),
+                    borderRadius: BorderRadius.circular(22),
+                  ),
+                ),
+              ),
+              // ① 一排书脊(真正"书架"的主体)
               Positioned(
                 left: 0,
                 right: 0,
-                bottom: 26,
+                bottom: _bookBottomGap + 6,
+                height: _maxSpineHeight + 6,
+                child: ClipRect(
+                  child: SingleChildScrollView(
+                    controller: _ctrl,
+                    scrollDirection: Axis.horizontal,
+                    physics: const BouncingScrollPhysics(),
+                    padding: EdgeInsets.symmetric(
+                      horizontal: math.max(24, (constraints.maxWidth - 60) / 2),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: <Widget>[
+                        for (var i = 0; i < widget.books.length; i++)
+                          Padding(
+                            padding: EdgeInsets.only(right: _gap(i)),
+                            child: _spine(skin, i, selected: i == _selected),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              // ② 搁板(书底那条板)
+              Positioned(
+                left: 8,
+                right: 8,
+                bottom: _bookBottomGap - 6,
                 child: Container(
-                  height: 14,
-                  margin: const EdgeInsets.symmetric(horizontal: Gap.md),
+                  height: 12,
                   decoration: BoxDecoration(
-                    color: skin.surfaceAlt,
+                    color: skin.surface,
                     borderRadius: BorderRadius.circular(999),
                     boxShadow: skin.shadow,
                   ),
                 ),
               ),
-              ClipRect(
-                child: PageView.builder(
-                  controller: _ctrl,
-                  clipBehavior: Clip.hardEdge,
-                  itemCount: widget.books.length,
-                  onPageChanged: (i) => setState(() => _page = i),
-                  itemBuilder: (context, i) {
-                    final book = widget.books[i];
-                    return AnimatedBuilder(
-                      animation: _ctrl,
-                      builder: (context, child) {
-                        final page = _ctrl.hasClients && _ctrl.position.haveDimensions
-                            ? (_ctrl.page ?? _page.toDouble())
-                            : _page.toDouble();
-                        final delta = (i - page).clamp(-2.5, 2.5);
-                        final dist = delta.abs();
-                        // 中间的立起来、两侧向内/向后倒
-                        final angle = delta * 0.42;
-                        final scale = 1 - dist * 0.14;
-                        final lift = dist * 14.0;
-                        return Transform.translate(
-                          offset: Offset(0, lift),
-                          child: Transform(
-                            alignment: Alignment.center,
-                            transform: Matrix4.identity()
-                              ..setEntry(3, 2, 0.0016)
-                              ..rotateY(angle)
-                              ..scaleByDouble(scale, scale, scale, 1.0),
-                            child: child,
-                          ),
-                        );
-                      },
-                      child: _spine(skin, book),
-                    );
-                  },
+              // ③ 被抽出来的那本:透视倾斜的封面(参考图的核心视觉)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: _bookBottomGap + 4,
+                height: _featuredHeight,
+                child: Center(
+                  child: GestureDetector(
+                    onTap: () => widget.onTapBook?.call(selected),
+                    onLongPress: () => widget.onLongPressBook?.call(selected),
+                    child: _featuredCover(skin, selected),
+                  ),
+                ),
+              ),
+              // ④ 底部状态
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 2,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: <Widget>[
+                    Icon(Icons.swipe, size: 12, color: skin.inkFaint),
+                    const SizedBox(width: 4),
+                    Text(
+                      '左右滑 · 点书脊切换 · 点封面打开',
+                      style: TextStyle(fontSize: 10, color: skin.inkFaint),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '${_selected + 1}/${widget.books.length}',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                        color: skin.inkSoft,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
           ),
-        ),
-        const SizedBox(height: 6),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            Icon(Icons.swipe, size: 13, color: skin.inkFaint),
-            const SizedBox(width: 4),
-            Text(
-              '左右滑 · 点击打开 · 长按看详情',
-              style: TextStyle(fontSize: 10.5, color: skin.inkFaint),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              '${_page + 1}/${widget.books.length}',
-              style: TextStyle(
-                fontSize: 10.5,
-                fontWeight: FontWeight.w700,
-                color: skin.inkSoft,
-              ),
-            ),
-          ],
-        ),
-      ],
+        );
+      },
     );
   }
 
-  /// 单本书脊:渐变色 + 竖排标题 + 进度条 + 等级角标(3:4 的书脊比例)
-  Widget _spine(V4Skin skin, BookshelfBook book) {
-    final seed = '${book.materialId}:${book.title}'.runes.fold<int>(
-          0,
-          (a, b) => (a * 31 + b) & 0x7fffffff,
-        );
-    final palette = _spinePalette(seed);
+  /// 书脊:窄长条 + 竖排标题 + 进度条;选中那本微微抬高/提亮
+  Widget _spine(V4Skin skin, int i, {required bool selected}) {
+    final book = widget.books[i];
+    final palette = _spinePalette(_seedOf(book));
     final pct = (book.percent / 100).clamp(0.0, 1.0);
-    final level = book.cefr.isNotEmpty ? book.cefr : '';
+    final width = _spineWidth(i);
+    final height = _spineHeight(i);
     return GestureDetector(
-      onTap: () => widget.onTapBook?.call(book),
-      onLongPress: () => widget.onLongPressBook?.call(book),
-      child: Center(
-        child: Container(
-          width: 96,
-          height: 240,
+      onTap: () {
+        setState(() => _selected = i);
+        _centerOn(i);
+      },
+      child: Transform(
+        alignment: Alignment.bottomCenter,
+        // 参考图是"一排书在透视里":离中心越远越向内收一点,整排才有 3D 纵深
+        transform: Matrix4.identity()
+          ..setEntry(3, 2, 0.0010)
+          ..rotateY(((i - _selected) * 0.030).clamp(-0.28, 0.28)),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          width: width,
+          height: height + (selected ? 10 : 0),
+          transform: Matrix4.translationValues(0, selected ? -10 : 0, 0),
           decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topLeft,
@@ -163,92 +276,85 @@ class _ShelfCarouselViewState extends State<ShelfCarouselView> {
               colors: palette,
             ),
             borderRadius: const BorderRadius.only(
-              topLeft: Radius.circular(5),
-              topRight: Radius.circular(10),
-              bottomLeft: Radius.circular(5),
-              bottomRight: Radius.circular(10),
+              topLeft: Radius.circular(3),
+              topRight: Radius.circular(6),
+              bottomLeft: Radius.circular(2),
+              bottomRight: Radius.circular(3),
+            ),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: selected ? 0.65 : 0.28),
+              width: selected ? 1.2 : 0.6,
             ),
             boxShadow: <BoxShadow>[
               BoxShadow(
-                color: skin.dark
-                    ? Colors.black.withValues(alpha: 0.45)
-                    : const Color(0xFF4C5AF0).withValues(alpha: 0.16),
-                blurRadius: 14,
-                offset: const Offset(2, 8),
+                color: Colors.black.withValues(alpha: selected ? 0.28 : 0.16),
+                blurRadius: selected ? 10 : 5,
+                offset: const Offset(1, 4),
               ),
             ],
           ),
           clipBehavior: Clip.antiAlias,
           child: Stack(
             children: <Widget>[
-              // 书脊高光条(靠左),让平面矩形有"厚度"感
+              // 书脊高光(靠左),做出圆柱/厚度感
               Positioned(
                 left: 0,
                 top: 0,
                 bottom: 0,
-                width: 7,
-                child: Container(
-                  color: Colors.white.withValues(alpha: 0.22),
-                ),
+                width: 5,
+                child: Container(color: Colors.white.withValues(alpha: 0.18)),
+              ),
+              Positioned(
+                right: 0,
+                top: 0,
+                bottom: 0,
+                width: 3,
+                child: Container(color: Colors.black.withValues(alpha: 0.08)),
               ),
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+                padding: const EdgeInsets.fromLTRB(8, 8, 4, 8),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
-                    if (level.isNotEmpty)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 5, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.25),
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: Text(
-                          level,
-                          style: const TextStyle(
-                            fontSize: 9,
-                            fontWeight: FontWeight.w800,
-                            color: Colors.white,
+                    // 书脊顶部小横线(像布面书脊的压纹)
+                    Container(
+                      width: math.max(4, width - 12),
+                      height: 1.5,
+                      color: Colors.white.withValues(alpha: 0.35),
+                    ),
+                    const SizedBox(height: 8),
+                    Expanded(
+                      child: RotatedBox(
+                        quarterTurns: 1,
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            book.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 10.5,
+                              fontWeight: selected
+                                  ? FontWeight.w800
+                                  : FontWeight.w600,
+                              letterSpacing: 0.4,
+                              color: Colors.white,
+                              height: 1.05,
+                              shadows: const <Shadow>[
+                                Shadow(
+                                    color: Color(0x33000000), blurRadius: 1),
+                              ],
+                            ),
                           ),
                         ),
                       ),
-                    const Spacer(),
-                    // 竖排标题(书侧标题 —— 用户 11/04 明确要看得到)
-                    RotatedBox(
-                      quarterTurns: 1,
-                      child: Text(
-                        book.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 0.5,
-                          color: Colors.white,
-                          height: 1.1,
-                        ),
-                      ),
                     ),
-                    const Spacer(),
-                    Text(
-                      book.finished
-                          ? '读完'
-                          : '${(pct * 100).round()}%',
-                      style: TextStyle(
-                        fontSize: 9,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.white.withValues(alpha: 0.9),
-                      ),
-                    ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 6),
                     ClipRRect(
                       borderRadius: BorderRadius.circular(999),
                       child: LinearProgressIndicator(
                         value: pct,
-                        minHeight: 3,
-                        backgroundColor:
-                            Colors.white.withValues(alpha: 0.25),
+                        minHeight: 2.5,
+                        backgroundColor: Colors.white.withValues(alpha: 0.25),
                         color: Colors.white,
                       ),
                     ),
@@ -262,7 +368,94 @@ class _ShelfCarouselViewState extends State<ShelfCarouselView> {
     );
   }
 
-  /// 书脊配色:按 seed 稳定取一组糖果色渐变(深浅主题都能读白字)
+  /// 被抽出来展示的封面:Matrix4 透视倾斜 + 阴影(参考图构图)
+  Widget _featuredCover(V4Skin skin, BookshelfBook book) {
+    final level = book.cefr.isNotEmpty ? book.cefr : '';
+    return Transform(
+      alignment: Alignment.bottomCenter,
+      transform: Matrix4.identity()
+        ..setEntry(3, 2, 0.0015)
+        ..rotateX(-0.035)
+        ..rotateY(0.12)
+        ..rotateZ(-0.012)
+        ..scaleByDouble(1.0, 1.0, 1.0, 1.0),
+      child: Container(
+        width: 132,
+        height: _featuredHeight,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(8),
+          boxShadow: <BoxShadow>[
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.28),
+              blurRadius: 22,
+              offset: const Offset(6, 14),
+            ),
+            BoxShadow(
+              color: skin.accent.withValues(alpha: 0.10),
+              blurRadius: 6,
+              offset: const Offset(-2, 2),
+            ),
+          ],
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Stack(
+          fit: StackFit.expand,
+          children: <Widget>[
+            MaterialCover(
+              seed: book.title,
+              kind: book.kind,
+              imageUrl: book.coverUrl,
+              width: 132,
+              height: _featuredHeight,
+              radius: 8,
+            ),
+            // 书脊根部的阴影:像是从书架里抽出来
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              height: 22,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: <Color>[
+                      Colors.transparent,
+                      Colors.black.withValues(alpha: 0.18),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            if (level.isNotEmpty)
+              Positioned(
+                left: 8,
+                bottom: 7,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.35),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    level,
+                    style: const TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 书脊配色:按 seed 稳定取一组"布面书脊"色(白字可读)
   List<Color> _spinePalette(int seed) {
     const palettes = <List<Color>>[
       <Color>[Color(0xFF6A76F5), Color(0xFF8C7BF0)],
@@ -272,6 +465,7 @@ class _ShelfCarouselViewState extends State<ShelfCarouselView> {
       <Color>[Color(0xFF4C7FBF), Color(0xFF76A9DD)],
       <Color>[Color(0xFFB06A4C), Color(0xFFD08C6A)],
       <Color>[Color(0xFF5C7A5C), Color(0xFF8AA98A)],
+      <Color>[Color(0xFF9A7B4F), Color(0xFFC0A274)],
     ];
     return palettes[seed % palettes.length];
   }
@@ -279,8 +473,9 @@ class _ShelfCarouselViewState extends State<ShelfCarouselView> {
 
 /// 书脊几何(纯函数,可单测):给渲染/测试一个统一的尺寸口径
 abstract final class ShelfCarouselMetrics {
-  static const double spineWidth = 96;
-  static const double spineHeight = 240;
+  static const double maxSpineHeight = 220;
+  static const double featuredHeight = 190;
+  static const double bookBottomGap = 30;
 
   /// 一本 3:4 封面的书在书脊上的可视高度比例(书脊略窄于封面)
   static double spineAspect(int bookCount) =>

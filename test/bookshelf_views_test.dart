@@ -88,6 +88,34 @@ List<BookshelfBook> _books() => const <BookshelfBook>[
           cefr: 'B1',
           percent: 64,
           wordCount: 1368),
+      BookshelfBook(
+          materialId: 6,
+          title: 'Pride and Prejudice',
+          kind: 'book',
+          cefr: 'B2',
+          percent: 22,
+          wordCount: 1600),
+      BookshelfBook(
+          materialId: 7,
+          title: 'The Old Man and the Sea',
+          kind: 'book',
+          cefr: 'B1',
+          percent: 88,
+          wordCount: 800),
+      BookshelfBook(
+          materialId: 8,
+          title: 'Science News Weekly',
+          kind: 'news',
+          cefr: 'C1',
+          percent: 6,
+          wordCount: 700),
+      BookshelfBook(
+          materialId: 9,
+          title: 'Walden Two',
+          kind: 'book',
+          cefr: 'C1',
+          percent: 45,
+          wordCount: 1100),
     ];
 
 Future<void> _capture(
