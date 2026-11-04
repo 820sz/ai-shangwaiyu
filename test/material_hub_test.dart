@@ -234,13 +234,9 @@ void main() {
     expect(find.text('按形式'), findsOneWidget);
     expect(find.text('按场景'), findsOneWidget);
     expect(find.text('我的材料库'), findsOneWidget);
-    // 长按今日精读卡 → 预览完整信息/推荐理由(用户 11/04 要求)
-    await tester.longPress(
-      find.text("For Ukraine's Kherson region, a short ceasefire"),
-    );
-    await tester.pumpAndSettle();
-    expect(find.text('为什么推这篇'), findsOneWidget);
+    expect(find.text('我的书架'), findsOneWidget);
 
+    // 先截"干净首页"(长按会把预览弹层也截进去)
     final boundary =
         key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
     await tester.runAsync(() async {
@@ -251,6 +247,13 @@ void main() {
           .writeAsBytesSync(bytes!.buffer.asUint8List());
       image.dispose();
     });
+
+    // 长按今日精读卡 → 预览完整信息/推荐理由(用户 11/04 要求)
+    await tester.longPress(
+      find.text("For Ukraine's Kherson region, a short ceasefire"),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('为什么推这篇'), findsOneWidget);
   });
 
   group('材料库分组(浏览/导入分开管理)', () {
