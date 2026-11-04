@@ -287,8 +287,9 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
                         onOpenOriginal: (d) async {
                           if (d.url.isEmpty) return;
                           final ok = await launchExternalUrl(d.url);
-                          if (!ok && mounted) {
-                            ScaffoldMessenger.of(context)
+                          if (!ok) {
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(this.context)
                               ..hideCurrentSnackBar()
                               ..showSnackBar(const SnackBar(
                                 content: Text('打不开这篇的原文链接,可以点卡片进软件内阅读'),
