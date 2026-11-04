@@ -661,7 +661,12 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     if (!_run.visible) return null;
     final total = _run.total;
     final done = _run.done;
-    final detail = StringBuffer('已翻 ${_translations.length}/$_units.length 段');
+    // 注意:`$_units.length` 在 Dart 里是"插值 _units 再拼字面量 .length"——
+    // 会把整个 ReaderUnit 列表 dump 到界面上(用户 11/04 截图里的那坨
+    // "已翻 4/[ReaderUnit(chunk=0, para=0, 18字), ...]" 就是它)。
+    // 必须写成 ${_units.length}。
+    final detail = StringBuffer(
+        '已翻 ${_translations.length}/${_units.length} 段');
     if (_chunkErrors.isNotEmpty) {
       detail.write(' · ${_chunkErrors.length} 段待重试');
     }
