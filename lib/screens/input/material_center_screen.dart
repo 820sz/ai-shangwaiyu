@@ -4,13 +4,16 @@ import 'package:flutter/material.dart';
 
 import '../../config/design_tokens.dart';
 import '../../config/v4_theme.dart';
+import '../../services/external_link.dart';
 import '../../services/learner_model_store.dart';
 import '../../services/material_library.dart';
 import '../../services/material_need.dart';
+import '../../services/material_prefs.dart';
 import '../../services/material_source.dart';
 import '../../services/material_taxonomy.dart';
 import '../../services/original_search.dart';
 import '../../widgets/graphics/graphics.dart';
+import '../../widgets/material_cover.dart';
 import '../../widgets/v4/v4_kit.dart';
 import 'material_browse_screen.dart';
 import 'material_hub/material_hub_home_view.dart';
@@ -76,23 +79,54 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
   /// 今日精读候选:优先公开源最新条目(可用时),否则从材料库按需求排前几篇。
   Future<void> _loadDaily() async {
     setState(() => _loadingDaily = true);
+    final need = _need;
+    // 推荐理由(长按预览里显示):只用真实依据,不编
+    String reasonFor({double? coverage}) {
+      final parts = <String>[];
+      if (coverage != null && !need.band.isAny) {
+        final inBand = need.band.contains(coverage);
+        parts.add(
+            '认知率 ${(coverage * 100).toStringAsFixed(0)}%,${inBand ? '正好落在你选的 ${need.band.label} 档' : '不在你选的 ${need.band.label} 档,今天候选有限先给你看'}');
+      }
+      if (need.goals.isNotEmpty) {
+        parts.add('符合你的目标:${need.goals.join("、")}');
+      }
+      if (need.kinds.isNotEmpty) {
+        parts.add(
+            '你偏好的形式:${need.kinds.map((k) => MaterialPrefs.kindLabels[k] ?? k).join("、")}');
+      }
+      if (parts.isEmpty) {
+        parts.add('按当前可用内容源挑的最新一篇,先保持每天的输入节奏');
+      }
+      return parts.join(';');
+    }
+
     final out = <MaterialHubDaily>[];
     // ① 材料库里未读完的(按需求排序)先兜底 —— 保证离线也有东西可读
     for (final s in _shelf.where((s) => !s.finished).take(5)) {
+      final level = MaterialLevel.of(s.cefr, kind: s.kind);
+      final coverage = s.coverage;
       out.add(MaterialHubDaily(
         materialId: s.id,
         title: s.titleCn.isNotEmpty ? s.titleCn : s.title,
         titleCn: s.titleCn.isNotEmpty ? s.title : '',
         sourceLabel: s.origin == 'import' ? '导入' : s.source,
         kind: s.kind,
-        cefr: s.cefr,
+        levelLabel: 'Lv$level',
+        knownPercent: coverage != null ? coverage * 100 : null,
+        wordCount: s.wordCount,
+        estMinutes: s.estMinutes,
+        accentLabel: MaterialLevel.accentOf(s.source),
+        adviceLine: coverage == null
+            ? ''
+            : '${s.cefr.isNotEmpty ? s.cefr : "CEFR"} · ${MaterialLevel.matchHint(coverage)}',
+        adviceWarning: coverage != null && coverage < 0.90,
+        reason: reasonFor(coverage: coverage),
         coverUrl: MaterialSourceService.coverFor(
           storedCoverUrl: s.coverUrl,
           sourceUrl: s.url,
         ),
         url: s.url,
-        wordCount: s.wordCount,
-        estMinutes: s.estMinutes,
       ));
     }
     // ② 公开源最新条目(网络不可用就跳过,不报错)
@@ -102,13 +136,25 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
             .listItems(sourceId, limit: 4)
             .timeout(const Duration(seconds: 6));
         final src = MaterialSourceService.sourceOf(sourceId);
+        final kind = src?.kind ?? 'article';
+        final estimate = MaterialLibrary.estimateDifficulty(
+          sourceId: sourceId,
+          kind: kind,
+        );
+        final level = MaterialLevel.fallbackForKind(kind);
         for (final it in items) {
           out.add(MaterialHubDaily(
             title: it.title,
             sourceLabel: src?.label ?? sourceId,
-            kind: src?.kind ?? 'article',
+            kind: kind,
+            levelLabel: 'Lv$level',
             coverUrl: it.imageUrl,
             url: it.link,
+            accentLabel: MaterialLevel.accentOf(sourceId),
+            adviceLine: estimate.label,
+            estimateNote:
+                '${estimate.basis} · 开始阅读后按你的词频算真实认知率',
+            reason: reasonFor(),
           ));
         }
       } catch (_) {
@@ -238,6 +284,18 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
                         libraryCount: _shelf.length,
                         loadingDaily: _loadingDaily,
                         onOpenDaily: _openDaily,
+                        onOpenOriginal: (d) async {
+                          if (d.url.isEmpty) return;
+                          final ok = await launchExternalUrl(d.url);
+                          if (!ok && mounted) {
+                            ScaffoldMessenger.of(context)
+                              ..hideCurrentSnackBar()
+                              ..showSnackBar(const SnackBar(
+                                content: Text('打不开这篇的原文链接,可以点卡片进软件内阅读'),
+                                behavior: SnackBarBehavior.floating,
+                              ));
+                          }
+                        },
                         onShuffleDaily: _shuffleDaily,
                         onOpenNeed: () => _openDirection(MaterialTaxonomy.need),
                         onOpenDirection: _openDirection,

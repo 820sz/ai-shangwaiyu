@@ -50,6 +50,16 @@ ThemeData _theme() {
   return base.copyWith(
     textTheme: base.textTheme.apply(fontFamily: _fontFamily),
     primaryTextTheme: base.primaryTextTheme.apply(fontFamily: _fontFamily),
+    filledButtonTheme: FilledButtonThemeData(
+      style: base.filledButtonTheme.style?.copyWith(
+        textStyle: WidgetStatePropertyAll<TextStyle?>(
+          const TextStyle(
+              fontFamily: _fontFamily,
+              fontSize: 14,
+              fontWeight: FontWeight.w700),
+        ),
+      ),
+    ),
   );
 }
 
@@ -164,27 +174,45 @@ void main() {
                     titleCn: '对乌克兰赫尔松地区而言,短暂停火',
                     sourceLabel: 'NPR',
                     kind: 'news',
-                    cefr: 'B2',
-                    wordCount: 1368,
-                    estMinutes: 7,
+                    levelLabel: 'Lv8',
+                    knownPercent: 74,
+                    wordCount: 1010,
+                    estMinutes: 6,
+                    summarySentences: 2,
+                    accentLabel: '美音',
+                    adviceLine: 'C1 · 先攒点基础 · 建议只精读前几段',
+                    adviceWarning: true,
+                    estimateNote:
+                        '预计难度按来源/类型估算,不是实测认知率 · 开始阅读后按你的词频算真实认知率',
+                    reason: '认知率 74%,正好落在你选的 i+10 档;符合你的目标:四六级',
                   ),
                   MaterialHubDaily(
                     title: 'A drag queen brings out the best in a small town',
                     titleCn: '变装皇后让小城看见更好的自己',
                     sourceLabel: '外刊',
                     kind: 'news',
-                    cefr: 'B1',
+                    levelLabel: 'Lv5',
+                    knownPercent: 88,
                     wordCount: 382,
                     estMinutes: 2,
+                    summarySentences: 3,
+                    accentLabel: '英音',
+                    adviceLine: 'B2 · 挑战区,读起来略吃力',
+                    reason: '认知率 88%,不在你选的 i+10 档,今天候选有限先给你看',
                   ),
                   MaterialHubDaily(
                     title: 'More middle-income families are falling behind',
                     titleCn: '更多中等收入家庭正在掉队',
                     sourceLabel: '外刊',
                     kind: 'news',
-                    cefr: 'B2',
+                    levelLabel: 'Lv7',
+                    knownPercent: 68,
                     wordCount: 941,
                     estMinutes: 5,
+                    summarySentences: 2,
+                    accentLabel: '美音',
+                    adviceLine: 'B1 · 舒适区,适合长期积累',
+                    reason: '符合你的目标:四六级',
                   ),
                 ],
                 onOpenDaily: (_) {},
@@ -199,12 +227,18 @@ void main() {
       ),
     );
     await tester.pump(const Duration(milliseconds: 200));
-    expect(find.text('今日精读'), findsOneWidget);
+    expect(find.text('今日精读'), findsWidgets);
     expect(find.text('按需求找材料'), findsOneWidget);
     expect(find.text('按题材'), findsOneWidget);
     expect(find.text('按形式'), findsOneWidget);
     expect(find.text('按场景'), findsOneWidget);
     expect(find.text('我的材料库'), findsOneWidget);
+    // 长按今日精读卡 → 预览完整信息/推荐理由(用户 11/04 要求)
+    await tester.longPress(
+      find.text("For Ukraine's Kherson region, a short ceasefire"),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('为什么推这篇'), findsOneWidget);
 
     final boundary =
         key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
