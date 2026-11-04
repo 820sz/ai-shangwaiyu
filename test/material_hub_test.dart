@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:readflow/config/theme.dart';
 import 'package:readflow/screens/input/material_hub/material_hub_home_view.dart';
+import 'package:readflow/screens/input/material_library_screen.dart';
 import 'package:readflow/services/material_library.dart';
 import 'package:readflow/services/material_need.dart';
 import 'package:readflow/services/material_prefs.dart';
@@ -251,4 +252,69 @@ void main() {
       image.dispose();
     });
   });
+
+  group('材料库分组(浏览/导入分开管理)', () {
+    test('浏览记录按来源分组,组内按 id 倒序', () {
+      final groups = groupBrowsedBySource(<ShelfItem>[
+        _shelf(1, 'a', 'news', 0.95).copyWithSource('npr'),
+        _shelf(2, 'b', 'news', 0.95).copyWithSource('npr'),
+        _shelf(3, 'c', 'news', 0.95).copyWithSource('gutenberg'),
+      ]);
+      expect(groups.length, 2);
+      final npr = groups.firstWhere((g) => g.id == 'src:npr');
+      expect(npr.items.map((e) => e.id).toList(), <int>[2, 1]);
+    });
+
+    test('外部导入按分组名分组,"未分组"排最后', () {
+      final groups = groupImportedByGroupName(<ShelfItem>[
+        _shelf(1, 'a', 'book', 0.95)
+            .copyWithOriginGroup('import', '新视野教材'),
+        _shelf(2, 'b', 'article', 0.95)
+            .copyWithOriginGroup('import', ''),
+        _shelf(3, 'c', 'article', 0.95)
+            .copyWithOriginGroup('import', '新视野教材'),
+      ]);
+      expect(groups.length, 2);
+      expect(groups.first.label, '新视野教材');
+      expect(groups.last.label, '未分组');
+      expect(groups.first.items.length, 2);
+    });
+  });
+}
+
+/// 测试专用:改来源(ShelfItem 是 const 模型,用扩展方法造数据)
+extension on ShelfItem {
+  ShelfItem copyWithSource(String source) => ShelfItem(
+        id: id,
+        title: title,
+        titleCn: titleCn,
+        kind: kind,
+        source: source,
+        cefr: cefr,
+        wordCount: wordCount,
+        coverage: coverage,
+        estMinutes: estMinutes,
+        percent: percent,
+        minutesRead: minutesRead,
+        pickedWords: pickedWords,
+        url: url,
+      );
+
+  ShelfItem copyWithOriginGroup(String origin, String group) => ShelfItem(
+        id: id,
+        title: title,
+        titleCn: titleCn,
+        kind: kind,
+        source: source,
+        group: group,
+        origin: origin,
+        cefr: cefr,
+        wordCount: wordCount,
+        coverage: coverage,
+        estMinutes: estMinutes,
+        percent: percent,
+        minutesRead: minutesRead,
+        pickedWords: pickedWords,
+        url: url,
+      );
 }
