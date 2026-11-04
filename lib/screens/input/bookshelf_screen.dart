@@ -20,7 +20,9 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 
+import '../../config/constants.dart';
 import '../../config/design_tokens.dart';
 import '../../config/theme.dart';
 import '../../config/v4_theme.dart';
@@ -35,6 +37,8 @@ import '../../widgets/confirm_destructive.dart';
 import '../../widgets/design_kit.dart';
 import '../../widgets/graphics/graphics.dart';
 import '../../widgets/material_cover.dart';
+import '../../widgets/shelf_carousel_view.dart';
+import '../../widgets/shelf_cover_grid.dart';
 import '../../widgets/v4/v4_kit.dart';
 import '../../widgets/waiting.dart';
 import 'material_center_screen.dart';
@@ -70,6 +74,11 @@ enum BookshelfFilter {
   const BookshelfFilter(this.label);
 }
 
+/// 书架显示形态(v5,2026-11-04 用户要求两种可切换)
+/// - 详细书架:封面网格,找书继续读(默认)
+/// - 3D 轮播:书脊朝外、可左右滑,能看到书侧标题
+enum ShelfViewMode { detail, carousel }
+
 class BookshelfScreen extends StatefulWidget {
   const BookshelfScreen({super.key});
 
@@ -83,6 +92,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
   String? _error;
   BookshelfSort _sort = BookshelfSort.recent;
   BookshelfFilter _filter = BookshelfFilter.all;
+  ShelfViewMode _viewMode = ShelfViewMode.detail;
 
   /// 当前筛选下的书(全部 = 不再过滤,避免无谓的 list 复制)
   List<BookshelfBook> get _visibleBooks => switch (_filter) {
@@ -109,7 +119,26 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
   @override
   void initState() {
     super.initState();
+    // 形态选择存 Hive;默认详细书架(用户 11/04 拍板"按建议")
+    try {
+      final raw =
+          Hive.box(AppConstants.hiveBoxSettings).get('shelf_view_mode');
+      if (raw == 'carousel') _viewMode = ShelfViewMode.carousel;
+    } catch (_) {}
     _load();
+  }
+
+  /// 切换"详细书架 / 3D 轮播书架"并持久化
+  Future<void> _toggleViewMode() async {
+    setState(() {
+      _viewMode = _viewMode == ShelfViewMode.detail
+          ? ShelfViewMode.carousel
+          : ShelfViewMode.detail;
+    });
+    try {
+      await Hive.box(AppConstants.hiveBoxSettings)
+          .put('shelf_view_mode', _viewMode.name);
+    } catch (_) {}
   }
 
   /// 读书架数据。
@@ -272,6 +301,16 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                       ' · 已读完 ${_countOf(BookshelfFilter.finished)}',
               actions: <Widget>[
                 if (hasBooks)
+                  V4IconAction(
+                    icon: _viewMode == ShelfViewMode.detail
+                        ? Icons.view_carousel_outlined
+                        : Icons.grid_view_rounded,
+                    tooltip: _viewMode == ShelfViewMode.detail
+                        ? '切换到 3D 轮播书架'
+                        : '切换到详细书架',
+                    onTap: _toggleViewMode,
+                  ),
+                if (hasBooks)
                   PopupMenuButton<BookshelfSort>(
                     tooltip: '排列',
                     initialValue: _sort,
@@ -370,8 +409,14 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                 ),
               ),
             )
+          else if (_viewMode == ShelfViewMode.carousel)
+            ShelfCarouselView(
+              books: visible,
+              onTapBook: _openBook,
+              onLongPressBook: _showBookSheet,
+            )
           else
-            BookshelfView(
+            ShelfCoverGrid(
               books: visible,
               onTapBook: _openBook,
               onLongPressBook: _showBookSheet,
@@ -379,7 +424,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
           const SizedBox(height: Gap.md),
           if (visible.isNotEmpty)
             Text(
-              '点一本书继续读,长按可以移出书架或看封面',
+              _viewMode == ShelfViewMode.carousel
+                  ? '左右滑看书脊 · 点书打开 · 长按看详情'
+                  : '点一本书继续读,长按可以移出书架或看封面',
               textAlign: TextAlign.center,
               style: AppFont.metaStyle.copyWith(
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
