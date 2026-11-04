@@ -4,6 +4,7 @@ import 'package:hive_flutter/hive_flutter.dart';
 import '../config/constants.dart';
 import '../config/design_tokens.dart';
 import '../config/theme.dart';
+import '../config/v4_theme.dart';
 import '../services/api_endpoint.dart';
 import '../services/doubao_api.dart' show primaryModelChoices;
 import 'waiting.dart';
@@ -93,10 +94,13 @@ class ReaderActionBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
+    final skin = V4Skin.of(context);
     return Container(
+      // v4:底部动作栏改成"白玻璃条 + 细边 + 柔影",与识图结果底栏同一语言
       decoration: BoxDecoration(
-        color: theme.scaffoldBackgroundColor,
-        border: Border(top: BorderSide(color: cs.outlineVariant)),
+        color: skin.surface,
+        border: Border(top: BorderSide(color: skin.hairline)),
+        boxShadow: skin.shadow,
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,

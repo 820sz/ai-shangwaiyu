@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../../config/constants.dart';
 import '../../config/design_tokens.dart';
 import '../../config/theme.dart';
+import '../../config/v4_theme.dart';
 import '../../models/learner_model.dart';
 import '../../providers/vocab_provider.dart';
 import '../../services/bookshelf.dart';
@@ -31,7 +32,6 @@ import '../../widgets/graphics/graphics.dart';
 import '../../widgets/material_cover.dart';
 import '../../widgets/v4/v4_kit.dart';
 import '../../widgets/waiting.dart';
-import '../../config/v4_theme.dart';
 import 'category_material_screen.dart';
 import 'material_category_screen.dart';
 import 'material_discover_screen.dart';
@@ -2221,12 +2221,28 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
               : AppTheme.warningColor(context));
     final preferred = _prefs.kinds.isEmpty || _prefs.kinds.contains(s.kind);
     return ChoiceChip(
-      avatar: mark == null ? null : Icon(mark, size: 15, color: markColor),
+      avatar: mark == null ? null : Icon(mark, size: 14, color: markColor),
       label: Text(preferred ? s.label : '${s.label}(非偏好)'),
-      labelStyle: health != null && !health.ok
-          ? TextStyle(color: theme.colorScheme.onSurfaceVariant)
-          : null,
+      labelStyle: TextStyle(
+        fontSize: 11.5,
+        fontWeight: FontWeight.w600,
+        color: health != null && !health.ok
+            ? theme.colorScheme.onSurfaceVariant
+            : V4Skin.of(context).inkSoft,
+      ),
       selected: _sourceId == s.id,
+      showCheckmark: false,
+      visualDensity: VisualDensity.compact,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      shape: const StadiumBorder(),
+      // v4:来源胶囊改成"淡主色选中 + 白底未选 + 细边"的玻璃小胶囊
+      selectedColor: V4Skin.of(context).accent.withValues(alpha: 0.12),
+      backgroundColor: V4Skin.of(context).surface,
+      side: BorderSide(
+        color: _sourceId == s.id
+            ? V4Skin.of(context).accent.withValues(alpha: 0.45)
+            : V4Skin.of(context).hairline,
+      ),
       onSelected: (_) {
         setState(() => _sourceId = s.id);
         _loadItems();
@@ -2335,7 +2351,7 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
   /// 动作保持不变(点卡 = 直接打开阅读,「设为今日精读」仍是卡上小按钮)——
   /// 用户 10/4 明确要求过"点卡片要真的打开",这条不能因为改版式而丢。
   Widget _buildFeedCard(ThemeData theme, FeedItem item) {
-    final muted = theme.colorScheme.onSurfaceVariant;
+    final skin = V4Skin.of(context);
     final kind = MaterialLevel.kindOfSource(_sourceId);
     final cn = _titleCnOf(item.title);
     // C1-17:feed 卡没有本地分析,给"预计难度区间"(口径见 estimateDifficulty);
@@ -2361,13 +2377,19 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          MaterialCover(
-            seed: item.title,
-            kind: kind,
-            imageUrl: item.imageUrl,
-            width: double.infinity,
-            height: 120,
-            radius: 0,
+          // v4:封面与白卡同圆角(顶部裁切),不再是"方角图贴在圆角卡上"
+          ClipRRect(
+            borderRadius: const BorderRadius.vertical(
+              top: Radius.circular(18),
+            ),
+            child: MaterialCover(
+              seed: item.title,
+              kind: kind,
+              imageUrl: item.imageUrl,
+              width: double.infinity,
+              height: 116,
+              radius: 0,
+            ),
           ),
           // 文字区:**必须用 Expanded 包住**,不能直接塞进 Column。
           //
@@ -2387,36 +2409,43 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
                   Text(item.title.isEmpty ? '(无标题)' : item.title,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodyLarge?.copyWith(
+                      style: TextStyle(
                         fontSize: 13.5,
                         height: 1.25,
-                        fontWeight: FontWeight.w600,
+                        fontWeight: FontWeight.w800,
+                        color: skin.ink,
                       )),
                   const SizedBox(height: 2),
                   // 中文标题(没有就占位一行小字,免得卡片高度在两张卡之间跳动)
                   Text(cn.isEmpty ? ' ' : cn,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodySmall
-                          ?.copyWith(color: muted, fontSize: 11, height: 1.3)),
-                  const SizedBox(height: 2),
+                      style: TextStyle(
+                          color: skin.inkSoft, fontSize: 11, height: 1.3)),
+                  const SizedBox(height: 3),
                   // 预计难度区间(不是实测覆盖率):完整口径在区块脚注与
                   // tooltip 里,卡片内只放一句"预计",避免被误读成精确值。
                   Tooltip(
                     message: estimate.basis,
-                    child: Row(
-                      children: [
-                        Icon(Icons.speed, size: 12, color: muted),
-                        const SizedBox(width: 3),
-                        Expanded(
-                          child: Text(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: skin.surfaceAlt,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.speed, size: 11, color: skin.inkSoft),
+                          const SizedBox(width: 3),
+                          Text(
                             estimate.label,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(fontSize: 11, color: muted),
+                            style: TextStyle(
+                                fontSize: 10, color: skin.inkSoft),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                   const Spacer(),
@@ -2435,6 +2464,9 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
                           padding: EdgeInsets.zero,
                           minimumSize: const Size(0, 22),
                           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          foregroundColor: skin.accent,
+                          textStyle: const TextStyle(
+                              fontSize: 10.5, fontWeight: FontWeight.w700),
                         ),
                         onPressed: () {
                           setState(() => _daily = item);
@@ -2448,18 +2480,19 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
                         },
                         icon: const Icon(Icons.local_fire_department_outlined,
                             size: 13),
-                        label: const Text('设为精读',
-                            style: TextStyle(fontSize: 11)),
+                        label: const Text('设为精读'),
                       ),
                       TextButton(
                         style: TextButton.styleFrom(
                           padding: EdgeInsets.zero,
                           minimumSize: const Size(0, 22),
                           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          foregroundColor: skin.inkSoft,
+                          textStyle: const TextStyle(
+                              fontSize: 10.5, fontWeight: FontWeight.w600),
                         ),
                         onPressed: () => _openExternal(item.link),
-                        child: const Text('原文链接',
-                            style: TextStyle(fontSize: 11)),
+                        child: const Text('原文'),
                       ),
                     ],
                   ),

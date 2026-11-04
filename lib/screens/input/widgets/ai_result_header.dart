@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../../config/theme.dart';
+import '../../../config/v4_theme.dart';
+import '../../../widgets/design_kit.dart';
 
 /// AI 结果摘要头部 — 紧凑版
 class AiResultHeader extends StatelessWidget {
@@ -47,48 +49,52 @@ class AiResultHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final skin = V4Skin.of(context);
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      // v4(2026-11-04):摘要卡改成"白卡果冻"(与下方词卡同语言),
+      // 不再是"主色淡底方角块"。
       decoration: BoxDecoration(
-        color: theme.colorScheme.primary.withAlpha(12),
-        borderRadius: BorderRadius.circular(12),
+        color: skin.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: skin.hairline),
+        boxShadow: skin.shadow,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
-            '识别完成 · 共 $totalCount 个标记',
-            style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: Text(
+                  '识别完成 · 共 $totalCount 个标记',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    color: skin.ink,
+                  ),
+                ),
+              ),
+              if (uncertainCount > 0)
+                AppTag('待确认 $uncertainCount', tone: AppTagTone.warning),
+            ],
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 8),
           Wrap(
             spacing: 6,
             runSpacing: 4,
             children: [
-              _countBadge(
-                '📝',
-                '$wordCount 单词',
-                AppTheme.wordTypeColor(context, 'word'),
-              ),
-              _countBadge(
-                '📐',
-                '$phraseCount 短语',
-                AppTheme.wordTypeColor(context, 'phrase'),
-              ),
-              _countBadge(
-                '💬',
-                '$sentenceCount 句子',
-                AppTheme.wordTypeColor(context, 'sentence'),
-              ),
+              AppTag('$wordCount 单词'),
+              AppTag('$phraseCount 短语'),
+              AppTag('$sentenceCount 句子'),
             ],
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 8),
           Text(
             '$modelName · $thinkingLabel',
-            // P2-31:次要文字对比度不足 → 用主题的次要文字色(深浅色都达 AA)
-            style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurfaceVariant),
+            style: TextStyle(fontSize: 10, color: skin.inkFaint),
           ),
           // v2.6:扫描对账 + 复查状态(一行,不占地方但很关键 —— 用户据此判断漏没漏)
           if (scanNote != null || missedNote != null) ...[
@@ -170,20 +176,6 @@ class AiResultHeader extends StatelessWidget {
             ),
           ],
         ],
-      ),
-    );
-  }
-
-  Widget _countBadge(String emoji, String label, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: color.withAlpha(15),
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Text(
-        '$emoji $label',
-        style: TextStyle(fontSize: 11, color: color, fontWeight: FontWeight.w500),
       ),
     );
   }
