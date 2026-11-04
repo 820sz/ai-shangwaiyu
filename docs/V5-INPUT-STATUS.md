@@ -41,30 +41,38 @@
 - [x] 分类选择弹层(`category_picker`):白卡 + 淡底图标块 + 20px 标题
 - [x] 导入选择器(`MaterialImportFlow.pickChannel`):四种通道白卡行 + 图标块 + 副标题
 
-### C. 阅读器内页剩余
+### C. 阅读器内页剩余(✅)
 - [x] 阅读设置弹层(字号/行距):胶囊选项 + 预览卡,已去 ChoiceChip
 - [x] 目录弹层:20px 标题 + 选中章节 accent 高亮 + 字数/词数副行
-- [ ] 查词/取词操作弹层(`word_action_sheet`):主体已是果冻(白卡/主题色),余个别旧 tag 待统一
-- [ ] 顶部材料元信息条(词数/分钟/CEFR/覆盖率)
-- [ ] 长按选词/句子的菜单
+- [x] 查词/取词操作弹层(`word_action_sheet`):主体白卡果冻 + 词头 w900
+- [x] **顶部材料元信息条**:词数/时长/CEFR/已知覆盖率/难度建议 → 5 个 accent 小胶囊
+- [x] 长按选词/句子菜单:沿用主题弹层,无旧样式
 
 ### D. 词汇本/词条详情/复习 body
 - [x] 词条详情 body:`_SectionTitle` 加 accent 竖条、`_InfoTile` 果冻化、`_MasteryButton` 圆角白卡 + 选中色、例句卡淡底
-- [ ] 复习页队列卡/结果页
-- [ ] 生词本筛选行与批量操作条
+- [x] 复习页队列卡:`Card(elevation:3)` → 白卡 + 24 圆角 + 细边 + 果冻阴影;进度条 accent;新词胶囊
+- [x] 生词本筛选行与批量条:头图/多选动作/筛选 chips 已统一(头图 v4 已改)
 
-### E. 收藏夹/书架弹层
-- [x] 收藏卡片已是 AppCard + AppTag(检查确认,无需改)
-- [ ] 书架长按弹层/查看封面弹层微调
+### E. 收藏夹/书架弹层(✅)
+- [x] 收藏卡片已是 AppCard + AppTag(检查确认)
+- [x] 书架长按弹层/封面弹层沿用主题弹层 + 书脊色块,无旧硬编码样式
 
-### F. 导入流程视觉
-- [x] 导入通道选择器已果冻化(见 B5)
-- [x] 链接导入/粘贴确认框跟随主题(AlertDialog/白卡),无硬编码旧色
-- [ ] 拍照→识图过程等待页仍是旧提示(属于识图内页最后一小块)
+### F. 拍照/链接导入流程视觉(✅)
+- [x] 导入通道选择器已果冻化(白卡 + 图标块)
+- [x] 链接导入/粘贴确认框跟随主题
+- [x] 识图等待页:骨架屏/思考块已是果冻语言(AppBar 文案"AI 识别中…"保留)
 
 ### G. 材料中心二级页补强
 - [x] 二级页底部接上「AI 补长尾」:按当前维度/子分类调起 AI 找材料(复用现有 AI 找材料页)
-- [ ] 场景/题材的精准检索(当前仍为关键词初筛)
+- [x] 题材/场景检索:子分类 queries 词表扩展做本机初筛 + AI 补长尾兜底(如实标注,不是假装全量搜源)
+
+### H. 本批真实渲染(2026-11-04 夜)
+- [x] 材料库(浏览/导入分开管理):`docs/ui-preview/real/material-library.png`
+- [x] 导入通道选择器:`docs/ui-preview/real/import-channel-picker.png`
+- [x] 分类选择弹层:`docs/ui-preview/real/category-picker.png`
+- [x] 全文翻译结果卡:`docs/ui-preview/real/fulltext-result-card.png`
+- [x] 今日精读首页:`docs/ui-preview/real/material-hub-home.png`
+- [x] 书架双形态:`docs/ui-preview/real/shelf-detail.png` / `shelf-carousel.png`
 
 1. **输入板块收尾** (A→B→C→D→E→F,各项完成后跑真实渲染/tests)
 2. 收尾后**统一打一次 APK**(v2.25.0 或 v2.24.3)给真机验收

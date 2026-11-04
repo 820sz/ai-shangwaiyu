@@ -1002,6 +1002,34 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
   }
 
   /// 阅读设置面板:字号 / 行距 —— 边调边生效(不用"确定"按钮),退出时已落盘
+  /// 阅读器顶部材料元信息小胶囊(v5:词数/时长/等级/认知率/难度建议)
+  Widget _metaPill(BuildContext context, IconData icon, String label) {
+    final skin = V4Skin.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: skin.surface,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: skin.hairline),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Icon(icon, size: 11, color: skin.accent),
+          const SizedBox(width: 3),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+              color: skin.inkSoft,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// 阅读设置/目录弹层共用的小胶囊(v5:与材料中心/书架筛选同一套果冻样式)
   Widget _sheetChip(
     BuildContext ctx,
@@ -2187,7 +2215,6 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final muted = theme.colorScheme.onSurfaceVariant;
     final title = '${_material?['title'] ?? '阅读'}';
     final url = '${_material?['url'] ?? ''}'.trim();
     final a = _analysis;
@@ -2346,17 +2373,27 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
                         title: '${_material!['title'] ?? ''}',
                       ),
                     if (a != null)
-                      Container(
-                        width: double.infinity,
-                        color: theme.colorScheme.surfaceContainerHighest,
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: Gap.md, vertical: Gap.xs),
-                        child: Text(
-                          '${a.wordCount} 词 · 约 ${a.estMinutes} 分钟 · ${a.cefr} · '
-                          '覆盖率 ${(a.knownTokenRatio * 100).toStringAsFixed(1)}% · ${a.hint}',
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodySmall?.copyWith(color: muted),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(
+                            Gap.md, Gap.xs, Gap.md, Gap.xs),
+                        child: Wrap(
+                          spacing: 6,
+                          runSpacing: 4,
+                          children: <Widget>[
+                            _metaPill(context,
+                                Icons.text_snippet_outlined, '${a.wordCount} 词'),
+                            _metaPill(context, Icons.schedule,
+                                '约 ${a.estMinutes} 分钟'),
+                            _metaPill(context, Icons.signal_cellular_alt,
+                                a.cefr),
+                            _metaPill(
+                              context,
+                              Icons.donut_small_outlined,
+                              '已知 ${(a.knownTokenRatio * 100).toStringAsFixed(0)}%',
+                            ),
+                            _metaPill(
+                                context, Icons.auto_awesome_outlined, a.hint),
+                          ],
                         ),
                       ),
                     Expanded(

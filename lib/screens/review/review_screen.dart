@@ -562,6 +562,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
 
   Widget _buildQueueCard(ThemeData theme, ReviewQueuePlan plan) {
     final muted = theme.colorScheme.onSurfaceVariant;
+    final skin = V4Skin.of(context);
     final item = _queue[_qIndex];
     final v = item.vocab;
     final total = _queue.length;
@@ -601,8 +602,13 @@ class _ReviewScreenState extends State<ReviewScreen> {
               ),
               const SizedBox(height: Gap.xs),
               ClipRRect(
-                borderRadius: BorderRadius.circular(Gap.xxs),
-                child: LinearProgressIndicator(value: progress, minHeight: 8),
+                borderRadius: BorderRadius.circular(999),
+                child: LinearProgressIndicator(
+                  value: progress,
+                  minHeight: 8,
+                  backgroundColor: skin.surfaceAlt,
+                  color: skin.accent,
+                ),
               ),
               const SizedBox(height: Gap.sm),
               Row(
@@ -629,12 +635,14 @@ class _ReviewScreenState extends State<ReviewScreen> {
                       padding: const EdgeInsets.symmetric(
                           horizontal: Gap.xs, vertical: 2),
                       decoration: BoxDecoration(
-                        color: theme.colorScheme.primary.withAlpha(20),
-                        borderRadius: BorderRadius.circular(Radii.control - 4),
+                        color: skin.accent.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(999),
                       ),
                       child: Text('新词',
                           style: TextStyle(
-                              fontSize: 10, color: theme.colorScheme.primary)),
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              color: skin.accent)),
                     ),
                 ],
               ),
@@ -644,10 +652,12 @@ class _ReviewScreenState extends State<ReviewScreen> {
         Expanded(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(Gap.md, Gap.sm, Gap.md, Gap.xs),
-            child: Card(
-              elevation: 3,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(Radii.sheet),
+            child: Container(
+              decoration: BoxDecoration(
+                color: skin.surface,
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: skin.hairline),
+                boxShadow: skin.shadow,
               ),
               child: SizedBox(
                 width: double.infinity,

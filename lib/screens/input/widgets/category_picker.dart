@@ -51,16 +51,7 @@ class _CategoryPickerSheet extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // 拖拽条
-            Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: skin.hairline,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const SizedBox(height: 16),
+            // 拖拽条用系统主题自带的(这里不再画第二条)
             Text(
               '选择保存分类',
               style: TextStyle(
@@ -110,7 +101,10 @@ class _CategoryPickerSheet extends StatelessWidget {
                     subtitle: _subtitles[cats[i + 1]] ?? '',
                     onTap: () => Navigator.pop(context, cats[i + 1]),
                   ),
-                ),
+                )
+              else
+                // 奇数个分类时补一个空位,让最后一张保持半宽而不是被拉通栏
+                const Expanded(child: SizedBox.shrink()),
             ],
           ),
         ),
