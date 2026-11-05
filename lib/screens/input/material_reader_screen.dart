@@ -30,7 +30,6 @@ import '../../widgets/audio_player_bar.dart';
 import '../../widgets/material_blocks.dart';
 import '../../widgets/reader_action_bar.dart';
 import '../../widgets/reader_text.dart';
-import '../../widgets/v4/v4_kit.dart';
 import '../../widgets/waiting.dart';
 import '../../widgets/word_action_sheet.dart';
 import 'dictation_screen.dart';
@@ -1024,31 +1023,25 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
+          // Plan A:小字 kicker + 右侧翻译进度,不再用彩色身份胶囊
           Row(
             children: <Widget>[
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: skin.accent.withValues(alpha: 0.10),
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(
-                  MaterialLibrary.kindLabel(kind),
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                    color: skin.accent,
-                  ),
+              Text(
+                'TODAY’S READING',
+                style: TextStyle(
+                  fontSize: 9.5,
+                  letterSpacing: 1.6,
+                  fontWeight: FontWeight.w800,
+                  color: skin.accent,
                 ),
               ),
-              const SizedBox(width: 6),
+              const Spacer(),
               if (_showTranslation)
                 Text(
                   '已翻 ${_translations.length}/${_units.length} 段',
                   style: TextStyle(fontSize: 10, color: skin.inkFaint),
                 ),
-              const Spacer(),
+              const SizedBox(width: 8),
               Text(
                 '$pct%',
                 style: TextStyle(
@@ -1064,61 +1057,25 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
             maxLines: 4,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              fontSize: 26,
-              height: 1.22,
+              fontSize: 30,
+              height: 1.12,
               fontWeight: FontWeight.w900,
-              letterSpacing: -0.5,
+              letterSpacing: -0.9,
               color: skin.ink,
             ),
           ),
-          const SizedBox(height: 10),
-          if (a != null)
-            Wrap(
-              spacing: 6,
-              runSpacing: 4,
-              children: <Widget>[
-                _metaPill(
-                    context, Icons.text_snippet_outlined, '${a.wordCount} 词'),
-                _metaPill(context, Icons.schedule, '约 ${a.estMinutes} 分钟'),
-                _metaPill(context, Icons.signal_cellular_alt, a.cefr),
-                _metaPill(
-                  context,
-                  Icons.donut_small_outlined,
-                  '已知 ${(a.knownTokenRatio * 100).toStringAsFixed(0)}%',
-                ),
-                _metaPill(context, Icons.auto_awesome_outlined, a.hint),
-              ],
-            ),
-          const SizedBox(height: 12),
-          Container(height: 1, color: skin.hairline),
-        ],
-      ),
-    );
-  }
-
-  /// 阅读器顶部材料元信息小胶囊(v5:词数/时长/等级/认知率/难度建议)
-  Widget _metaPill(BuildContext context, IconData icon, String label) {
-    final skin = V4Skin.of(context);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: skin.surface,
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: skin.hairline),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          Icon(icon, size: 11, color: skin.accent),
-          const SizedBox(width: 3),
+          const SizedBox(height: 8),
           Text(
-            label,
+            a == null
+                ? '${MaterialLibrary.kindLabel(kind)} · 正在分析难度…'
+                : '${a.cefr} · ${a.wordCount} 词 · 约 ${a.estMinutes} 分钟 · '
+                    '已知 ${(a.knownTokenRatio * 100).toStringAsFixed(0)}%',
             style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
-              color: skin.inkSoft,
-            ),
+                fontSize: 11.5, height: 1.4, color: skin.inkSoft),
           ),
+          const SizedBox(height: 16),
+          Container(height: 1, color: skin.hairline),
+          const SizedBox(height: 20),
         ],
       ),
     );
@@ -2312,6 +2269,17 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     final title = '${_material?['title'] ?? '阅读'}';
     final url = '${_material?['url'] ?? ''}'.trim();
     final a = _analysis;
+    // ── v5 阅读器 · 方案 A「沉浸纸面」──
+    // 参考用户 11/05 选型:暖纸底 + 无彩色大头部 + 正文第一 + 悬浮玻璃底栏。
+    final skin = V4Skin.of(context);
+    final paperBg =
+        skin.dark ? const Color(0xFF17161C) : const Color(0xFFF7F4EC);
+    final kind = '${_material?['kind'] ?? 'article'}';
+    final metaTop = <String>[
+      MaterialLibrary.kindLabel(kind),
+      if (a != null) a.cefr,
+      if (a != null) '${a.wordCount} 词',
+    ].join(' · ');
 
     // v2.10(用户 10/4 第 4 条):退出这篇材料时问一句
     // "放进书架? / 放进收藏夹 / 不了,就看看" —— 用 PopScope 拦住返回,
@@ -2328,10 +2296,28 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
         nav.pop();
       },
       child: Scaffold(
-      // v4(2026-11-03):阅读器保留 AppBar 的导航语义,但换成**果冻头**:
-      // 渐变底 + 26 圆角 + 深墨标题,和材料中心/输入首页同一套语言。
-      appBar: V4JellyAppBar(
-        title: title,
+        backgroundColor: paperBg,
+      // Plan A:顶部不再是彩色果冻头,只有一条极细工具行;大标题移到正文前。
+      appBar: AppBar(
+        backgroundColor: paperBg,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        centerTitle: true,
+        titleSpacing: 0,
+        iconTheme: IconThemeData(color: skin.ink),
+        actionsIconTheme: IconThemeData(color: skin.ink),
+        title: Text(
+          metaTop,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.2,
+            color: skin.inkSoft,
+          ),
+        ),
         actions: [
           // v2.10(用户 10/4 第 4 条):**加入书架** —— 明明白白一个按钮,
           // 不用翻"更多"菜单(用户说的是"在文章内部增加一个 ui 即加入书架")
@@ -2466,20 +2452,10 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
                         title: '${_material!['title'] ?? ''}',
                       ),
                     Expanded(
-                      // v4(2026-11-03):阅读区做成"纸面" —— 上方 24 圆角 +
-                      // 细边,正文印在白纸上;页面底色在四周露一圈,层次更像书。
+                      // Plan A:阅读区就是"一整张纸",正文直接印在暖纸底上,
+                      // 不再用白色卡片盖住纸色。
                       child: Container(
-                        decoration: BoxDecoration(
-                          color: V4Skin.of(context).surface,
-                          borderRadius: const BorderRadius.vertical(
-                            top: Radius.circular(24),
-                          ),
-                          border: Border(
-                            top: BorderSide(
-                              color: V4Skin.of(context).hairline,
-                            ),
-                          ),
-                        ),
+                        decoration: BoxDecoration(color: paperBg),
                         child: ListView.builder(
                           // v2.12.2:用列表视口的真实矩形判断"哪几段可见"
                           // (设备/字号/行距不同,按滚动比例猜会把范围翻错)
@@ -2726,15 +2702,19 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     return Padding(
       padding: const EdgeInsets.only(top: Gap.xs),
       child: Container(
-        // v4(2026-11-03):逐段译文从"左侧竖线 + 灰字"改成"译文便签":
-        // 淡主色卡 + 「译」徽标,与原文段落明确分工(像贴着的一张便签)。
+        // Plan A:译文不再是"便签卡",改成左侧竖线 + 极浅底的内嵌注释,
+        // 读起来不打断正文,但一眼能分清原文/译文。
         decoration: BoxDecoration(
           color: Color.alphaBlend(
-              skin.accent.withValues(alpha: 0.055), skin.surface),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: skin.accent.withValues(alpha: 0.16)),
+              skin.accent.withValues(alpha: 0.045), skin.surface),
+          border: Border(
+            left: BorderSide(
+              color: skin.accent.withValues(alpha: 0.55),
+              width: 2.5,
+            ),
+          ),
         ),
-        padding: const EdgeInsets.fromLTRB(10, 8, 2, 8),
+        padding: const EdgeInsets.fromLTRB(12, 8, 2, 8),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -2742,7 +2722,7 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
               margin: const EdgeInsets.only(top: 2, right: 8),
               padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
               decoration: BoxDecoration(
-                color: skin.accent.withValues(alpha: 0.14),
+                color: skin.accent.withValues(alpha: 0.10),
                 borderRadius: BorderRadius.circular(999),
               ),
               child: Text(

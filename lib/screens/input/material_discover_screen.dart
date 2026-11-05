@@ -6,6 +6,7 @@ import '../../config/design_tokens.dart';
 import '../../models/learner_model.dart';
 import '../../providers/vocab_provider.dart';
 import '../../services/deepseek_api.dart';
+import '../../services/external_link.dart';
 import '../../services/input_prefs.dart';
 import '../../services/learner_model_store.dart';
 import '../../services/material_discovery.dart';
@@ -56,6 +57,9 @@ class _MaterialDiscoverScreenState extends State<MaterialDiscoverScreen> {
   final List<SearchEvent> _events = [];
   bool _running = false;
   bool _opening = false;
+
+  /// 搜索过程默认折叠:跑完只剩一行"搜索过程 · N 步",点开才看时间线
+  bool _showProcess = false;
   String? _error;
   DiscoveryRun? _run;
 
@@ -171,6 +175,7 @@ class _MaterialDiscoverScreenState extends State<MaterialDiscoverScreen> {
       setState(() {
         _running = false;
         _run = run;
+        _showProcess = false;
       });
       // 结果出来后回到顶部看"本次找到的内容"
       if (_scrollCtrl.hasClients) _scrollCtrl.jumpTo(0);
@@ -180,6 +185,26 @@ class _MaterialDiscoverScreenState extends State<MaterialDiscoverScreen> {
         _running = false;
         _error = '$e';
       });
+    }
+  }
+
+  /// PDF/反爬站点抓不到正文时,至少要把原文链接打开(用户 11/05 反馈:
+  /// 找到真题 PDF 但点进去没有任何反应)。
+  static bool _looksLikePdf(String url) {
+    final u = url.toLowerCase();
+    return u.endsWith('.pdf') || u.contains('.pdf?') || u.contains('/pdf/');
+  }
+
+  Future<void> _openOriginal(String url) async {
+    if (url.trim().isEmpty) return;
+    final ok = await launchExternalUrl(url);
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(
+          content: Text('这个链接打不开,长按复制到浏览器试试'),
+          behavior: SnackBarBehavior.floating,
+        ));
     }
   }
 
@@ -230,7 +255,7 @@ class _MaterialDiscoverScreenState extends State<MaterialDiscoverScreen> {
           _buildSearchCard(theme),
           if (_events.isNotEmpty) ...[
             const SizedBox(height: Gap.md),
-            SearchTimeline(events: _events, loading: _running),
+            _buildProcessCard(theme),
           ],
           if (_error != null) ...[
             const SizedBox(height: Gap.md),
@@ -273,6 +298,65 @@ class _MaterialDiscoverScreenState extends State<MaterialDiscoverScreen> {
             const SkeletonLines(lines: 3),
           ],
           const SizedBox(height: Gap.lg),
+        ],
+      ),
+    );
+  }
+
+  /// 搜索过程(默认折叠):跑完后只留一行,点开才展开时间线。
+  /// 用户 11/05 反馈:过程一直铺在页面上,结果被顶到很远的地方。
+  Widget _buildProcessCard(ThemeData theme) {
+    final cs = theme.colorScheme;
+    return AppCard(
+      variant: AppCardVariant.compact,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            onTap: () => setState(() => _showProcess = !_showProcess),
+            borderRadius: BorderRadius.circular(10),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                children: [
+                  Icon(
+                    _running
+                        ? Icons.autorenew_rounded
+                        : Icons.timeline_rounded,
+                    size: 17,
+                    color: cs.primary,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      _running
+                          ? '正在找材料(点开看过程)'
+                          : '搜索过程 · ${_events.length} 步',
+                      style: AppFont.subheadStyle.copyWith(
+                        color: cs.onSurface,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    _showProcess ? '收起' : '展开',
+                    style: AppFont.tagStyle.copyWith(color: cs.primary),
+                  ),
+                  Icon(
+                    _showProcess
+                        ? Icons.expand_less_rounded
+                        : Icons.expand_more_rounded,
+                    size: 18,
+                    color: cs.onSurfaceVariant,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (_showProcess) ...[
+            const SizedBox(height: 6),
+            SearchTimeline(events: _events, loading: _running),
+          ],
         ],
       ),
     );
@@ -486,7 +570,10 @@ class _MaterialDiscoverScreenState extends State<MaterialDiscoverScreen> {
                     ),
                   ],
                   const SizedBox(height: 6),
-                  Row(
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       FilledButton(
                         onPressed: _opening || c.content == null
@@ -500,7 +587,25 @@ class _MaterialDiscoverScreenState extends State<MaterialDiscoverScreen> {
                         ),
                         child: const Text('开始读'),
                       ),
-                      const SizedBox(width: Gap.xs),
+                      // 抓正文失败(常见于 PDF/反爬站点)也必须能打开原文,
+                      // 否则用户看到结果却点不动(用户 11/05 反馈)
+                      if (c.url.trim().isNotEmpty)
+                        OutlinedButton.icon(
+                          onPressed: () => _openOriginal(c.url),
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: const Size(0, 36),
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          icon: Icon(
+                            _looksLikePdf(c.url)
+                                ? Icons.picture_as_pdf_outlined
+                                : Icons.open_in_new,
+                            size: 15,
+                          ),
+                          label: Text(
+                            _looksLikePdf(c.url) ? '打开 PDF' : '打开原文',
+                          ),
+                        ),
                       Text(
                         c.fromSearchApi ? '官方搜索' : '公开源',
                         style: AppFont.tagStyle.copyWith(

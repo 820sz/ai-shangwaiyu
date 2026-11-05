@@ -225,9 +225,20 @@ class _ShelfCarouselViewState extends State<ShelfCarouselView> {
                 bottom: _bookBottomGap + 4,
                 height: _featuredHeight,
                 child: Center(
+                  // 封面会盖住中间书脊;如果它只吃 tap,用户在封面上左右滑
+                  // 会完全滑不动(用户 11/05 反馈"每次都有一本书挡住卡着")。
+                  // 这里把横向拖拽转交给书脊滚动条,点按仍然打开。
                   child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
                     onTap: () => widget.onTapBook?.call(selected),
                     onLongPress: () => widget.onLongPressBook?.call(selected),
+                    onHorizontalDragUpdate: (details) {
+                      if (!_ctrl.hasClients) return;
+                      final next = (_ctrl.offset - details.delta.dx)
+                          .clamp(0.0, _ctrl.position.maxScrollExtent)
+                          .toDouble();
+                      _ctrl.jumpTo(next);
+                    },
                     child: _featuredCover(skin, selected),
                   ),
                 ),

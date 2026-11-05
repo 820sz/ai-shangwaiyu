@@ -96,12 +96,21 @@ class ReaderActionBar extends StatelessWidget {
     final cs = theme.colorScheme;
     final skin = V4Skin.of(context);
     return Container(
-      // v4:底部动作栏改成"白玻璃条 + 细边 + 柔影",与识图结果底栏同一语言
+      // Plan A:底部动作栏变成"悬浮白玻璃胶囊",不再是一条贴边的实心条。
+      margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
       decoration: BoxDecoration(
-        color: skin.surface,
-        border: Border(top: BorderSide(color: skin.hairline)),
-        boxShadow: skin.shadow,
+        color: skin.surface.withValues(alpha: 0.94),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: skin.hairline),
+        boxShadow: <BoxShadow>[
+          BoxShadow(
+            color: Colors.black.withValues(alpha: skin.dark ? 0.35 : 0.08),
+            blurRadius: 22,
+            offset: const Offset(0, 8),
+          ),
+        ],
       ),
+      clipBehavior: Clip.antiAlias,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
