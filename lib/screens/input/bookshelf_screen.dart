@@ -421,17 +421,18 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
               onTapBook: _openBook,
               onLongPressBook: _showBookSheet,
             ),
-          const SizedBox(height: Gap.md),
-          if (visible.isNotEmpty)
-            Text(
-              _viewMode == ShelfViewMode.carousel
-                  ? '左右滑看书脊 · 点书打开 · 长按看详情'
-                  : '点一本书继续读,长按可以移出书架或看封面',
-              textAlign: TextAlign.center,
-              style: AppFont.metaStyle.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
+          // 3D 轮播自带操作提示与页码,这里不再重复一行(真机上会出现两条提示)
+          if (_viewMode == ShelfViewMode.detail) ...[
+            const SizedBox(height: Gap.md),
+            if (visible.isNotEmpty)
+              Text(
+                '点一本书继续读,长按可以移出书架或看封面',
+                textAlign: TextAlign.center,
+                style: AppFont.metaStyle.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
-            ),
+          ],
         ],
       ],
     );

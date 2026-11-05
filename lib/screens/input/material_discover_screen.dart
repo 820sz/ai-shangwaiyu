@@ -161,6 +161,7 @@ class _MaterialDiscoverScreenState extends State<MaterialDiscoverScreen> {
       _stage('检索计划:${queries.join(' / ')}');
       final run = await MaterialDiscovery().discover(
         queries: queries,
+        maxFetch: 8,
         prefs: _prefs,
         model: _model,
         vocab: vocab,
@@ -238,6 +239,15 @@ class _MaterialDiscoverScreenState extends State<MaterialDiscoverScreen> {
           if (_run != null) ...[
             const SizedBox(height: Gap.md),
             _buildRunSummary(theme, _run!),
+            if (_run!.items.isNotEmpty)
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: _running ? null : _find,
+                  icon: const Icon(Icons.refresh, size: 16),
+                  label: const Text('没找到想要的?换一批再找'),
+                ),
+              ),
             const SizedBox(height: Gap.sm),
             if (_run!.isEmpty)
               AppEmptyState(
@@ -337,7 +347,10 @@ class _MaterialDiscoverScreenState extends State<MaterialDiscoverScreen> {
             textInputAction: TextInputAction.search,
             onSubmitted: (_) => _find(),
             decoration: const InputDecoration(
-              hintText: '用中文说你想要什么，例如：\n最近一周的科技新闻，最好有小标题；或者：四六级难度的议论文',
+              hintText: '用中文说你想要什么，例如：\n'
+                  '· 新概念英语第三册的课文\n'
+                  '· 四六级历年真题(阅读/写作)\n'
+                  '· 剑桥雅思 18 的学术阅读,难度 C1',
               border: OutlineInputBorder(),
             ),
           ),
@@ -354,7 +367,8 @@ class _MaterialDiscoverScreenState extends State<MaterialDiscoverScreen> {
           const SizedBox(height: 4),
           Text(
             '会先用公开源(公版书/外刊/论文)找,再按你的 DeepSeek 官方 Key 用官方搜索补长尾;'
-            '每条结果都会抓回正文算出真实难度。',
+            '教材、真题、教辅、书籍、论文都可以找(个人学习用途)。每条结果都会抓回正文、'
+            '算出真实难度。',
             style: AppFont.tagStyle.copyWith(color: cs.onSurfaceVariant, height: 1.35),
           ),
         ],
@@ -374,7 +388,11 @@ class _MaterialDiscoverScreenState extends State<MaterialDiscoverScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '找到 ${run.items.length} 篇可读材料',
+            run.items.isEmpty
+                ? '这次没找到可读原文'
+                : (run.items.length < 3
+                    ? '找到 ${run.items.length} 篇可读材料(偏少,建议换关键词再找)'
+                    : '找到 ${run.items.length} 篇可读材料'),
             style: AppFont.subheadStyle.copyWith(
               color: cs.onSurface,
               fontWeight: FontWeight.w700,

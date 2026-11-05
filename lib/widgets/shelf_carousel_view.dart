@@ -58,6 +58,23 @@ class _ShelfCarouselViewState extends State<ShelfCarouselView> {
   }
 
   @override
+  void didUpdateWidget(covariant ShelfCarouselView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 筛选/排序变了:选中的书可能已不在列表里 —— 重置到中间那本,
+    // 否则会停在越界索引,出现"只显示一本、其余书脊看不到"的真机 bug。
+    if (oldWidget.books.length != widget.books.length ||
+        (oldWidget.books.isNotEmpty &&
+            widget.books.isNotEmpty &&
+            oldWidget.books.first.materialId != widget.books.first.materialId)) {
+      _selected = widget.books.isEmpty ? 0 : widget.books.length ~/ 2;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _centerOn(_selected, animate: false);
+      });
+    }
+  }
+
+  @override
   void dispose() {
     _ctrl.removeListener(_onScroll);
     _ctrl.dispose();
@@ -68,18 +85,18 @@ class _ShelfCarouselViewState extends State<ShelfCarouselView> {
   // 书脊宽度/高度按书名与进度稳定生成:同一本书每次进来姿势一致,不会"跳"。
   double _spineWidth(int i) {
     final seed = _seedOf(widget.books[i]);
-    return 22 + (seed % 11).toDouble(); // 22~32
+    return 24 + (seed % 11).toDouble(); // 24~34
   }
 
   double _spineHeight(int i) {
     final seed = _seedOf(widget.books[i]);
-    final h = 150 + (seed % 71); // 150~220
+    final h = 150 + (seed % 51); // 150~200
     return math.min(h.toDouble(), _maxSpineHeight);
   }
 
-  static const double _maxSpineHeight = 220;
+  static const double _maxSpineHeight = 200;
   static const double _bookBottomGap = 30; // 书底离容器底(给搁板+阴影)
-  static const double _featuredHeight = 176;
+  static const double _featuredHeight = 168;
 
   int _seedOf(BookshelfBook b) {
     final s = '${b.materialId}:${b.title}'.runes.fold<int>(
@@ -142,7 +159,9 @@ class _ShelfCarouselViewState extends State<ShelfCarouselView> {
         final selected =
             widget.books[_selected.clamp(0, widget.books.length - 1)];
         return SizedBox(
-          height: _maxSpineHeight + _featuredHeight + _bookBottomGap + 16,
+          // 高度按"最高书脊 + 底部搁板 + 封面露出的顶"算;之前的公式把
+          // 封面高度和书脊高度相加,真机上顶部空出一大块(用户 11/04 反馈)
+          height: _maxSpineHeight + _bookBottomGap + 26,
           child: Stack(
             clipBehavior: Clip.hardEdge,
             children: <Widget>[

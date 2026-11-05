@@ -209,7 +209,7 @@ class MaterialDiscovery {
     required InputPreferences prefs,
     required LearnerModel model,
     List<Vocabulary> vocab = const [],
-    int maxFetch = 5,
+    int maxFetch = 8,
     bool usePublicSources = true,
     bool useSearchApi = true,
     /// 用户原始中文需求(补救轮提示词要用它,而不是让模型只看英文 queries 猜);
@@ -244,7 +244,7 @@ class MaterialDiscovery {
         .map((q) => q.trim())
         .where((q) => q.isNotEmpty)
         .toSet()
-        .take(3)
+        .take(6)
         .toList();
 
     final client = _injectedClient ?? DeepSeekSearchClient();
@@ -261,7 +261,8 @@ class MaterialDiscovery {
     Future<void> collectRound(List<String> roundQueries) async {
       // ① 公开源并发检索(可达性实测过的三个源,零 API 成本)
       if (usePublicSources) {
-        for (final q in roundQueries) {
+        // 公开源只认英文/拉丁字母 query,中文 query 交给官方搜索
+        for (final q in roundQueries.where(_isLatinQuery)) {
           onEvent?.call('在公开源里检索「$q」…');
           try {
             final result = await OriginalSearch.search(q, category: '其他');
@@ -288,9 +289,10 @@ class MaterialDiscovery {
 
       // ② DeepSeek 官方搜索(长尾/时效性内容的来源)
       if (useSearchApi && apiAvailable) {
-        for (final q in roundQueries.take(2)) {
+        // 中英文 query 都搜:官方搜索本来就能搜中文网页(教材/真题/教辅多在中文站)
+        for (final q in roundQueries.take(4)) {
           onEvent?.call('用 DeepSeek 搜索「$q」…');
-          final hits = await client.search(q, count: 5, oriQuestion: q);
+          final hits = await client.search(q, count: 8, oriQuestion: q);
           final err = client.lastError;
           if (hits.isEmpty && err != null) notes.add('搜索失败:${err.message}');
           addAll(<DiscoveredCandidate>[
@@ -428,6 +430,10 @@ class MaterialDiscovery {
       refineQueries: refineQueries,
     );
   }
+
+  /// 公开源(RSS/Gutenberg/arXiv)只认拉丁字母 query;中文 query 交给官方搜索。
+  static bool _isLatinQuery(String q) =>
+      !RegExp(r'[\\u4e00-\\u9fff]').hasMatch(q);
 
   Future<String?> _fetchViaSearchApi(
     DeepSeekSearchClient client,
@@ -664,13 +670,18 @@ List<DiscoveredCandidate> dropCandidatesWithoutUrl(
   String prefsHint = '',
 }) {
   const system = '''你是英语学习材料的检索助手。用户第一轮检索没有找到足够材料,
-请帮他换更准的英文检索词。返回 JSON:{"queries":["英文检索词1","英文检索词2"]}
+请帮他换更准的检索词。返回 JSON:{"queries":["检索词1","检索词2"]}
 
 规则:
-1. 只输出 3 条以内的**英文**检索关键词,越具体越好(如 "stoicism meditations aurelius",
-   而不是 "philosophy");不要输出解释、不要编号列表之外的文字;
-2. 只能基于"用户需求 + 下面给出的真实候选"调整检索词:从候选的题材/标题/日期里
-   判断缺什么方向,或补足第一轮没覆盖的方向;
+1. 只输出 4 条以内的检索词,可中英文混合、越具体越好:
+   - 用户要"教材" → 给具体教材系列/册数(如 "新概念英语第三册 课文",
+     "New Concept English 3");
+   - 用户要"真题/应试" → 给考试+年份/题型(如 "CET-4 2024 真题 阅读",
+     "四级真题 pdf");
+   - 用户要"书/论文/外刊" → 书名作者、论文主题、媒体+题材;
+   - 不要输出 "textbook / english / exam" 这种空泛词;
+2. 只能基于"用户需求 + 下面给出的真实候选"调整:从候选题材/标题/日期判断缺什么,
+   或补足第一轮没覆盖的方向;
 3. **不要编造资源**:不要返回作者、书名、链接或 URL —— 你只负责给检索词,
    真实资源由检索系统去找;
 4. 如果候选里已经有足够的方向,返回 {"queries":[]}(空数组);
@@ -738,12 +749,12 @@ List<String> parseRefineQueries(String content) {
     s = s.replaceAll(RegExp(r'^[-*\d.)、\s]+'), '').trim();
     s = s.replaceAll(RegExp(r'''^[`"']+|[`"']+$'''), '').trim();
     if (s.isEmpty || s.length > 120) continue;
-    // 非英文行(中文说明/JSON 残片)不是检索词
-    if (!RegExp(r'[A-Za-z]').hasMatch(s)) continue;
+    // 允许中英文检索词(中文站/教材真题需要中文 query);过滤纯说明文字
+    if (!RegExp(r'[A-Za-z\u4e00-\u9fff]').hasMatch(s)) continue;
     if (s.startsWith('{') || s.startsWith('[')) continue;
     if (out.contains(s)) continue;
     out.add(s);
-    if (out.length >= 3) break;
+    if (out.length >= 4) break;
   }
   return out;
 }

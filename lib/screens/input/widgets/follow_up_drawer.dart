@@ -433,6 +433,9 @@ void showFollowUpDrawer({
     isScrollControlled: true,
     enableDrag: true,
     useSafeArea: true,
+    // 全局主题开了系统拖拽条(showDragHandle: true);抽屉自己在内容里画了一条,
+    // 两天真机上就是两条"横杠"(用户 11/04 反馈)。这里关掉系统的,保留自己的。
+    showDragHandle: false,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
     ),
