@@ -16,7 +16,7 @@ import '../../services/original_search.dart';
 
 import '../../widgets/material_cover.dart';
 
-import 'material_browse_screen.dart';
+import 'material_channel_screen.dart';
 import 'material_hub/material_hub_home_view.dart';
 import 'material_import_flow.dart';
 import 'bookshelf_screen.dart';
@@ -226,10 +226,13 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
   }
 
   void _openDirection(MaterialDirectionDef def) {
+    // 方案 2「频道化」(用户 11/05 拍板):四个大分类统一进频道页,
+    // 每个频道 = 「发现(真实检索结果) / 我的(可管理材料)」两个 Tab。
+    // 旧的 MaterialBrowseScreen 保留,仅作为频道页「去设置需求」的入口。
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => MaterialBrowseScreen(direction: def.id),
+        builder: (_) => MaterialChannelScreen(direction: def.id),
       ),
     ).then((_) {
       if (mounted) unawaited(_load());

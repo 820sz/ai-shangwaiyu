@@ -182,6 +182,8 @@ String coverKindLabel(String kind, {bool compact = false}) {
       'paper' => '论文',
       'podcast' => '播客',
       'wiki' => '百科',
+      'textbook' => '教材',
+      'exam' => '真题',
       _ => '文章',
     };
   }
@@ -191,6 +193,8 @@ String coverKindLabel(String kind, {bool compact = false}) {
     'paper' => '论文',
     'podcast' => '播客/听力',
     'wiki' => '百科',
+    'textbook' => '教材',
+    'exam' => '应试真题',
     _ => '文章',
   };
 }

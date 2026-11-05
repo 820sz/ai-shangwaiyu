@@ -385,6 +385,8 @@ class MaterialLibrary {
         'podcast' => '播客/听力',
         'wiki' => '百科',
         'paper' => '论文',
+        'textbook' => '教材',
+        'exam' => '应试真题',
         _ => '文章',
       };
 

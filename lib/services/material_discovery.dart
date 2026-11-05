@@ -217,16 +217,37 @@ class MaterialDiscovery {
     String userQuery = '',
     /// 是否允许"两段式补救";默认允许,但只有第一轮候选不足时才真的触发。
     bool enableRefine = true,
+    /// 已经展示过的 URL(分页 /「继续找更多」时由调用方传入)。
+    ///
+    /// 原始 URL 与 [dedupeKeyOf] 归一 key **都认**:调用方传 `结果卡上的 url`
+    /// 或自己归一后的 key 都能命中。命中的候选在入库前就被丢弃(不占抓取名额、
+    /// 不进成本统计),因此"继续找更多"不会把上一页的卡片重复塞回来。
+    Set<String> excludeUrls = const <String>{},
+    /// 「继续找更多」时模型新给出的检索词:与 [queries] 合并去重后最多 8 条
+    /// (公开源只跑拉丁字母 query,官方搜索按原有逻辑取前 4 条)。
+    List<String> extraQueries = const <String>[],
     void Function(String label)? onEvent,
   }) async {
     final notes = <String>[];
     final raw = <DiscoveredCandidate>[];
     final seen = <String>{};
 
+    // 排除集:原始写法 + 归一 key 都收进来,调用方传哪种都能命中。
+    final excluded = <String>{};
+    for (final rawUrl in excludeUrls) {
+      final url = rawUrl.trim();
+      if (url.isEmpty) continue;
+      excluded.add(url);
+      final key = dedupeKeyOf(url);
+      if (key.isNotEmpty) excluded.add(key);
+    }
+
     void addAll(Iterable<DiscoveredCandidate> list) {
       for (final c in list) {
         final key = dedupeKeyOf(c.url);
         if (key.isEmpty) continue;
+        // 已经给用户看过的 URL 直接丢(排除判断在 seen 之前:不占位)
+        if (excluded.contains(key) || excluded.contains(c.url.trim())) continue;
         if (!seen.add(key)) continue;
         // 用户黑名单:标题/来源里出现屏蔽词就整条丢掉(C1-14 的落点)
         if (!prefs.allowsMaterial(
@@ -240,12 +261,10 @@ class MaterialDiscovery {
       }
     }
 
-    final plan = queries
-        .map((q) => q.trim())
-        .where((q) => q.isNotEmpty)
-        .toSet()
-        .take(6)
-        .toList();
+    final plan = mergeDiscoveryQueries(
+      queries: queries,
+      extraQueries: extraQueries,
+    );
 
     final client = _injectedClient ?? DeepSeekSearchClient();
     final apiAvailable = client.available;
@@ -289,8 +308,26 @@ class MaterialDiscovery {
 
       // ② DeepSeek 官方搜索(长尾/时效性内容的来源)
       if (useSearchApi && apiAvailable) {
-        // 中英文 query 都搜:官方搜索本来就能搜中文网页(教材/真题/教辅多在中文站)
-        for (final q in roundQueries.take(4)) {
+        // 中英文 query 都搜:官方搜索本来就能搜中文网页(教材/真题/教辅多在中文站)。
+        // 「继续找更多」带来的 extraQueries 必须优先占官方搜索的 4 个名额 ——
+        // 否则它排在第 5 位以后永远搜不到(质检 P1-1:继续找更多≈重跑旧词)。
+        final searchPriority = identical(roundQueries, plan) &&
+                extraQueries.isNotEmpty
+            // 补充词先去重、整体排前;基础词只在官方搜索还有名额时兜底
+            ? <String>[
+                ...mergeDiscoveryQueries(queries: extraQueries, limit: 4),
+                ...roundQueries,
+              ]
+            : roundQueries;
+        final officialQueries = <String>[];
+        final seenOfficial = <String>{};
+        for (final raw in searchPriority) {
+          final q = raw.trim();
+          if (q.isEmpty || !seenOfficial.add(q)) continue;
+          officialQueries.add(q);
+          if (officialQueries.length >= 4) break;
+        }
+        for (final q in officialQueries) {
           onEvent?.call('用 DeepSeek 搜索「$q」…');
           final hits = await client.search(q, count: 8, oriQuestion: q);
           final err = client.lastError;
@@ -396,7 +433,7 @@ class MaterialDiscovery {
       onEvent?.call('抓取正文 ${i + 1}/${targets.length}:${c.title}');
       try {
         final text = c.fromSearchApi
-            ? await _fetchViaSearchApi(client, c.url)
+            ? await _fetchViaSearchApi(client, c)
             : await _fetchViaPublicSource(c);
         if (text == null || text.trim().length < 200) {
           dropped++;
@@ -432,16 +469,104 @@ class MaterialDiscovery {
   }
 
   /// 公开源(RSS/Gutenberg/arXiv)只认拉丁字母 query;中文 query 交给官方搜索。
+  ///
+  /// 注意正则必须写成 `r'[\u4e00-\u9fff]'`(单反斜杠):写成 `[\\u4e00-...]`
+  /// 会被当成"字面反斜杠 + 数字/大写字母区间",于是中文 query 被放行到公开源、
+  /// 带大写的英文 query 反被拦下 —— 两个方向都错。
   static bool _isLatinQuery(String q) =>
-      !RegExp(r'[\\u4e00-\\u9fff]').hasMatch(q);
+      !RegExp(r'[\u4e00-\u9fff]').hasMatch(q);
 
+  /// 用模型给「继续找更多」换一批**新检索词**(纯编排,不联网时可通过
+  /// [handler] 注入假实现)。
+  ///
+  /// 与两段式补救([discover] 内部)复用同一套输入/提示词/解析口径:
+  /// - 输入是"用户需求 + 已见候选 + 偏好摘要",模型只准给检索词,不准编资源;
+  /// - [seenCandidates] 直接接受结果卡 map(键名做归一:[buildRefinePrompt]
+  ///   要 `site`,调用方快照里叫 `sourceLabel` 也认),最多取前 8 条喂模型;
+  /// - 输出经 [parseRefineQueries] 同一套规则清洗(去编号/引号/空串/重复),
+  ///   并夹到**最多 4 条**;
+  /// - 模型/网络失败(含 [handler] 抛异常)返回空列表 —— 调用方按"没换出新词"
+  ///   处理,不中断页面。
+  ///
+  /// [handler] 不传时用构造时注入的 [onRefine](生产默认 [defaultMaterialRefine])。
+  Future<List<String>> planNextQueries({
+    required String userQuery,
+    required List<Map<String, Object?>> seenCandidates,
+    String prefsHint = '',
+    MaterialRefineHandler? handler,
+  }) async {
+    final input = MaterialRefineInput(
+      userQuery: userQuery.trim(),
+      candidates: normalizeSeenCandidates(seenCandidates),
+      prefsHint: prefsHint,
+    );
+    var proposed = const <String>[];
+    try {
+      proposed = await (handler ?? _refine)(input);
+    } catch (e) {
+      // 和补救轮同一个边界:换词失败只是"这轮没新词",不能让页面崩掉。
+      return const <String>[];
+    }
+    if (proposed.isEmpty) return const <String>[];
+    // 注入 handler 的输出也走同一套解析规则:去编号/引号/空串/重复,夹到 4 条。
+    return parseRefineQueries(jsonEncode(<String, Object?>{'queries': proposed}));
+  }
+
+  /// URL 是否"像一个 PDF 文件 / PDF 阅读页"(纯字符串判断,不联网)。
+  ///
+  /// 两处用途:
+  /// 1. 流水线内部:官方 Fetch 抓到极短正文时,判断要不要走 PDF 回退;
+  /// 2. UI:给卡片出「打开 PDF」按钮/图标,避免把 PDF 当普通文章渲染。
+  ///
+  /// 口径(只看 path/query,不猜站点是否"能读"):`.pdf` 结尾、`/pdf/xxx`
+  /// 路由(arXiv 等)、query 里带 `.pdf` 或 `format=pdf`/`filetype=pdf` 这类
+  /// 下载参数。`pdf-guide` 这种"名字里带 pdf"的文章不当成 PDF。
+  static bool looksLikePdfUrl(String url) {
+    final raw = url.trim();
+    if (raw.isEmpty) return false;
+    final uri = Uri.tryParse(raw);
+    if (uri == null) return false;
+    final path = uri.path.toLowerCase();
+    if (path.endsWith('.pdf')) return true;
+    if (path.endsWith('/pdf') || path.contains('/pdf/')) return true;
+    final query = uri.query.toLowerCase();
+    if (query.isEmpty) return false;
+    if (query.contains('.pdf')) return true;
+    return RegExp(
+      r'(^|&)(format|filetype|type|output)=pdf(&|$)',
+    ).hasMatch(query);
+  }
+
+  /// 官方 Fetch 抓正文;失败(或 PDF 页面只拿到极短正文)时回退公开抓取层。
+  ///
+  /// 为什么需要回退:官方 Fetch 遇到 PDF/需要渲染的页面常返回 404 或只有
+  /// 标题级的几行文字,而 [MaterialSourceService.fetchAnyUrl] 走普通 HTTP,
+  /// 对有静态 HTML 的页面更宽容。[fetchAnyUrl] 本身也可能抛(PDF 二进制、
+  /// 反爬、正文抽不出来),这里**吞掉异常返回 null** —— 对流水线而言
+  /// "这页抓不到"是正常结果,不能把整轮发现打断。
   Future<String?> _fetchViaSearchApi(
     DeepSeekSearchClient client,
-    String url,
+    DiscoveredCandidate c,
   ) async {
-    final page = await client.fetch(url);
-    if (page == null) return null;
-    return plainTextFromMarkdown(page.content);
+    final page = await client.fetch(c.url);
+    final text = page == null ? null : plainTextFromMarkdown(page.content).trim();
+    final tooShort = text == null || text.length < 200;
+    if (page == null || (tooShort && looksLikePdfUrl(c.url))) {
+      return _fetchViaAnyUrlFallback(c);
+    }
+    return text;
+  }
+
+  /// PDF/抓取失败回退:[MaterialSourceService.fetchAnyUrl],失败返回 null(不抛)。
+  Future<String?> _fetchViaAnyUrlFallback(DiscoveredCandidate c) async {
+    try {
+      final doc = await _source.fetchAnyUrl(c.url, titleHint: c.title);
+      final text = doc.chunks.map((chunk) => chunk.text).join('\n\n').trim();
+      return text.isEmpty ? null : text;
+    } catch (_) {
+      // PDF 二进制/登录墙/反爬:回退也读不了 → 如实当作"没抓到",不编内容。
+      return null;
+    }
   }
 
   Future<String?> _fetchViaPublicSource(DiscoveredCandidate c) async {
@@ -454,6 +579,30 @@ class MaterialDiscovery {
 // ═══════════════════════════════════════════════════════════════════════
 // 纯函数层(可单测;UI 与联调都依赖这里的口径)
 // ═══════════════════════════════════════════════════════════════════════
+
+/// 合并「基础检索词 + 继续找更多的补充词」(纯函数,可单测)。
+///
+/// 口径与 [MaterialDiscovery.discover] 的检索计划一致:
+/// - 逐条 trim,空串丢弃;
+/// - 按出现顺序去重(基础词在前、补充词在后,先搜最相关的);
+/// - 最多 [limit] 条(默认 8:公开源跑全部拉丁字母 query,官方搜索只取前 4 条,
+///   再多只会增加时延/成本,不会多出卡片)。
+List<String> mergeDiscoveryQueries({
+  required List<String> queries,
+  List<String> extraQueries = const <String>[],
+  int limit = 8,
+}) {
+  final out = <String>[];
+  final seen = <String>{};
+  for (final raw in <String>[...queries, ...extraQueries]) {
+    final q = raw.trim();
+    if (q.isEmpty) continue;
+    if (!seen.add(q)) continue;
+    out.add(q);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
 
 /// 候选去重键:URL 归一(去协议差异/大小写/尾斜杠/常见追踪参数)。
 ///
@@ -642,6 +791,61 @@ List<Map<String, Object?>> refineCandidateMaps(
           : c.date!.toIso8601String().substring(0, 10),
       'authority': c.authority,
       'snippet': c.snippet,
+    });
+  }
+  return out;
+}
+
+/// 把「已见候选快照 map」归一成 [buildRefinePrompt] 认识的键(纯函数,可单测)。
+///
+/// 为什么需要:频道快照/结果卡存的是 `sourceLabel`/`imageUrl`/`fromSearchApi`
+/// 这一套面向 UI 的键,而提示词层要 `site`/`date`/`authority`/`snippet`。
+/// 两种写法都认(缺字段容错),调用方不用为了"继续找更多"重排 map。
+///
+/// 规则:
+/// - `url` 为空的条目跳过(对"哪些出处已经有了"没有信息量);
+/// - 最多 [limit] 条(默认 8:与 [refineCandidateMaps] 同一 token 口径);
+/// - `date` 统一成 `YYYY-MM-DD`(DateTime 与 ISO 串都接受);
+/// - `authority` 缺失记 -1(= 未知),不是 0(0 是"官方明确说不权威")。
+List<Map<String, Object?>> normalizeSeenCandidates(
+  List<Map<String, Object?>> seen, {
+  int limit = 8,
+}) {
+  String textOf(Map<String, Object?> map, List<String> keys) {
+    for (final key in keys) {
+      final value = map[key];
+      if (value == null) continue;
+      final text = '$value'.trim();
+      if (text.isNotEmpty) return text;
+    }
+    return '';
+  }
+
+  final out = <Map<String, Object?>>[];
+  for (final raw in seen) {
+    if (out.length >= limit) break;
+    final url = textOf(raw, const ['url', 'link']);
+    if (url.isEmpty) continue;
+    final title = textOf(raw, const ['title', 'name']);
+    final site = textOf(raw, const ['site', 'sourceLabel', 'source']);
+    final snippet = textOf(raw, const ['snippet', 'summary', 'note']);
+    var date = '';
+    final rawDate = raw['date'] ?? raw['published'] ?? raw['updatedAt'];
+    if (rawDate is DateTime) {
+      date = rawDate.toIso8601String();
+    } else if (rawDate != null) {
+      date = '$rawDate'.trim();
+    }
+    if (date.length > 10) date = date.substring(0, 10);
+    final rawAuthority = raw['authority'];
+    final authority = rawAuthority is num ? rawAuthority.toInt() : -1;
+    out.add(<String, Object?>{
+      'title': title.isEmpty ? url : title,
+      'url': url,
+      'site': site,
+      'date': date,
+      'authority': authority,
+      'snippet': snippet,
     });
   }
   return out;
