@@ -61,6 +61,9 @@
 
 ## 7. 发布状态
 
-- 本地提交 `4c4f330`（**未 push**）
-- 构建产物：`build/app/outputs/flutter-apk/app-release.apk`（arm64 release）
-- 按约定：**等用户真机截图验收通过后**再 push master + tag `v2.27.0` + gh release
+- 本地提交 `4c4f330`（功能）/ `e3b0e8e`（符号+交付清单）/ `9c3e00f`（交接文档+发布脚本）——**未 push**
+- 构建产物：`build/app/outputs/flutter-apk/app-release.apk`（arm64 release，versionCode 92 / versionName 2.27.0）
+- **签名与上一版一致**（apksigner 证书 SHA-256 `f94a4bec…`，v2.26.0 相同）→ 可直接覆盖安装/App 内更新
+- **原生库结构与上一版一致**（arm64-v8a: libapp/libflutter/libdartjni；libdartjni 另带 v7a/x86_64 条目，与 v2.26.0 相同）
+- 渲染图索引：`docs/ui-preview/real/INDEX.md`（按主题列出每张图对应屏幕，供真机验收对照）
+- 按约定：**等用户真机截图验收通过后**再 push master + tag `v2.27.0` + gh release（脚本 `tool/publish_v2.27.0.sh` 已备好）
