@@ -11,7 +11,7 @@ import '../../widgets/app_ui.dart';
 import '../../widgets/design_kit.dart';
 import '../../widgets/v4/v4_kit.dart';
 import '../../widgets/waiting.dart';
-import 'material_discover_screen.dart';
+import 'find_material_screen.dart';
 import 'material_import_flow.dart';
 import 'widgets/material_topic_card.dart';
 
@@ -207,10 +207,7 @@ class _MaterialCategoryScreenState extends State<MaterialCategoryScreen> {
                     onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) => MaterialDiscoverScreen(
-                          initialNeed:
-                              '按「${widget.topic.label}」方向找真实材料,要能抓到原文',
-                        ),
+                        builder: (_) => const FindMaterialScreen(),
                       ),
                     ),
                     child: Row(

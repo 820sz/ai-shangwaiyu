@@ -61,9 +61,20 @@
 
 ## 7. 发布状态
 
-- 本地提交 `4c4f330`（功能）/ `e3b0e8e`（符号+交付清单）/ `9c3e00f`（交接文档+发布脚本）——**未 push**
+- 本地提交 `4c4f330`（功能）/ `e3b0e8e`（符号+交付清单）/ `9c3e00f`（交接文档+发布脚本）/ `8f94e87`（渲染图索引+发布前核验）——**未 push**
 - 构建产物：`build/app/outputs/flutter-apk/app-release.apk`（arm64 release，versionCode 92 / versionName 2.27.0）
 - **签名与上一版一致**（apksigner 证书 SHA-256 `f94a4bec…`，v2.26.0 相同）→ 可直接覆盖安装/App 内更新
 - **原生库结构与上一版一致**（arm64-v8a: libapp/libflutter/libdartjni；libdartjni 另带 v7a/x86_64 条目，与 v2.26.0 相同）
 - 渲染图索引：`docs/ui-preview/real/INDEX.md`（按主题列出每张图对应屏幕，供真机验收对照）
 - 按约定：**等用户真机截图验收通过后**再 push master + tag `v2.27.0` + gh release（脚本 `tool/publish_v2.27.0.sh` 已备好）
+
+### 7.1 发布前补漏（QA 复检通过）
+
+产品级入口审计发现「旧 AI 找材料页」还有 2 处**活入口**（输入首页「AI 找材料」动作砖 +「AI 帮找」按钮、题材分类页"让 AI 去找"卡），
+会与新的「找材料」形成两套入口。已修（只改接线/文案，不改业务）：
+`input_home.dart` 与 `material_category_screen.dart` 均改推 `FindMaterialScreen`，文案统一为「找材料」。
+
+- QA 复检：改路线由正确，`MaterialDiscoverScreen` **已无活入口**（剩余 3 处引用均在死链：`CategoryMaterialScreen` ← 旧 `MaterialCenterScreen` 页面零实例化；`MaterialBrowseScreen` 仅以 `settingsOnly:true` 构造不渲染补长尾卡）；回归 `material_hub_test` + `material_center_helpers_test` **+20 全过**。
+- 勘误记录：`legacy_material_center_screen.dart` 里的类名是 `MaterialCenterScreen`（旧名遗留），不是 `LegacyMaterialCenterScreen`。
+- 补漏后重建 APK：**SHA256 `5151176bc42c53335455039047c11be5912c5bf6dc3529a9c616ff5a0b971e6a`**（以此为准；旧包 `50ff35d…` 作废）。
+

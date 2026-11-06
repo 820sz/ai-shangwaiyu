@@ -22,7 +22,7 @@ import '../../widgets/graphics/graphics.dart';
 import '../../widgets/v4/v4_kit.dart';
 import '../../widgets/waiting.dart';
 import 'material_import_flow.dart';
-import 'material_discover_screen.dart';
+import 'find_material_screen.dart';
 import 'material_reader_screen.dart';
 import 'process_chat.dart';
 import 'widgets/ai_article_section.dart';
@@ -154,11 +154,12 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
     });
   }
 
-  /// AI 按需求找材料(v3 批 2):需求→检索计划→公开源+官方搜索→抓正文算难度。
+  /// 「找材料」统一入口(v2.27.0)：旧的 AI 找材料页已下线，这里进新的
+  /// 「找材料」(自由搜 / 按我的情况找)，与材料中心/hub 的入口是同一页。
   void _openAiDiscover() {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => const MaterialDiscoverScreen()),
+      MaterialPageRoute(builder: (_) => const FindMaterialScreen()),
     ).then((_) {
       if (mounted) _loadShelf();
     });
@@ -247,8 +248,8 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
                     Expanded(
                       child: V4ActionTile(
                         icon: Icons.auto_awesome,
-                        title: 'AI 找材料',
-                        subtitle: '说出需求自动找',
+                        title: '找材料',
+                        subtitle: '自由搜 · 或按你的情况找',
                         domain: GraphicDomain.academic,
                         onTap: _openAiDiscover,
                       ),
@@ -528,7 +529,7 @@ class _InputHomeScreenState extends State<InputHomeScreen> {
                     height: 48,
                     child: OutlinedButton(
                       onPressed: _openAiDiscover,
-                      child: const Text('AI 帮找'),
+                      child: const Text('找材料'),
                     ),
                   ),
                 ),
