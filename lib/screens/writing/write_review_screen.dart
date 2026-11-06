@@ -23,6 +23,7 @@ import '../../widgets/design_kit.dart' show AppProgressRing;
 import '../../widgets/error_state.dart';
 import '../../widgets/writing_labels.dart';
 import '../input/widgets/follow_up_drawer.dart';
+import '../output/widgets/paper_kit.dart';
 import 'writing_logs_screen.dart';
 
 /// 写译批改(v1.5.0 初版 / v1.6.0 重构 / v2.13 手写直批 + 可配置)。
@@ -984,6 +985,10 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // 纸面:整页套纸面主题(各 phase 的显式取色也走纸面,不留果冻紫)
+    return Theme(
+      data: paperThemeOf(context),
+      child: Builder(builder: (context) {
     return PopScope(
       canPop: false, // 我们手动控制:先问保存/离开,再决定退不退(P2-27)
       onPopInvokedWithResult: (didPop, result) async {
@@ -1000,8 +1005,11 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
         }
       },
       child: Scaffold(
-        appBar: AppBar(
-          title: const Text('写译批改'),
+        // 视觉 A(纸面工作台):顶栏无阴影、页面底色、居中细眉标;
+        // 下面的旧卡片在 PaperSkin 下自动失去柔影,与输出内页同一张纸。
+        appBar: paperAppBar(
+          context,
+          '写译工作台 · 按 rubric 批改',
           actions: [
             // 常驻保存入口(P2-27):结果页很长,底部的保存按钮得滚到底才看得见;
             // 而原来只有"批改完成弹一次"的对话框,点过"暂不保存"就再也回不来。
@@ -1062,6 +1070,8 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
         ),
       ),
     ); // PopScope
+      }),
+    );
   }
 
   // ── 编辑态 ──
@@ -1070,235 +1080,230 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
     final theme = Theme.of(context);
     final isHandwritten = _materialType == kMaterialTypeHandwritten;
     final wordCount = _wordCount;
+    // 主行动只留一个:手写稿有图时"直接批改图"是主行动,否则"AI 批改"是主行动。
+    final gradeImagesIsPrimary = isHandwritten && _images.isNotEmpty;
     return ListView(
-      padding: Insets.page,
-      children: [
-        // 材料类型(取值与文案见 lib/widgets/writing_labels.dart,
-        // 与「写译记录」页共用一份 —— P2-29 的局部收口)
-        SegmentedButton<String>(
-          segments: const [
-            ButtonSegment(
+      // 底部留 120:滚到底时最后一项不会被底部主行动压住
+      padding: const EdgeInsets.fromLTRB(Gap.page, Gap.md, Gap.page, 120),
+      children: <Widget>[
+        PaperTitle(
+          title: '写译批改',
+          subtitle: isHandwritten
+              ? '拍下手写稿直接批改，或先转成电子档改错别字；结果按 rubric 给维度分与依据。'
+              : '粘贴或输入英文，按 rubric 给维度分与依据。',
+        ),
+        const SizedBox(height: Gap.lg),
+
+        // 01 材料类型(纸面分段:细边 + 选中墨色实心)
+        const PaperSectionHead(index: '01', title: '材料类型'),
+        const SizedBox(height: Gap.sm),
+        PaperSegmented(
+          value: _materialType,
+          options: const <({String value, String label, IconData? icon})>[
+            (
               value: kMaterialTypeHandwritten,
-              icon: Icon(Icons.gesture, size: 16),
-              label: Text(kMaterialTypeHandwrittenLabel),
+              label: kMaterialTypeHandwrittenLabel,
+              icon: Icons.gesture,
             ),
-            ButtonSegment(
+            (
               value: kMaterialTypeElectronic,
-              icon: Icon(Icons.keyboard_alt_outlined, size: 16),
-              label: Text(kMaterialTypeElectronicLabel),
+              label: kMaterialTypeElectronicLabel,
+              icon: Icons.keyboard_alt_outlined,
             ),
           ],
-          selected: {_materialType},
-          onSelectionChanged: (s) => setState(() => _materialType = s.first),
+          onChanged: (value) => setState(() => _materialType = value),
+        ),
+        const SizedBox(height: Gap.lg),
+
+        // 02 练习类型(决定用写作还是翻译的评分维度)
+        const PaperSectionHead(
+          index: '02',
+          title: '练习类型',
+          trailing: '决定评分维度',
         ),
         const SizedBox(height: Gap.sm),
-
-        // 练习类型:决定用四六级写作还是翻译的评分标准(两套维度不同)
-        Row(
-          children: [
-            Text(
-              '练习类型',
-              style: theme.textTheme.titleSmall
-                  ?.copyWith(fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(width: Gap.xs),
-            Text(
-              '决定用哪套评分维度',
-              style: theme.textTheme.bodySmall
-                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-            ),
+        PaperSegmented(
+          value: _taskType.name,
+          options: const <({String value, String label, IconData? icon})>[
+            (value: 'writing', label: '写作', icon: Icons.edit_note),
+            (value: 'translation', label: '翻译', icon: Icons.translate),
           ],
+          onChanged: (value) => setState(() {
+            for (final type in WriteReviewTaskType.values) {
+              if (type.name == value) _taskType = type;
+            }
+          }),
         ),
-        const SizedBox(height: Gap.xxs),
-        SegmentedButton<WriteReviewTaskType>(
-          segments: const [
-            ButtonSegment(
-              value: WriteReviewTaskType.writing,
-              icon: Icon(Icons.edit_note, size: 16),
-              label: Text('写作'),
-            ),
-            ButtonSegment(
-              value: WriteReviewTaskType.translation,
-              icon: Icon(Icons.translate, size: 16),
-              label: Text('翻译'),
-            ),
-          ],
-          selected: {_taskType},
-          onSelectionChanged: (s) => setState(() => _taskType = s.first),
-        ),
-        const SizedBox(height: Gap.sm),
+        const SizedBox(height: Gap.lg),
 
-        // 手写稿:固定高度横向条,永不撑破页面
-        if (isHandwritten) ...[
-          Row(
-            children: [
-              Text(
-                '手写稿 ${_images.length}/$_maxImages',
-                style: theme.textTheme.titleSmall
-                    ?.copyWith(fontWeight: FontWeight.w600),
-              ),
-              const Spacer(),
-              IconButton(
-                tooltip: '从相册选择（可多选）',
-                onPressed: () => _pickImages(fromCamera: false),
-                icon: const Icon(Icons.photo_library_outlined),
-              ),
-              IconButton(
-                tooltip: '拍照',
-                onPressed: () => _pickImages(fromCamera: true),
-                icon: const Icon(Icons.camera_alt_outlined),
-              ),
-            ],
-          ),
-          const SizedBox(height: Gap.xxs),
-          SizedBox(
-            height: 92,
-            child: _images.isEmpty
-                ? GestureDetector(
-                    onTap: () => _pickImages(fromCamera: false),
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.surfaceContainerHighest,
-                        borderRadius: Radii.controlRadius,
-                        border: Border.all(
-                          color: theme.colorScheme.outlineVariant,
-                        ),
-                      ),
-                      child: Center(
-                        child: Icon(
-                          Icons.add_photo_alternate_outlined,
-                          size: 28,
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ),
-                  )
-                : ListView.separated(
-                    scrollDirection: Axis.horizontal,
-                    itemCount: _images.length,
-                    separatorBuilder: (_, _) => const SizedBox(width: Gap.xs),
-                    itemBuilder: (_, i) => Stack(
-                      children: [
-                        GestureDetector(
-                          onTap: () => _openImageViewer(i),
-                          child: ClipRRect(
-                            borderRadius:
-                                BorderRadius.circular(Radii.control - 2),
-                            child: Image.file(
-                              _images[i],
-                              width: 92,
-                              height: 92,
-                              fit: BoxFit.cover,
-                            ),
-                          ),
-                        ),
-                        // 角标压在图片上:黑白在两种主题下都对(硬编码色闸门已豁免)
-                        Positioned(
-                          top: 2,
-                          right: 2,
-                          child: GestureDetector(
-                            onTap: () => setState(() => _images.removeAt(i)),
-                            child: Container(
-                              width: 22,
-                              height: 22,
-                              decoration: const BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: Colors.black54,
-                              ),
-                              child: const Icon(
-                                Icons.close,
-                                size: 14,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-          ),
-          const SizedBox(height: Gap.xs),
-          // v2.13:两条路并列摆出来,由用户选,不再强制先转写。
-          // 竖排而不是左右各半:系统字号放大到 2× 时,半宽按钮里的
-          // "先转成电子档(可改)" 会被挤破;写译用户里有不少会开大字号。
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: _images.isEmpty ? null : _transcribe,
-              icon: const Icon(Icons.document_scanner_outlined, size: 16),
-              // 标签刻意短("可改"放在下面的说明里):大字号下长按钮会挤爆
-              label: const Text('先转电子档'),
-            ),
-          ),
-          const SizedBox(height: Gap.xs),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.tonalIcon(
-              onPressed: _images.isEmpty ? null : _reviewImages,
-              icon: const Icon(Icons.auto_awesome_outlined, size: 16),
-              label: const Text('直接批改手写图'),
-            ),
-          ),
-          const SizedBox(height: Gap.xxs),
-          Text(
-            '两种都行：先转电子档可以顺手改错别字；直接批改会把照片交给 AI，跳过转写确认。',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-              height: 1.4,
-            ),
+        // 03 手写稿:拍/选图 + 转写入口(只在手写档出现)
+        if (isHandwritten) ...<Widget>[
+          PaperSectionHead(
+            index: '03',
+            title: '手写稿',
+            trailing: '${_images.length}/$_maxImages 张',
           ),
           const SizedBox(height: Gap.sm),
+          PaperCard(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                SizedBox(height: 92, child: _buildImageStrip(theme)),
+                const SizedBox(height: Gap.sm),
+                Row(
+                  children: <Widget>[
+                    IconButton(
+                      tooltip: '从相册选择（可多选）',
+                      onPressed: () => _pickImages(fromCamera: false),
+                      icon: const Icon(Icons.photo_library_outlined),
+                    ),
+                    IconButton(
+                      tooltip: '拍照',
+                      onPressed: () => _pickImages(fromCamera: true),
+                      icon: const Icon(Icons.camera_alt_outlined),
+                    ),
+                    const Spacer(),
+                    // 次级入口:先转写再批改(改错别字用)
+                    TextButton(
+                      onPressed: _images.isEmpty ? null : _transcribe,
+                      child: const Text('先转电子档'),
+                    ),
+                  ],
+                ),
+                // 主行动:直接把手写稿交给视觉模型批改
+                PaperPillButton(
+                  label: '直接批改手写图',
+                  icon: Icons.auto_awesome_outlined,
+                  onTap: _images.isEmpty ? null : _reviewImages,
+                  primary: true,
+                  expand: true,
+                ),
+                const SizedBox(height: Gap.xs),
+                Text(
+                  '两种都行：先转电子档可以顺手改错别字；直接批改会把照片交给 AI，跳过转写确认。',
+                  style: AppFont.tagStyle.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                    height: 1.45,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: Gap.lg),
         ],
 
-        // 文本区:固定高度,内部滚动(长文不会把页面顶爆)
-        Row(
-          children: [
-            Text(
-              isHandwritten ? '电子档' : '英文内容',
-              style: theme.textTheme.titleSmall
-                  ?.copyWith(fontWeight: FontWeight.w600),
-            ),
-            const Spacer(),
-            Text(
-              '$wordCount 词',
-              style: theme.textTheme.bodySmall
-                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-            ),
-          ],
+        // 04 电子档/英文内容:白纸卡包住输入区,不再是"一片空白"
+        PaperSectionHead(
+          index: isHandwritten ? '04' : '03',
+          title: isHandwritten ? '电子档' : '英文内容',
+          trailing: '$wordCount 词',
         ),
-        const SizedBox(height: Gap.xs),
-        SizedBox(
-          height: 240,
-          child: TextField(
-            controller: _textCtrl,
-            maxLines: null,
-            expands: true,
-            textAlignVertical: TextAlignVertical.top,
-            onChanged: (_) => setState(() {}),
-            decoration: InputDecoration(
-              hintText: isHandwritten
-                  ? '可先点「先转电子档」，或直接在上面输入/粘贴英文'
-                  : '粘贴或输入要批改的英文',
-              border: const OutlineInputBorder(),
-              contentPadding: const EdgeInsets.all(Gap.sm),
+        const SizedBox(height: Gap.sm),
+        PaperCard(
+          padding: const EdgeInsets.all(14),
+          child: SizedBox(
+            height: 212,
+            child: TextField(
+              controller: _textCtrl,
+              maxLines: null,
+              expands: true,
+              textAlignVertical: TextAlignVertical.top,
+              onChanged: (_) => setState(() {}),
+              decoration: InputDecoration(
+                hintText: isHandwritten
+                    ? '可先点「先转电子档」，或直接在上面输入/粘贴英文'
+                    : '粘贴或输入要批改的英文',
+              ),
             ),
           ),
         ),
         const SizedBox(height: Gap.md),
         _reviewSettingsEntry(theme),
         const SizedBox(height: Gap.md),
-        SizedBox(
-          width: double.infinity,
-          child: FilledButton.icon(
-            onPressed: _review,
-            icon: const Icon(Icons.fact_check_outlined, size: 18),
-            label: const Text('AI 批改'),
-            style: FilledButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: Gap.sm + 2),
+
+        // 唯一主行动:电子档文本批改;手写有图时降为次级(主行动在上面的 03 区块)
+        PaperPillButton(
+          label: 'AI 批改',
+          icon: Icons.fact_check_outlined,
+          onTap: _review,
+          primary: !gradeImagesIsPrimary,
+          expand: true,
+        ),
+      ],
+    );
+  }
+
+  /// 手写稿横向图片条(空态=虚线感细边卡,有图=缩略图 + 右上角删除)。
+  Widget _buildImageStrip(ThemeData theme) {
+    if (_images.isEmpty) {
+      return GestureDetector(
+        onTap: () => _pickImages(fromCamera: false),
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.transparent,
+            borderRadius: Radii.controlRadius,
+            border: Border.all(color: theme.colorScheme.outlineVariant),
+          ),
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Icon(
+                  Icons.add_photo_alternate_outlined,
+                  size: 26,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '从相册选择 / 拍照',
+                  style: AppFont.tagStyle.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                    fontSize: 10.5,
+                  ),
+                ),
+              ],
             ),
           ),
         ),
-      ],
+      );
+    }
+    return ListView.separated(
+      scrollDirection: Axis.horizontal,
+      itemCount: _images.length,
+      separatorBuilder: (_, _) => const SizedBox(width: Gap.xs),
+      itemBuilder: (_, i) => Stack(
+        children: <Widget>[
+          GestureDetector(
+            onTap: () => _openImageViewer(i),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(Radii.control - 2),
+              child: Image.file(
+                _images[i],
+                width: 92,
+                height: 92,
+                fit: BoxFit.cover,
+              ),
+            ),
+          ),
+          Positioned(
+            top: 2,
+            right: 2,
+            child: GestureDetector(
+              onTap: () => setState(() => _images.removeAt(i)),
+              child: Container(
+                width: 22,
+                height: 22,
+                decoration: const BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.black54,
+                ),
+                child: const Icon(Icons.close, size: 14, color: Colors.white),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -2044,9 +2049,13 @@ class _ReviewSettingsSheetState extends State<_ReviewSettingsSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-    final options = WritingReviewSettings.thinkingOptionsFor(widget.model);
+    // 纸面(P3):设置弹层也套纸面主题,ChoiceChip/输入框不再落旧果冻色
+    return Theme(
+      data: paperThemeOf(context),
+      child: Builder(builder: (context) {
+        final theme = Theme.of(context);
+        final cs = theme.colorScheme;
+        final options = WritingReviewSettings.thinkingOptionsFor(widget.model);
     return SafeArea(
       top: false,
       child: SingleChildScrollView(
@@ -2060,17 +2069,8 @@ class _ReviewSettingsSheetState extends State<_ReviewSettingsSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 拖拽条:告诉用户这层可以下滑关掉(与追问抽屉同一套手势)
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: cs.outlineVariant,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
+            // 拖拽条由全局主题提供(showDragHandle),这里不画第二条(双横杠修复)。
+            const SizedBox(height: 4),
             const SizedBox(height: Gap.sm),
             Row(
               children: [
@@ -2218,6 +2218,8 @@ class _ReviewSettingsSheetState extends State<_ReviewSettingsSheet> {
           ],
         ),
       ),
+    );
+      }),
     );
   }
 }

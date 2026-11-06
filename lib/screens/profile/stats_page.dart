@@ -9,10 +9,12 @@ import '../../providers/stats_provider.dart';
 import '../../services/learner_extras_sync.dart';
 import '../../services/material_library.dart';
 import '../../widgets/app_ui.dart';
+import '../../widgets/dash_kit.dart';
 import '../../widgets/design_kit.dart';
 import '../../widgets/error_state.dart';
 import '../../widgets/graphics/graphics.dart';
 import '../../widgets/stats_chart.dart';
+import '../../widgets/v4/v4_kit.dart';
 import '../../widgets/waiting.dart';
 
 /// 学习统计页。
@@ -52,7 +54,10 @@ class _StatsPageScreenState extends State<StatsPageScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final stats = context.watch<StatsProvider>();
-    final appBar = AppBar(title: const Text('学习统计'));
+    final appBar = const V4JellyAppBar(
+      title: '学习统计',
+      domain: GraphicDomain.custom,
+    );
 
     if (stats.loading) {
       return Scaffold(
@@ -103,15 +108,47 @@ class _StatsPageScreenState extends State<StatsPageScreen> {
         // 两屏并排看"边距不一致"正是用户说的"不够统一"。
         padding: Insets.page,
         children: [
-          // ── 最近在读(v2.9,用户 10/2 第 4 条)──
-          // 用户原话:"材料中心阅读的那些材料阅读的进度,要自动同步留存,
-          // 以及同步到'学习统计''本周报告'里。"
-          // 阅读器把进度写进 material_progress,这里把同一份进度读出来 ——
-          // 用户在阅读器里读到哪儿,统计页立刻看得到,不用再回去翻。
-          // 没读过任何材料时整卡不显示(不给空卡占地方)。
+          // ── 数据内页 · A 诊断台:KPI 带(与助理复盘/错误档案同一排布)──
+          DashKpiBand(
+            items: <DashKpi>[
+              DashKpi(label: '累计词汇', value: '${stats.totalVocab}', unit: '个'),
+              DashKpi(
+                label: '连续打卡',
+                value: '${stats.streakDays}',
+                unit: '天',
+                color: theme.colorScheme.primary,
+              ),
+              DashKpi(
+                label: '近 7 天活动',
+                value: '$weekTotal',
+                unit: weekTotal > 0 ? '' : '',
+                color: weekTotal > 0
+                    ? DashTheme.of(context).good
+                    : DashTheme.of(context).inkFaint,
+              ),
+            ],
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 8, bottom: 2),
+            child: Text(
+              '活跃 $activeDays7/7 天'
+              '${weekMinutes > 0 ? ' · 共 $weekMinutes 分钟' : ''}'
+              ' · 口径:新收词 + 练习量',
+              style: AppFont.metaStyle.copyWith(
+                fontSize: 10.5,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+
+          // ── 最近在读(阅读进度自动同步到统计;没读过时整卡不显示)──
           const _ReadingInProgressCard(),
 
-          const AppSectionHeader(title: '学习节奏', indexLabel: '01'),
+          const DashSectionTitle(
+            index: '01',
+            title: '学习节奏',
+            trailing: '近 12 周',
+          ),
 
           // ── 打卡热力图(近 12 周)──
           // v3(批 5):Card + Padding(16) 换成 AppCard/AppSectionTitle ——
@@ -122,8 +159,7 @@ class _StatsPageScreenState extends State<StatsPageScreen> {
               children: [
                 AppSectionTitle(
                   title: '学习打卡',
-                  subtitle: '连续 ${stats.streakDays} 天 · 近 12 周'
-                      '(每格 = 当天新收词 + 练习)',
+                  subtitle: '连续 ${stats.streakDays} 天 · 近 12 周',
                 ),
                 const SizedBox(height: Gap.md),
                 // 热力图色阶与组件内部一致:空档 = 图形弱化色(极低 alpha),
@@ -167,8 +203,7 @@ class _StatsPageScreenState extends State<StatsPageScreen> {
               children: [
                 AppSectionTitle(
                   title: '近 7 天学习量',
-                  subtitle: '新收词 + 练习量 · 左旧右新'
-                      '${weekMinutes > 0 ? ' · 共 $weekMinutes 分钟' : ''}',
+                  subtitle: '新收词 + 练习量 · 左旧右新',
                   trailing: Text(
                     '合计 $weekTotal',
                     style: AppFont.metaStyle.copyWith(
@@ -181,7 +216,7 @@ class _StatsPageScreenState extends State<StatsPageScreen> {
                   // 整周没有任何记录:不画一排 0 柱、不显示 0/7 的环 ——
                   // 那会被读成"系统给你打了 0 分",而事实是"这周没数据"。
                   // v3:空态用图形资产插画(AppEmpty 内含 EmptyArt),不再是灰图标。
-                  AppEmpty(
+                  AppEmptyState(
                     icon: Icons.query_stats_outlined,
                     title: '这 7 天还没有记录',
                     hint: '收词或做练习后,这里会出现每天的学习量',
@@ -234,7 +269,11 @@ class _StatsPageScreenState extends State<StatsPageScreen> {
             ),
           ),
 
-          const AppSectionHeader(title: '词汇增长', indexLabel: '02'),
+          const DashSectionTitle(
+            index: '02',
+            title: '词汇增长',
+            trailing: '近 30 天',
+          ),
 
           // ── 学习曲线(近 30 天,图形:TrendLine)──
           AppCard(
@@ -334,7 +373,7 @@ class _MonthlyCard extends StatelessWidget {
           const SizedBox(height: Gap.md),
           if (total <= 0)
             // 没有数据就明说,不画一排 0 柱(会被读成"每月都是 0 词")。
-            AppEmpty(
+            AppEmptyState(
               icon: Icons.calendar_month_outlined,
               title: '还没有月度数据',
               hint: '收词后这里会按月统计新增词汇',

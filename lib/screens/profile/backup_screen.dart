@@ -10,6 +10,7 @@ import '../../services/export_service.dart';
 import '../../widgets/app_ui.dart';
 import '../../widgets/design_kit.dart';
 import '../../widgets/waiting.dart';
+import '../../widgets/v4/v4_kit.dart';
 
 /// 备份与导出(v2.2「生产力」)。
 ///
@@ -261,7 +262,7 @@ class _BackupScreenState extends State<BackupScreen> {
     final theme = Theme.of(context);
     final muted = theme.colorScheme.onSurfaceVariant;
     return Scaffold(
-      appBar: AppBar(title: const Text('备份与导出')),
+      appBar: const V4JellyAppBar(title: '备份与导出'),
       body: ListView(
         padding: Insets.page,
         children: [

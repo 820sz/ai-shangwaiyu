@@ -656,18 +656,8 @@ class _CategoryVocabSheetState extends State<_CategoryVocabSheet> {
       padding: EdgeInsets.only(bottom: widget.bottomSafe),
       child: Column(
       children: [
-        // 拖拽条
-        Padding(
-          padding: const EdgeInsets.only(top: 8, bottom: 4),
-          child: Container(
-            width: 40,
-            height: 4,
-            decoration: BoxDecoration(
-              color: theme.colorScheme.outlineVariant,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-        ),
+        // 拖拽条由全局主题提供,这里不再画第二条(双横杠修复)。
+        const SizedBox(height: 4),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           child: Row(

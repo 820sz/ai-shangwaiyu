@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../config/v4_theme.dart';
 import '../services/bookshelf.dart';
-import 'material_cover.dart';
+import 'shelf_cover_grid.dart';
 
 /// 书架形态 B · **3D 立体轮播书架**(v5 · 第二版,对齐用户参考图)。
 ///
@@ -25,7 +25,9 @@ class ShelfCarouselView extends StatefulWidget {
   final ValueChanged<BookshelfBook>? onTapBook;
   final ValueChanged<BookshelfBook>? onLongPressBook;
 
-  /// 渲染测试用:关掉联网抓封面(本组件封面走 MaterialCover,不主动抓图)
+  /// 渲染测试用开关(历史参数):本组件封面已改为 [CoverOrText],
+  /// **不再联网抓封面** —— 有 `coverUrl` 显示真图,没有就显示文字版式。
+  /// 保留该参数只为不破坏既有调用点,传什么都不会触发网络请求。
   final bool enableCoverFetch;
 
   const ShelfCarouselView({
@@ -399,6 +401,10 @@ class _ShelfCarouselViewState extends State<ShelfCarouselView> {
   }
 
   /// 被抽出来展示的封面:Matrix4 透视倾斜 + 阴影(参考图构图)
+  ///
+  /// 封面内容是 [CoverOrText]:**有 `coverUrl` 显示真图,没有就显示文字版式**
+  /// (标题 + 英文原名 + 难度),不再用 `MaterialCover` 的程序化渐变封面 ——
+  /// 用户 2026-11-06 真机反馈那层渐变「原版书」封面是假封面。
   Widget _featuredCover(V4Skin skin, BookshelfBook book) {
     final level = book.cefr.isNotEmpty ? book.cefr : '';
     return Transform(
@@ -431,34 +437,18 @@ class _ShelfCarouselViewState extends State<ShelfCarouselView> {
         child: Stack(
           fit: StackFit.expand,
           children: <Widget>[
-            MaterialCover(
-              seed: book.title,
+            CoverOrText(
+              title: book.title,
+              subtitle: book.subtitle,
               kind: book.kind,
-              imageUrl: book.coverUrl,
+              coverUrl: book.coverUrl,
+              levelLabel: level,
               width: 132,
               height: _featuredHeight,
               radius: 8,
             ),
-            // 书脊根部的阴影:像是从书架里抽出来
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              height: 22,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: <Color>[
-                      Colors.transparent,
-                      Colors.black.withValues(alpha: 0.18),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            if (level.isNotEmpty)
+            // 真图时才需要额外的黑底难度角标(文字版式自己带难度胶囊)
+            if (shelfCoverHasImage(book.coverUrl) && level.isNotEmpty)
               Positioned(
                 left: 8,
                 bottom: 7,

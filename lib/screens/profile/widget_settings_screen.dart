@@ -6,6 +6,7 @@ import '../../services/widget_service.dart';
 import '../../widgets/app_ui.dart';
 import '../../widgets/design_kit.dart';
 import '../../widgets/waiting.dart';
+import '../../widgets/v4/v4_kit.dart';
 
 /// 桌面小组件设置页(v2.2)。
 ///
@@ -82,7 +83,7 @@ class _WidgetSettingsScreenState extends State<WidgetSettingsScreen> {
     final theme = Theme.of(context);
     final muted = theme.colorScheme.onSurfaceVariant;
     return Scaffold(
-      appBar: AppBar(title: const Text('桌面小组件')),
+      appBar: const V4JellyAppBar(title: '桌面小组件'),
       body: ListView(
         padding: Insets.page,
         children: [

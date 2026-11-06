@@ -229,7 +229,7 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 200));
     expect(find.text('今日精读'), findsWidgets);
-    expect(find.text('按需求找材料'), findsOneWidget);
+    expect(find.text('找材料'), findsOneWidget);
     expect(find.text('按题材'), findsOneWidget);
     expect(find.text('按形式'), findsOneWidget);
     expect(find.text('按场景'), findsOneWidget);

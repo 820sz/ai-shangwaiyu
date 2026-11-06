@@ -4,6 +4,7 @@ import 'dart:convert';
 import '../models/learner_model.dart';
 import '../models/vocabulary.dart';
 import '../services/base_api.dart';
+import '../services/content_quality.dart';
 import '../services/deepseek_api.dart';
 import '../services/deepseek_search.dart';
 import '../services/doubao_api.dart' show DoubaoApiService;
@@ -11,6 +12,7 @@ import '../services/input_prefs.dart';
 import '../services/material_library.dart';
 import '../services/material_source.dart';
 import '../services/original_search.dart';
+import '../services/url_key.dart';
 
 /// ═══════════════════════════════════════════════════════════════════════
 /// **按需找材料 · 发现流水线**(v3 · 批 2 · C1-3/C1-5/C1-6/C1-7)
@@ -109,6 +111,9 @@ class DiscoveredCandidate {
   DiscoveredCandidate copyWith({
     String? content,
     MaterialAnalysis? analysis,
+    /// 抓正文时顺带拿到的真实封面（og:image / markdown 首图）。
+    /// 拿不到就保持 null —— UI 走"无封面 → 标题文字版式"，不画假封面。
+    String? imageUrl,
   }) {
     return DiscoveredCandidate(
       title: title,
@@ -116,7 +121,7 @@ class DiscoveredCandidate {
       sourceLabel: sourceLabel,
       kind: kind,
       snippet: snippet,
-      imageUrl: imageUrl,
+      imageUrl: imageUrl ?? this.imageUrl,
       authority: authority,
       date: date,
       rerankScore: rerankScore,
@@ -428,27 +433,51 @@ class MaterialDiscovery {
     // ── ④ 抓正文 + 本地难度分析(串行:内存/网络都稳,不做并发解码) ──
     final analyzed = <DiscoveredCandidate>[];
     var dropped = 0;
+    var junkPages = 0;
     for (var i = 0; i < targets.length; i++) {
       final c = targets[i];
       onEvent?.call('抓取正文 ${i + 1}/${targets.length}:${c.title}');
       try {
-        final text = c.fromSearchApi
+        final fetched = c.fromSearchApi
             ? await _fetchViaSearchApi(client, c)
             : await _fetchViaPublicSource(c);
-        if (text == null || text.trim().length < 200) {
+        final text = fetched.text?.trim();
+        // 内容质量闸门（2026-11-06 用户反馈「真题点进去只有书籍宣传信息」）：
+        // 旧门槛只有"≥200 字"，书店商品页/课程售卖页/站点导航页都能过。
+        final reject = text == null || text.isEmpty
+            ? '没抓到正文'
+            : ContentQuality.rejectReason(text);
+        if (reject != null) {
           dropped++;
+          if (text != null &&
+              text.isNotEmpty &&
+              ContentQuality.looksLikeBookOrProductPage(text)) {
+            junkPages++;
+          }
+          notes.add('跳过《${c.title}》:$reject');
           continue;
         }
+        // 过闸后 text 一定非空（reject != null 已 continue），这里显式收敛类型
+        final body = text!;
         final analysis = await MaterialLibrary.analyze(
-          text,
+          body,
           model: model,
           vocab: vocab,
         );
-        analyzed.add(c.copyWith(content: text, analysis: analysis));
+        analyzed.add(
+          c.copyWith(
+            content: body,
+            analysis: analysis,
+            imageUrl: fetched.cover,
+          ),
+        );
       } catch (e) {
         dropped++;
         notes.add('抓取失败:${c.title}($e)');
       }
+    }
+    if (junkPages > 0) {
+      notes.add('跳过 $junkPages 篇只有图书/课程介绍或购买信息的页面(不是正文)。');
     }
 
     // ── ⑤ 排序 + 解释性推荐理由 ──
@@ -539,40 +568,60 @@ class MaterialDiscovery {
 
   /// 官方 Fetch 抓正文;失败(或 PDF 页面只拿到极短正文)时回退公开抓取层。
   ///
-  /// 为什么需要回退:官方 Fetch 遇到 PDF/需要渲染的页面常返回 404 或只有
-  /// 标题级的几行文字,而 [MaterialSourceService.fetchAnyUrl] 走普通 HTTP,
-  /// 对有静态 HTML 的页面更宽容。[fetchAnyUrl] 本身也可能抛(PDF 二进制、
-  /// 反爬、正文抽不出来),这里**吞掉异常返回 null** —— 对流水线而言
-  /// "这页抓不到"是正常结果,不能把整轮发现打断。
-  Future<String?> _fetchViaSearchApi(
+  /// 返回 `(text, cover)`：text 是正文，cover 是抓取时顺带拿到的真实封面
+  /// （markdown 首图 / 公开源 og:image）。拿不到 cover 就是 null —— 结果卡
+  /// 走"无封面 → 标题文字版式"，**不画渐变假封面**（用户 2026-11-06 要求）。
+  Future<({String? text, String? cover})> _fetchViaSearchApi(
     DeepSeekSearchClient client,
     DiscoveredCandidate c,
   ) async {
     final page = await client.fetch(c.url);
-    final text = page == null ? null : plainTextFromMarkdown(page.content).trim();
+    final markdown = page?.content;
+    final text = markdown == null
+        ? null
+        : plainTextFromMarkdown(markdown).trim();
     final tooShort = text == null || text.length < 200;
     if (page == null || (tooShort && looksLikePdfUrl(c.url))) {
       return _fetchViaAnyUrlFallback(c);
     }
-    return text;
+    return (
+      text: text,
+      cover: ContentQuality.firstImageFromMarkdown(
+        markdown ?? '',
+        baseUrl: c.url,
+      ),
+    );
   }
 
   /// PDF/抓取失败回退:[MaterialSourceService.fetchAnyUrl],失败返回 null(不抛)。
-  Future<String?> _fetchViaAnyUrlFallback(DiscoveredCandidate c) async {
+  Future<({String? text, String? cover})> _fetchViaAnyUrlFallback(
+    DiscoveredCandidate c,
+  ) async {
     try {
       final doc = await _source.fetchAnyUrl(c.url, titleHint: c.title);
       final text = doc.chunks.map((chunk) => chunk.text).join('\n\n').trim();
-      return text.isEmpty ? null : text;
+      return (
+        text: text.isEmpty ? null : text,
+        cover: ContentQuality.absoluteHttpUrl(
+          doc.coverUrl ?? '',
+          baseUrl: c.url,
+        ),
+      );
     } catch (_) {
       // PDF 二进制/登录墙/反爬:回退也读不了 → 如实当作"没抓到",不编内容。
-      return null;
+      return (text: null, cover: null);
     }
   }
 
-  Future<String?> _fetchViaPublicSource(DiscoveredCandidate c) async {
+  Future<({String? text, String? cover})> _fetchViaPublicSource(
+    DiscoveredCandidate c,
+  ) async {
     final doc = await _source.fetchAnyUrl(c.url, titleHint: c.title);
     final text = doc.chunks.map((chunk) => chunk.text).join('\n\n');
-    return text.trim().isEmpty ? null : text;
+    return (
+      text: text.trim().isEmpty ? null : text,
+      cover: ContentQuality.absoluteHttpUrl(doc.coverUrl ?? '', baseUrl: c.url),
+    );
   }
 }
 
@@ -604,22 +653,13 @@ List<String> mergeDiscoveryQueries({
   return out;
 }
 
-/// 候选去重键:URL 归一(去协议差异/大小写/尾斜杠/常见追踪参数)。
+/// 候选去重键 —— **历史名字,实现已统一到 [normalizedUrlKey]**（P2-9）。
 ///
-/// 为什么不能直接比原串:同一篇文章在 RSS 里是 `http://x/a?id=1`、在搜索结果里
-/// 是 `https://x/a/` —— 不去重会同一篇出现两次,用户点开发现是同一篇。
-String dedupeKeyOf(String url) {
-  var s = url.trim();
-  if (s.isEmpty) return '';
-  s = s.replaceFirst(RegExp(r'^https?://'), '');
-  final hash = s.indexOf('#');
-  if (hash >= 0) s = s.substring(0, hash);
-  // 追踪参数对"是不是同一篇"没有影响
-  s = s.replaceAll(RegExp(r'[?&](utm_[^&]*|ref=[^&]*|source=[^&]*)'), '');
-  s = s.replaceAll(RegExp(r'/+$'), '');
-  s = s.toLowerCase();
-  return s;
-}
+/// 以前这里有一套独立规则(只去 http(s)、不处理尾斜杠顺序不同、参数过滤口径
+/// 与频道快照那套不一致),导致"发现去重"和"快照/保存关系去重"对同一条 URL
+/// 可能给出不同 key。现在两处都调用 `url_key.dart` 的唯一实现,本函数只保留
+/// 名字给既有调用方/测试用。
+String dedupeKeyOf(String url) => normalizedUrlKey(url);
 
 /// 抓取前排序:官方搜索按"权威度 + 相关性",公开源按可达性优先级。
 ///

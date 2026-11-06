@@ -9,6 +9,7 @@ import '../../services/learner_model_store.dart';
 import '../../services/placement_diagnosis.dart';
 import '../../services/vocab_estimator.dart';
 import '../../services/word_frequency.dart';
+import '../../widgets/v4/v4_kit.dart';
 import '../../widgets/waiting.dart';
 
 /// 词汇量测试(v2.0)：「速测」与「完整版」两个模式。
@@ -307,8 +308,8 @@ class _PlacementTestScreenState extends State<PlacementTestScreen> {
         if (quit) Navigator.pop(context);
       },
       child: Scaffold(
-        appBar: AppBar(
-          title: Text(widget.full ? '词汇量测试 · 完整版' : '词汇量测试 · 速测'),
+        appBar: V4JellyAppBar(
+          title: widget.full ? '词汇量测试 · 完整版' : '词汇量测试 · 速测',
           bottom: _phase == _Phase.intro || _phase == _Phase.result
               ? null
               : PreferredSize(

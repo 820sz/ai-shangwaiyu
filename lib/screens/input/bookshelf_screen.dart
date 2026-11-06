@@ -204,8 +204,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
         _titleTried.add(entry.key); // 试过就记上,别每次进书架都重试同一批
         final cn = translated[entry.value]?.trim() ?? '';
         if (cn.isEmpty) continue;
-        await DatabaseService.setMaterialTitleCn(entry.key, cn);
-        changed = true;
+        // P2-1 尾巴（QA B7-①）：写库现在返回 bool，只有真写进去才需要重载列表；
+        // 失败不打断（补译名是锦上添花），但别让"changed=true"触发一次无用重载。
+        final saved = await DatabaseService.setMaterialTitleCn(entry.key, cn);
+        if (saved) changed = true;
       }
       if (changed && mounted) await _load(showSkeleton: false);
     } catch (_) {

@@ -111,4 +111,94 @@ class ReaderSettings {
       debugPrint('ReadFlow 保存阅读设置失败: $e');
     }
   }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // C 方案阅读排印(2026-11-06 用户拍板)
+  //
+  // 为什么另起一组常量而不改上面的 baseFontSize/档位:
+  // 上面那组是两个阅读器(材料 / 输出文章)共用的**历史口径**,直接改基准
+  // 会顺带改掉输出板块文章阅读器的观感 —— 本轮只允许改阅读器主题内的东西。
+  // 所以 C 用「档位下标 → C 字号」的映射:用户原来 5 档字号 / 3 档行距的选择
+  // 完全保留(旧键、旧值都还能读),只是落到 C 的号数上。
+  // ═══════════════════════════════════════════════════════════════════
+
+  /// C 方案正文号数表:用户 5 档字号依次落在这 5 个号上(默认第 0 档 = 18 号)
+  static const List<double> cFontSizes = [18, 19.5, 21, 22.5, 24];
+
+  /// C 方案行距:紧凑 / 标准 / 宽松(默认标准 = 1.8 —— C 规范正文 18/1.8)
+  static const List<double> cLineHeights = [1.6, 1.8, 2.0];
+
+  /// 当前设置对应的 C 正文号数(默认 18)
+  static double cBodyFontSize() => cFontSizes[scaleIndex(fontScale())];
+
+  /// 当前设置对应的 C 正文行高(默认 1.8)
+  static double cBodyLineHeight() => cLineHeights[lineHeightIndex(lineHeight())];
+
+  /// 设置面板/控制台显示用的短标签:「18 号」「21 号」
+  static String cFontLabel(double size) {
+    final rounded = size.roundToDouble();
+    return (size - rounded).abs() < 0.01
+        ? '${rounded.toInt()} 号'
+        : '${size.toStringAsFixed(1)} 号';
+  }
+
+  /// 纸张三色(C 方案 + B 方案的纸张色卡,用户 2026-11-06 拍板)
+  ///
+  /// - [white] 纸白(冷灰纸 #EEEFEA,默认 —— C 方案基底);
+  /// - [beige] 米黄(暖纸 #F4EFE3,搬 B 方案的暖纸);
+  /// - [night] 墨夜(深色纸 #16181C)。
+  ///
+  /// 只存枚举名,不存色值:色值表在 `lib/widgets/reader_paper.dart`
+  /// ([ReaderPalette]),换配色不需要写迁移。
+  static const String keyReaderPaper = 'reader_paper';
+
+  static ReaderPaper paper() {
+    try {
+      final raw = Hive.box(AppConstants.hiveBoxSettings).get(keyReaderPaper);
+      if (raw is String) {
+        for (final p in ReaderPaper.values) {
+          if (p.name == raw) return p;
+        }
+      }
+      if (raw is int && raw >= 0 && raw < ReaderPaper.values.length) {
+        // 容错:手改配置写成 0/1/2 也能读
+        return ReaderPaper.values[raw];
+      }
+    } catch (e) {
+      debugPrint('ReadFlow 读取纸张设置失败(用默认): $e');
+    }
+    return ReaderPaper.white;
+  }
+
+  static Future<void> setPaper(ReaderPaper value) async {
+    try {
+      await Hive.box(AppConstants.hiveBoxSettings)
+          .put(keyReaderPaper, value.name);
+    } catch (e) {
+      debugPrint('ReadFlow 保存纸张设置失败: $e');
+    }
+  }
+
+  /// 纸张显示名(设置面板用)
+  static String paperLabel(ReaderPaper value) => value.label;
+}
+
+/// 纸张三色(持久化在 `reader_settings` 的 settings Hive box 里)
+enum ReaderPaper {
+  /// 纸白:冷灰纸,默认(C 方案基底)
+  white('纸白', '冷灰纸 · 默认'),
+
+  /// 米黄:暖纸(搬 B 方案的纸张)
+  beige('米黄', '暖纸 · 长时间读'),
+
+  /// 墨夜:深色纸
+  night('墨夜', '深色纸 · 夜里读');
+
+  const ReaderPaper(this.label, this.hint);
+
+  /// 显示名(纸白 / 米黄 / 墨夜)
+  final String label;
+
+  /// 一句说明(色卡下面那行小字)
+  final String hint;
 }

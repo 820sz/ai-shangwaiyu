@@ -1,455 +1,144 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:hive_flutter/hive_flutter.dart';
 
-import '../config/constants.dart';
-import '../config/design_tokens.dart';
-import '../config/theme.dart';
-import '../config/v4_theme.dart';
-import '../services/api_endpoint.dart';
-import '../services/doubao_api.dart' show primaryModelChoices;
-import 'waiting.dart';
+import 'reader_paper.dart';
+import 'reader_progress.dart';
 
-/// 阅读器底部动作栏(v2.7,用户第 3 条)。
+/// 阅读器 C 方案(2026-11-06 用户拍板)的底部:贴底 2px 进度线 + 42px 把手区。
 ///
-/// 用户原话:"多功能分析(翻译、文本处理…等快捷功能键 —— 快捷键位置位于该功能
-/// 进入后的界面下方(就跟原来的拍照识别进入后下方的「模型、保存、追问」的 ui
-/// 位置一样)"。所以这一条**照搬拍照识图页底部栏的形态**(同样的芯片样式、
-/// 同样的"保存"C 位、同样的高度),只把功能换成阅读需要的:
+/// **零常驻按钮**是 C 方案的核心承诺之一:旧 `ReaderActionBar` 是一条单行
+/// Row 里塞 6 个控件(模型 / 翻译 / 丰富形式 / 收词 / 追问 / 更多,见
+/// `docs/READER-REDESIGN-OPTIONS-2026-11-06.md` §1.1),把屏高 22% 吃掉了还
+/// 三套控件语言混用。现在底部只剩三样东西:
 ///
-/// `[模型 ▾] [翻译] [保存(N)] [追问] [更多 ▾]` + 上一行「收词存到 …  改」。
+/// ```
+/// ──────────── 2px 进度线(砖红)────────────
+///  37% 已读          ── 36×4 抓手 ──          上滑工具
+/// ```
 ///
-/// 为什么把模型选择放进阅读器:翻译、点词讲解、追问都走同一个模型,
-/// 用户在哪儿读就在哪儿换 —— 不必退回首页切完再进来。
-class ReaderActionBar extends StatelessWidget {
-  /// 是否已开启逐段翻译(高亮显示)
-  final bool translating;
-
-  /// 切换逐段翻译
-  final VoidCallback onToggleTranslation;
-
-  /// 本次阅读收了多少个词(显示在"保存"按钮上)
-  final int pickedCount;
-
-  /// 把本次收的词再确认一遍(保存/查看)
-  final VoidCallback onSave;
-
-  /// 打开追问抽屉
-  final VoidCallback onFollowUp;
-
-  /// 「更多」菜单里的动作
-  final List<ReaderMoreAction> moreActions;
-
-  /// 打开「丰富形式」(v2.9,用户第 3(5) 条):把这一段变成表格/思维导图/
-  /// 时间线/要点卡/自测卡。为 null 时不显示这个按钮。
-  final VoidCallback? onRichForms;
-
-  /// 收词保存位置的说明(如「书籍 / 红楼梦 · p33」)
-  final String saveTargetLabel;
-
-  /// 改保存位置(分类 / 材料名 / 页码)
-  final VoidCallback onChangeTarget;
-
-  /// 翻译进度说明(v2.8):开着翻译时显示「翻译中 3/40」这类状态;关着传空串。
-  /// 为什么要有:改成按需翻译后,用户需要知道"翻到哪了/还有多少没翻",
-  /// 否则"往下滚才会翻"这件事没有任何提示。
-  final String translationNote;
-
-  /// 换一个范围重新翻译(v2.9:用户自选翻译范围)
-  final VoidCallback? onRetranslate;
-
-  /// 翻译进度条(v2.9,用户第 3(2) 条"增加翻译的进度条"):
-  /// 真实进度 = 已完成段数 / 本次要翻的总段数;不在翻译时为 null(不显示)。
-  final ProgressStageBar? translationProgress;
-
-  /// 换了模型/思考档后通知页面重建(否则菜单里的勾还停在旧值)
-  final VoidCallback? onModelChanged;
-
-  const ReaderActionBar({
+/// 所有动作都收进「上滑阅读控制台」(见 `reader_console.dart`):
+/// 上滑把手区 / 点任意处 / 点右侧 % 胶囊都能打开。
+class ReaderBottomDock extends StatefulWidget {
+  const ReaderBottomDock({
     super.key,
-    required this.translating,
-    required this.onToggleTranslation,
-    required this.pickedCount,
-    required this.onSave,
-    required this.onFollowUp,
-    required this.moreActions,
-    required this.saveTargetLabel,
-    required this.onChangeTarget,
-    this.translationNote = '',
-    this.translationProgress,
-    this.onRetranslate,
-    this.onRichForms,
-    this.onModelChanged,
+    required this.progress,
+    required this.palette,
+    required this.onOpenConsole,
+    this.bottomInset = 0,
   });
 
-  /// 当前模型(Hive 实时读;与拍照识图页共用同一份设置)
-  static String get currentModel {
-    final v = Hive.box(AppConstants.hiveBoxSettings)
-        .get(AppConstants.keyDoubaoModel);
-    return (v is String && v.isNotEmpty) ? v : AppConstants.doubaoVisionModel;
+  /// 阅读进度(0~1),只重建把手区里的数字与那条 2px 线
+  final ValueListenable<double> progress;
+
+  final ReaderPalette palette;
+
+  /// 打开阅读控制台
+  final VoidCallback onOpenConsole;
+
+  /// 设备底部安全区(手势条/导航栏),由页面用 MediaQuery.viewPadding 传进来
+  final double bottomInset;
+
+  /// 把手区高度(C 规范 42px)
+  static const double handleHeight = 42;
+
+  /// 打开控制台所需的向上拖动距离
+  static const double swipeThreshold = 16;
+
+  @override
+  State<ReaderBottomDock> createState() => _ReaderBottomDockState();
+}
+
+class _ReaderBottomDockState extends State<ReaderBottomDock> {
+  double _dragDy = 0;
+
+  void _open() => widget.onOpenConsole();
+
+  void _onDragUpdate(DragUpdateDetails d) {
+    _dragDy += d.delta.dy;
   }
 
-  static String get currentThinking => ApiEndpointConfig.primary.thinking;
+  void _onDragEnd(DragEndDetails d) {
+    final velocity = d.primaryVelocity ?? 0;
+    // 慢拖过阈值、或者快速上滑(fling)都算"要上滑工具"
+    if (_dragDy <= -ReaderBottomDock.swipeThreshold || velocity < -220) {
+      _open();
+    }
+    _dragDy = 0;
+  }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-    final skin = V4Skin.of(context);
-    return Container(
-      // Plan A:底部动作栏变成"悬浮白玻璃胶囊",不再是一条贴边的实心条。
-      margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-      decoration: BoxDecoration(
-        color: skin.surface.withValues(alpha: 0.94),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: skin.hairline),
-        boxShadow: <BoxShadow>[
-          BoxShadow(
-            color: Colors.black.withValues(alpha: skin.dark ? 0.35 : 0.08),
-            blurRadius: 22,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // 保存位置(第 3 条"选择保存位置"):默认跟着材料走,随时可改
-          Padding(
-            padding: const EdgeInsets.fromLTRB(Gap.sm, Gap.xxs, Gap.xs, 0),
-            child: Row(
-              children: [
-                Icon(Icons.folder_outlined,
-                    size: 13, color: cs.onSurfaceVariant),
-                const SizedBox(width: Gap.xxs),
-                Expanded(
-                  child: Text(
-                    '收词存到:$saveTargetLabel',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: cs.onSurfaceVariant,
-                      fontSize: 11,
-                    ),
-                  ),
-                ),
-                TextButton(
-                  style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: Gap.xs),
-                    minimumSize: const Size(0, 28),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  onPressed: onChangeTarget,
-                  child: const Text('改', style: TextStyle(fontSize: 12)),
-                ),
-              ],
-            ),
-          ),
-          // 翻译进度(v2.9,用户第 3(2) 条):真实进度条 + 第 N/M 段 + 剩余估算 +
-          // 取消。**只在真的在翻的时候出现** —— 不翻的时候不留一个空进度条骗人。
-          if (translationProgress != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(Gap.sm, 0, Gap.sm, Gap.xxs),
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 460),
-                child: translationProgress,
-              ),
-            ),
-          // 翻译说明(v2.8):开着翻译时显示「已翻 3/40」这类状态;关着传空串。
-          if (translationNote.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(Gap.sm, 0, Gap.sm, 2),
+    final p = widget.palette;
+    return Column(
+      key: const ValueKey<String>('reader-bottom-dock'),
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        // 贴底 2px 进度线:常驻、不占布局、永远在视野里
+        ReaderProgressLine(progress: widget.progress, palette: p),
+        GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: _open,
+          onVerticalDragUpdate: _onDragUpdate,
+          onVerticalDragEnd: _onDragEnd,
+          child: SizedBox(
+            height: ReaderBottomDock.handleHeight,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
               child: Row(
-                children: [
-                  Icon(Icons.translate, size: 12, color: cs.primary),
-                  const SizedBox(width: Gap.xxs),
-                  Expanded(
-                    child: Text(
-                      translationNote,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: cs.primary,
+                children: <Widget>[
+                  ValueListenableBuilder<double>(
+                    valueListenable: widget.progress,
+                    builder: (_, raw, _) => Text(
+                      '${(raw.clamp(0.0, 1.0) * 100).round()}%',
+                      style: TextStyle(
                         fontSize: 11,
+                        height: 1.2,
+                        letterSpacing: 0.2,
+                        fontWeight: FontWeight.w800,
+                        color: p.ink,
                       ),
                     ),
                   ),
-                  // 换范围再翻(第 3(2) 条"让用户自选翻译范围")
-                  if (onRetranslate != null)
-                    TextButton(
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 6),
-                        minimumSize: const Size(0, 26),
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                      onPressed: onRetranslate,
-                      child: const Text('换范围', style: TextStyle(fontSize: 11)),
+                  const SizedBox(width: 8),
+                  Text(
+                    '已读',
+                    style: TextStyle(
+                      fontSize: 9.5,
+                      height: 1.2,
+                      color: p.inkFaint,
                     ),
+                  ),
+                  const Spacer(),
+                  // 36×4 抓手:既是"能上滑"的暗示,也是真正的上滑热区
+                  Container(
+                    key: const ValueKey<String>('reader-bottom-handle'),
+                    width: 36,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: p.inkFaint.withValues(alpha: 0.5),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  const Spacer(),
+                  GestureDetector(
+                    onTap: _open,
+                    behavior: HitTestBehavior.opaque,
+                    child: Text(
+                      '上滑工具',
+                      style: TextStyle(
+                        fontSize: 9.5,
+                        height: 1.2,
+                        color: p.inkFaint,
+                      ),
+                    ),
+                  ),
                 ],
               ),
-            ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
-            child: Row(
-              children: [
-                // 模型 + 思考档(与拍照识图页同一个弹出菜单)
-                Flexible(
-                  flex: 2,
-                  child: _ModelMenu(
-                    theme: theme,
-                    onChanged: onModelChanged,
-                  ),
-                ),
-                const SizedBox(width: 4),
-
-                // 翻译(第 2(2) 条的核心按钮)
-                Flexible(
-                  flex: 2,
-                  child: ActionChip(
-                    avatar: Icon(
-                      translating ? Icons.translate : Icons.translate_outlined,
-                      size: 16,
-                      color: translating ? cs.primary : cs.onSurfaceVariant,
-                    ),
-                    label: Text(
-                      '翻译',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: cs.onSurface,
-                        fontWeight:
-                            translating ? FontWeight.w600 : FontWeight.normal,
-                      ),
-                    ),
-                    onPressed: onToggleTranslation,
-                    visualDensity: VisualDensity.compact,
-                    backgroundColor:
-                        translating ? cs.primary.withAlpha(20) : cs.surface,
-                    side: BorderSide(
-                      color: translating ? cs.primary : cs.outlineVariant,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 4),
-
-                // 丰富形式(第 3(5) 条):让 AI 把这一段整理成表格/导图/时间线…
-                if (onRichForms != null) ...[
-                  Flexible(
-                    flex: 3,
-                    child: ActionChip(
-                      avatar: Icon(Icons.auto_awesome_outlined,
-                          size: 16, color: cs.primary),
-                      label: Text(
-                        '丰富形式',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 12, color: cs.onSurface),
-                      ),
-                      onPressed: onRichForms,
-                      visualDensity: VisualDensity.compact,
-                      backgroundColor: cs.surface,
-                      side: BorderSide(color: cs.outlineVariant),
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                ],
-
-                // 保存(C 位)
-                Flexible(
-                  flex: 3,
-                  child: FilledButton.icon(
-                    onPressed: onSave,
-                    icon: const Icon(Icons.bookmark_add_outlined, size: 16),
-                    label: Text(
-                      pickedCount > 0 ? '已收($pickedCount)' : '收词',
-                      style: const TextStyle(fontSize: 13),
-                    ),
-                    style: FilledButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 8,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 4),
-
-                // 追问
-                Flexible(
-                  flex: 2,
-                  child: ActionChip(
-                    avatar: Icon(Icons.chat_bubble_outline,
-                        size: 16, color: cs.primary),
-                    label: Text('追问',
-                        style: TextStyle(fontSize: 12, color: cs.onSurface)),
-                    onPressed: onFollowUp,
-                    visualDensity: VisualDensity.compact,
-                    backgroundColor: cs.surface,
-                    side: BorderSide(color: cs.outlineVariant),
-                  ),
-                ),
-
-                // 更多(阅读设置 / 听写 / 导出 / 原文链接 / 读完)
-                if (moreActions.isNotEmpty)
-                  PopupMenuButton<String>(
-                    tooltip: '更多',
-                    padding: EdgeInsets.zero,
-                    icon: Icon(Icons.more_vert,
-                        size: 20, color: cs.onSurfaceVariant),
-                    onSelected: (v) {
-                      for (final a in moreActions) {
-                        if (a.id == v) {
-                          a.onSelected();
-                          return;
-                        }
-                      }
-                    },
-                    itemBuilder: (_) => [
-                      for (final a in moreActions)
-                        PopupMenuItem(
-                          value: a.id,
-                          height: 38,
-                          child: Row(
-                            children: [
-                              Icon(a.icon, size: 17, color: cs.onSurfaceVariant),
-                              const SizedBox(width: Gap.xs),
-                              Text(a.label, style: const TextStyle(fontSize: 13)),
-                            ],
-                          ),
-                        ),
-                    ],
-                  ),
-              ],
             ),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-/// 「更多」菜单里的一项
-class ReaderMoreAction {
-  final String id;
-  final String label;
-  final IconData icon;
-  final VoidCallback onSelected;
-
-  const ReaderMoreAction({
-    required this.id,
-    required this.label,
-    required this.icon,
-    required this.onSelected,
-  });
-}
-
-/// 模型 + 思考档位弹出菜单(与拍照识图页同一套视觉与 Hive 键)
-class _ModelMenu extends StatelessWidget {
-  final ThemeData theme;
-  final VoidCallback? onChanged;
-
-  const _ModelMenu({required this.theme, this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    final model = ReaderActionBar.currentModel;
-    final thinking = ReaderActionBar.currentThinking;
-    return PopupMenuButton<String>(
-      offset: const Offset(0, -360),
-      padding: EdgeInsets.zero,
-      itemBuilder: (_) => [
-        ...primaryModelChoices().map((m) {
-          final isSel = m == model;
-          return PopupMenuItem(
-            value: 'model:$m',
-            height: 32,
-            child: Row(
-              children: [
-                if (isSel)
-                  Icon(Icons.check, size: 16, color: AppTheme.successColor(context))
-                else
-                  const SizedBox(width: 16),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    m,
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: isSel ? FontWeight.w600 : FontWeight.normal,
-                      color: isSel ? AppTheme.successColor(context) : null,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          );
-        }),
-        const PopupMenuDivider(),
-        ...AppConstants.thinkingOptionsFor(model).entries.map((e) {
-          final isSel = e.key == thinking;
-          return PopupMenuItem(
-            value: 'think:${e.key}',
-            height: 32,
-            child: Row(
-              children: [
-                Icon(
-                  isSel ? Icons.lightbulb : Icons.lightbulb_outline,
-                  size: 14,
-                  color: isSel
-                      ? AppTheme.warningColor(context)
-                      : theme.colorScheme.onSurfaceVariant,
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  e.value,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: isSel ? FontWeight.w600 : FontWeight.normal,
-                    color: isSel ? AppTheme.warningColor(context) : null,
-                  ),
-                ),
-              ],
-            ),
-          );
-        }),
+        ),
+        SizedBox(height: 8 + widget.bottomInset),
       ],
-      onSelected: (v) async {
-        if (v.startsWith('model:')) {
-          await Hive.box(AppConstants.hiveBoxSettings)
-              .put(AppConstants.keyDoubaoModel, v.substring(6));
-        } else if (v.startsWith('think:')) {
-          await Hive.box(AppConstants.hiveBoxSettings)
-              .put(AppConstants.keyDoubaoThinking, v.substring(6));
-        }
-        // 菜单自己是 StatelessWidget,换了模型要让页面重建 —— 否则菜单里的勾
-        // 还停在旧值,用户会以为"点了没生效"
-        onChanged?.call();
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-        decoration: BoxDecoration(
-          border: Border.all(color: theme.colorScheme.outlineVariant),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.model_training,
-                size: 14, color: theme.colorScheme.onSurfaceVariant),
-            const SizedBox(width: 2),
-            Flexible(
-              child: Text(
-                '模型',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                    fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
-              ),
-            ),
-            Icon(Icons.arrow_drop_up,
-                size: 14, color: theme.colorScheme.onSurfaceVariant),
-          ],
-        ),
-      ),
     );
   }
 }

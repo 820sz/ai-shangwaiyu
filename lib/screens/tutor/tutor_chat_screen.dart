@@ -8,6 +8,7 @@ import '../../services/api_endpoint.dart';
 import '../../services/database.dart';
 import '../../services/doubao_api.dart';
 import '../../services/tutor_engine.dart';
+import '../../widgets/v4/v4_kit.dart';
 import '../../widgets/waiting.dart';
 import '../input/widgets/follow_up_bubble.dart' show ThinkingBlock;
 import '../input/widgets/model_avatars.dart';
@@ -464,24 +465,10 @@ $evidence''';
     final theme = Theme.of(context);
     final muted = theme.colorScheme.onSurfaceVariant;
     return Scaffold(
-      appBar: AppBar(
-        // v2.8:标题就是**当前对话标题**(可改),右边是对话管理(用户第 5(2) 条)
-        title: InkWell(
-          onTap: _renameConversation,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Flexible(
-                child: Text(_title,
-                    maxLines: 1, overflow: TextOverflow.ellipsis),
-              ),
-              const SizedBox(width: 4),
-              Icon(Icons.edit_outlined,
-                  size: 14, color: theme.colorScheme.onSurfaceVariant),
-            ],
-          ),
-        ),
-        actions: [
+      appBar: V4JellyAppBar(
+        // 标题 = 当前对话标题;改名收进右侧「对话管理」菜单(能力不丢)
+        title: _title,
+        actions: <Widget>[
           // 思考强度:规划类问题值得多想;识图那条链路固定低档,不受这里影响
           PopupMenuButton<String>(
             tooltip: '思考强度',

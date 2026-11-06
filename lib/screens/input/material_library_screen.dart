@@ -8,6 +8,7 @@ import '../../services/database.dart';
 import '../../services/material_library.dart';
 import '../../services/material_source.dart';
 import '../../widgets/app_ui.dart';
+import '../../widgets/confirm_destructive.dart';
 import '../../widgets/v4/v4_kit.dart';
 import 'material_reader_screen.dart';
 
@@ -167,7 +168,13 @@ class _MaterialLibraryScreenState extends State<MaterialLibraryScreen> {
     final text = ctrl.text.trim();
     ctrl.dispose();
     if (ok != true || text.isEmpty) return;
-    await DatabaseService.setMaterialTitleCn(s.id, text);
+    // P2-1:DB 写方法返回成败,失败如实提示(否则用户看到列表没变,不知道是失败还是没网)。
+    final updated = await DatabaseService.setMaterialTitleCn(s.id, text);
+    if (!mounted) return;
+    if (!updated) {
+      showFeedbackSnack(context, '改标题失败:数据库没写进去,请重试');
+      return;
+    }
     await _load();
   }
 
@@ -202,7 +209,13 @@ class _MaterialLibraryScreenState extends State<MaterialLibraryScreen> {
       setState(() => _hidden.add(s.id));
       await _persistHidden();
     } else if (action == 'delete') {
-      await DatabaseService.deleteMaterial(s.id);
+      // P2-1:deleteMaterial 用 -1 表示删除出错(0 = 本来就没有)。
+      final deleted = await DatabaseService.deleteMaterial(s.id);
+      if (!mounted) return;
+      if (deleted < 0) {
+        showFeedbackSnack(context, '删除失败:数据库操作出错,材料还在,请重试');
+        return;
+      }
       await _load();
     }
   }
@@ -237,10 +250,16 @@ class _MaterialLibraryScreenState extends State<MaterialLibraryScreen> {
       setState(() => _hidden.addAll(_selected));
       await _persistHidden();
     } else {
+      var failed = 0;
       for (final id in _selected) {
-        await DatabaseService.deleteMaterial(id);
+        final deleted = await DatabaseService.deleteMaterial(id);
+        if (deleted < 0) failed++;
       }
       await _load();
+      if (!mounted) return;
+      if (failed > 0) {
+        showFeedbackSnack(context, '$failed 篇删除失败:数据库操作出错,请重试');
+      }
     }
     setState(() {
       _selected.clear();
@@ -461,7 +480,13 @@ class _MaterialLibraryScreenState extends State<MaterialLibraryScreen> {
               ),
               TextButton(
                 onPressed: () async {
-                  await DatabaseService.deleteMaterial(s.id);
+                  // P2-1:删失败不能装作删掉了(恢复按钮还在,但材料可能仍在库)。
+                  final deleted = await DatabaseService.deleteMaterial(s.id);
+                  if (!mounted) return;
+                  if (deleted < 0) {
+                    showFeedbackSnack(context, '删除失败:数据库操作出错,请重试');
+                    return;
+                  }
                   setState(() => _hidden.remove(s.id));
                   await _load();
                 },

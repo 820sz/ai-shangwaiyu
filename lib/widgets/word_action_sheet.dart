@@ -86,6 +86,11 @@ Future<void> showWordActionSheet(
   bool autoAsk = false,
   String sourceTitle = '',
   Future<String> Function(Vocabulary v)? onSave,
+  // 预览/测试专用:直接给一条词条数据,跳过网络查询。
+  // 默认 null = 生产行为完全不变(走 completeWordInfo)。
+  // 为什么加在组件层而不是各调用点:查词结果依赖真 API,渲染测试/截图没法
+  // 在不联网的前提下展示"正常查词结果",加一个默认 null 的注入口最干净。
+  @visibleForTesting Map<String, String>? previewWordInfo,
 }) {
   return showModalBottomSheet<void>(
     context: context,
@@ -105,6 +110,7 @@ Future<void> showWordActionSheet(
       autoAsk: autoAsk,
       sourceTitle: sourceTitle,
       onSave: onSave,
+      previewWordInfo: previewWordInfo,
     ),
   );
 }
@@ -117,6 +123,9 @@ class _WordActionSheet extends StatefulWidget {
   final String sourceTitle;
   final Future<String> Function(Vocabulary v)? onSave;
 
+  /// 预览/测试专用词条(见 [showWordActionSheet] 同名参数)
+  final Map<String, String>? previewWordInfo;
+
   const _WordActionSheet({
     required this.word,
     required this.sentence,
@@ -124,6 +133,7 @@ class _WordActionSheet extends StatefulWidget {
     required this.autoAsk,
     required this.sourceTitle,
     this.onSave,
+    this.previewWordInfo,
   });
 
   @override
@@ -203,6 +213,14 @@ class _WordActionSheetState extends State<_WordActionSheet> {
   }
 
   Future<void> _lookup() async {
+    final preview = widget.previewWordInfo;
+    if (preview != null) {
+      setState(() {
+        _info = preview;
+        _loading = false;
+      });
+      return;
+    }
     try {
       final info = await _api.completeWordInfo(widget.word);
       if (!mounted) return;

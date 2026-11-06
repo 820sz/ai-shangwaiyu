@@ -56,3 +56,6 @@ app.*.map.json
 
 # 调研产物(子代理下载的对标 App 截屏,不进仓库)
 .research/
+
+# 多 agent 串行跑 flutter 的锁目录(tool/lockrun.sh)
+/.buildlock/

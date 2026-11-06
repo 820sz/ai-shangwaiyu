@@ -25,6 +25,7 @@ import '../review/review_screen.dart';
 import 'cloze_practice_screen.dart';
 import 'practice_flow_screen.dart';
 import 'sentence_practice_screen.dart';
+import 'widgets/paper_kit.dart';
 import 'word_bank_drill_screen.dart';
 
 /// 出题入口(v3 · 批 3):先选"从哪出题",再进练习器。
@@ -66,6 +67,16 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
   String? _examId;
   List<ExamWord> _examWords = const [];
 
+  /// P0-2:等级筛选('' = 跟随学习目标;其余 = 用户在这屏临时指定练哪一级)。
+  ///
+  /// 为什么要在设置页也放筛选:题库能按 CET-4/CET-6 筛了,但"我要练六级真题"
+  /// 这件事必须在**出题入口**就能选,否则用户还是得先改学习目标再回来。
+  String _levelOverride = '';
+
+  /// 本次出题实际使用的考试等级(筛选 > 学习目标;识别不出为 null)
+  String? get _effectiveExam =>
+      _levelOverride.isNotEmpty ? _levelOverride : targetExamOf(_prefs.examGoals);
+
   @override
   void initState() {
     super.initState();
@@ -77,14 +88,29 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
     });
   }
 
+  /// 切等级:立刻按新等级重载考纲词表,并让"按你的目标练"的来源跟着变。
+  void _applyLevel(String level) {
+    if (level == _levelOverride) return;
+    setState(() => _levelOverride = level);
+    _loadExamVocab();
+  }
+
   /// 读考纲词表(assets 只读一次,失败静默 —— 没有词表时页面照常可用)。
   Future<void> _loadExamVocab() async {
     try {
       await ExamVocab.ensureLoaded();
-      final id = ExamVocab.primaryExam(_prefs.examGoals);
-      if (id == null) return;
+      final id = _effectiveExam;
+      if (id == null) {
+        if (mounted) {
+          setState(() {
+            _examId = null;
+            _examWords = const <ExamWord>[];
+          });
+        }
+        return;
+      }
       final words = ExamVocab.wordsFor(id, limit: 400);
-      if (!mounted || words.isEmpty) return;
+      if (!mounted) return;
       setState(() {
         _examId = id;
         _examWords = words;
@@ -229,8 +255,21 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
     if (_busy) return;
     switch (source.tier) {
       case OutputTier.word:
-        final pool =
-            source.id == 'news_words' ? OutputBank.newsWords : OutputBank.cet4Words;
+        // 2026-11-06 二期:四级/六级拆桶 —— 词池优先用考纲词表按等级切分,
+        // 词表没加载(离线首屏)再回落内置精选池,保证"点了一定有词"。
+        final level = switch (source.id) {
+          'cet4_words' => 'cet4',
+          'cet6_words' => 'cet6',
+          _ => null,
+        };
+        final pool = level == null
+            ? (source.id == 'news_words'
+                ? OutputBank.newsWords
+                : OutputBank.cet4Words)
+            : () {
+                final words = OutputBank.wordsForLevel(level);
+                return words.isEmpty ? OutputBank.cet4Words : words;
+              }();
         final words = OutputBank.pickWords(pool, 10);
         if (words.isEmpty) return;
         await appPush(
@@ -286,6 +325,8 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
       final set = await _composer.composeFromMaterial(
         materialText: material.text,
         examGoals: _prefs.examGoals,
+        // P2-1:入口等级筛选要真正生效(否则筛 CET-6 出题、题库按 CET-6 筛不到)
+        examTypeOverride: _effectiveExam,
         levelHint: _levelHint,
         bandHint: _prefs.band.hintForAi,
         tier: widget.tier.id,
@@ -319,7 +360,8 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
   /// 真题:先弹出"写作 / 翻译"选择,再用官方搜索抓真题页出题。
   Future<void> _composeFromExam() async {
     if (_busy) return;
-    final exam = targetExamOf(_prefs.examGoals);
+    // P0-2:等级 = 本屏筛选优先,否则取学习目标里更明确的那一个(四六级→cet4 兜底)
+    final exam = _effectiveExam;
     if (exam == null) {
       setState(() => _error = '先到「我的需求」里选一个考试目标（四六级 / 考研 / 雅思 / 托福 / 新概念），才能按真题出题。');
       return;
@@ -342,16 +384,26 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
                     ?.copyWith(fontWeight: FontWeight.w700),
               ),
             ),
-            ListTile(
-              leading: const Icon(Icons.edit_note),
-              title: const Text('写作真题'),
-              subtitle: const Text('按题目要求写一篇（议论文/图表/书信）'),
+            // P3:题型选择也走纸面件(旧 ListTile 与纸面语言不一致)
+            PaperRow(
+              leading: Icon(
+                Icons.edit_note,
+                size: 20,
+                color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+              ),
+              title: '写作真题',
+              meta: '按题目要求写一篇（议论文/图表/书信）',
               onTap: () => Navigator.pop(ctx, 'writing'),
             ),
-            ListTile(
-              leading: const Icon(Icons.translate),
-              title: const Text('翻译真题'),
-              subtitle: const Text('段落汉译英'),
+            const SizedBox(height: Gap.xs),
+            PaperRow(
+              leading: Icon(
+                Icons.translate,
+                size: 20,
+                color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+              ),
+              title: '翻译真题',
+              meta: '段落汉译英',
               onTap: () => Navigator.pop(ctx, 'translation'),
             ),
             const SizedBox(height: Gap.xs),
@@ -360,15 +412,26 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
       ),
     );
     if (section == null || !mounted) return;
+    // P0-1:年份 / 套数选择。只用于**检索**("按 2023 年第 2 套找页面"),
+    // 卷面身份以抓到的页面为准 —— 页面没写年份就只显示来源站点,不拿筛选条件冒充事实。
+    final paper = await _pickExamPaper();
+    if (paper == null || !mounted) return;
+    final paperHint = <String>[
+      if (paper.year != null) '${paper.year} 年',
+      if (paper.setNo != null) '第 ${paper.setNo} 套',
+    ].join();
     setState(() {
       _busy = true;
-      _busyLabel = '正在用 DeepSeek 搜索${examLabelFor(exam)}${sectionLabelFor(section)}…';
+      _busyLabel =
+          '正在用 DeepSeek 搜索$paperHint${examLabelFor(exam)}${sectionLabelFor(section)}…';
       _error = null;
     });
     try {
       final set = await _composer.composeFromExam(
         examType: exam,
         section: section,
+        year: paper.year,
+        setNo: paper.setNo,
         levelHint: _levelHint,
       );
       if (!mounted) return;
@@ -396,6 +459,143 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
     }
   }
 
+  /// 年份 / 套数选择(P0-1)。
+  ///
+  /// 返回 null = 用户取消。这里的年份套数**只作为检索条件**:
+  /// 页面标题/URL 里能抽到真实卷面身份时以页面为准,抽不到就只显示来源站点,
+  /// 绝不把"我按 2023 年搜的"伪装成"这套题是 2023 年的"。
+  Future<({int? year, int? setNo})?> _pickExamPaper() async {
+    final now = DateTime.now().year;
+    final years = <int?>[null, for (var y = now; y >= now - 6; y--) y];
+    final sets = <int?>[null, 1, 2, 3];
+    int? year;
+    int? setNo;
+    final picked = await showModalBottomSheet<({int? year, int? setNo})>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (ctx) {
+        final theme = Theme.of(ctx);
+        final cs = theme.colorScheme;
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            Widget option(
+              String label,
+              bool selected,
+              VoidCallback onTap,
+            ) {
+              final fg = selected ? cs.onPrimary : cs.onSurfaceVariant;
+              return GestureDetector(
+                onTap: onTap,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                  decoration: BoxDecoration(
+                    color: selected ? cs.primary : cs.surface,
+                    borderRadius: BorderRadius.circular(Radii.pill),
+                    border: Border.all(
+                      color: selected ? cs.primary : cs.outlineVariant,
+                      width: 1,
+                    ),
+                  ),
+                  child: Text(
+                    label,
+                    style: AppFont.tagStyle.copyWith(
+                      color: fg,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              );
+            }
+
+            return SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(
+                    Gap.md, 0, Gap.md, Gap.md),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '练哪一份真题？',
+                      style: theme.textTheme.titleMedium
+                          ?.copyWith(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '年份/套数只用于检索；卷面以抓到的页面为准，页面没写就不猜。',
+                      style: AppFont.tagStyle.copyWith(
+                        color: cs.onSurfaceVariant,
+                        height: 1.4,
+                      ),
+                    ),
+                    const SizedBox(height: Gap.md),
+                    Text(
+                      '年份',
+                      style: AppFont.tagStyle.copyWith(
+                        color: cs.onSurfaceVariant,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: Gap.xs),
+                    Wrap(
+                      spacing: Gap.xs,
+                      runSpacing: Gap.xs,
+                      children: [
+                        for (final y in years)
+                          option(
+                            y == null ? '不限' : '$y 年',
+                            year == y,
+                            () => setSheetState(() => year = y),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: Gap.md),
+                    Text(
+                      '套数',
+                      style: AppFont.tagStyle.copyWith(
+                        color: cs.onSurfaceVariant,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: Gap.xs),
+                    Wrap(
+                      spacing: Gap.xs,
+                      runSpacing: Gap.xs,
+                      children: [
+                        for (final s in sets)
+                          option(
+                            s == null ? '不限' : '第 $s 套',
+                            setNo == s,
+                            () => setSheetState(() => setNo = s),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: Gap.lg),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 48,
+                      child: FilledButton.icon(
+                        onPressed: () => Navigator.pop(
+                          ctx,
+                          (year: year, setNo: setNo),
+                        ),
+                        icon: const Icon(Icons.search, size: 18),
+                        label: const Text('去抓这几份真题'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+    return picked;
+  }
+
   /// 题组入库(失败返回 0:还能练,只是不进统计)。
   Future<int> _saveSet(OutputSetSpec set) async {
     try {
@@ -403,7 +603,8 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
         {
           'source': set.source,
           'exam_type': set.examType,
-          'paper_label': '',
+          'paper_year': set.paperYear,
+          'paper_label': set.paperLabel,
           'section': set.section,
           'title': set.title,
           'difficulty_cefr': '',
@@ -440,57 +641,40 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    // 纸面:本页所有显式取的色也走纸面主题(否则图标/文字会残留果冻紫)
+    final theme = paperThemeOf(context);
     final cs = theme.colorScheme;
-    final exam = targetExamOf(_prefs.examGoals);
-    return Scaffold(
-      appBar: AppBar(title: Text(_tierTitle)),
+    final exam = _effectiveExam;
+    final levelLabel = exam == null ? '' : examLabelFor(exam);
+    return PaperScaffold(
+      topBar: PaperTopBar(eyebrow: '出题来源'),
       body: ListView(
-        padding: Insets.page,
+        padding: const EdgeInsets.fromLTRB(
+            Gap.page, Gap.xs, Gap.page, 120),
         children: [
-          // v3 终版:题目来自哪里、这阶练什么,用一张带图形的引导卡说清,
-          // 而不是一段小字(用户 11/02:"前端看不出区别/太素")。
-          AppCard(
-            variant: AppCardVariant.hero,
-            child: Row(
-              children: [
-                OutputTierGraphic(
-                  tier: switch (widget.tier) {
-                    OutputTier.word => OutputTierArt.word,
-                    OutputTier.sentence => OutputTierArt.sentence,
-                    OutputTier.paragraph => OutputTierArt.paragraph,
-                    OutputTier.essay => OutputTierArt.essay,
-                  },
-                  size: 64,
-                  showPanel: true,
-                  semanticLabel: _tierTitle,
-                ),
-                const SizedBox(width: Gap.md),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '这一阶练什么',
-                        style: AppFont.tagStyle.copyWith(
-                          color: cs.primary,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        _tierHint,
-                        style: AppFont.metaStyle.copyWith(
-                          color: cs.onSurface,
-                          height: 1.45,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+          // ① 标题区(A 纸面:大标题 + 一句说明;不用彩色头图抢注意力)
+          PaperTitle(title: _tierTitle, subtitle: _tierHint),
+          const SizedBox(height: Gap.md),
+          // P0-2 等级筛选:这一屏选完,真题/考纲词/内置来源都跟着走
+          PaperLevelTabs(value: _levelOverride, onChanged: _applyLevel),
+          const SizedBox(height: 8),
+          Text(
+            exam == null
+                ? '还没选考试目标：先在「输入 → 我的需求」里选一个，或直接在上面按等级练。'
+                : '本次按「$levelLabel」出题 · 内置素材离线可用',
+            style: AppFont.tagStyle.copyWith(
+              color: cs.onSurfaceVariant,
+              fontSize: 10.5,
+              height: 1.4,
             ),
           ),
+          const SizedBox(height: Gap.lg),
+          PaperSectionHead(
+            index: '01',
+            title: '按目标练',
+            trailing: '内置素材 · 离线可用',
+          ),
+          const SizedBox(height: Gap.sm),
           if (!DeepseekApiService().isConfigured) ...[
             const SizedBox(height: Gap.sm),
             AppCard(
@@ -520,24 +704,7 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
           // 用户 2026-11-01:"输出练习不要局限于和输入闭环……考四六级就提供
           // 四六级的材料练习(考纲词汇、作文范文句子),读外刊就给外刊高频词"。
           // 这里的来源按他的多选目标排序;没有目标的人也能练(通用来源)。
-          const SizedBox(height: Gap.md),
-          Row(
-            children: [
-              Text(
-                '按你的目标练',
-                style: AppFont.metaStyle.copyWith(
-                  color: cs.onSurface,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const Spacer(),
-              Text(
-                '内置素材 · 离线可用',
-                style: AppFont.tagStyle.copyWith(color: cs.onSurfaceVariant),
-              ),
-            ],
-          ),
-          const SizedBox(height: Gap.xs),
+          const SizedBox(height: 2),
           if (widget.tier == OutputTier.word) ...[
             // v3 批 7:语境选词填空 —— 用你读过的句子挖空,替之前"只有孤立词卡"的空档
             AppCard(
@@ -810,49 +977,35 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
                     ),
                   ),
                   const SizedBox(height: Gap.sm),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 44,
-                    child: FilledButton.icon(
-                      onPressed: (_busy || exam == null) ? null : _composeFromExam,
-                      icon: const Icon(Icons.search, size: 18),
-                      label: const Text('去抓真题出题'),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    // 次行动样式:整页唯一的主行动在底部固定条,这里不再抢
+                    child: PaperPillButton(
+                      label: '去抓真题出题',
+                      icon: Icons.search,
+                      primary: false,
+                      onTap: (_busy || exam == null) ? null : _composeFromExam,
                     ),
                   ),
                 ],
               ),
             ),
           ],
-          const SizedBox(height: Gap.md),
-          Row(
-            children: [
-              Text(
-                '从你读过的材料出题',
-                style: AppFont.subheadStyle.copyWith(
-                  color: cs.onSurface,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(width: Gap.xs),
-              if (!_loadingMaterials && _materials.isNotEmpty)
-                Text(
-                  '${_materials.length} 篇',
-                  style: AppFont.tagStyle.copyWith(color: cs.onSurfaceVariant),
-                ),
-              const Spacer(),
-              if (_loadingMaterials)
-                Text(
-                  '正在读取…',
-                  style: AppFont.tagStyle.copyWith(color: cs.onSurfaceVariant),
-                )
-              else if (_materials.isNotEmpty)
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('去输入'),
-                ),
-            ],
+          const SizedBox(height: Gap.lg),
+          PaperSectionHead(
+            index: '02',
+            title: '从你读过的材料出题',
+            trailing: _loadingMaterials
+                ? '正在读取…'
+                : (_materials.isEmpty ? '' : '${_materials.length} 篇'),
+            action: _materials.isEmpty
+                ? null
+                : TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('去输入'),
+                  ),
           ),
-          const SizedBox(height: Gap.xs),
+          const SizedBox(height: Gap.sm),
           if (_busy) ...[
             AppCard(
               child: Column(
@@ -948,6 +1101,67 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
           const SizedBox(height: Gap.lg),
         ],
       ),
+      // 唯一主行动:按当前阶推"最该点的那个入口"(写词/写句/写段/写篇各不相同)
+      bottomBar: _buildBottomAction(context),
     );
+  }
+
+  /// 底部主行动(一屏只有一个)。
+  ///
+  /// 不在这里放"开始练习"这种空话:四阶是**并行**的,每阶的推荐入口不同 ——
+  /// 写篇 = 去抓真题;写词 = 按考纲词练;写句/写段 = 练对应内置来源。
+  Widget? _buildBottomAction(BuildContext context) {
+    final exam = _effectiveExam;
+    final recommended = _firstRecommendedSource();
+    var label = '开始练习';
+    var icon = Icons.play_arrow_rounded;
+    VoidCallback? onTap;
+    switch (widget.tier) {
+      case OutputTier.essay:
+        label = exam == null
+            ? '去抓真题出题（先选考试目标）'
+            : '抓「${examLabelFor(exam)}」真题';
+        icon = Icons.workspace_premium_outlined;
+        onTap = (_busy || exam == null) ? null : _composeFromExam;
+      case OutputTier.word:
+        if (_examWords.isNotEmpty) {
+          label = '按考纲词练（${_examWords.length} 词）';
+          icon = Icons.spellcheck;
+          onTap = _busy ? null : _practiceExamWords;
+        } else {
+          label = '从读过的材料练语境填空';
+          icon = Icons.auto_stories_outlined;
+          onTap = _busy ? null : _practiceCloze;
+        }
+      case OutputTier.sentence:
+        label = recommended == null ? '回译我的材料' : '练「${recommended.title}」';
+        icon = Icons.translate_rounded;
+        onTap = (_busy || recommended == null)
+            ? null
+            : () => _practiceFromSource(recommended);
+      case OutputTier.paragraph:
+        label = recommended == null ? '从材料写一段' : '练「${recommended.title}」';
+        icon = Icons.edit_note_rounded;
+        onTap = (_busy || recommended == null)
+            ? null
+            : () => _practiceFromSource(recommended);
+    }
+    if (onTap == null) return null;
+    return PaperBottomAction(
+      child: PaperPillButton(
+        label: label,
+        icon: icon,
+        onTap: onTap,
+        expand: true,
+      ),
+    );
+  }
+
+  /// 当前阶的第一个推荐内置来源(没有就返回 null,底部主行动随之隐藏)
+  OutputPracticeSource? _firstRecommendedSource() {
+    for (final source in OutputBank.recommendedSources(_prefs.examGoals)) {
+      if (source.tier == widget.tier) return source;
+    }
+    return null;
   }
 }

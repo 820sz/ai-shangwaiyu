@@ -8,6 +8,7 @@ import '../../services/doubao_api.dart';
 import '../../services/material_art.dart';
 import '../../widgets/app_ui.dart';
 import '../../widgets/design_kit.dart';
+import '../../widgets/v4/v4_kit.dart';
 import '../../widgets/waiting.dart';
 
 /// 全屏 API 设置页 — 主/副双槽位:
@@ -539,9 +540,11 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
     final secondaryReady = _secondaryKeyCtrl.text.trim().isNotEmpty;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('API 设置'),
-        actions: [TextButton(onPressed: _save, child: const Text('保存'))],
+      appBar: V4JellyAppBar(
+        title: 'API 设置',
+        actions: <Widget>[
+          TextButton(onPressed: _save, child: const Text('保存')),
+        ],
       ),
       body: ListView(
         padding: Insets.page,
@@ -802,14 +805,15 @@ class _ApiField extends StatelessWidget {
         decoration: InputDecoration(
           labelText: label,
           hintText: hint,
-          hintStyle: TextStyle(
+          // 字阶/字体族从主题派生:不要写裸 TextStyle —— 它会盖掉主题字体族
+          hintStyle: theme.textTheme.bodySmall?.copyWith(
             fontSize: 12,
             color: theme.colorScheme.onSurfaceVariant,
           ),
           border: const OutlineInputBorder(),
           isDense: true,
         ),
-        style: const TextStyle(fontSize: 14),
+        style: theme.textTheme.bodyMedium?.copyWith(fontSize: 14),
       ),
     );
   }
@@ -846,14 +850,14 @@ class _ModelRow extends StatelessWidget {
               decoration: InputDecoration(
                 labelText: label,
                 hintText: hint,
-                hintStyle: TextStyle(
+                hintStyle: theme.textTheme.bodySmall?.copyWith(
                   fontSize: 12,
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
                 border: const OutlineInputBorder(),
                 isDense: true,
               ),
-              style: const TextStyle(fontSize: 14),
+              style: theme.textTheme.bodyMedium?.copyWith(fontSize: 14),
             ),
           ),
           const SizedBox(width: Gap.xs),
@@ -908,10 +912,11 @@ class _ThinkingDropdown extends StatelessWidget {
             value: validValue,
             isExpanded: true,
             isDense: true,
-            style: TextStyle(
-              fontSize: 14,
-              color: Theme.of(context).colorScheme.onSurface,
-            ),
+            // 思考模式下拉:文字样式从主题派生(裸 TextStyle 会盖掉字体族)
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  fontSize: 14,
+                  color: Theme.of(context).colorScheme.onSurface,
+                ),
             items: options.entries
                 .map(
                   (e) => DropdownMenuItem(value: e.key, child: Text(e.value)),
@@ -968,18 +973,8 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
           padding: EdgeInsets.only(bottom: widget.bottomSafe),
           child: Column(
             children: [
-              // 拖拽条
-              Padding(
-                padding: const EdgeInsets.only(top: Gap.xs, bottom: Gap.xxs),
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
+              // 拖拽条由全局主题提供,这里不再画第二条(双横杠修复)。
+              const SizedBox(height: Gap.xs),
               // 搜索栏
               Padding(
                 padding: const EdgeInsets.symmetric(

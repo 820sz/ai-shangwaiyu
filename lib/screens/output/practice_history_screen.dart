@@ -1,21 +1,29 @@
 import 'package:flutter/material.dart';
 
 import '../../config/design_tokens.dart';
+import '../../config/v4_theme.dart';
 import '../../services/database.dart';
 import '../../services/output_composer.dart';
+import '../../services/output_exam_backfill.dart';
 import '../../widgets/app_page_route.dart';
-import '../../widgets/app_ui.dart';
-import '../../widgets/design_kit.dart';
 import '../../widgets/graphics/graphics.dart';
 import '../../widgets/waiting.dart';
 import 'practice_flow_screen.dart';
+import 'widgets/paper_kit.dart';
 
-/// 题库浏览（v3 · 批 8 · D1-8 「题库浏览」骨架）。
+/// 题库浏览(v3 · 批 8 D1-8;2026-11-06 视觉 A 纸面工作台重做 + 等级筛选)。
 ///
 /// 为什么需要它:练习器每次出题都会把题组写进 `exercise_sets/items`(v21 起),
 /// 但界面上只有"做完就走"一条路 —— 用户想回头重练一套、或者看看自己做过
 /// 哪些题,没有入口。这一屏把历史题组列出来,点开就能**原样重练**
 /// (题面/参考答案/rubric 都从库里还原,不再花一次出题成本)。
+///
+/// 本轮(用户 2026-11-06 反馈)补三件事:
+/// 1. **等级筛选**(全部 / CET-4 / CET-6 / 考研 / 雅思):以前四六级混排,
+///    现在按 `exercise_sets.exam_type` 过滤(`listExerciseSets(examType:)` 已现成);
+/// 2. **统一来源行**:等级 · 年份套数 · 来源站点 · 校对状态;
+/// 3. **老数据回填**:顶栏「重建题源标签」显式按钮(按标题/来源里的明确写法重判,
+///    写不清的保持原样,不隐式迁移)。
 class PracticeHistoryScreen extends StatefulWidget {
   const PracticeHistoryScreen({super.key});
 
@@ -26,7 +34,11 @@ class PracticeHistoryScreen extends StatefulWidget {
 class _PracticeHistoryScreenState extends State<PracticeHistoryScreen> {
   List<Map<String, Object?>> _sets = const [];
   bool _loading = true;
+  bool _backfilling = false;
   String? _error;
+
+  /// P0-2:等级筛选值('' = 全部;其余见 [examFilterOptions])
+  String _level = '';
 
   @override
   void initState() {
@@ -42,7 +54,10 @@ class _PracticeHistoryScreenState extends State<PracticeHistoryScreen> {
       _error = null;
     });
     try {
-      final rows = await DatabaseService.listExerciseSets(limit: 100);
+      final rows = await DatabaseService.listExerciseSets(
+        examType: _level.isEmpty ? null : _level,
+        limit: 100,
+      );
       if (!mounted) return;
       setState(() {
         _sets = rows;
@@ -55,6 +70,40 @@ class _PracticeHistoryScreenState extends State<PracticeHistoryScreen> {
         _error = '$e';
       });
     }
+  }
+
+  /// 老数据回填(显式操作):先确认,再跑,再报数。
+  Future<void> _runBackfill() async {
+    if (_backfilling) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('重建题源标签？'),
+        content: Text(
+          '$examBackfillHint\n\n'
+          '会扫最近 200 个题组，只补「考试等级 / 年份 / 套数」三列，不删题、不改题目内容。',
+          style: AppFont.tagStyle.copyWith(height: 1.5),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('算了'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('重建'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    setState(() => _backfilling = true);
+    final report = await backfillExerciseExamMeta();
+    if (!mounted) return;
+    setState(() => _backfilling = false);
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(report.summary)));
+    await _load();
   }
 
   /// 打开一组历史题:把库里的行还原成 `OutputSetSpec` 再进练习器。
@@ -89,6 +138,13 @@ class _PracticeHistoryScreenState extends State<PracticeHistoryScreen> {
         examType: '${full?['exam_type'] ?? 'none'}',
         section: '${full?['section'] ?? ''}',
         rubricId: '${full?['rubric_id'] ?? ''}',
+        // P0-1:历史题组重练也要带上卷面身份与来源(以前这里全丢,
+        // 从题库点进去就变成"无名卷子")
+        paperYear: (full?['paper_year'] as num?)?.toInt(),
+        paperLabel: '${full?['paper_label'] ?? ''}',
+        sourceSite: siteOfLicenseNote('${full?['license_note'] ?? ''}'),
+        licenseNote: '${full?['license_note'] ?? ''}',
+        verifyStatus: '${full?['verify_status'] ?? 'pending'}',
         tasks: tasks,
       );
       await appPush(
@@ -139,47 +195,98 @@ class _PracticeHistoryScreenState extends State<PracticeHistoryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-    return Scaffold(
-      appBar: AppBar(title: const Text('题库')),
-      body: _loading
-          ? const Padding(padding: Insets.page, child: SkeletonLines(lines: 5))
-          : _error != null
-              ? ListView(
-                  padding: Insets.page,
-                  children: [
-                    AppErrorCard(message: '题库读取失败:$_error', onRetry: _load),
-                  ],
-                )
-              : ListView(
-                  padding: Insets.page,
-                  children: [
-                    if (_sets.isEmpty)
-                      AppEmptyState(
-                        icon: Icons.inventory_2_outlined,
-                        title: '还没有做过的题组',
-                        hint: '去输出四阶任意一阶练一组,这里就会留下题库,以后能原样重练',
-                        action: FilledButton(
-                          onPressed: () => Navigator.pop(context),
-                          child: const Text('去练习'),
-                        ),
-                      )
-                    else ...[
-                      Text(
-                        '共 ${_sets.length} 组 · 点开可原样重练（不重新出题）',
-                        style: AppFont.tagStyle.copyWith(color: cs.onSurfaceVariant),
-                      ),
-                      const SizedBox(height: Gap.xs),
-                      for (final row in _sets) _buildCard(theme, cs, row),
-                    ],
-                    const SizedBox(height: Gap.lg),
-                  ],
+    return PaperScaffold(
+      topBar: PaperTopBar(
+        eyebrow: '题库 · 历史题组',
+        actions: <Widget>[
+          if (_backfilling)
+            const SizedBox(
+              width: 36,
+              height: 36,
+              child: Center(
+                child: SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
                 ),
+              ),
+            )
+          else
+            PaperIconAction(
+              icon: Icons.auto_fix_high_rounded,
+              tooltip: '重建题源标签（补等级/年份/套数）',
+              onTap: _runBackfill,
+            ),
+        ],
+      ),
+      // 用 Builder:让 _buildBody 里的显式取色也拿到纸面主题(否则果冻紫残留)
+      body: Builder(builder: _buildBody),
     );
   }
 
-  Widget _buildCard(ThemeData theme, ColorScheme cs, Map<String, Object?> row) {
+  Widget _buildBody(BuildContext context) {
+    if (_loading) {
+      return const Padding(
+        padding: EdgeInsets.fromLTRB(Gap.page, Gap.md, Gap.page, Gap.xl),
+        child: SkeletonLines(lines: 5),
+      );
+    }
+    if (_error != null) {
+      return ListView(
+        padding: const EdgeInsets.fromLTRB(
+            Gap.page, Gap.md, Gap.page, Gap.xl),
+        children: <Widget>[
+          PaperEmpty(
+            icon: Icons.error_outline_rounded,
+            title: '题库读取失败',
+            hint: _error!,
+            actionLabel: '重试',
+            onAction: _load,
+          ),
+        ],
+      );
+    }
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(Gap.page, Gap.md, Gap.page, Gap.xl),
+      children: <Widget>[
+        PaperTitle(
+          title: '题库',
+          subtitle: _sets.isEmpty
+              ? '做完一组练习就会留在这里，随时原样重练。'
+              : '共 ${_sets.length} 组 · 点开可原样重练（不重新出题）',
+        ),
+        const SizedBox(height: Gap.md),
+        // P0-2:等级筛选(数据层已支持 examType 过滤)
+        PaperLevelTabs(
+          value: _level,
+          onChanged: (v) {
+            if (v == _level) return;
+            setState(() => _level = v);
+            _load();
+          },
+        ),
+        const SizedBox(height: Gap.lg),
+        if (_sets.isEmpty)
+          PaperEmpty(
+            icon: Icons.inventory_2_outlined,
+            title: '这个等级还没有做过的题组',
+            hint: _level.isEmpty
+                ? '去输出四阶任意一阶练一组，这里就会留下题库，以后能原样重练。'
+                : '换一个等级看看，或者去四阶设置里按这个等级练一组。',
+            actionLabel: '去练习',
+            onAction: () => Navigator.maybePop(context),
+          )
+        else
+          for (final row in _sets) ...<Widget>[
+            _buildCard(context, row),
+            const SizedBox(height: Gap.xs),
+          ],
+      ],
+    );
+  }
+
+  Widget _buildCard(BuildContext context, Map<String, Object?> row) {
+    final skin = V4Skin.of(context);
     final section = '${row['section'] ?? ''}';
     final tier = _tierOf(section, '');
     final source = '${row['source'] ?? ''}';
@@ -191,60 +298,57 @@ class _PracticeHistoryScreenState extends State<PracticeHistoryScreen> {
       _ => '练习',
     };
     final created = DateTime.tryParse('${row['created_at'] ?? ''}');
-    final dateLabel = created == null
-        ? ''
-        : '${created.month}/${created.day}';
+    final dateLabel =
+        created == null ? '' : '${created.month}/${created.day}';
     final verify = '${row['verify_status'] ?? ''}';
-    return Padding(
-      padding: const EdgeInsets.only(bottom: Gap.xs),
-      child: AppCard(
-        variant: AppCardVariant.compact,
-        onTap: () => _open(row),
-        child: Row(
-          children: [
-            OutputTierGraphic(
-              tier: switch (tier) {
-                OutputTier.word => OutputTierArt.word,
-                OutputTier.sentence => OutputTierArt.sentence,
-                OutputTier.paragraph => OutputTierArt.paragraph,
-                OutputTier.essay => OutputTierArt.essay,
-              },
-              size: 40,
-              showPanel: true,
-            ),
-            const SizedBox(width: Gap.sm),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '${row['title'] ?? '未命名题组'}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: AppFont.subheadStyle.copyWith(
-                      color: cs.onSurface,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    [
-                      sourceLabel,
-                      '${row['section'] ?? ''}'.isEmpty
-                          ? ''
-                          : '${row['section']}',
-                      dateLabel,
-                      verify == 'pending' ? '待校对' : '',
-                    ].where((e) => e.isNotEmpty).join(' · '),
-                    style: AppFont.tagStyle.copyWith(color: cs.onSurfaceVariant),
-                  ),
-                ],
-              ),
-            ),
-            Icon(Icons.chevron_right, size: 18, color: cs.outline),
-          ],
+    // P0-1 / P0-2:统一来源行「等级 · 年份套数 · 来源站点 · 校对」。
+    // 非真题(内置 / AI / 我的材料)没有等级与卷面,只显示来源与校对状态。
+    final examType = '${row['exam_type'] ?? 'none'}';
+    final paperYear = (row['paper_year'] as num?)?.toInt();
+    final paperLabel = '${row['paper_label'] ?? ''}';
+    final sourceSite = siteOfLicenseNote('${row['license_note'] ?? ''}');
+    final sourceLine = examSourceLine(
+      examType: examType,
+      paperYear: paperYear,
+      paperLabel: paperLabel,
+      sourceSite: sourceSite,
+      verifyStatus: verify,
+      withExam: source == 'exam',
+    );
+    final meta2 = <String>[
+      sourceLabel,
+      sectionLabelFor(section),
+      if (dateLabel.isNotEmpty) dateLabel,
+    ].where((e) => e.isNotEmpty).join(' · ');
+
+    return PaperRow(
+      onTap: () => _open(row),
+      leading: Container(
+        width: 42,
+        height: 42,
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: skin.pastelAt(tier.index),
+          ),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Center(
+          child: OutputTierGraphic(
+            tier: switch (tier) {
+              OutputTier.word => OutputTierArt.word,
+              OutputTier.sentence => OutputTierArt.sentence,
+              OutputTier.paragraph => OutputTierArt.paragraph,
+              OutputTier.essay => OutputTierArt.essay,
+            },
+            size: 24,
+          ),
         ),
       ),
+      title: '${row['title'] ?? '未命名题组'}',
+      meta: sourceLine.isEmpty ? null : sourceLine,
+      meta2: meta2,
     );
   }
 }

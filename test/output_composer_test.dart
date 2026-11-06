@@ -374,7 +374,9 @@ First, online courses can save a lot of time.
     test('examTypeFromGoalIds:学习目标 → 数据库考试类型', () {
       expect(examTypeFromGoalIds(const <String>[]), 'none');
       expect(examTypeFromGoalIds(const <String>['cet']), 'cet4');
-      expect(examTypeFromGoalIds(const <String>['cet', 'kaoyan']), 'cet4');
+      // 2026-11-06(P0-2):泛化目标不压过明确目标 —— 与 targetExamOf 的两趟语义一致,
+      // 「cet(四六级) + kaoyan」应取更明确的 kaoyan,而不是笼统的 cet4。
+      expect(examTypeFromGoalIds(const <String>['cet', 'kaoyan']), 'kaoyan');
       expect(examTypeFromGoalIds(const <String>['kaoyan']), 'kaoyan');
       expect(examTypeFromGoalIds(const <String>['ielts']), 'ielts');
       expect(examTypeFromGoalIds(const <String>['business']), 'none');

@@ -587,6 +587,33 @@ String? targetExamOf(List<String> examGoals) {
   return generic;
 }
 
+/// 目标 → 考试等级**集合**(筛选 / 来源匹配 / 词池切分用)。
+///
+/// 与 [targetExamOf] 的分工:
+/// - [targetExamOf] 回答"这批目标里最具体的**一个**考试"(出题提示词只能有一个);
+/// - 本函数回答"这批目标覆盖**哪些**等级"(四级/六级两个目标同时勾时两个都要算)。
+///
+/// 「四六级」是泛化档(2026-11-06 拆目标前存下来的老数据):识别不出四还是六,
+/// 所以**同时展开成 cet4 与 cet6**,这样老用户按等级筛选时两个桶都能看到,
+/// 不需要迁移已存的学习目标。
+Set<String> examTypesForGoals(List<String> examGoals) {
+  final out = <String>{};
+  for (final raw in examGoals) {
+    final s = raw
+        .toLowerCase()
+        .replaceAll(RegExp(r'[\s\-_/]+'), '')
+        .trim();
+    if (s.isEmpty) continue;
+    if (s.contains('四六级') || (s.contains('cet') && s.contains('46'))) {
+      out.addAll(const <String>['cet4', 'cet6']);
+      continue;
+    }
+    final one = targetExamOf(<String>[raw]);
+    if (one != null) out.add(one);
+  }
+  return out;
+}
+
 /// UI 卡片用的一句话来源描述(如「《人类简史》· B2 · 覆盖率 96%」)。
 ///
 /// 只描述**有值**的字段:没分析过难度/覆盖率就不写,不留" · ·"这种空槽。

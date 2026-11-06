@@ -9,6 +9,7 @@ import 'material_prefs.dart';
 import 'material_source.dart';
 import 'original_search.dart';
 import 'text_difficulty.dart';
+import 'url_key.dart';
 import 'word_frequency.dart';
 
 /// 材料难度分析结果(入库前算好,列表与阅读器直接用)
@@ -270,17 +271,26 @@ class MaterialLibrary {
     String kind = 'article',
     String? url,
     String? author,
+    /// 抓正文时顺带拿到的真实封面（og:image / markdown 首图）。
+    /// 用户 2026-11-06 要求：有真实封面就存下来（「我的」/书架/阅读器显示），
+    /// 没有就留空 → UI 走"标题文字版式"，不画渐变假封面。
+    String? coverUrl,
   }) async {
     final analysis = await analyze(text, model: model, vocab: vocab);
+    final cover = (coverUrl ?? '').trim();
     final id = await DatabaseService.upsertMaterial(
       {
         'kind': kind,
         'source': 'manual',
-        // 手动材料用标题做身份,避免同一篇重复入库
-        'source_id': title.trim(),
+        // 材料身份(schema 唯一键 source+source_id)以前**只用标题**:
+        // 同一标题、不同 URL 的材料(转载/多册同名章节/同名真题)会 upsert 成一行,
+        // 后面的正文覆盖前面的。P2-4 改为:有 URL 时用归一 URL 作身份(同 URL 幂等,
+        // 不同 URL 各自独立),没 URL(粘贴文本/图片 OCR)才退回标题。
+        'source_id': _ingestSourceId(title: title, url: url),
         'title': title.trim(),
         'author': author,
         'url': url,
+        'cover_url': cover.isEmpty ? null : cover,
         'license': '用户自备材料(仅个人学习使用)',
         'language': 'en',
         'word_count': analysis.wordCount,
@@ -302,6 +312,17 @@ class MaterialLibrary {
       analysis: analysis,
       title: title.trim(),
     );
+  }
+
+  /// 入库身份(P2-4):有 URL 用归一 URL,没有才用标题。
+  ///
+  /// SQLite 里材料唯一键是 `source + source_id`;以前一律用标题,
+  /// 导致"同标题不同 URL"互相覆盖。前缀区分两类身份,避免"标题恰好长得像 URL"
+  /// 时与 URL 身份撞车。
+  static String _ingestSourceId({required String title, String? url}) {
+    final key = normalizedUrlKey(url ?? '');
+    if (key.isNotEmpty) return 'url:$key';
+    return 'title:${title.trim()}';
   }
 
   /// 材料库列表(带进度),按最近更新时间倒序

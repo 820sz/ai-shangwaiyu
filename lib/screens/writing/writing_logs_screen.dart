@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../config/design_tokens.dart';
 import '../../config/theme.dart';
 import '../../models/writing_log.dart';
+import '../../widgets/v4/v4_kit.dart';
 import '../../services/database.dart';
 import '../../widgets/app_ui.dart';
 import '../../widgets/confirm_destructive.dart';
@@ -73,9 +74,9 @@ class _WritingLogsScreenState extends State<WritingLogsScreen> {
     final all = logs ?? const <WritingLog>[];
     final summary = _summary(all);
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('写译记录'),
-        actions: [
+      appBar: V4JellyAppBar(
+        title: '写译记录',
+        actions: <Widget>[
           if (all.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(right: Gap.sm),
@@ -116,7 +117,7 @@ class _WritingLogsScreenState extends State<WritingLogsScreen> {
       // 读到后原地替换;key 必须保留,AnimatedSwitcher 靠它做切场。
       return const Padding(
         key: ValueKey('logs-loading'),
-        padding: EdgeInsets.all(16),
+        padding: Insets.page,
         child: SkeletonLines(lines: 6, seed: 1),
       );
     }

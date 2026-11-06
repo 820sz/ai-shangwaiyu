@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../../../config/design_tokens.dart';
+import '../../../config/v4_theme.dart';
 import '../../../services/output_rubric.dart';
-import '../../../widgets/app_ui.dart';
 import '../../../widgets/graphics/graphics.dart';
+import '../widgets/paper_kit.dart';
 
-/// 批改结果视图(v3 · 批 3 · 骨架 c「对照复盘」)。
+/// 批改结果视图(v3 初版;2026-11-06 视觉 A 纸面工作台重做)。
 ///
 /// 用户 2026-11-01 的要求:
 /// > "评分:维度分 + 折算四六级官方档位都给"(他要求**两个都给**)
@@ -15,6 +16,9 @@ import '../../../widgets/graphics/graphics.dart';
 /// 2. 每个维度一条:维度名 + 分数/满分 + **依据**(模型必须引用作答原文);
 /// 3. 逐条错误:原文片段 → 问题类型 → 建议改法;
 /// 4. 参考改写(有就显示) + 一句话总评。
+///
+/// 视觉 A(纸面):白面 + 1px 细边 + 编号区块;错误条不再用大块脏红,
+/// 改成"中性面 + 左侧 2px 主色细条",让"需要改的地方"抢注意力但不刺眼。
 ///
 /// 纪律:没有依据的维度显示"未评"而不是 0 分(0 分是"评了但很烂",两者不同)。
 class PracticeResultView extends StatelessWidget {
@@ -51,66 +55,72 @@ class PracticeResultView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
+    final skin = V4Skin.of(context);
     final maxTotal = result.dimensions.fold<double>(
       0,
       (sum, d) => sum + d.maxScore,
     );
     final totalMax = maxTotal <= 0 ? 100.0 : maxTotal;
-    return AppCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (title != null) ...[
-            Text(
-              title!,
-              style: AppFont.subheadStyle.copyWith(
-                color: cs.onSurface,
-                fontWeight: FontWeight.w700,
-              ),
+    final converted = _convertedBand;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        if (title != null && title!.trim().isNotEmpty) ...<Widget>[
+          Text(
+            title!,
+            style: AppFont.tagStyle.copyWith(
+              color: skin.inkFaint,
+              fontSize: 10.5,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.2,
             ),
-            const SizedBox(height: Gap.xs),
-          ],
-          // ① 总分 + 档位 + 折算官方档位
-          Row(
-            children: [
+          ),
+          const SizedBox(height: Gap.xs),
+        ],
+        // ① 总分:环 + 档位 + 折算官方档位(A 纸面:一张白卡讲清一个结论)
+        PaperCard(
+          radius: 20,
+          padding: const EdgeInsets.all(18),
+          child: Row(
+            children: <Widget>[
               RadialGauge(
                 value: (result.totalScore / totalMax).clamp(0.0, 1.0),
-                size: 88,
+                size: 84,
+                color: skin.accent,
                 centerText: result.totalScore.toStringAsFixed(0),
                 caption: '满分 ${totalMax.toStringAsFixed(0)}',
+                semanticLabel: '总分 ${result.totalScore.toStringAsFixed(0)} 分',
               ),
               const SizedBox(width: Gap.md),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
+                  children: <Widget>[
                     Text(
                       result.bandLabel.isEmpty ? '未给档位' : result.bandLabel,
                       style: AppFont.subheadStyle.copyWith(
-                        color: cs.onSurface,
+                        color: skin.ink,
+                        fontSize: 17,
                         fontWeight: FontWeight.w800,
                       ),
                     ),
-                    const SizedBox(height: 2),
+                    const SizedBox(height: 3),
                     Text(
                       '共评 ${result.ratedDimensionCount} 个维度',
                       style: AppFont.tagStyle.copyWith(
-                        color: cs.onSurfaceVariant,
+                        color: skin.inkSoft,
+                        fontSize: 11,
                       ),
                     ),
-                    // v3 补漏(用户批注 #9):把 100 分制折算成考场档位。
-                    // 区间与描述来自本地 rubric(band.description 里写着"约 13~15 分档"),
-                    // 不依赖模型复述,避免每次说法不一样。
-                    if (_convertedBand != null) ...[
-                      const SizedBox(height: 4),
+                    if (converted != null) ...<Widget>[
+                      const SizedBox(height: 5),
                       Text(
-                        '折算档位：${_convertedBand!.label}'
-                        '${_convertedBand!.description.isEmpty ? '' : ' · ${_convertedBand!.description}'}',
+                        '折算档位：${converted.label}'
+                        '${converted.description.isEmpty ? '' : ' · ${converted.description}'}',
                         style: AppFont.tagStyle.copyWith(
-                          color: cs.primary,
-                          fontWeight: FontWeight.w600,
+                          color: skin.accent,
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w700,
                           height: 1.35,
                         ),
                       ),
@@ -120,139 +130,119 @@ class PracticeResultView extends StatelessWidget {
               ),
             ],
           ),
+        ),
+        // ② 维度分 + 依据
+        if (result.dimensions.isNotEmpty) ...<Widget>[
+          const SizedBox(height: Gap.lg),
+          const PaperSectionHead(index: '01', title: '维度分'),
           const SizedBox(height: Gap.sm),
-          // ② 维度分 + 依据
-          for (final d in result.dimensions) ...[
-            _dimensionRow(theme, d),
+          for (final d in result.dimensions) ...<Widget>[
+            _dimensionRow(context, d),
             const SizedBox(height: 6),
           ],
-          // ③ 错误逐条
-          if (result.issues.isNotEmpty) ...[
-            const SizedBox(height: Gap.xs),
-            Text(
-              '需要改的地方',
-              style: AppFont.metaStyle.copyWith(
-                color: cs.onSurface,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 4),
-            for (final issue in result.issues)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Container(
-                  padding: const EdgeInsets.all(Gap.xs),
-                  decoration: BoxDecoration(
-                    color: cs.errorContainer.withAlpha(60),
-                    borderRadius: BorderRadius.circular(Radii.control - 2),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (issue.span.trim().isNotEmpty)
-                        Text(
-                          issue.span,
-                          style: AppFont.tagStyle.copyWith(
-                            color: cs.onSurface,
-                            fontWeight: FontWeight.w600,
-                            height: 1.3,
-                          ),
-                        ),
-                      if (issue.span.trim().isNotEmpty)
-                        const SizedBox(height: 2),
-                      Text(
-                        '${issue.type.isEmpty ? '问题' : issue.type}：${issue.reason}',
-                        style: AppFont.tagStyle.copyWith(
-                          color: cs.onSurfaceVariant,
-                          height: 1.35,
-                        ),
-                      ),
-                      if (issue.suggestion.trim().isNotEmpty) ...[
-                        const SizedBox(height: 2),
-                        Text(
-                          '建议：${issue.suggestion}',
-                          style: AppFont.tagStyle.copyWith(
-                            color: cs.primary,
-                            height: 1.35,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ),
+        ],
+        // ③ 错误逐条(低干扰:中性面 + 左侧细条,不用脏红大块)
+        if (result.issues.isNotEmpty) ...<Widget>[
+          const SizedBox(height: Gap.md),
+          PaperSectionHead(
+            index: '02',
+            title: '需要改的地方',
+            trailing: '${result.issues.length} 处',
+          ),
+          const SizedBox(height: Gap.sm),
+          for (final issue in result.issues) ...<Widget>[
+            _issueCard(context, issue),
+            const SizedBox(height: 8),
           ],
-          // ④ 参考改写
-          if ((result.correction ?? '').trim().isNotEmpty) ...[
-            const SizedBox(height: Gap.xs),
-            Text(
-              '参考改写',
-              style: AppFont.metaStyle.copyWith(
-                color: cs.onSurface,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 3),
-            SelectableText(
+        ],
+        // ④ 参考改写
+        if ((result.correction ?? '').trim().isNotEmpty) ...<Widget>[
+          const SizedBox(height: Gap.md),
+          const PaperSectionHead(index: '03', title: '参考改写'),
+          const SizedBox(height: Gap.sm),
+          PaperCard(
+            radius: 18,
+            padding: const EdgeInsets.all(16),
+            child: SelectableText(
               result.correction!,
               style: AppFont.bodyStyle.copyWith(
-                color: cs.onSurface,
-                height: 1.45,
+                color: skin.ink,
+                height: 1.55,
               ),
             ),
-          ],
-          // ⑤ 总评
-          if (result.summary.trim().isNotEmpty) ...[
-            const SizedBox(height: Gap.xs),
-            Text(
+          ),
+        ],
+        // ⑤ 总评
+        if (result.summary.trim().isNotEmpty) ...<Widget>[
+          const SizedBox(height: Gap.md),
+          PaperCard(
+            radius: 18,
+            padding: const EdgeInsets.all(16),
+            color: skin.surfaceAlt,
+            child: Text(
               result.summary,
               style: AppFont.tagStyle.copyWith(
-                color: cs.onSurfaceVariant,
-                height: 1.4,
+                color: skin.inkSoft,
+                fontSize: 11.5,
+                height: 1.5,
               ),
             ),
-          ],
-          // ⑥ 参考答案(可选;回译题这里是英文原句)
-          if (reference != null && reference!.trim().isNotEmpty) ...[
-            const SizedBox(height: Gap.xs),
-            ExpansionTile(
+          ),
+        ],
+        // ⑥ 参考答案(可选;回译题这里是英文原句)
+        if (reference != null && reference!.trim().isNotEmpty) ...<Widget>[
+          const SizedBox(height: Gap.sm),
+          Theme(
+            data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+            child: ExpansionTile(
               tilePadding: EdgeInsets.zero,
               childrenPadding: EdgeInsets.zero,
               title: Text(
                 '看参考答案',
-                style: AppFont.tagStyle.copyWith(color: cs.primary),
+                style: AppFont.tagStyle.copyWith(
+                  color: skin.accent,
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
-              children: [
-                SelectableText(
-                  reference!,
-                  style: AppFont.bodyStyle.copyWith(
-                    color: cs.onSurface,
-                    height: 1.45,
+              children: <Widget>[
+                PaperCard(
+                  radius: 18,
+                  padding: const EdgeInsets.all(16),
+                  child: SelectableText(
+                    reference!,
+                    style: AppFont.bodyStyle.copyWith(
+                      color: skin.ink,
+                      height: 1.5,
+                    ),
                   ),
                 ),
               ],
             ),
-          ],
+          ),
         ],
-      ),
+      ],
     );
   }
 
-  Widget _dimensionRow(ThemeData theme, ScoredDimension d) {
-    final cs = theme.colorScheme;
+  /// 一个维度:名称 + 分数 + 细进度条 + 依据(没评就不画 0 分条)
+  Widget _dimensionRow(BuildContext context, ScoredDimension d) {
+    final skin = V4Skin.of(context);
     final scored = d.isScored && d.score != null;
-    final ratio = d.maxScore <= 0 ? 0.0 : ((d.score ?? 0) / d.maxScore).clamp(0.0, 1.0);
+    final ratio =
+        d.maxScore <= 0 ? 0.0 : ((d.score ?? 0) / d.maxScore).clamp(0.0, 1.0);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
+      children: <Widget>[
         Row(
-          children: [
+          children: <Widget>[
             Expanded(
               child: Text(
                 d.label.isEmpty ? d.key : d.label,
                 style: AppFont.tagStyle.copyWith(
-                  color: cs.onSurface,
-                  fontWeight: FontWeight.w600,
+                  color: skin.ink,
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
             ),
@@ -261,32 +251,98 @@ class PracticeResultView extends StatelessWidget {
                   ? '${d.score!.toStringAsFixed(1)} / ${d.maxScore.toStringAsFixed(0)}'
                   : '未评',
               style: AppFont.tagStyle.copyWith(
-                color: scored ? cs.primary : cs.onSurfaceVariant,
-                fontWeight: FontWeight.w600,
+                color: scored ? skin.accent : skin.inkFaint,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
               ),
             ),
           ],
         ),
-        const SizedBox(height: 3),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(3),
-          child: LinearProgressIndicator(
-            value: ratio,
-            minHeight: 4,
-            backgroundColor: cs.outlineVariant.withAlpha(80),
-          ),
-        ),
-        if (d.evidence.trim().isNotEmpty) ...[
-          const SizedBox(height: 3),
+        const SizedBox(height: 4),
+        if (scored)
+          PaperProgressLine(value: ratio)
+        else
+          Container(height: 3, decoration: BoxDecoration(
+            color: skin.hairline,
+            borderRadius: BorderRadius.circular(999),
+          )),
+        if (d.evidence.trim().isNotEmpty) ...<Widget>[
+          const SizedBox(height: 4),
           Text(
             '依据：${d.evidence}',
             style: AppFont.tagStyle.copyWith(
-              color: cs.onSurfaceVariant,
-              height: 1.3,
+              color: skin.inkSoft,
+              fontSize: 10.5,
+              height: 1.4,
             ),
           ),
         ],
       ],
+    );
+  }
+
+  /// 一条问题:原文片段 → 类型/原因 → 建议(左侧 2px 主色细条,不抢注意力)
+  Widget _issueCard(BuildContext context, ScoredIssue issue) {
+    final skin = V4Skin.of(context);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 14, 10),
+      decoration: BoxDecoration(
+        color: skin.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: skin.hairline, width: 1),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Container(
+            width: 2,
+            height: 34,
+            decoration: BoxDecoration(
+              color: skin.accent,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                if (issue.span.trim().isNotEmpty) ...<Widget>[
+                  Text(
+                    issue.span,
+                    style: AppFont.tagStyle.copyWith(
+                      color: skin.ink,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      height: 1.35,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                ],
+                Text(
+                  '${issue.type.isEmpty ? '问题' : issue.type}：${issue.reason}',
+                  style: AppFont.tagStyle.copyWith(
+                    color: skin.inkSoft,
+                    fontSize: 10.5,
+                    height: 1.4,
+                  ),
+                ),
+                if (issue.suggestion.trim().isNotEmpty) ...<Widget>[
+                  const SizedBox(height: 3),
+                  Text(
+                    '建议：${issue.suggestion}',
+                    style: AppFont.tagStyle.copyWith(
+                      color: skin.accent,
+                      fontSize: 10.5,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

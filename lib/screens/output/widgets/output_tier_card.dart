@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../../../config/design_tokens.dart';
-import '../../../widgets/app_ui.dart';
+import '../../../config/v4_theme.dart';
 import '../../../widgets/graphics/graphics.dart';
+import 'paper_kit.dart';
 
-/// 输出四阶里的一阶卡片(v3 · 批 3)。
+/// 输出四阶里的一阶卡片(v3 · 批 3;2026-11-06 视觉 A 纸面化)。
 ///
 /// 用户 2026-11-01 的明确要求:
 /// > "四阶写作阶梯这个不错,不过不要搞成'只有写词过了才写句'这种死人逻辑,
@@ -13,7 +14,9 @@ import '../../../widgets/graphics/graphics.dart';
 /// 所以四张卡是**平级、并列**的:没有锁、没有"先完成上一阶",只在卡片上标
 /// 当前进度;从哪一阶开始由用户自己决定。
 ///
-/// 图形用 [OutputTierGraphic](排版体量递进:短块 → 三块 → 框行 → 两页),
+/// 视觉 A(纸面):不再用"彩色渐变阶段卡",改成「白面 + 细边 + 阶位编号 +
+/// 果冻图标块」——入口页头图承担色彩,四阶本身是**清单**,不是第二张海报。
+/// 图形仍用 [OutputTierGraphic](排版体量递进:短块 → 三块 → 框行 → 两页),
 /// 四张卡放在一起,不用读文字也能看出"段位在涨"。
 class OutputTierCard extends StatelessWidget {
   final OutputTierArt tier;
@@ -27,6 +30,9 @@ class OutputTierCard extends StatelessWidget {
   /// 当前进度摘要(真实数据拼出来的;没有就传 null,不显示)
   final String? progress;
 
+  /// 阶位编号(01~04,纸面的"秩序"来自编号;空 = 不显示)
+  final String indexLabel;
+
   /// false = 该阶的题源还在做(卡片灰一点 + "开发中"角标),点了会给说明而不是无反应
   final bool available;
 
@@ -38,56 +44,68 @@ class OutputTierCard extends StatelessWidget {
     required this.title,
     required this.subtitle,
     this.progress,
+    this.indexLabel = '',
     this.available = true,
     this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
+    final skin = V4Skin.of(context);
     return Opacity(
       // 未开放的阶不要装作可用:整体压一点,角标写清楚
       opacity: available ? 1 : 0.72,
-      child: AppCard(
-        padding: const EdgeInsets.all(Gap.sm),
+      child: PaperCard(
         onTap: onTap,
+        padding: const EdgeInsets.all(13),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+          children: <Widget>[
             Row(
-              children: [
-                OutputTierGraphic(
-                  tier: tier,
-                  size: 40,
-                  showPanel: true,
-                  semanticLabel: title,
-                ),
-                const SizedBox(width: Gap.xs),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        style: AppFont.subheadStyle.copyWith(
-                          color: cs.onSurface,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      if (!available)
-                        Text(
-                          '开发中',
-                          style: AppFont.tagStyle.copyWith(
-                            color: cs.onSurfaceVariant,
-                            fontSize: 10,
-                          ),
-                        ),
-                    ],
+              children: <Widget>[
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: skin.pastelAt(tier.index),
+                    ),
+                    borderRadius: BorderRadius.circular(11),
+                  ),
+                  child: Center(
+                    child: OutputTierGraphic(
+                      tier: tier,
+                      size: 24,
+                      semanticLabel: title,
+                    ),
                   ),
                 ),
-                Icon(Icons.chevron_right, size: 18, color: cs.outline),
+                const Spacer(),
+                if (indexLabel.isNotEmpty)
+                  Text(
+                    indexLabel,
+                    style: AppFont.tagStyle.copyWith(
+                      color: skin.accent,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1.2,
+                    ),
+                  )
+                else
+                  Icon(Icons.chevron_right_rounded,
+                      size: 18, color: skin.inkFaint),
               ],
+            ),
+            const SizedBox(height: 10),
+            Text(
+              title,
+              style: AppFont.subheadStyle.copyWith(
+                color: skin.ink,
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+              ),
             ),
             // 文字区用 Expanded 吃掉剩余高度:卡片是固定高网格单元,
             // 大字号/长文案下先压缩留白,而不是把卡片撑破(项目铁律)
@@ -95,27 +113,36 @@ class OutputTierCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.end,
-                children: [
+                children: <Widget>[
+                  if (!available)
+                    Text(
+                      '开发中',
+                      style: AppFont.tagStyle.copyWith(
+                        color: skin.inkFaint,
+                        fontSize: 10,
+                      ),
+                    ),
                   Flexible(
                     child: Text(
                       subtitle,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: AppFont.tagStyle.copyWith(
-                        color: cs.onSurfaceVariant,
-                        height: 1.3,
+                        color: skin.inkSoft,
+                        fontSize: 10.5,
+                        height: 1.35,
                       ),
                     ),
                   ),
-                  if (progress != null) ...[
-                    const SizedBox(height: 3),
+                  if (progress != null) ...<Widget>[
+                    const SizedBox(height: 5),
                     Text(
                       progress!,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: AppFont.tagStyle.copyWith(
-                        color: cs.primary,
-                        fontWeight: FontWeight.w600,
+                        color: skin.accent,
+                        fontWeight: FontWeight.w700,
                         fontSize: 10.5,
                       ),
                     ),

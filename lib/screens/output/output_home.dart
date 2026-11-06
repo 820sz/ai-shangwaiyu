@@ -10,7 +10,6 @@ import '../../services/learner_model_store.dart';
 import '../../services/output_composer.dart';
 import '../../widgets/app_page_route.dart';
 import '../../widgets/app_ui.dart';
-import '../../widgets/design_kit.dart';
 import '../../widgets/v4/v4_kit.dart';
 import '../../widgets/waiting.dart';
 import '../review/review_screen.dart';
@@ -22,6 +21,7 @@ import 'drill_screen.dart' show DrillMode;
 import 'practice_history_screen.dart';
 import 'practice_setup_screen.dart';
 import 'widgets/output_tier_card.dart';
+import 'widgets/paper_kit.dart';
 
 /// 输出页(v3 · 批 3 重做)。
 ///
@@ -136,16 +136,26 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
                       ?.copyWith(fontWeight: FontWeight.w700),
                 ),
               ),
-              ListTile(
-                leading: const Icon(Icons.grid_view_outlined),
-                title: const Text('四阶练习（推荐）'),
-                subtitle: const Text('写词 / 写句 / 写段 / 写篇，可从材料和目标出题，按 rubric 批改'),
+              // P3:入口弹层也走纸面件(旧 ListTile 在纸面里像"另一个 App")
+              PaperRow(
+                leading: Icon(
+                  Icons.grid_view_outlined,
+                  size: 20,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+                title: '四阶练习（推荐）',
+                meta: '写词 / 写句 / 写段 / 写篇，可从材料和目标出题，按 rubric 批改',
                 onTap: () => Navigator.pop(ctx, 'tier'),
               ),
-              ListTile(
-                leading: const Icon(Icons.event_note_outlined),
-                title: const Text('旧版练习计划'),
-                subtitle: const Text('按水平排练习计划（保留历史进度，不再新增题型）'),
+              const SizedBox(height: Gap.xs),
+              PaperRow(
+                leading: Icon(
+                  Icons.event_note_outlined,
+                  size: 20,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+                title: '旧版练习计划',
+                meta: '按水平排练习计划（保留历史进度，不再新增题型）',
                 onTap: () => Navigator.pop(ctx, 'legacy'),
               ),
               const SizedBox(height: Gap.xs),
@@ -274,9 +284,22 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
     return parts.join(' · ');
   }
 
+  /// 头图光斑(低透明度径向渐变;只让底子透气,不压文字)
+  Widget _heroBlob(Color color, double size) => Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: RadialGradient(
+            colors: <Color>[color, color.withValues(alpha: 0.0)],
+          ),
+        ),
+      );
+
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    // 入口屏:头图用果冻皮肤(B),正文用纸面主题(A)——两套皮肤各管一段
+    final theme = paperThemeOf(context);
     final skin = V4Skin.of(context);
     final muted = theme.colorScheme.onSurfaceVariant;
     final goals = DrillCatalog.normalizeAll([
@@ -286,17 +309,31 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
     final level = DrillPlanner.levelOf(_model);
 
     return Scaffold(
-      body: SafeArea(
+      body: PaperSkin(
+        child: SafeArea(
         bottom: false,
         child: ListView(
           padding: Insets.page,
           children: [
-            // ① 头图(v4 果冻 · 2026-11-03):渐变卡 + 大标题 + 练习中心
-            Container(
-              decoration: BoxDecoration(
-                gradient: skin.heroFill,
-                borderRadius: BorderRadius.circular(skin.heroRadius),
-              ),
+            // ① 头图(入口借 B「果冻头图」):渐变 + 两团光斑 + 白胶囊 CTA。
+            // 内页(设置/答题/批改/题库)走纸面 A,只有入口保留色彩与光。
+            ClipRRect(
+              borderRadius: BorderRadius.circular(skin.heroRadius),
+              child: Stack(
+                children: <Widget>[
+                  Positioned(
+                    left: -70,
+                    top: -90,
+                    child: _heroBlob(skin.accent.withValues(alpha: 0.26), 210),
+                  ),
+                  Positioned(
+                    right: -50,
+                    top: -60,
+                    child:
+                        _heroBlob(skin.accentAlt.withValues(alpha: 0.24), 190),
+                  ),
+                  Container(
+              decoration: BoxDecoration(gradient: skin.heroFill),
               padding:
                   const EdgeInsets.fromLTRB(Gap.md, Gap.md, Gap.md, Gap.lg),
               child: Row(
@@ -328,7 +365,7 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
                         ),
                         const SizedBox(height: 6),
                         Text(
-                          '写词 → 写句 → 写段 → 写篇 · 四阶并行，从哪阶开始都行',
+                          '写词 → 写句 → 写段 → 写篇 · 四阶并行',
                           style: AppFont.bodyStyle.copyWith(
                             color: skin.inkSoft,
                             fontSize: 13,
@@ -344,6 +381,9 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
                     light: true,
                     icon: Icons.tune,
                     onTap: _openPracticeCenter,
+                  ),
+                ],
+              ),
                   ),
                 ],
               ),
@@ -427,12 +467,14 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
             const SizedBox(height: Gap.sm),
 
             // ②.5 今日建议:只用真实数据(到期复习词数 / 近 7 天写译篇数)
-            if (!_loading)
-              AppStagger(index: 1, child: _buildTodayAdvice(theme)),
+            //
+            // 不再套 AppStagger:它的入场延迟在首帧/截图里会留下"看不见但占位"
+            // 的空带(QA P3);这张卡是信息卡,直接常显更稳。
+            if (!_loading) _buildTodayAdvice(theme),
             const SizedBox(height: Gap.md),
 
             // ③ 四阶台阶(并行,不锁顺序)
-            const AppSectionHeader(title: '四阶', indexLabel: '01'),
+            const PaperSectionHead(index: '01', title: '四阶'),
             if (_loading)
               const AppCard(
                 child: SkeletonLines(lines: 3, withTitle: true, seed: 3),
@@ -448,6 +490,7 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
                 children: [
                   OutputTierCard(
                     tier: outputTierCatalog[0].tier,
+                    indexLabel: '01',
                     title: outputTierCatalog[0].title,
                     subtitle: outputTierCatalog[0].subtitle,
                     progress: _progressOf(DrillMode.spelling),
@@ -457,6 +500,7 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
                   ),
                   OutputTierCard(
                     tier: outputTierCatalog[1].tier,
+                    indexLabel: '02',
                     title: outputTierCatalog[1].title,
                     subtitle: outputTierCatalog[1].subtitle,
                     progress: _progressOf(DrillMode.translation),
@@ -464,12 +508,14 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
                   ),
                   OutputTierCard(
                     tier: outputTierCatalog[2].tier,
+                    indexLabel: '03',
                     title: outputTierCatalog[2].title,
                     subtitle: outputTierCatalog[2].subtitle,
                     onTap: () => _openPractice(OutputTier.paragraph),
                   ),
                   OutputTierCard(
                     tier: outputTierCatalog[3].tier,
+                    indexLabel: '04',
                     title: outputTierCatalog[3].title,
                     subtitle: outputTierCatalog[3].subtitle,
                     onTap: () => _openPractice(OutputTier.essay),
@@ -501,7 +547,7 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
             ),
 
             // ④ 写篇:批改与复盘(现有能力,真实入口)
-            const AppSectionHeader(title: '写篇 · 批改与复盘', indexLabel: '02'),
+            const PaperSectionHead(index: '02', title: '写篇 · 批改与复盘'),
             AppStagger(
               index: 4,
               child: AppActionTile(
@@ -563,6 +609,7 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
             ),
             const SizedBox(height: Gap.lg),
           ],
+        ),
         ),
       ),
     );

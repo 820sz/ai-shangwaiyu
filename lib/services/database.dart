@@ -2596,6 +2596,43 @@ class DatabaseService {
     }
   }
 
+  /// 更新题组的**考试等级 / 卷面身份**(老数据回填专用)。
+  ///
+  /// 为什么单独一个方法:回填必须是**显式操作**(用户在题库点「重建题源标签」),
+  /// 不能在启动时偷偷改历史数据。只写建表就有的三列
+  /// (`exam_type` / `paper_year` / `paper_label`),不加列、不改 dbVersion。
+  ///
+  /// 请假/权限说明:调用方要么一次性传入多个字段,要么不调用(空 map 返回 false)。
+  static Future<bool> updateExerciseSetMeta(
+    int id, {
+    String? examType,
+    int? paperYear,
+    String? paperLabel,
+  }) async {
+    final values = <String, Object?>{};
+    if (examType != null && examType.trim().isNotEmpty) {
+      values['exam_type'] = examType.trim();
+    }
+    if (paperYear != null) values['paper_year'] = paperYear;
+    if (paperLabel != null && paperLabel.trim().isNotEmpty) {
+      values['paper_label'] = paperLabel.trim();
+    }
+    if (values.isEmpty) return false;
+    try {
+      final db = await database;
+      final count = await db.update(
+        'exercise_sets',
+        values,
+        where: 'id = ?',
+        whereArgs: <Object?>[id],
+      );
+      return count > 0;
+    } catch (e) {
+      debugPrint('ReadFlow updateExerciseSetMeta failed: $e');
+      return false;
+    }
+  }
+
   /// 单条 rubric(内置 4 条固定 id:cet4_writing / cet4_translation /
   /// back_translation / summary);不存在返回 null。
   static Future<Map<String, Object?>?> getRubric(String id) async {
@@ -2745,7 +2782,10 @@ class DatabaseService {
   /// 删材料:同时清掉它的正文分块与阅读进度(单事务,不留孤儿行)。
   /// **不删 reading_sessions** —— 那是行为历史(导师判断"读过什么/速度多少"
   /// 的依据),删材料不等于抹掉"我读过它";真要清历史另有入口。
-  /// 返回被删掉的材料行数(0 = 本来就没有)。
+  ///
+  /// 返回值(P2-1):`> 0` = 删掉了几行;`0` = 本来就没有这行(幂等);
+  /// **`-1` = 删除过程出错**(事务已回滚)。调用方必须按 `< 0` 判失败,
+  /// 否则会出现"删失败也弹已删除、列表靠 UI 自己抹掉"的假象。
   static Future<int> deleteMaterial(int id) async {
     try {
       final db = await database;
@@ -2773,7 +2813,7 @@ class DatabaseService {
       });
     } catch (e) {
       debugPrint('ReadFlow deleteMaterial failed: $e');
-      return 0;
+      return -1;
     }
   }
 
@@ -4699,9 +4739,11 @@ class DatabaseService {
   /// 一次都没实现过"。以前只在"当下那一次列表加载"里翻,翻完就丢:
   /// 材料库、书架、阅读器、历史记录里到处都是没翻译的英文标题。
   /// 现在译名**落库**(materials.title_cn),任何界面读同一份,且只翻一次。
-  static Future<void> setMaterialTitleCn(int materialId, String titleCn) async {
+  /// 返回是否写成功（P2-1）：以前 catch 内 debugPrint、返回 void，
+  /// 调用方拿不到失败信号 → 界面上"改标题失败"也照样弹"已更新"。
+  static Future<bool> setMaterialTitleCn(int materialId, String titleCn) async {
     final t = titleCn.trim();
-    if (t.isEmpty) return;
+    if (t.isEmpty) return false;
     try {
       final db = await database;
       await db.update(
@@ -4710,8 +4752,10 @@ class DatabaseService {
         where: 'id = ?',
         whereArgs: [materialId],
       );
+      return true;
     } catch (e) {
       debugPrint('ReadFlow setMaterialTitleCn failed: $e');
+      return false;
     }
   }
 

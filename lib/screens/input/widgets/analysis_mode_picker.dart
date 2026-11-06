@@ -19,18 +19,9 @@ Future<String?> showAnalysisModePicker(BuildContext context) {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 拖拽条
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                margin: const EdgeInsets.only(bottom: 16),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.outlineVariant,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
+            // 拖拽条由全局主题提供(bottomSheetTheme.showDragHandle=true),
+            // 这里不要再画第二条(2026-11-06 真机截图:出现双横杠)。
+            const SizedBox(height: 4),
             Text(
               '选择分析模式',
               style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),

@@ -24,10 +24,17 @@ class MaterialBrowseScreen extends StatefulWidget {
   final MaterialDirection direction;
   final String? initialSubtopic;
 
+  /// 只显示「需求设置」（难度档 / 按形式 / 保存），**不显示下面的材料列表**。
+  ///
+  /// 频道页「去设置需求」用它：旧页面下半部分会把材料库 300 条竖列出来，
+  /// 用户只想改需求却被一屏材料淹没（质检 P2-8）。保存后 pop(true) 让调用方重读。
+  final bool settingsOnly;
+
   const MaterialBrowseScreen({
     super.key,
     required this.direction,
     this.initialSubtopic,
+    this.settingsOnly = false,
   });
 
   @override
@@ -57,9 +64,11 @@ class _MaterialBrowseScreenState extends State<MaterialBrowseScreen> {
     setState(() => _loading = true);
     var items = <ShelfItem>[];
     final need = MaterialNeed.load();
-    try {
-      items = await MaterialLibrary.shelf(limit: 300);
-    } catch (_) {}
+    if (!widget.settingsOnly) {
+      try {
+        items = await MaterialLibrary.shelf(limit: 300);
+      } catch (_) {}
+    }
     if (!mounted) return;
     setState(() {
       _need = need;
@@ -103,6 +112,17 @@ class _MaterialBrowseScreenState extends State<MaterialBrowseScreen> {
   Future<void> _saveNeed() async {
     await MaterialPrefs.load().copyWith(band: _band, kinds: _kinds).save();
     if (!mounted) return;
+    if (widget.settingsOnly) {
+      // 轻量设置模式：保存即返回，让调用方（频道页）重读偏好
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(
+          content: Text('需求已保存'),
+          behavior: SnackBarBehavior.floating,
+        ));
+      Navigator.pop(context, true);
+      return;
+    }
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(const SnackBar(
@@ -129,19 +149,22 @@ class _MaterialBrowseScreenState extends State<MaterialBrowseScreen> {
     return Scaffold(
       backgroundColor: skin.pageBg,
       appBar: V4JellyAppBar(
-        title: _def.label,
+        title: widget.settingsOnly ? '设置需求' : _def.label,
         actions: <Widget>[
-          V4IconAction(
-            icon: Icons.refresh,
-            tooltip: '重新加载',
-            onTap: () => _load(),
-          ),
+          if (!widget.settingsOnly)
+            V4IconAction(
+              icon: Icons.refresh,
+              tooltip: '重新加载',
+              onTap: () => _load(),
+            ),
         ],
       ),
       body: _loading
           ? const Center(
               child: Text('正在读取材料…', style: TextStyle(fontSize: 12)))
-          : ListView(
+          : widget.settingsOnly
+              ? _settingsBody(skin)
+              : ListView(
               padding: const EdgeInsets.fromLTRB(
                   Gap.page, Gap.sm, Gap.page, Gap.xl),
               children: <Widget>[
@@ -309,6 +332,33 @@ class _MaterialBrowseScreenState extends State<MaterialBrowseScreen> {
               if (!_selected.remove(sub.id)) _selected.add(sub.id);
             }),
           ),
+      ],
+    );
+  }
+
+  /// 「只设置需求」模式的页面主体：需求编辑器 + 保存 + 说明，**不显示材料列表**。
+  ///
+  /// 频道页「去设置需求」进来就是这一屏（质检 P2-8：旧页会把材料库 300 条竖列出来）。
+  Widget _settingsBody(V4Skin skin) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(Gap.page, Gap.sm, Gap.page, Gap.xl),
+      children: <Widget>[
+        Text(
+          '这里只改需求。难度档与形式偏好是全 App 共享的事实源：'
+          '保存后材料中心、频道页和「找材料」都按它排序与推荐。',
+          style: TextStyle(fontSize: 11.5, height: 1.6, color: skin.inkSoft),
+        ),
+        const SizedBox(height: Gap.sm),
+        _needEditor(skin),
+        const SizedBox(height: Gap.md),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            onPressed: _saveNeed,
+            icon: const Icon(Icons.check_rounded, size: 18),
+            label: const Text('保存需求'),
+          ),
+        ),
       ],
     );
   }

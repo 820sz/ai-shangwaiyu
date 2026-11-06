@@ -5,6 +5,11 @@ import 'package:hive_flutter/hive_flutter.dart';
 
 import '../config/constants.dart';
 import 'material_taxonomy.dart';
+import 'url_key.dart';
+
+// URL 归一只有一份实现（P2-9）：本文件与 material_discovery.dart 都引用
+// `url_key.dart`；这里 re-export，保持既有调用方/测试的 import 不变。
+export 'url_key.dart' show isSameUrl, normalizedUrlKey;
 
 /// 材料中心「方案 2 · 频道化」里的一个频道(一个入口 = 一个频道)。
 ///
@@ -80,31 +85,8 @@ class ChannelRunSnapshot {
       };
 }
 
-/// URL 归一(去重键):小写、去协议、去 `utm_*` 跟踪参数、去锚点。
-///
-/// 为什么抽成纯函数:去重规则错一点,"继续找更多"就会把同一篇材料重复堆出来,
-/// 而界面上看起来只是"又出现了",很难发现是去重键写错了。
-String normalizedUrlKey(String raw) {
-  var url = raw.trim().toLowerCase();
-  if (url.isEmpty) return '';
-  // 协议不参与身份比较:http/https 混用的同一篇文章是同一篇
-  url = url.replaceFirst(RegExp(r'^[a-z][a-z0-9+.\-]*://'), '');
-  // 锚点(#section)不改变内容,也去掉
-  final hash = url.indexOf('#');
-  if (hash >= 0) url = url.substring(0, hash);
-  final q = url.indexOf('?');
-  if (q < 0) return url;
-  final path = url.substring(0, q);
-  final kept = <String>[];
-  for (final piece in url.substring(q + 1).split('&')) {
-    if (piece.isEmpty) continue;
-    final cut = piece.indexOf('=');
-    final name = cut < 0 ? piece : piece.substring(0, cut);
-    if (name.startsWith('utm_')) continue; // 跟踪参数纯噪声
-    kept.add(piece);
-  }
-  return kept.isEmpty ? path : '$path?${kept.join('&')}';
-}
+// URL 归一见 `url_key.dart`（P2-9 把两套实现合并成唯一一份；本文件顶部 re-export，
+// 老调用方/测试无需改 import）。
 
 /// 把候选 map 规整成**可 JSON 化、可入库**的规范 map(纯函数)。
 ///
@@ -224,6 +206,14 @@ class MaterialChannelStore {
   /// 所有本 store 的 Hive key 前缀(测试清理/诊断用)
   static const String boxKeyPrefix = 'material_channel_';
 
+  /// 单个频道发现快照的**条数上限**(P2-3)。
+  ///
+  /// 快照是"上次结果"的缓存,不是无限档案:每轮 8~10 条,攒到 120 条
+  /// (≈ 12 轮「继续找更多」)已经远超正常人会翻的量;再不封顶 settings box
+  /// 会随使用时间一直变大。到上限后频道页会禁用「继续找更多」并说明,
+  /// 而不是"付了钱、结果被静默丢掉"。
+  static const int maxSnapshotItems = 120;
+
   /// 保存关系的 key 后缀(用 `@@` 避免与频道 id 本身拼出的 key 冲突)
   static const String _savedSuffix = '@@saved';
   static const String _hiddenSuffix = '@@hidden';
@@ -255,7 +245,11 @@ class MaterialChannelStore {
   /// [append] = true 用于「继续找更多」:旧条目原序保留,新条目按 URL 归一后
   /// 追加(重复的丢弃),累计 apiRequests / costCny,合并 queriesUsed。
   /// [append] = false 用于「重新找」:整体替换。
-  static Future<void> saveRun(
+  ///
+  /// 返回**是否真的写进 Hive**（P2-1）:调用方据此提示"结果已显示,但快照没存上"。
+  /// 以前返回 void + catch 内 debugPrint,外面那层 try/catch 永远不触发,
+  /// 存失败也当成功。
+  static Future<bool> saveRun(
     String channelId, {
     required List<Map<String, Object?>> items,
     required int apiRequests,
@@ -281,8 +275,13 @@ class MaterialChannelStore {
           if (key.isNotEmpty && !seen.add(key)) continue;
           merged.add(item);
         }
+        // P2-3:封顶。保留最早的一批（用户从第一页往下读，新追加的排最后）
+        var capped = merged;
+        if (merged.length > maxSnapshotItems) {
+          capped = merged.sublist(0, maxSnapshotItems);
+        }
         snapshot = ChannelRunSnapshot(
-          items: merged,
+          items: capped,
           updatedAt: DateTime.now(),
           apiRequests: (old?.apiRequests ?? 0) + apiRequests,
           costCny: (old?.costCny ?? 0) + costCny,
@@ -301,9 +300,11 @@ class MaterialChannelStore {
         );
       }
       await _box.put(_snapshotKey(channelId), jsonEncode(snapshot.toJson()));
+      return true;
     } catch (e) {
-      // 存不上最多是"下次要重搜",不能把这次已经拿到的结果页打断
+      // 存不上最多是"下次要重搜",不能把这次已经拿到的结果页打断（但要把信号给 UI）
       debugPrint('ReadFlow 保存频道快照失败($channelId): $e');
+      return false;
     }
   }
 
@@ -331,17 +332,17 @@ class MaterialChannelStore {
     }
   }
 
-  /// 记一条"保存到我的"关系(重复保存是幂等的)。
-  static Future<void> addSavedMaterial(String channelId, int materialId) async {
-    await _mutateSaved(channelId, (ids) => ids..add(materialId));
+  /// 记一条"保存到我的"关系(重复保存是幂等的)。返回是否写成功(P2-1)。
+  static Future<bool> addSavedMaterial(String channelId, int materialId) {
+    return _mutateSaved(channelId, (ids) => ids..add(materialId));
   }
 
-  /// 删一条"保存到我的"关系(不存在时无副作用)。
-  static Future<void> removeSavedMaterial(
+  /// 删一条"保存到我的"关系(不存在时无副作用)。返回是否写成功(P2-1)。
+  static Future<bool> removeSavedMaterial(
     String channelId,
     int materialId,
-  ) async {
-    await _mutateSaved(channelId, (ids) => ids..remove(materialId));
+  ) {
+    return _mutateSaved(channelId, (ids) => ids..remove(materialId));
   }
 
   /// 某频道**被用户移除**的材料 id 集合(频道级持久隐藏,不删材料本体)。
@@ -359,17 +360,17 @@ class MaterialChannelStore {
     }
   }
 
-  /// 记一条"从频道移除"关系(重复移除幂等)。
-  static Future<void> addHiddenMaterial(String channelId, int materialId) async {
-    await _mutateHidden(channelId, (ids) => ids..add(materialId));
+  /// 记一条"从频道移除"关系(重复移除幂等)。返回是否写成功(P2-1)。
+  static Future<bool> addHiddenMaterial(String channelId, int materialId) {
+    return _mutateHidden(channelId, (ids) => ids..add(materialId));
   }
 
-  /// 取消"从频道移除"(重新保存/手动恢复时用)。
-  static Future<void> removeHiddenMaterial(
+  /// 取消"从频道移除"(重新保存/手动恢复时用)。返回是否写成功(P2-1)。
+  static Future<bool> removeHiddenMaterial(
     String channelId,
     int materialId,
-  ) async {
-    await _mutateHidden(channelId, (ids) => ids..remove(materialId));
+  ) {
+    return _mutateHidden(channelId, (ids) => ids..remove(materialId));
   }
 
   /// 测试专用:清空本 store 的所有 key(快照 + 保存关系)。
@@ -388,7 +389,7 @@ class MaterialChannelStore {
     }
   }
 
-  static Future<void> _mutateSaved(
+  static Future<bool> _mutateSaved(
     String channelId,
     void Function(Set<int> ids) mutate,
   ) async {
@@ -397,12 +398,14 @@ class MaterialChannelStore {
       mutate(ids);
       final sorted = ids.toList()..sort();
       await _box.put(_savedKey(channelId), jsonEncode(sorted));
+      return true;
     } catch (e) {
       debugPrint('ReadFlow 写入频道保存关系失败($channelId): $e');
+      return false;
     }
   }
 
-  static Future<void> _mutateHidden(
+  static Future<bool> _mutateHidden(
     String channelId,
     void Function(Set<int> ids) mutate,
   ) async {
@@ -411,8 +414,10 @@ class MaterialChannelStore {
       mutate(ids);
       final sorted = ids.toList()..sort();
       await _box.put(_hiddenKey(channelId), jsonEncode(sorted));
+      return true;
     } catch (e) {
       debugPrint('ReadFlow 写入频道移除表失败($channelId): $e');
+      return false;
     }
   }
 

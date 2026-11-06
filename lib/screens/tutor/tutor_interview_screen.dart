@@ -4,6 +4,7 @@ import '../../config/design_tokens.dart';
 import '../../models/learner_model.dart';
 import '../../services/database.dart';
 import '../../services/learner_model_store.dart';
+import '../../widgets/v4/v4_kit.dart';
 
 /// 助理的**先访谈**(v2.8,用户第 5(3) 条)。
 ///
@@ -254,9 +255,9 @@ class _TutorInterviewScreenState extends State<TutorInterviewScreen> {
     final muted = theme.colorScheme.onSurfaceVariant;
     final step = _steps[_index];
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('先聊聊你的情况'),
-        actions: [
+      appBar: V4JellyAppBar(
+        title: '先聊聊你的情况',
+        actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('跳过'),

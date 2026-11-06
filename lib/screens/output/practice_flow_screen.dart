@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../../config/design_tokens.dart';
+import '../../config/v4_theme.dart';
 import '../../models/learner_model.dart';
 import '../../services/ability_recorder.dart';
 import '../../services/database.dart';
@@ -15,6 +16,7 @@ import '../../services/output_rubric.dart';
 import '../../widgets/answer_image_input.dart';
 import '../../widgets/app_ui.dart';
 import '../../widgets/waiting.dart';
+import 'widgets/paper_kit.dart';
 import 'widgets/practice_result_view.dart';
 
 /// 练习器(v3 · 批 3 · 骨架 b「篇章任务」+ 骨架 c「对照复盘」)。
@@ -219,47 +221,90 @@ class _PracticeFlowScreenState extends State<PracticeFlowScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
+    // 纸面:本页所有显式取色也走纸面主题(否则图钉/文字会残留果冻紫)
+    final paperTheme = paperThemeOf(context);
+    final theme = paperTheme;
+    final cs = paperTheme.colorScheme;
     final task = _task;
     final total = widget.set.tasks.length;
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          widget.set.title.isEmpty
-              ? '${task.tier.label}练习'
-              : widget.set.title,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
+    // P0-1:统一的来源行「等级 · 年份套数 · 来源站点 · 校对」——
+    // 答题时就要能确认"这题哪来的",而不是只在题库列表里标一下。
+    final sourceLine = examSourceLine(
+      examType: widget.set.examType,
+      paperYear: widget.set.paperYear,
+      paperLabel: widget.set.paperLabel,
+      sourceSite: widget.set.sourceSite.isNotEmpty
+          ? widget.set.sourceSite
+          : siteOfLicenseNote(widget.set.licenseNote),
+      verifyStatus: widget.set.verifyStatus,
+      withExam: widget.set.source == 'exam' || widget.set.examType != 'none',
+    );
+    final skin = paperTheme.extension<V4Skin>()!;
+    final levelLabel = widget.set.examType.trim().toLowerCase() == 'none'
+        ? ''
+        : examShortLabelFor(widget.set.examType);
+    return PaperScaffold(
+      topBar: PaperTopBar(
+        // 眉标只放"哪一级 · 哪一套",不重复长标题(长标题会被截成省略号)
+        eyebrow: <String>[
+          if (levelLabel.isNotEmpty) levelLabel,
+          if (widget.set.paperLabel.trim().isNotEmpty) widget.set.paperLabel,
+          if (levelLabel.isEmpty && widget.set.paperLabel.trim().isEmpty)
+            widget.set.title.isEmpty
+                ? '${task.tier.label}练习'
+                : widget.set.title,
+        ].join(' · '),
       ),
+      // 唯一主行动放底部固定条:作答时不被按钮打断,滚动也一直在手边
+      bottomBar: _buildBottomBar(context),
       body: ListView(
-        padding: Insets.page,
+        padding: const EdgeInsets.fromLTRB(Gap.page, Gap.xs, Gap.page, 120),
         children: [
-          // ① 进度 + 题源标注(真题必须显示来源)
+          // ① 进度:细线 + 第 N 题 + 等级标记(A 纸面:不靠色块抢注意力)
           Row(
             children: [
               Text(
                 '第 ${_index + 1}/$total 题',
                 style: AppFont.metaStyle.copyWith(
-                  color: cs.onSurface,
+                  color: skin.ink,
                   fontWeight: FontWeight.w700,
                 ),
               ),
               const SizedBox(width: Gap.xs),
               _typeBadge(theme, task.type),
               const Spacer(),
-              if (widget.set.source == 'exam')
-                Text(
-                  '真题来源 · 已标注',
-                  style: AppFont.tagStyle.copyWith(color: cs.primary),
+              if (levelLabel.isNotEmpty)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: skin.surfaceAlt,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    levelLabel,
+                    style: AppFont.tagStyle.copyWith(
+                      color: skin.inkSoft,
+                      fontSize: 9.5,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.4,
+                    ),
+                  ),
                 ),
             ],
           ),
-          const SizedBox(height: Gap.sm),
+          const SizedBox(height: 8),
+          PaperProgressLine(
+            value: total <= 0
+                ? 0
+                : (_index + (_result == null ? 0.4 : 1)) / total,
+          ),
+          const SizedBox(height: Gap.md),
 
-          // ② 题面
-          AppCard(
+          // ② 题面(纸面卡)
+          PaperCard(
+            radius: 20,
+            padding: const EdgeInsets.all(18),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -333,23 +378,40 @@ class _PracticeFlowScreenState extends State<PracticeFlowScreen> {
           ),
           const SizedBox(height: Gap.sm),
 
-          // ③ 作答区
+          // ③ 作答区(纸面:输入区不要边框噪声,靠留白分区)
           if (_result == null) ...[
-            AppCard(
+            PaperCard(
+              radius: 20,
+              padding: const EdgeInsets.all(18),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  Text(
+                    '你的作答',
+                    style: AppFont.tagStyle.copyWith(
+                      color: skin.inkFaint,
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.6,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
                   TextField(
                     controller: _answerCtrl,
                     minLines: _editorMinLines(task),
                     maxLines: _editorMaxLines(task),
-                    style: AppFont.bodyStyle.copyWith(height: 1.5),
+                    style: AppFont.bodyStyle.copyWith(height: 1.6),
                     decoration: InputDecoration(
                       hintText: _editorHint(task),
-                      border: const OutlineInputBorder(),
+                      border: InputBorder.none,
+                      isDense: true,
+                      contentPadding: EdgeInsets.zero,
                     ),
                     onChanged: (_) => setState(() {}),
                   ),
+                  const SizedBox(height: 6),
+                  Container(height: 1, color: skin.hairline),
+                  const SizedBox(height: 10),
                   const SizedBox(height: Gap.xs),
                   // v2.24:不想打字/手写稿 → 拍照或从相册选,提交时先转写再批改
                   AnswerImageInput(
@@ -388,23 +450,6 @@ class _PracticeFlowScreenState extends State<PracticeFlowScreen> {
                     const SizedBox(height: Gap.xs),
                     const SkeletonLines(lines: 3, seed: 4),
                   ],
-                  const SizedBox(height: Gap.sm),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 48,
-                    child: FilledButton.icon(
-                      onPressed: (_scoring ||
-                              _transcribing ||
-                              (_answerCtrl.text.trim().isEmpty &&
-                                  _answerImages.isEmpty))
-                          ? null
-                          : _submit,
-                      icon: const Icon(Icons.fact_check_outlined, size: 18),
-                      label: Text(_transcribing
-                          ? '正在转写图片…'
-                          : (_answerImages.isEmpty ? '提交批改' : '转写并提交批改')),
-                    ),
-                  ),
                   if (_error != null) ...[
                     const SizedBox(height: Gap.xs),
                     Text(
@@ -415,6 +460,14 @@ class _PracticeFlowScreenState extends State<PracticeFlowScreen> {
                 ],
               ),
             ),
+            const SizedBox(height: Gap.sm),
+            // ③.5 批改标准预览:作答前就知道会被怎么评(不开盲盒)
+            _buildRubricPreview(context, task),
+            // ③.6 来源行(P0-1:等级 · 年份套数 · 来源站点 · 校对)
+            if (sourceLine.isNotEmpty) ...[
+              const SizedBox(height: Gap.sm),
+              PaperSourceLine(value: sourceLine),
+            ],
           ] else ...[
             // ④ 批改结果
             // 结果出现时做一次入场(AppStagger 本身尊重系统"减少动态"设置):
@@ -429,39 +482,113 @@ class _PracticeFlowScreenState extends State<PracticeFlowScreen> {
                 rubric: _rubricOf(task),
               ),
             ),
-            const SizedBox(height: Gap.sm),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () => setState(() {
-                      // 看完结果想再写一遍:清空答案重新作答
-                      _result = null;
-                      _answerCtrl.clear();
-                      _answerImages.clear();
-                      _stopwatch
-                        ..reset()
-                        ..start();
-                    }),
-                    child: const Text('再写一遍'),
-                  ),
-                ),
-                const SizedBox(width: Gap.xs),
-                Expanded(
-                  child: FilledButton(
-                    onPressed: _next,
-                    child: Text(
-                      _index + 1 >= total ? '完成' : '下一题',
-                    ),
-                  ),
-                ),
-              ],
-            ),
           ],
           const SizedBox(height: Gap.lg),
         ],
       ),
     );
+  }
+
+  /// 批改标准预览(作答前):只列维度名与权重,不泄露答案。
+  Widget _buildRubricPreview(BuildContext context, OutputTaskSpec task) {
+    final skin = V4Skin.of(context);
+    final rubric = _rubricOf(task);
+    if (rubric.dimensions.isEmpty) return const SizedBox.shrink();
+    return PaperCard(
+      padding: const EdgeInsets.fromLTRB(16, 13, 16, 13),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Text(
+                '批改标准',
+                style: AppFont.tagStyle.copyWith(
+                  color: skin.inkFaint,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.6,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                rubric.id,
+                style: AppFont.tagStyle.copyWith(
+                  color: skin.inkFaint,
+                  fontSize: 10,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: <Widget>[
+              for (final dim in rubric.dimensions)
+                PaperMetaChip(
+                  label: dim.maxScore > 0
+                      ? '${dim.label} ${dim.maxScore.toStringAsFixed(0)}'
+                      : dim.label,
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 底部唯一主行动:作答态 = 提交批改;结果态 = 再写一遍 / 下一题。
+  Widget _buildBottomBar(BuildContext context) {
+    if (_result == null) {
+      final canSubmit = !_scoring &&
+          !_transcribing &&
+          (_answerCtrl.text.trim().isNotEmpty || _answerImages.isNotEmpty);
+      return PaperBottomAction(
+        child: PaperPillButton(
+          label: _transcribing
+              ? '正在转写图片…'
+              : (_answerImages.isEmpty ? '提交批改' : '转写并提交批改'),
+          icon: Icons.fact_check_outlined,
+          onTap: canSubmit ? _submit : null,
+          expand: true,
+        ),
+      );
+    }
+    return PaperBottomAction(
+      child: Row(
+        children: <Widget>[
+          Expanded(
+            child: PaperPillButton(
+              label: '再写一遍',
+              primary: false,
+              onTap: _resetAnswer,
+              expand: true,
+            ),
+          ),
+          const SizedBox(width: Gap.xs),
+          Expanded(
+            child: PaperPillButton(
+              label: _index + 1 >= widget.set.tasks.length ? '完成' : '下一题',
+              onTap: _next,
+              expand: true,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 看完结果想再写一遍:清空答案重新作答(计时也重开)。
+  void _resetAnswer() {
+    setState(() {
+      _result = null;
+      _answerCtrl.clear();
+      _answerImages.clear();
+      _stopwatch
+        ..reset()
+        ..start();
+    });
   }
 
   // ── 四阶形态差异(批 8 · D1-13)────────────────────────────────

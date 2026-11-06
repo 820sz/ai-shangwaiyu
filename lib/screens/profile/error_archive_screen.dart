@@ -6,9 +6,11 @@ import '../../config/design_tokens.dart';
 import '../../config/theme.dart';
 import '../../services/database.dart';
 import '../../widgets/app_ui.dart';
+import '../../widgets/dash_kit.dart';
 import '../../widgets/design_kit.dart';
 import '../../widgets/error_state.dart';
 import '../../widgets/graphics/graphics.dart';
+import '../../widgets/v4/v4_kit.dart';
 import '../../widgets/waiting.dart';
 import '../writing/write_review_screen.dart';
 
@@ -183,7 +185,7 @@ class _ErrorArchiveScreenState extends State<ErrorArchiveScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('错误档案')),
+      appBar: const V4JellyAppBar(title: '错误档案', domain: GraphicDomain.custom),
       body: _buildBody(),
     );
   }
@@ -194,7 +196,7 @@ class _ErrorArchiveScreenState extends State<ErrorArchiveScreen> {
       // v2.10:整页加载态不再转圈 —— 骨架屏先铺出"错误记录列表将要占据的
       // 形状",数据一到原地替换(全项目统一等待 UI 的约定见 waiting.dart)。
       return const Padding(
-        padding: EdgeInsets.fromLTRB(12, 12, 12, 0),
+        padding: Insets.page,
         child: SkeletonLines(lines: 6, seed: 1),
       );
     }
@@ -208,6 +210,7 @@ class _ErrorArchiveScreenState extends State<ErrorArchiveScreen> {
       child: Column(
         children: [
           _buildTabs(base, list),
+          _buildDashSummary(base, list),
           Expanded(
             // 空态也套一层可滚动容器:否则空列表时 RefreshIndicator 拉不动,
             // 用户以为"下拉刷新坏了"
@@ -414,6 +417,94 @@ class _ErrorArchiveScreenState extends State<ErrorArchiveScreen> {
           icon: const Icon(Icons.inbox_outlined, size: 16),
           label: const Text('回到待处理'),
         ),
+      ),
+    );
+  }
+
+  /// 数据内页 · A 诊断台头部:KPI 带 + 「错在哪」分布细条。
+  ///
+  /// 为什么加这一段:原来一进页就是两级筛选 + 卡片列表,用户看不出
+  /// "一共多少、最该先动哪一类";KPI + 分布条把这两个问题在首屏回答掉。
+  Widget _buildDashSummary(List<_ErrorTag> base, List<_ErrorTag> list) {
+    final DashTheme d = DashTheme.of(context);
+    final int total = list.fold<int>(0, (int s, _ErrorTag t) => s + t.count);
+    final List<_ErrorTag> top = list.take(3).toList();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(Gap.page, Gap.xxs, Gap.page, Gap.xs),
+      child: Column(
+        children: <Widget>[
+          DashKpiBand(
+            items: <DashKpi>[
+              DashKpi(
+                label: _tab == 0 ? '待处理' : '已改正',
+                value: '${list.length}',
+                unit: '类',
+              ),
+              DashKpi(
+                label: '累计次数',
+                value: '$total',
+                unit: '次',
+                color: total > 0 ? d.warn : null,
+              ),
+              DashKpi(
+                label: '最需要处理',
+                value: top.isEmpty ? '—' : top.first.tag,
+                size: 15,
+                color: top.isEmpty ? null : d.danger,
+              ),
+            ],
+          ),
+          if (top.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            DashCard(
+              padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+              child: Column(
+                children: <Widget>[
+                  for (var i = 0; i < top.length; i++)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 5),
+                      child: Row(
+                        children: <Widget>[
+                          SizedBox(
+                            width: 62,
+                            child: Text(
+                              top[i].tag,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppFont.bodyStyle.copyWith(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: d.ink,
+                              ),
+                            ),
+                          ),
+                          Expanded(
+                            child: DashThinBar(
+                              value: total <= 0 ? 0 : top[i].count / total,
+                              color: i == 0 ? d.danger : d.accent,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          SizedBox(
+                            width: 42,
+                            child: Text(
+                              '${top[i].count} 次',
+                              textAlign: TextAlign.right,
+                              style: AppFont.metaStyle.copyWith(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w700,
+                                color: d.inkSoft,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }

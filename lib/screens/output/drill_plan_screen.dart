@@ -12,6 +12,7 @@ import '../../services/learner_model_store.dart';
 import '../../widgets/app_ui.dart';
 import '../../widgets/waiting.dart';
 import 'drill_screen.dart';
+import 'widgets/paper_kit.dart';
 
 /// 目标需求选择器(练习中心与输出首页共用一处)。
 ///
@@ -742,16 +743,22 @@ class _DrillPlanScreenState extends State<DrillPlanScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('练习中心'),
+    // 纸面:整页套纸面主题(顶栏/旧卡片/显式取色一起变纸面,不留果冻紫)
+    return Theme(
+      data: paperThemeOf(context),
+      child: Builder(builder: (context) {
+        final theme = Theme.of(context);
+        return Scaffold(
+      // 视觉 A(纸面):顶栏无阴影、页面底色、居中细眉标;旧计划页行为一行不动
+      appBar: paperAppBar(
+        context,
+        '练习中心 · 旧版计划',
         actions: [
           if (!_loading)
             IconButton(
               tooltip: '刷新进度',
               onPressed: _refreshProgress,
-              icon: const Icon(Icons.refresh),
+              icon: const Icon(Icons.refresh_rounded),
             ),
         ],
       ),
@@ -790,6 +797,8 @@ class _DrillPlanScreenState extends State<DrillPlanScreen> {
                 const SizedBox(height: Gap.lg),
               ],
             ),
+        );
+      }),
     );
   }
 
@@ -800,10 +809,12 @@ class _DrillPlanScreenState extends State<DrillPlanScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const AppSectionTitle(
+          const PaperSectionHead(
+            index: '01',
             title: '怎么练',
-            subtitle: '三种都能用,随时可切',
+            trailing: '三种都能用，随时可切',
           ),
+          const SizedBox(height: Gap.xs),
           for (final m in DrillPlanNote.planModes)
             AppCard(
               onTap: () => _pickPlanMode(m.$1),
@@ -868,10 +879,11 @@ class _DrillPlanScreenState extends State<DrillPlanScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          AppSectionTitle(
+          PaperSectionHead(
+            index: '02',
             title: '目标需求',
-            subtitle: goals.isEmpty ? '还没选' : '已选 ${goals.length} 个',
-            trailing: TextButton.icon(
+            trailing: goals.isEmpty ? '还没选' : '已选 ${goals.length} 个',
+            action: TextButton.icon(
               onPressed: () => showDrillGoalPicker(
                 context,
                 model: _model,
@@ -887,6 +899,7 @@ class _DrillPlanScreenState extends State<DrillPlanScreen> {
               label: const Text('选择'),
             ),
           ),
+          const SizedBox(height: Gap.xs),
           AppCard(
             onTap: () => showDrillGoalPicker(
               context,
@@ -952,15 +965,17 @@ class _DrillPlanScreenState extends State<DrillPlanScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          AppSectionTitle(
+          PaperSectionHead(
+            index: '03',
             title: '当前水平',
-            subtitle: '软件内数据 + 你自己补充',
-            trailing: TextButton.icon(
+            trailing: '软件内数据 + 你自己补充',
+            action: TextButton.icon(
               onPressed: _editLevelNote,
               icon: const Icon(Icons.edit_outlined, size: 16),
               label: Text(userNote.isEmpty ? '补充' : '修改'),
             ),
           ),
+          const SizedBox(height: Gap.xs),
           AppCard(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1063,12 +1078,13 @@ class _DrillPlanScreenState extends State<DrillPlanScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          AppSectionTitle(
+          PaperSectionHead(
+            index: '04',
             title: '进度追踪',
-            subtitle: _stats.hasData
+            trailing: _stats.hasData
                 ? '累计 ${_stats.total} 题 · 正确率 ${(_stats.accuracy * 100).round()}%'
                 : '开始第一次练习后就有数据',
-            trailing: _hasPlan
+            action: _hasPlan
                 ? TextButton.icon(
                     onPressed: _generatePlan,
                     icon: const Icon(Icons.refresh, size: 15),
@@ -1076,6 +1092,7 @@ class _DrillPlanScreenState extends State<DrillPlanScreen> {
                   )
                 : null,
           ),
+          const SizedBox(height: Gap.xs),
           AppCard(
             padding: const EdgeInsets.all(Gap.md),
             child: Column(
@@ -1353,11 +1370,13 @@ class _DrillPlanScreenState extends State<DrillPlanScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          AppSectionTitle(
+          PaperSectionHead(
+            index: '05',
             title: '开始练',
-            subtitle: '每天 ${_progress.perDay} 题'
+            trailing: '每天 ${_progress.perDay} 题'
                 '${alreadyToday > 0 ? ' · 今天已练 $alreadyToday 题' : ''}',
           ),
+          const SizedBox(height: Gap.xs),
           // 只练到期词:复习债优先(默认关 —— 只在复习队列很满时才值得开)
           AppCard(
             dense: true,

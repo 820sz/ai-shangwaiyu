@@ -86,10 +86,47 @@ class DrillCatalog {
 
   /// 全部目标(界面顺序即此处顺序:先备考,再应用,后兴趣)
   static const List<DrillGoal> goals = [
+    // 2026-11-06 二期(用户已同意):四六级拆成两个独立目标。
+    // 旧「四六级」保留为"通用档":已存 goals 不迁移(语义上代表 CET-4 ∪ CET-6,
+    // 由 output_source.examTypesForGoals 在读取时展开),这样老数据不会丢、也不用启动迁移。
+    DrillGoal(
+      id: 'cet4',
+      label: '四级',
+      what: '四级考纲高频词 + 写作/翻译常考句式',
+      tag: GoalTag.exam,
+      exam: true,
+      wordLen: (5, 12),
+      sentenceLen: (8, 20),
+      keywords: [
+        'campus', 'student', 'study', 'education', 'college', 'university',
+        'tradition', 'culture', 'society', 'economy', 'environment',
+        'technology', 'develop', 'improve', 'benefit', 'challenge',
+        '课程', '校园', '社会', '文化', '经济', '环境', '科技', '发展',
+        '传统', '教育', '大学', '学生', '考试',
+      ],
+    ),
+    DrillGoal(
+      id: 'cet6',
+      label: '六级',
+      what: '六级高频词 + 更长的论证句',
+      tag: GoalTag.exam,
+      exam: true,
+      wordLen: (6, 14),
+      sentenceLen: (10, 26),
+      keywords: [
+        'phenomenon', 'significant', 'substantial', 'perspective', 'acquire',
+        'controversy', 'sustainable', 'innovation', 'interpret', 'advocate',
+        'however', 'therefore', 'moreover', 'consequently',
+        '现象', '显著', '视角', '获得', '争议', '可持续', '创新',
+        '阐释', '主张', '然而', '因此', '此外', '核心', '本质',
+      ],
+    ),
+    // 旧「四六级」放在四级/六级**之后**,并且文案写明"等于两级通用",
+    // 避免用户以为这是第三个要选的档位(设置页只显示标签,这里用 what 说明)。
     DrillGoal(
       id: 'cet',
       label: '四六级',
-      what: '练考试高频词与固定搭配的拼写,翻译按真题句式(短句为主、语法点密集)',
+      what: '通用档:等于「四级 + 六级」两级一起练;想单独练某一级就选上面的四级或六级',
       tag: GoalTag.exam,
       exam: true,
       wordLen: (6, 13),

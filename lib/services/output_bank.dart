@@ -23,6 +23,7 @@ library;
 
 import 'dart:math';
 
+import 'exam_vocab.dart';
 import 'output_composer.dart';
 
 /// 一个练习来源(界面上的"按目标练"卡片)。
@@ -621,18 +622,52 @@ class OutputBank {
   /// 四六级/考研通用考纲词
   static final List<WordBankEntry> cet4Words = _parse(_cet4Raw);
 
+  /// 按考试等级取词池(四级/六级拆桶)。
+  ///
+  /// 数据来自 `assets/data/exam_vocab.json`:同一份词表里每个词带 `exams` 多标签,
+  /// 所以"四级词"与"六级词"是**同一事实源的两个视图**,不是两张各自维护的表。
+  /// 词表未加载(离线首屏/测试未注入)时返回空,调用方回落内置精选池。
+  static List<WordBankEntry> wordsForLevel(String examId) {
+    try {
+      final id = examId.trim().toLowerCase();
+      if (id.isEmpty || !ExamVocab.isLoaded) return const <WordBankEntry>[];
+      final words = ExamVocab.wordsFor(id, limit: 400);
+      return <WordBankEntry>[
+        for (final w in words) WordBankEntry(w.word, w.zh, w.pos),
+      ];
+    } catch (_) {
+      return const <WordBankEntry>[];
+    }
+  }
+
+  /// 六级来源卡显示的词数:词表未加载时退回精选池规模(不显示 0)
+  static int get cet6WordCount {
+    final words = wordsForLevel('cet6');
+    return words.isEmpty ? cet4Words.length : words.length;
+  }
+
   /// 外刊/新闻高频词
   static final List<WordBankEntry> newsWords = _parse(_newsRaw);
 
   /// 所有来源(界面按用户目标排序展示)
   static List<OutputPracticeSource> sources() => [
+        // 2026-11-06 二期:四六级拆成两个来源(词池按考纲词表 exams 标签切分;
+        // 词表未加载时回落内置四六级精选池,不空手)。
         OutputPracticeSource(
           id: 'cet4_words',
-          title: '四六级高频词',
-          description: '考纲高频词,练拼写与中译英',
+          title: '四级高频词',
+          description: '四级考纲高频词，练拼写与中译英',
           tier: OutputTier.word,
           itemCount: cet4Words.length,
-          matchesGoals: const ['四六级', '四级', '六级', 'cet'],
+          matchesGoals: const ['四级', 'CET-4', '四六级', 'cet'],
+        ),
+        OutputPracticeSource(
+          id: 'cet6_words',
+          title: '六级高频词',
+          description: '六级考纲高频词，词更长、更抽象',
+          tier: OutputTier.word,
+          itemCount: cet6WordCount,
+          matchesGoals: const ['六级', 'CET-6', '四六级', 'cet'],
         ),
         OutputPracticeSource(
           id: 'news_words',

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../config/design_tokens.dart';
 import '../../models/learning_record.dart';
 import '../../services/database.dart';
 import '../../services/fsrs.dart';
@@ -8,10 +9,12 @@ import '../../services/learner_model_store.dart';
 import '../../services/output_feedback.dart';
 import '../../services/review_queue.dart';
 import '../../services/weekly_report.dart';
-import '../../widgets/empty_state.dart';
+import '../../widgets/design_kit.dart';
 import '../../widgets/error_state.dart';
 import '../../widgets/graphics/graphics.dart';
+import '../../widgets/dash_kit.dart';
 import '../../widgets/stats_chart.dart';
+import '../../widgets/v4/v4_kit.dart';
 import '../../widgets/waiting.dart';
 
 /// 每周报告页(v2.1)。
@@ -24,7 +27,12 @@ import '../../widgets/waiting.dart';
 /// 正确率多少、欠多少复习)。让模型复述一遍数字既慢又可能编,凡是能算的
 /// 就不该问模型 —— 这就是"无证据不下结论"的具体做法。
 class WeeklyReportScreen extends StatefulWidget {
-  const WeeklyReportScreen({super.key});
+  const WeeklyReportScreen({super.key, this.previewReport, this.previewDailyLogs});
+
+  /// **仅用于逐屏渲染/测试**:直接注入已生成好的报告与 7 天日志,
+  /// 跳过异步查库(页面渲染路径不变)。生产调用不传。
+  final WeeklyReport? previewReport;
+  final List<LearningRecord>? previewDailyLogs;
 
   @override
   State<WeeklyReportScreen> createState() => _WeeklyReportScreenState();
@@ -49,6 +57,14 @@ class _WeeklyReportScreenState extends State<WeeklyReportScreen> {
   @override
   void initState() {
     super.initState();
+    final WeeklyReport? injected = widget.previewReport;
+    if (injected != null) {
+      // 渲染/测试注入:报告与逐日日志都由调用方给,不查库
+      _report = injected;
+      _dailyLogs = widget.previewDailyLogs ?? const <LearningRecord>[];
+      _loading = false;
+      return;
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _load();
@@ -260,9 +276,10 @@ class _WeeklyReportScreenState extends State<WeeklyReportScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('本周报告'),
-        actions: [
+      appBar: V4JellyAppBar(
+        title: '本周报告',
+        domain: GraphicDomain.custom,
+        actions: <Widget>[
           IconButton(
             icon: const Icon(Icons.copy_all_outlined),
             tooltip: '复制为文本',
@@ -280,20 +297,52 @@ class _WeeklyReportScreenState extends State<WeeklyReportScreen> {
       // v2.10:整页加载态不再转圈 —— 骨架屏先铺出报告各区块的形状;
       // 内边距与下面真正的 ListView 完全一致,数据到达时布局不跳。
       return const Padding(
-        padding: EdgeInsets.fromLTRB(12, 12, 12, 24),
+        padding: Insets.page,
         child: SkeletonLines(lines: 6, seed: 3),
       );
     }
     if (_error != null) return ErrorState(message: _error!, onRetry: _load);
     final report = _report!;
+    // ── 数据内页 · A 诊断台 KPI 带:三个可核对的真实数字 ──
+    final DateTime anchor =
+        DateTime(report.to.year, report.to.month, report.to.day);
+    final List<double> weekWords = dailySeriesOf(
+      _dailyLogs,
+      days: 7,
+      pick: (r) => r.newWordsCount,
+      now: anchor,
+    );
+    int newWords7 = 0;
+    int daysWithWords = 0;
+    for (final double v in weekWords) {
+      newWords7 += v.round();
+      if (v > 0) daysWithWords++;
+    }
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
+        padding: Insets.page,
         children: [
+          DashKpiBand(
+            items: <DashKpi>[
+              DashKpi(label: '近 7 天新收词', value: '$newWords7', unit: '个'),
+              DashKpi(
+                label: '有收词的天数',
+                value: '$daysWithWords',
+                unit: '/7',
+                color: daysWithWords >= 4 ? DashTheme.of(context).good : null,
+              ),
+              DashKpi(
+                label: '最该处理的错误',
+                value: report.topErrors.isEmpty ? '—' : report.topErrors.first,
+                size: 15,
+              ),
+            ],
+          ),
+          const SizedBox(height: Gap.sm),
           _buildRange(report),
           const SizedBox(height: 12),
-          if (!report.isActive) _buildEmptyHint(),
+          if (!report.isActive && newWords7 == 0) _buildEmptyHint(),
           // v2.13(图形资产系统 · 批 1):周报顶部先把"这周的数据形状"画出来,
           // 再给文字结论 —— 图看趋势、数字看事实、句子看结论。
           _Section(
@@ -343,9 +392,9 @@ class _WeeklyReportScreenState extends State<WeeklyReportScreen> {
           Text(
             '本周报告由本机数据算出(不联网、不调用 AI);'
             '历史周报会在后续版本以「选周期」的方式补算。',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
+            style: AppFont.metaStyle.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ),
         ],
       ),
@@ -357,7 +406,7 @@ class _WeeklyReportScreenState extends State<WeeklyReportScreen> {
   Widget _buildEmptyHint() {
     return const Padding(
       padding: EdgeInsets.only(bottom: 4),
-      child: EmptyState(
+      child: AppEmptyState(
         icon: Icons.calendar_today_outlined,
         title: '本周还没有学习记录',
         hint: '读一篇材料或复习几个词,这里就会有内容',
@@ -383,7 +432,7 @@ class _WeeklyReportScreenState extends State<WeeklyReportScreen> {
     );
     final total = series.fold<double>(0, (sum, v) => sum + v).round();
     if (total <= 0) {
-      return const ChartEmptyHint(label: '暂无数据', hint: '这 7 天没有新收词记录');
+      return const AppEmptyState(title: '暂无数据', hint: '这 7 天没有新收词记录');
     }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -401,7 +450,7 @@ class _WeeklyReportScreenState extends State<WeeklyReportScreen> {
                 child: Text(
                   _mdLabel(anchor.subtract(Duration(days: i))),
                   textAlign: TextAlign.center,
-                  style: theme.textTheme.labelSmall?.copyWith(color: muted),
+                  style: AppFont.tagStyle.copyWith(color: muted),
                 ),
               ),
           ],
@@ -409,7 +458,7 @@ class _WeeklyReportScreenState extends State<WeeklyReportScreen> {
         const SizedBox(height: 4),
         Text(
           '每根柱 = 当天新收词数(共 $total 个)· 左旧右新',
-          style: theme.textTheme.bodySmall?.copyWith(color: muted),
+          style: AppFont.metaStyle.copyWith(fontSize: 11.5, color: muted),
         ),
       ],
     );
@@ -434,7 +483,7 @@ class _WeeklyReportScreenState extends State<WeeklyReportScreen> {
     ).map((v) => v.round()).toList(growable: false);
     final total = counts.fold<int>(0, (sum, v) => sum + v);
     if (total <= 0) {
-      return const ChartEmptyHint(label: '暂无数据', hint: '这 5 周还没有收词或练习记录');
+      return const AppEmptyState(title: '暂无数据', hint: '这 5 周还没有收词或练习记录');
     }
     final levels = HeatmapCalendar.tiersOf(counts);
     return Column(
@@ -460,7 +509,7 @@ class _WeeklyReportScreenState extends State<WeeklyReportScreen> {
         const SizedBox(height: 8),
         Text(
           '颜色越深 = 当天新收词 + 练习量越多(复习结果按词存,没有逐日历史,不在此图)',
-          style: theme.textTheme.bodySmall?.copyWith(color: muted),
+          style: AppFont.metaStyle.copyWith(fontSize: 11.5, color: muted),
         ),
       ],
     );
@@ -480,7 +529,7 @@ class _WeeklyReportScreenState extends State<WeeklyReportScreen> {
           child: Text(
             '${_fmtDate(report.from)} ~ ${_fmtDate(report.to)}'
             ' · 滚动 7 天含今天',
-            style: theme.textTheme.bodySmall?.copyWith(color: muted),
+            style: AppFont.metaStyle.copyWith(fontSize: 11.5, color: muted),
           ),
         ),
         // 日期区间是报告的一部分:同一个页面刷新后区间会变,必须写死在页面上
@@ -551,7 +600,7 @@ class _WeeklyReportScreenState extends State<WeeklyReportScreen> {
           const SizedBox(height: 10),
           Text(
             '本周最该处理的错误:${report.topErrors.join('、')}',
-            style: theme.textTheme.bodySmall?.copyWith(color: muted),
+            style: AppFont.metaStyle.copyWith(fontSize: 11.5, color: muted),
           ),
         ],
       ],
@@ -562,7 +611,7 @@ class _WeeklyReportScreenState extends State<WeeklyReportScreen> {
     final theme = Theme.of(context);
     final muted = theme.colorScheme.onSurfaceVariant;
     if (lines.isEmpty) {
-      return Text(fallback, style: theme.textTheme.bodySmall?.copyWith(color: muted));
+      return Text(fallback, style: AppFont.metaStyle.copyWith(fontSize: 11.5, color: muted));
     }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -585,7 +634,7 @@ class _WeeklyReportScreenState extends State<WeeklyReportScreen> {
                     ),
                   ),
                   Expanded(
-                    child: Text(s, style: theme.textTheme.bodyMedium?.copyWith(height: 1.5)),
+                    child: Text(s, style: AppFont.bodyStyle.copyWith(height: 1.5)),
                   ),
                 ],
               ),
@@ -601,7 +650,7 @@ class _WeeklyReportScreenState extends State<WeeklyReportScreen> {
     final days = report.forecast.keys.map(int.tryParse).whereType<int>().toList()
       ..sort();
     if (days.isEmpty) {
-      return Text('暂无复习排期', style: theme.textTheme.bodySmall?.copyWith(color: muted));
+      return Text('暂无复习排期', style: AppFont.metaStyle.copyWith(fontSize: 11.5, color: muted));
     }
     final maxV = days
         .map((d) => report.forecast['$d'] ?? 0)
@@ -625,7 +674,7 @@ class _WeeklyReportScreenState extends State<WeeklyReportScreen> {
                   width: 62,
                   child: Text(
                     '${date.month}-${date.day}',
-                    style: theme.textTheme.bodySmall?.copyWith(color: muted),
+                    style: AppFont.metaStyle.copyWith(fontSize: 11.5, color: muted),
                   ),
                 ),
                 Expanded(
@@ -645,8 +694,8 @@ class _WeeklyReportScreenState extends State<WeeklyReportScreen> {
                   child: Text(
                     '$v',
                     textAlign: TextAlign.right,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      fontWeight: v > 0 ? FontWeight.w600 : FontWeight.normal,
+                    style: AppFont.metaStyle.copyWith(
+                      fontWeight: v > 0 ? FontWeight.w600 : FontWeight.w400,
                       color: v > 0 ? null : muted,
                     ),
                   ),
@@ -660,7 +709,7 @@ class _WeeklyReportScreenState extends State<WeeklyReportScreen> {
             '最重的一天是 ${_startOfDay(report.from).add(Duration(days: peakDay)).month}-'
             '${_startOfDay(report.from).add(Duration(days: peakDay)).day}'
             '($maxV 个到期)',
-            style: theme.textTheme.bodySmall?.copyWith(color: muted),
+            style: AppFont.metaStyle.copyWith(fontSize: 11.5, color: muted),
           ),
       ],
     );
@@ -724,7 +773,8 @@ class _WeeklyReportScreenState extends State<WeeklyReportScreen> {
   }
 }
 
-/// 分节卡片(报告的四块内容用同一套壳,避免每块各写一遍内边距)
+/// 分节卡片:统一到 A 诊断台的「编号/标题 + 白卡」语言(原来是一套自建 Card,
+/// 圆角 8、内边距 14,与统计页的 AppCard 并排看像两个 App)。
 class _Section extends StatelessWidget {
   final IconData icon;
   final String title;
@@ -734,29 +784,38 @@ class _Section extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Card(
-      margin: const EdgeInsets.only(bottom: 10),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(icon, size: 18, color: theme.colorScheme.primary),
+    final DashTheme d = DashTheme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: Gap.sm),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Padding(
+            padding: const EdgeInsets.only(left: 2, bottom: 8),
+            child: Row(
+              children: <Widget>[
+                Icon(icon, size: 16, color: d.accent),
                 const SizedBox(width: 8),
                 Text(
                   title,
-                  style: theme.textTheme.titleSmall
-                      ?.copyWith(fontWeight: FontWeight.w600),
+                  style: AppFont.headingStyle.copyWith(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    color: d.ink,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Container(
+                    height: 1,
+                    color: d.line.withValues(alpha: 0.8),
+                  ),
                 ),
               ],
             ),
-            const SizedBox(height: 10),
-            child,
-          ],
-        ),
+          ),
+          DashCard(child: child),
+        ],
       ),
     );
   }
@@ -791,7 +850,7 @@ class _StatChip extends StatelessWidget {
           Text(
             label,
             textAlign: TextAlign.center,
-            style: theme.textTheme.labelSmall?.copyWith(color: muted),
+            style: AppFont.tagStyle.copyWith(color: muted),
           ),
         ],
       ),

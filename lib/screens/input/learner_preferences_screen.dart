@@ -286,6 +286,13 @@ class _LearnerPreferencesScreenState extends State<LearnerPreferencesScreen> {
                   ],
                 ),
                 const SizedBox(height: Gap.sm),
+                // Lead 授权的最小文案改动(2026-11-07):旧「四六级」是通用档,
+                // 新拆出的「四级」「六级」才是明确档 —— 不写清楚会让用户以为要选两次。
+                Text(
+                  '「四六级」= 四级 + 六级 通用档；想单独练某一级，请选「四级」或「六级」。',
+                  style: AppFont.tagStyle.copyWith(color: muted, height: 1.4),
+                ),
+                const SizedBox(height: Gap.sm),
                 Text(
                   _selectedGoals.isEmpty
                       ? '尚未选择 —— 不选也能用,只是推荐会更泛。'

@@ -485,7 +485,7 @@ class BookmarkReaderScreen extends StatelessWidget {
     final body = cleanMarkdownForDisplay(bookmark.content);
 
     return Scaffold(
-      appBar: AppBar(title: Text('${style.label}收藏')),
+      appBar: V4JellyAppBar(title: '${style.label}收藏'),
       body: SafeArea(
         top: false,
         child: Column(
@@ -495,7 +495,7 @@ class BookmarkReaderScreen extends StatelessWidget {
               child: body.isEmpty
                   // 兜底:空内容/全是空白不能给用户一块白板
                   ? const Center(
-                      child: AppEmpty(
+                      child: AppEmptyState(
                         icon: Icons.notes,
                         title: '这条收藏没有正文',
                         hint: '内容可能在收藏时就没抓到,可以删掉这条重新收藏一次',

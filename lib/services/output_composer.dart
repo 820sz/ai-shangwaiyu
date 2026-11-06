@@ -35,7 +35,22 @@ import 'package:flutter/foundation.dart';
 import 'base_api.dart';
 import 'deepseek_api.dart';
 import 'deepseek_search.dart';
+import 'output_paper.dart';
 import 'output_rubric.dart';
+
+// 卷面身份(年份/月份/套数/来源站点)与来源行工具:页面只要 import 本文件就能用,
+// 不用再各自去拼「CET-4 · 2023 年 12 月第 1 套 · 来源」这种字符串。
+export 'output_paper.dart'
+    show
+        PaperMeta,
+        examShortLabelFor,
+        examSourceLine,
+        examTypeOfText,
+        inferExamTypeFromText,
+        mergePaperMeta,
+        parsePaperMeta,
+        siteLabelOf,
+        siteOfLicenseNote;
 
 // ═══════════════════════════════════════════════════════════════════════
 // 数据模型
@@ -265,6 +280,17 @@ class OutputSetSpec {
   /// 校对状态:`pending`(AI 生成/结构化,未人工校对)/ `verified`
   final String verifyStatus;
 
+  /// 试卷年份(如 2023)。**只来自真实来源**(检索结果标题/URL/页面抬头),
+  /// 模型不许编造;抽不到就是 null(对应 DB `exercise_sets.paper_year`)。
+  final int? paperYear;
+
+  /// 试卷套数标签,如「2023 年 12 月 · 第 1 套」;抽不到就是空串
+  /// (对应 DB `exercise_sets.paper_label`)。
+  final String paperLabel;
+
+  /// 来源站点名(如「中国教育考试网」;未知时是 URL host,便于用户核对)
+  final String sourceSite;
+
   const OutputSetSpec({
     required this.title,
     required this.tier,
@@ -276,6 +302,9 @@ class OutputSetSpec {
     this.licenseNote = '',
     this.sourceUrls = const <String>[],
     this.verifyStatus = 'pending',
+    this.paperYear,
+    this.paperLabel = '',
+    this.sourceSite = '',
   });
 
   bool get isEmpty => tasks.isEmpty;
@@ -297,6 +326,9 @@ class OutputSetSpec {
     'license_note': licenseNote,
     'source_urls': sourceUrls,
     'verify_status': verifyStatus,
+    'paper_year': paperYear,
+    'paper_label': paperLabel,
+    'source_site': sourceSite,
     'tasks': [for (final task in tasks) task.toJson()],
   };
 
@@ -321,6 +353,9 @@ class OutputSetSpec {
       licenseNote: '${raw['license_note'] ?? ''}'.trim(),
       sourceUrls: _stringList(raw['source_urls']),
       verifyStatus: '${raw['verify_status'] ?? 'pending'}'.trim(),
+      paperYear: int.tryParse('${raw['paper_year'] ?? ''}'),
+      paperLabel: '${raw['paper_label'] ?? ''}'.trim(),
+      sourceSite: '${raw['source_site'] ?? raw['site_name'] ?? ''}'.trim(),
       tasks: tasks,
     );
   }
@@ -775,20 +810,37 @@ String truncateWords(String text, int maxWords) {
   return '${words.take(maxWords).join(' ')}…';
 }
 
-/// 纯函数:从 `DrillCatalog` 目标 id 列表推 `exercise_sets.exam_type`。
+/// 纯函数:从 `DrillCatalog` 目标 **标签/id** 列表推 `exercise_sets.exam_type`。
 ///
 /// 为什么需要:用户勾的目标是"四六级/考研/雅思"这种**学习目标**,
 /// 数据库里存的是 `cet4/cet6/kaoyan/ielts` 这种**考试类型**;
 /// 两套口径必须在一处映射,散着写迟早对不上。
+///
+/// P0-2 修复(2026-11-06):以前只认英文 id(`cet/cet4/cet6`),
+/// 而 `LearnerModel.goals` 存的是**中文标签**(「四六级」「考研」…),
+/// 于是中文目标全部落到 `none` —— 材料题组的 exam_type 一直是空的,
+/// 题库按等级筛也筛不出来。现在改成与 [examTypeOfText] 同源识别:
+/// - 先认"更具体"的目标(六级 / 四级 / 考研 / 雅思 / 托福 / 新概念);
+/// - 泛化的「四六级」无法区分四还是六,兜底记 `cet4`(与真题链路口径一致);
+/// - 一个都认不出 → `none`(不猜)。
 String examTypeFromGoalIds(List<String> goalIds) {
-  final ids = goalIds.map((g) => g.trim().toLowerCase()).toSet();
-  if (ids.contains('cet') || ids.contains('cet4') || ids.contains('cet6')) {
-    return ids.contains('cet6') ? 'cet6' : 'cet4';
+  String? generic;
+  for (final raw in goalIds) {
+    final text = raw.trim();
+    if (text.isEmpty) continue;
+    final normalized = text.toLowerCase().replaceAll(RegExp(r'[\s\-_/]+'), '');
+    // 泛化写法:四六级 / CET46 / 裸 cet —— 区分不了四还是六,先记着
+    final isGenericCet = normalized.contains('四六级') ||
+        (normalized.contains('cet') && normalized.contains('46')) ||
+        normalized == 'cet';
+    if (isGenericCet) {
+      generic ??= 'cet4';
+      continue;
+    }
+    final mapped = examTypeOfText(text);
+    if (mapped != null) return mapped;
   }
-  if (ids.contains('kaoyan')) return 'kaoyan';
-  if (ids.contains('ielts') || ids.contains('toefl')) return 'ielts';
-  if (ids.contains('nce') || ids.contains('new_concept')) return 'nce';
-  return 'none';
+  return generic ?? 'none';
 }
 
 /// 考试类型的中文名(提示词/UI 共用一份口径)
@@ -813,11 +865,12 @@ String sectionLabelFor(String section) => switch (section.trim()) {
 
 /// 构造真题检索的英文 query(Search 接口对英文 query 效果更好)。
 ///
-/// 例:`CET-4 writing past exam 2023`(年份可空)。
+/// 例:`CET-4 writing past exam 2023 set 1`(年份/套数可空)。
 String buildExamSearchQuery({
   required String examType,
   required String section,
   int? year,
+  int? setNo,
 }) {
   final exam = switch (examType.trim().toLowerCase()) {
     'cet4' => 'CET-4',
@@ -830,7 +883,23 @@ String buildExamSearchQuery({
   };
   final topic = section == 'translation' ? 'translation' : 'writing prompts';
   final yearText = year != null && year > 0 ? ' $year' : '';
-  return '$exam $topic past exam$yearText';
+  // 套数只影响"找哪一份卷"的召回,不代表题目身份(身份以抓到的页面为准)
+  final setText = setNo != null && setNo > 0 ? ' set $setNo' : '';
+  return '$exam $topic past exam$yearText$setText';
+}
+
+/// 决定一次出题用哪个考试等级:**入口筛选优先,其次学习目标**。
+///
+/// 优先级理由:用户在设置页显式点了「CET-6」,这就是本次意图;
+/// 不能因为 `LearnerModel.goals` 里存的是泛化「四六级」(映射成 cet4)就把它盖掉
+/// —— 否则会出现"按 CET-6 出题、题库按 CET-6 筛不到"的缺口(P2-1)。
+String resolveExamType({
+  required List<String> examGoals,
+  String? examTypeOverride,
+}) {
+  final override = (examTypeOverride ?? '').trim().toLowerCase();
+  if (override.isNotEmpty && override != 'none') return override;
+  return examTypeFromGoalIds(examGoals);
 }
 
 /// 由 tier 推 `exercise_sets.section`(数据库枚举值)
@@ -895,6 +964,13 @@ class OutputComposer {
     required String tier,
     int? materialId,
     int taskCount = 5,
+    /// 出题入口的等级筛选值(`cet4/cet6/kaoyan/ielts/toefl/nce`)。
+    ///
+    /// 为什么需要它:设置页可以"临时按 CET-6 出材料题",而 `examGoals` 里
+    /// 可能只有泛化的「四六级」(会被映射成 cet4)。不把筛选值显式传进来,
+    /// 就会出现了"筛 CET-6 出题、题库按 CET-6 却筛不到"的缺口(P2-1)。
+    /// null/空 = 回落到按 `examGoals` 推导(旧调用方行为不变)。
+    String? examTypeOverride,
   }) async {
     final text = materialText.trim();
     if (text.isEmpty) return null;
@@ -903,7 +979,10 @@ class OutputComposer {
       debugPrint('ReadFlow 出题:写词不走 AI 出题(应来自生词本),已跳过');
       return null;
     }
-    final examType = examTypeFromGoalIds(examGoals);
+    final examType = resolveExamType(
+      examGoals: examGoals,
+      examTypeOverride: examTypeOverride,
+    );
 
     OutputPrompt prompt;
     String type;
@@ -992,11 +1071,17 @@ class OutputComposer {
   /// 2. search(`CET-4 writing prompts past exam 2023`)拿候选;
   /// 3. fetch 前 [maxPages] 条有 URL 的页面正文(为空/抓不到就跳过);
   /// 4. 全部抓不到正文 → null(**没有原文就不生成题目**);
-  /// 5. 用 [buildExamWritingPrompt] 让模型只基于正文切题,解析时强制带来源 URL。
+  /// 5. 用 [buildExamWritingPrompt] 让模型只基于正文切题,解析时强制带来源 URL;
+  /// 6. 卷面身份(年份/月份/套数/站点)用 [parsePaperMeta] 从**检索结果与页面抬头**
+  ///    抽取(不靠模型、不猜),写进 [OutputSetSpec.paperYear]/[paperLabel]/[sourceSite]。
+  ///
+  /// [year] / [setNo] 只用于**检索**("按 2024 年第 2 套找页面");
+  /// 界面上展示的卷面身份以**抓到的页面**为准,两者不同时以后者为准。
   Future<OutputSetSpec?> composeFromExam({
     required String examType,
     required String section,
     int? year,
+    int? setNo,
     int maxPages = 3,
     String levelHint = '',
   }) async {
@@ -1009,6 +1094,7 @@ class OutputComposer {
       examType: examType,
       section: section,
       year: year,
+      setNo: setNo,
     );
     final hits = await search.search(query, count: 5);
     if (hits.isEmpty) {
@@ -1016,7 +1102,13 @@ class OutputComposer {
       return null;
     }
 
-    final pages = <({String url, String text})>[];
+    final pages = <({
+      String url,
+      String text,
+      String title,
+      String siteName,
+      DateTime? date,
+    })>[];
     for (final hit in hits) {
       if (pages.length >= maxPages) break;
       final url = hit.url.trim();
@@ -1024,23 +1116,60 @@ class OutputComposer {
       final page = await search.fetch(url);
       final text = page?.content.trim() ?? '';
       if (text.isEmpty) continue;
-      pages.add((url: url, text: text));
+      pages.add((
+        url: url,
+        text: text,
+        title: hit.title.trim(),
+        siteName: hit.siteName.trim(),
+        date: hit.date,
+      ));
     }
     if (pages.isEmpty) {
       debugPrint('ReadFlow 真题出题:候选页全部抓不到正文,拒绝无来源生成');
       return null;
     }
 
+    // 卷面身份:只从真实来源抽(标题 > URL > 页面首段),字段级合并、不猜。
+    final paperMeta = mergePaperMeta(<PaperMeta>[
+      for (final p in pages)
+        parsePaperMeta(
+          url: p.url,
+          title: p.title,
+          pageText: p.text,
+          siteName: p.siteName,
+          publishedAt: p.date,
+        ),
+    ]);
+    // 检索时用户明确选过年份 → 至少能说"这批题按 2023 年检索";
+    // 但套数/月份只认页面事实(不把筛选条件伪装成卷面事实)。
+    final effectiveYear =
+        paperMeta.year ?? ((year != null && year > 0) ? year : null);
+    final effectiveMeta = PaperMeta(
+      year: effectiveYear,
+      month: paperMeta.month,
+      setNo: paperMeta.setNo,
+      siteName: paperMeta.siteName,
+      sourceUrl: paperMeta.sourceUrl,
+      pageTitle: paperMeta.pageTitle,
+    );
+    debugPrint(
+      'ReadFlow 真题出题:卷面身份「${effectiveMeta.label}」'
+      '来源「${effectiveMeta.siteName}」',
+    );
+
     final sourceUrls = pages.map((p) => p.url).toList();
+    // 页面标题一起给模型(只当"这段正文是什么"的上下文,不许它据此编题号)
     final sourceText = pages
-        .map((p) => '【来源:${p.url}】\n${p.text}')
+        .map((p) => p.title.isEmpty
+            ? '【来源:${p.url}】\n${p.text}'
+            : '【来源:${p.title}｜${p.url}】\n${p.text}')
         .join('\n\n---\n\n');
     final prompt = buildExamWritingPrompt(
       examType: examType,
       section: section,
       sourceText: sourceText,
       sourceUrls: sourceUrls,
-      year: year,
+      year: effectiveYear,
       levelHint: levelHint,
     );
     final content = await _complete(
@@ -1061,10 +1190,17 @@ class OutputComposer {
       sourceUrls: sourceUrls,
     );
     if (tasks.isEmpty) return null;
-    final yearText = year != null && year > 0 ? '$year 年' : '近年';
+
+    // 标题带卷面身份(用户一眼知道这是哪一年的哪套);抽不到就只写题型。
+    final titleParts = <String>[examLabelFor(examType)];
+    if (effectiveMeta.plainLabel.isNotEmpty) {
+      titleParts.add(effectiveMeta.plainLabel);
+    }
+    titleParts.add('${sectionLabelFor(section)}真题');
+    final title = titleParts.join(' · ');
+
     return OutputSetSpec(
-      title:
-          '${examLabelFor(examType)} · ${sectionLabelFor(section)}真题($yearText)',
+      title: title,
       tier: OutputTier.essay,
       source: 'exam',
       examType: examType,
@@ -1076,6 +1212,9 @@ class OutputComposer {
           '仅本地学习使用;AI 结构化为未人工校对状态。',
       sourceUrls: sourceUrls,
       verifyStatus: 'pending',
+      paperYear: effectiveMeta.year,
+      paperLabel: effectiveMeta.label,
+      sourceSite: effectiveMeta.siteName,
     );
   }
 

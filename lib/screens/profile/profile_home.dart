@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:provider/provider.dart';
-import '../../providers/stats_provider.dart';
-import '../../providers/vocab_provider.dart';
-import '../../providers/bookmark_provider.dart';
+
 import '../../config/constants.dart';
 import '../../config/design_tokens.dart';
 import '../../config/theme.dart';
-import '../../config/v4_theme.dart';
 import '../../models/learner_model.dart';
+import '../../providers/bookmark_provider.dart';
+import '../../providers/stats_provider.dart';
+import '../../providers/vocab_provider.dart';
 import '../../services/api_endpoint.dart';
 import '../../services/database.dart';
 import '../../services/doubao_api.dart';
@@ -16,30 +16,37 @@ import '../../services/learner_context.dart';
 import '../../services/learner_model_store.dart';
 import '../../services/material_source.dart';
 import '../../services/material_source_status.dart';
+import '../../services/tutor_briefing.dart';
 import '../../services/translation_diagnostics.dart';
-import '../../services/widget_service.dart';
-import '../../widgets/profile_name_card.dart';
-import '../../utils/crash_logger.dart';
-import '../../widgets/app_ui.dart';
-import '../../widgets/design_kit.dart';
-import '../../widgets/graphics/graphics.dart';
-import '../../widgets/stats_chart.dart';
-import '../../widgets/update_dialog.dart';
-import '../../widgets/v4/v4_kit.dart';
 import '../../services/update_service.dart';
-import 'vocab_list.dart';
-import 'stats_page.dart';
+import '../../services/widget_service.dart';
+import '../../utils/crash_logger.dart';
+import '../../widgets/brief_kit.dart';
+import '../../widgets/profile_name_card.dart';
+import '../../widgets/update_dialog.dart';
+import '../../widgets/waiting.dart';
+import '../input/learner_preferences_screen.dart';
+import '../review/review_screen.dart';
+import '../tutor/placement_test_screen.dart';
+import '../writing/writing_logs_screen.dart';
+import 'about_screen.dart';
 import 'api_settings.dart';
 import 'appearance_screen.dart';
-import 'bookmarks_screen.dart';
 import 'backup_screen.dart';
+import 'bookmarks_screen.dart';
 import 'error_archive_screen.dart';
-import 'widget_settings_screen.dart';
+import 'stats_page.dart';
+import 'vocab_list.dart';
 import 'weekly_report_screen.dart';
-import '../review/review_screen.dart';
-import '../input/learner_preferences_screen.dart';
-import '../tutor/placement_test_screen.dart';
+import 'widget_settings_screen.dart';
 
+/// 「我的」首页 · B「每日简报」语言。
+///
+/// 用户选型(2026-11-06):助理/我的 = B 每日简报 + A 数据内页。
+/// 这一页从「9 个入口行平铺」改成**本周简报**:
+/// 刊头 → 一句本周结论 + 一段事实 → 名片 → 本周事实卡(真实数字 + 7 天柱)
+/// → 分组入口(学习 / 数据 / 设置)。数据全部来自现有 Provider 与 Hive:
+/// `StatsProvider` / `LearnerModelStore` / 错误档案条数 / 写译记录条数。
 class ProfileHomeScreen extends StatefulWidget {
   const ProfileHomeScreen({super.key});
 
@@ -48,475 +55,401 @@ class ProfileHomeScreen extends StatefulWidget {
 }
 
 class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
-  /// 学习者模型(v2.0):词汇量基线卡片的数据来源。
-  /// Hive 同步读,不阻塞首帧;测试页返回后再刷一次。
+  /// 学习者模型:词汇量基线/屏蔽偏好(同步读 Hive,不阻塞首帧)
   LearnerModel _learnerModel = LearnerModel();
 
-  /// 待处理的错误类数(v2.1 错误档案入口的副标题)。
-  /// 为什么要显示:错误档案是一个"平时没人点"的页面,副标题报出积压量
-  /// 才有被点开的理由 —— 只写"写译与测验的错题"等于没有入口。
+  /// 待处理的错误类数(错误档案入口副标题)
   int _activeErrorKinds = 0;
+
+  /// 写译记录篇数(这个入口以前在「我的」里根本没有)
+  int _writingLogCount = 0;
+
+  bool _loading = true;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      // P2-10:进页立刻返回时 element 已 deactivate,
-      // 不加这道判断会抛错并被 CrashLogger 记成"崩溃",污染诊断日志
       if (!mounted) return;
       _loadAll();
     });
   }
 
   Future<void> _loadAll() async {
-    // 学习者模型先读(Hive 同步,页面一渲染就能显示基线)
     _learnerModel = LearnerModelStore.load();
-    // 错误类数:失败不影响主流程(读不到就退回中性副标题)
-    final errors = await DatabaseService.getErrorTags(status: 'active');
-    if (!mounted) return;
-    setState(() => _activeErrorKinds = errors.length);
-    await Future.wait([
+    try {
+      final List<Map<String, Object?>> errors =
+          await DatabaseService.getErrorTags(status: 'active');
+      if (!mounted) return;
+      setState(() => _activeErrorKinds = errors.length);
+    } catch (_) {
+      // 读不到就退回中性副标题,不影响首页
+    }
+    try {
+      final List<dynamic> logs = await DatabaseService.getWritingLogs(limit: 200);
+      if (!mounted) return;
+      setState(() => _writingLogCount = logs.length);
+    } catch (_) {
+      // 同上:写译记录读失败只是少一个数字
+    }
+    await Future.wait(<Future<void>>[
       context.read<StatsProvider>().loadStats(),
       context.read<VocabProvider>().loadVocabularies(),
       context.read<BookmarkProvider>().load(),
     ]);
+    if (!mounted) return;
+    setState(() => _loading = false);
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final stats = context.watch<StatsProvider>();
-    final skin = V4Skin.of(context);
-
-    return Scaffold(
-      backgroundColor: skin.pageBg,
-      body: SafeArea(
-        bottom: false,
-        child: Column(
-          children: <Widget>[
-            // v4(2026-11-03):「我的」主屏换成主屏级果冻头 —— 和输入/输出同一套语言
-            V4HeroHeader(
-              domain: GraphicDomain.custom,
-              eyebrow: '学习资产 · 数据 · 设置',
-              title: '我的',
-              subtitle: '词库、统计、备份都在这里;数据只存在这台手机上',
-              chips: <Widget>[
-                V4GlassChip(
-                  icon: Icons.menu_book_outlined,
-                  label: '生词 ${stats.totalVocab}',
-                ),
-                V4GlassChip(
-                  icon: Icons.local_fire_department_outlined,
-                  label: '连续 ${stats.streakDays} 天',
-                ),
-              ],
-            ),
-            Expanded(
-              child: RefreshIndicator(
-                onRefresh: _loadAll,
-                child: ListView(
-                  padding: Insets.page,
-                  children: [
-            // ── 个性化名片(v2.8,用户第 9 条):头像 / 背景 / 签名 / 词汇量 ──
-            ProfileNameCard(vocabCount: stats.totalVocab),
-
-            // ── 数据亮点(Hero 概览卡)──
-            // v3(批 5):三个数字平铺改成"Hero 形态 + 环形活跃率 + 近 7 天柱状"。
-            // 用户 2026-11-01 原话是"其他页面 UI 也不够现代化" —— 我的页作为
-            // 使用频率最高的二级页,必须和输入/输出/助理是同一套视觉语言。
-            _buildOverview(theme, stats),
-            const SizedBox(height: Gap.md),
-
-            // ── 词汇量基线(v2.0;v2.6 收成一行入口)──
-            // 用户实测:"词汇量测试占据这么大个 UI,把它合并进「学习」里的一项就行"。
-            // 于是从"占半屏的大卡片 + 两个按钮"改成**学习组里的一行**:
-            // 副标题直接报当前基线(不点也能看到),点开才让你选速测/完整版。
-            const AppSectionHeader(title: '学习', indexLabel: '01'),
-            AppStagger(
-              index: 1,
-              child: Column(
-                children: [
-                  _buildBaselineTile(),
-                  AppActionTile(
-                    icon: Icons.book,
-                    title: '我的生词本',
-                    subtitle: '按书籍分组',
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) => const VocabListScreen()),
-                    ),
-                  ),
-                  AppActionTile(
-                    icon: Icons.style,
-                    title: '复习模式',
-                    subtitle: '抽认卡记忆',
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => const ReviewScreen()),
-                    ),
-                  ),
-                  AppActionTile(
-                    icon: Icons.star_outline,
-                    title: '收藏夹',
-                    subtitle: '收藏的洞见与好句',
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) => const BookmarksScreen()),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            // ── 数据与回顾 ──
-            const AppSectionHeader(title: '数据与回顾', indexLabel: '02'),
-            AppStagger(
-              index: 2,
-              child: Column(
-                children: [
-                  AppActionTile(
-                    icon: Icons.bar_chart,
-                    title: '学习统计',
-                    subtitle: '趋势与热力图',
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) => const StatsPageScreen()),
-                    ),
-                  ),
-                  AppActionTile(
-                    icon: Icons.insights,
-                    title: '本周报告',
-                    subtitle: '这周做了什么、下周改什么(本地算,不调 AI)',
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) => const WeeklyReportScreen()),
-                    ),
-                  ),
-                  // 错误档案(v2.1):把"我英语不好"变成"我时态错了 7 次"。
-                  // 副标题报出积压量,这个"平时没人点"的页面才有被点开的理由。
-                  AppActionTile(
-                    icon: Icons.fact_check_outlined,
-                    title: '错误档案',
-                    subtitle: _activeErrorKinds > 0
-                        ? '待处理 $_activeErrorKinds 类'
-                        : '写译批改、读后测验与复习里的错题',
-                    onTap: _openErrorArchive,
-                  ),
-                  // 备份与导出(v2.2):数据只在这台手机上,这是唯一的迁移/保险出口
-                  AppActionTile(
-                    icon: Icons.backup_outlined,
-                    title: '备份与导出',
-                    subtitle: '完整备份(可回导)/ 生词本 CSV / Anki 导入包',
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => const BackupScreen()),
-                    ),
-                  ),
-                  // 学习曲线预览已移到「数据与回顾」分组的下方(见下方 AppCard):
-                  // 它是"看趋势"的图,不该夹在 4 个入口行中间打断列表节奏。
-                ],
-              ),
-            ),
-
-            // 学习曲线预览卡(近 30 天,图形 TrendLine)——
-            // 没数据时也保留这张卡,用图形资产空态说明"收了词就会出现",而不是
-            // 让整块凭空消失(用户会以为这个功能不存在)。
-            const SizedBox(height: Gap.sm),
-            AppCard(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const AppSectionTitle(
-                    title: '学习曲线',
-                    subtitle: '近 30 天每日新增词汇',
-                  ),
-                  const SizedBox(height: Gap.md),
-                  if (stats.dailyLogs.isEmpty)
-                    const AppEmpty(
-                      icon: Icons.show_chart,
-                      title: '还没有学习记录',
-                      hint: '收词或做练习后,这里会画出近 30 天趋势',
-                    )
-                  else
-                    LearningCurveChart(dailyLogs: stats.dailyLogs),
-                ],
-              ),
-            ),
-
-            // ── 设置与数据管理 ──
-            const AppSectionHeader(title: '设置与数据管理', indexLabel: '03'),
-            AppStagger(
-              index: 3,
-              child: Column(
-                children: [
-                  AppActionTile(
-                    icon: Icons.settings,
-                    title: 'API 设置',
-                    subtitle: '配置 API Key',
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) => const ApiSettingsScreen()),
-                    ),
-                  ),
-                  // 学习偏好(v2.0):朗读音色 + 不想看的题材/关键词。
-                  // 与 API 设置分开放:一个是技术配置,一个是个人偏好,
-                  // 混在一起用户找不到"屏蔽题材"这件事。
-                  AppActionTile(
-                    icon: Icons.tune,
-                    title: '学习偏好',
-                    // 副标题直接暴露"当前屏蔽了几个/哪些":用户一眼能看出
-                    // 黑名单是不是生效了(静默生效等于没生效)
-                    subtitle: _preferencesSubtitle(),
-                    onTap: _openPreferences,
-                  ),
-                  // 外观(v2.2):深浅色 + 开屏文案(v2.5)
-                  AppActionTile(
-                    icon: Icons.brightness_6_outlined,
-                    title: '外观',
-                    subtitle: '浅色 / 深色 / 跟随系统 · 开屏文案',
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) => const AppearanceScreen()),
-                    ),
-                  ),
-                  // 桌面小组件(v2.2):状态 / 一键添加 / 手动同步并预览
-                  AppActionTile(
-                    icon: Icons.widgets_outlined,
-                    title: '桌面小组件',
-                    subtitle: '在桌面看今天的任务与待复习数',
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const WidgetSettingsScreen(),
-                      ),
-                    ),
-                  ),
-                  AppActionTile(
-                    icon: Icons.medical_information,
-                    title: '诊断信息',
-                    subtitle: '崩溃日志与配置',
-                    onTap: _showDiagnostics,
-                  ),
-                  AppActionTile(
-                    icon: Icons.system_update_alt,
-                    title: '检查更新',
-                    subtitle: 'GitHub 最新版',
-                    onTap: _checkUpdate,
-                  ),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: Gap.md),
-
-            // ── 这里原本是「AI 学习建议」卡片 ──
-            // 已删除(用户 2026-09-24 实测:"完全没用"):它的输入只有"生词本收藏数 +
-            // 连续天数 + 按书分布",算不出任何真东西 —— 说"先定小目标、每天 10 分钟"
-            // 这种谁都能说的话,还要花一次付费 API 调用。
-            // 现在"今天该做什么"由学习助理页按本地诊断给出:结论带数字依据、
-            // 可点、可打勾、会随数据变化。两者定位重叠,留一个真的。
-                  ],
-                ),
-              ),
-            ),
-          ],
+    final StatsProvider stats = context.watch<StatsProvider>();
+    final BriefTheme t = BriefTheme.of(context);
+    if (_loading) {
+      return BriefScaffold(
+        child: Padding(
+          padding: const EdgeInsets.only(top: 24),
+          child: SkeletonLines(lines: 6, seed: 2),
         ),
-      ),
+      );
+    }
+    final MineBriefing b = MineBriefing.build(
+      totalVocab: stats.totalVocab,
+      streakDays: stats.streakDays,
+      totalExercises: stats.totalExercises,
+      dailyLogs: stats.dailyLogs,
+      activeErrorKinds: _activeErrorKinds,
+      writingLogCount: _writingLogCount,
+      cefr: _learnerModel.cefr?.value,
+      vocabEstimate: _learnerModel.vocabEstimate?.value,
+      vocabLow: _learnerModel.vocabLow,
+      vocabHigh: _learnerModel.vocabHigh,
     );
-  }
 
-  /// 顶部「学习概览」Hero 卡(v3 · 批 5)。
-  ///
-  /// 为什么升级:旧版是"一张面板 + 三列数字 + 细分隔线",信息对但**没有形状** ——
-  /// 用户看到的是又一块文字卡;新版用 Hero 形态 + 两个数据图形回答两个问题:
-  /// 「最近有没有在学」(近 7 天活跃率环)、「学得有多密」(近 7 天量柱状)。
-  /// 口径说明写进卡内小字:**新收词 + 复习 + 练习**(与统计页 totalActivity 同源),
-  /// 不把 0 画成"失败",没数据时用图形资产空态说明"做了什么才会出现"。
-  Widget _buildOverview(ThemeData theme, StatsProvider stats) {
-    final cs = theme.colorScheme;
-    final series = dailySeriesOf(
-      stats.dailyLogs,
-      days: 7,
-      pick: (r) => r.totalActivity,
-    );
-    final weekTotal = series.fold<double>(0, (sum, v) => sum + v).round();
-    final activeDays = activeDaysOf(stats.dailyLogs, days: 7);
-    final hasWeek = weekTotal > 0;
-    return AppCard(
-      variant: AppCardVariant.hero,
+    return BriefScaffold(
+      refresh: _loadAll,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // ① 累计战绩(与旧版同口径,但放进 Hero 卡里;三列仍均匀分宽)
-          Row(
-            children: [
-              Expanded(
-                child: AppStat(
-                  value: '${stats.totalVocab}',
-                  label: '总词汇量',
-                  valueColor: cs.primary,
-                ),
-              ),
-              Expanded(
-                child: AppStat(
-                  value: '${stats.streakDays}',
-                  label: '连续天数',
-                  valueColor: AppTheme.warningColor(context),
-                ),
-              ),
-              Expanded(
-                child: AppStat(
-                  value: '${stats.totalExercises}',
-                  label: '已完成练习',
-                  valueColor: AppTheme.successColor(context),
-                ),
-              ),
-            ],
+        children: <Widget>[
+          BriefDateHead(
+            eyebrow: '我的 · PROFILE',
+            bigDate: b.dateBig,
+            rightTop: b.weekday,
+            rightBottom:
+                b.streakDays > 0 ? '连续 ${b.streakDays} 天' : '还没形成连续记录',
           ),
           const SizedBox(height: Gap.md),
-          // ② 近 7 天节奏:柱状 + 活跃率环;没数据画一排 0 会被误读成评分
-          if (!hasWeek)
-            const AppEmpty(
-              icon: Icons.insights_outlined,
-              title: '这 7 天还没有学习记录',
-              hint: '收词、复习或做一次练习,这里会画出每天的量',
-            )
-          else ...[
-            Row(
-              children: [
-                Expanded(
-                  child: SparkBars(
-                    values: series,
-                    height: 56,
-                    semanticLabel:
-                        '近 7 天活动量柱状图,合计 $weekTotal,活跃 $activeDays 天',
-                  ),
-                ),
-                const SizedBox(width: Gap.md),
-                // 环 = 近 7 天有几个"真的有活动"的日子(分母就是 7 天,不造目标值)
-                Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    AppProgressRing(
-                      value: activeDays / 7,
-                      centerText: '$activeDays',
-                      size: 60,
-                      stroke: 6,
-                    ),
-                    const SizedBox(height: Gap.xxs),
-                    Text(
-                      '活跃天/7',
-                      style: AppFont.tagStyle.copyWith(
-                        color: cs.onSurfaceVariant,
+          Text(
+            b.greeting,
+            style: AppFont.headingStyle.copyWith(
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              color: t.ink,
+            ),
+          ),
+          const SizedBox(height: Gap.xs),
+          BriefLead(title: b.headline, body: b.lead),
+          const SizedBox(height: Gap.md),
+
+          // ── 个性化名片(保留原有头像/背景/签名能力)──
+          ProfileNameCard(vocabCount: stats.totalVocab),
+          const SizedBox(height: Gap.md),
+
+          // ── 本周事实 ──
+          BriefCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                BriefSectionTitle(
+                  eyebrow: '本周',
+                  trailing: '看本周报告',
+                  onTrailingTap: () async {
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) => const WeeklyReportScreen(),
                       ),
+                    );
+                    if (mounted) await _loadAll();
+                  },
+                ),
+                if (b.facts.isEmpty)
+                  BriefEmpty(
+                    title: '这周还没有学习记录',
+                    hint: '收一个词、做一次练习,这里就会出现真实数字与 7 天柱。',
+                    actionLabel: '去输入页',
+                    onAction: () => Navigator.maybePop(context),
+                  )
+                else
+                  BriefStatRow(
+                    stats: <BriefStat>[
+                      for (final BriefFact f in b.facts.take(3))
+                        BriefStat(
+                          value: f.value,
+                          label: f.label,
+                          valueSize: 24,
+                          color: switch (f.tone) {
+                            BriefTone.good => t.accent2,
+                            BriefTone.accent => t.accent,
+                            BriefTone.warn => t.warn,
+                            BriefTone.neutral => t.ink,
+                          },
+                        ),
+                    ],
+                  ),
+                if (b.weekBars.isNotEmpty) ...[
+                  const SizedBox(height: 14),
+                  BriefBars(values: b.weekBars, height: 30),
+                  const SizedBox(height: 6),
+                  Text(
+                    '近 7 天活动量 ${b.weekBarsTotal > 0 ? '合计 ${b.weekBarsTotal}' : '暂无记录'}',
+                    style: AppFont.metaStyle.copyWith(
+                      fontSize: 10.5,
+                      color: t.inkFaint,
                     ),
-                  ],
+                  ),
+                ],
+                if (b.gaps.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    '还缺:${b.gaps.join('、')} —— 补上之后,统计与建议才会具体。',
+                    style: AppFont.metaStyle.copyWith(
+                      fontSize: 10.5,
+                      height: 1.55,
+                      color: t.warn,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: Gap.sm),
+
+          // ── 学习 ──
+          BriefCard(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+            child: Column(
+              children: <Widget>[
+                BriefEntryRow(
+                  title: '词汇量测试',
+                  subtitle: b.vocabText,
+                  dense: true,
+                  onTap: _pickPlacement,
+                ),
+                BriefEntryRow(
+                  title: '我的生词本',
+                  subtitle: '${stats.totalVocab} 个词 · 按书籍分组',
+                  dense: true,
+                  onTap: () async {
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) => const VocabListScreen(),
+                      ),
+                    );
+                    if (mounted) await _loadAll();
+                  },
+                ),
+                BriefEntryRow(
+                  title: '复习模式',
+                  subtitle: '抽认卡记忆 · 到期词优先',
+                  dense: true,
+                  onTap: () async {
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(builder: (_) => const ReviewScreen()),
+                    );
+                    if (mounted) await _loadAll();
+                  },
+                ),
+                BriefEntryRow(
+                  title: '收藏夹',
+                  subtitle: '收藏的洞见与好句',
+                  dense: true,
+                  showDivider: false,
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(builder: (_) => const BookmarksScreen()),
+                  ),
                 ),
               ],
             ),
-            const SizedBox(height: Gap.xs),
-            Text(
-              '近 7 天活动量 · 新收词 + 复习 + 练习,合计 $weekTotal',
-              style: AppFont.metaStyle.copyWith(color: cs.onSurfaceVariant),
+          ),
+          const SizedBox(height: Gap.sm),
+
+          // ── 数据与回顾 ──
+          BriefCard(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+            child: Column(
+              children: <Widget>[
+                BriefEntryRow(
+                  title: '学习统计',
+                  subtitle: '趋势 / 热力图 / 月度(诊断台排版)',
+                  dense: true,
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(builder: (_) => const StatsPageScreen()),
+                  ),
+                ),
+                BriefEntryRow(
+                  title: '本周报告',
+                  subtitle: '这周做了什么、下周改什么(本地算,不调 AI)',
+                  dense: true,
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) => const WeeklyReportScreen(),
+                    ),
+                  ),
+                ),
+                BriefEntryRow(
+                  title: '错误档案',
+                  subtitle: _activeErrorKinds > 0
+                      ? '待处理 $_activeErrorKinds 类 · 写译/测验/复习的错题'
+                      : '写译批改、读后测验与复习里的错题',
+                  trailingText: _activeErrorKinds > 0 ? '$_activeErrorKinds 类' : null,
+                  dense: true,
+                  onTap: _openErrorArchive,
+                ),
+                BriefEntryRow(
+                  title: '写译记录',
+                  subtitle: _writingLogCount > 0
+                      ? '$_writingLogCount 篇 · 按日期归档的写译轨迹'
+                      : '按日期归档的写译练习轨迹',
+                  trailingText: _writingLogCount > 0 ? '$_writingLogCount 篇' : null,
+                  dense: true,
+                  onTap: () async {
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) => const WritingLogsScreen(),
+                      ),
+                    );
+                    if (mounted) await _loadAll();
+                  },
+                ),
+                BriefEntryRow(
+                  title: '备份与导出',
+                  subtitle: '完整备份(可回导)/ 生词本 CSV / Anki 导入包',
+                  dense: true,
+                  showDivider: false,
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(builder: (_) => const BackupScreen()),
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
+          const SizedBox(height: Gap.sm),
+
+          // ── 设置 ──
+          BriefCard(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+            child: Column(
+              children: <Widget>[
+                BriefEntryRow(
+                  title: 'API 设置',
+                  subtitle: '配置 API Key(只显示厂商与长度)',
+                  dense: true,
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(builder: (_) => const ApiSettingsScreen()),
+                  ),
+                ),
+                BriefEntryRow(
+                  title: '学习偏好',
+                  subtitle: _preferencesSubtitle(),
+                  dense: true,
+                  onTap: _openPreferences,
+                ),
+                BriefEntryRow(
+                  title: '外观',
+                  subtitle: '浅色 / 深色 / 跟随系统 · 开屏文案',
+                  dense: true,
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) => const AppearanceScreen(),
+                    ),
+                  ),
+                ),
+                BriefEntryRow(
+                  title: '桌面小组件',
+                  subtitle: '在桌面看今天的任务与待复习数',
+                  dense: true,
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) => const WidgetSettingsScreen(),
+                    ),
+                  ),
+                ),
+                BriefEntryRow(
+                  title: '关于与更新',
+                  subtitle: '版本 / 检查更新 / 诊断信息 / 数据说明',
+                  dense: true,
+                  showDivider: false,
+                  onTap: _openAbout,
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
   }
 
-  /// 错误档案:回来后刷新副标题(用户刚在里面标了「已改正」)
   Future<void> _openErrorArchive() async {
     await Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => const ErrorArchiveScreen()),
+      MaterialPageRoute<void>(builder: (_) => const ErrorArchiveScreen()),
     );
     if (!mounted) return;
-    final errors = await DatabaseService.getErrorTags(status: 'active');
-    if (!mounted) return;
-    setState(() => _activeErrorKinds = errors.length);
+    await _loadAll();
   }
 
-  /// 学习偏好:黑名单可能刚改过,回来自刷新,让副标题与磁盘保持一致
   Future<void> _openPreferences() async {
     await Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => const LearnerPreferencesScreen()),
+      MaterialPageRoute<void>(builder: (_) => const LearnerPreferencesScreen()),
     );
     if (!mounted) return;
     setState(() => _learnerModel = LearnerModelStore.load());
   }
 
-  /// 检查更新:F3 —— 检查失败(网络全断)必须明说,不能伪装成"已是最新"
-  Future<void> _checkUpdate() async {
-    try {
-      final info = await UpdateService.checkLatestRelease();
-      if (!mounted) return;
-      if (info == null || !info.hasUpdate) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('当前已是最新版本')),
-        );
-      } else {
-        showUpdateDialog(context, info);
-      }
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('检查更新失败:$e')),
-      );
-    }
-  }
-
-  /// 词汇量基线行(v2.6):原先是占半屏的大卡片,现收成学习组里的一行。
-  /// 副标题直接报"约 X 词 · CEFR(区间)"——不点也能看到当前基线。
-  Widget _buildBaselineTile() {
-    final model = _learnerModel;
-    final f = model.vocabEstimate;
-    final hasBaseline = (f?.value ?? 0) > 0;
-    final String subtitle;
-    if (!hasBaseline) {
-      subtitle = '尚未测量 · 约 5 分钟,给出词汇量与 CEFR 区间';
-    } else {
-      final range = (model.vocabLow != null && model.vocabHigh != null)
-          ? '(${model.vocabLow}-${model.vocabHigh})'
-          : '';
-      final cefr = (model.cefr != null && model.cefr!.value.isNotEmpty)
-          ? ' · ${model.cefr!.value}'
-          : '';
-      subtitle = '约 ${f!.value} 词$range$cefr · 点击可重测';
-    }
-    return AppActionTile(
-      icon: Icons.straighten,
-      title: '词汇量测试',
-      subtitle: subtitle,
-      onTap: () => _pickPlacement(hasBaseline: hasBaseline),
+  void _openAbout() {
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => AboutScreen(
+          onCheckUpdate: _checkUpdate,
+          onShowDiagnostics: _showDiagnostics,
+        ),
+      ),
     );
   }
 
-  /// 选速测(5 分钟)/ 完整版(10 分钟)—— 原来这两个按钮常驻在「我的」页,
-  /// 现在收进弹层:需要时才出现,不占首页空间。
-  Future<void> _pickPlacement({required bool hasBaseline}) async {
-    final choice = await showModalBottomSheet<String>(
+  /// 词汇量测试:基线有/没有都给同一入口,弹层选速测或完整版
+  Future<void> _pickPlacement() async {
+    final bool hasBaseline = (_learnerModel.vocabEstimate?.value ?? 0) > 0;
+    final String? choice = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
-      builder: (ctx) {
-        final theme = Theme.of(ctx);
+      builder: (BuildContext ctx) {
+        final ThemeData theme = Theme.of(ctx);
         return SafeArea(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(Gap.md, 0, Gap.md, Gap.md),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('词汇量测试',
-                    style: theme.textTheme.titleMedium
-                        ?.copyWith(fontWeight: FontWeight.w700)),
+              children: <Widget>[
+                Text(
+                  '词汇量测试',
+                  style: theme.textTheme.titleMedium
+                      ?.copyWith(fontWeight: FontWeight.w700),
+                ),
                 const SizedBox(height: Gap.xxs),
                 Text(
                   '测试给出的是区间而不是单一数字;隔一段时间可以重测,基线会更新。',
@@ -566,42 +499,58 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
     await _startPlacement(full: choice == 'full');
   }
 
-  /// 「学习偏好」副标题:没屏蔽就说清这一页有什么,屏蔽了就报数量和内容
-  String _preferencesSubtitle() {
-    final topics = _learnerModel.blockedTopics;
-    final keywords = _learnerModel.blockedKeywords;
-    final total = topics.length + keywords.length;
-    if (total == 0) return '朗读音色 · 屏蔽题材与关键词';
-    final shown = [...topics, ...keywords].take(3).join('、');
-    final more = total > 3 ? ' 等 $total 项' : '';
-    return '已屏蔽:$shown$more';
-  }
-
-  /// 词汇量基线的**依据**一句话(收成入口行后,详情放进弹层/测试完成后看)
-  String _baselineDetail() => LearnerContext.describeBaseline(_learnerModel);
-
   Future<void> _startPlacement({required bool full}) async {
     await Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => PlacementTestScreen(full: full)),
+      MaterialPageRoute<void>(
+        builder: (_) => PlacementTestScreen(full: full),
+      ),
     );
     if (!mounted) return;
-    // 回来时刷新基线展示(测试结果已写进学习者模型)
     setState(() => _learnerModel = LearnerModelStore.load());
+    await _loadAll();
+  }
+
+  String _baselineDetail() => LearnerContext.describeBaseline(_learnerModel);
+
+  String _preferencesSubtitle() {
+    final List<String> topics = _learnerModel.blockedTopics;
+    final List<String> keywords = _learnerModel.blockedKeywords;
+    final int total = topics.length + keywords.length;
+    if (total == 0) return '朗读音色 · 屏蔽题材与关键词';
+    final String shown = <String>[...topics, ...keywords].take(3).join('、');
+    return '已屏蔽:$shown${total > 3 ? ' 等 $total 项' : ''}';
+  }
+
+  /// 检查更新:F3 —— 检查失败(网络全断)必须明说,不能伪装成"已是最新"
+  Future<void> _checkUpdate() async {
+    try {
+      final dynamic info = await UpdateService.checkLatestRelease();
+      if (!mounted) return;
+      if (info == null || info.hasUpdate != true) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('当前已是最新版本')),
+        );
+      } else {
+        showUpdateDialog(context, info);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('检查更新失败:$e')),
+      );
+    }
   }
 
   /// 诊断信息:崩溃日志 + 当前 API 配置摘要(key 打码)。
   /// 真机闪退/识别失败时,打开这里截图即可定位,无需 adb(v1.3.2)。
   Future<void> _showDiagnostics() async {
-    final log = await CrashLogger.readCrashLog();
+    final String log = await CrashLogger.readCrashLog();
     final box = Hive.box(AppConstants.hiveBoxSettings);
-    // 审查 P2-6:原来给前 6 位 + 后 2 位 + 精确长度,截图外发即泄露可用片段
-    // (sk-/ark- 前缀之外的字符都是秘密)。现在只报"哪家 + 多少字符":
-    // 足以判断"是不是填了/填错家/少复制",又拼不出任何片段。
     String maskKey(String? k) {
       if (k == null || k.isEmpty) return '(未配置)';
       final String kind;
-      final lower = k.toLowerCase();
+      final String lower = k.toLowerCase();
       if (lower.startsWith('sk-')) {
         kind = 'DeepSeek Key';
       } else if (lower.startsWith('ark-')) {
@@ -617,8 +566,7 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
       return u;
     }
 
-    final summary = [
-      // 审查 P2-6:这一页会整屏截图外发,提醒必须写在最顶部(而不是藏在按钮说明里)
+    final String summary = <String>[
       '⚠️ 此页含本机日志与配置,公开前请自行检查(Key 只显示厂商与长度)',
       '',
       '── 主 API(多模态) ──',
@@ -632,10 +580,6 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
       'Base URL: ${briefUrl(box.get(AppConstants.keyDeepseekBaseUrl) as String?)}',
       '模型: ${ApiEndpointConfig.secondary.model}',
       '',
-      // v2.16.0(阅读器翻译根治):翻译链路曾经"查不动"——
-      // 阅读器的模型菜单改的是主槽位,而翻译实际走副槽位;再加失败原因
-      // 只在段下显示一行。这里把**真实请求使用的槽位/模型/端点 host** 与
-      // 最近 3 条失败原因摊开(host 不可能是 key;失败原因写入前已脱敏)。
       '── 翻译(阅读器) ──',
       '槽位/模型: ${TranslationDiagnostics.targetSummary}',
       'Base URL: ${TranslationDiagnostics.baseHost}',
@@ -644,8 +588,6 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
       '',
       '── 模型列表加载 ──',
       DoubaoApiService.lastFetchNote,
-      // v2.3:内容源可达性取决于**用户网络**,平时看不见 —— 放这里让"材料中心
-      // 打不开"这类问题一次截图就能定性(哪些源试过、结果、失败原因)
       ...MaterialSourceStatus.summaryLines(
         sources: MaterialSourceService.sources,
         state: MaterialSourceStatus.loadAll(),
@@ -660,9 +602,9 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
     ].join('\n');
 
     if (!mounted) return;
-    showDialog(
+    showDialog<void>(
       context: context,
-      builder: (ctx) => AlertDialog(
+      builder: (BuildContext ctx) => AlertDialog(
         title: const Text('诊断信息'),
         content: SingleChildScrollView(
           child: SelectableText(
@@ -670,23 +612,21 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
             style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
           ),
         ),
-        actions: [
-          // 危险操作二次确认(v3 · 批 5):「清空日志」不可恢复,而且用户很容易
-          // 把"清日志"误解成"清学习数据" —— 先在确认框里把后果说清楚再执行。
+        actions: <Widget>[
           TextButton(
             style: TextButton.styleFrom(
               foregroundColor: AppTheme.dangerColor(ctx),
             ),
             onPressed: () async {
-              final confirmed = await showDialog<bool>(
+              final bool? confirmed = await showDialog<bool>(
                 context: ctx,
-                builder: (c) => AlertDialog(
+                builder: (BuildContext c) => AlertDialog(
                   title: const Text('清空崩溃日志?'),
                   content: const Text(
                     '只会删除本机保存的崩溃诊断记录,不影响生词、材料、'
                     '学习统计与 API Key。清空后无法恢复。',
                   ),
-                  actions: [
+                  actions: <Widget>[
                     TextButton(
                       onPressed: () => Navigator.pop(c, false),
                       child: const Text('取消'),

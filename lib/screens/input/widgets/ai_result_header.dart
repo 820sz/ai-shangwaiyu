@@ -156,19 +156,32 @@ class AiResultHeader extends StatelessWidget {
                         ),
                       ),
               child: Row(
-                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(Icons.fact_check_outlined,
-                      size: 13, color: theme.colorScheme.onSurfaceVariant),
-                  const SizedBox(width: 4),
-                  Text(
-                    guardNote!,
-                    style: TextStyle(
-                      fontSize: 10,
+                  Padding(
+                    padding: const EdgeInsets.only(top: 1),
+                    child: Icon(
+                      Icons.fact_check_outlined,
+                      size: 13,
                       color: theme.colorScheme.onSurfaceVariant,
-                      decoration: (guardDetails == null || guardDetails!.isEmpty)
-                          ? null
-                          : TextDecoration.underline,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  // 校验说明可能很长（忽略 N 条 · 合并重复 M 处 · 纠正 K 条…）：
+                  // 必须可换行，否则 Row 横向溢出、被卡片裁掉半行
+                  // （2026-11-06 真机截图：「已校验:…」这行被切在卡片边缘）。
+                  Flexible(
+                    child: Text(
+                      guardNote!,
+                      style: TextStyle(
+                        fontSize: 10,
+                        height: 1.35,
+                        color: theme.colorScheme.onSurfaceVariant,
+                        decoration:
+                            (guardDetails == null || guardDetails!.isEmpty)
+                            ? null
+                            : TextDecoration.underline,
+                      ),
                     ),
                   ),
                 ],

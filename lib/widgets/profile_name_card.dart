@@ -6,8 +6,8 @@ import 'package:flutter/services.dart' show LengthLimitingTextInputFormatter;
 import 'package:image_picker/image_picker.dart';
 
 import '../config/design_tokens.dart';
+import 'brief_kit.dart';
 import '../models/learner_model.dart';
-import '../services/learner_context.dart';
 import '../services/learner_model_store.dart';
 import '../services/profile_card.dart';
 
@@ -73,6 +73,15 @@ class _ProfileNameCardState extends State<ProfileNameCard> {
     await _card.save();
   }
 
+  /// 卡上「水平」一栏只有约 90px 宽:这里只放短文案,
+  /// 完整依据放在「词汇量测试」入口里讲(390 宽下不允许出现半截字)。
+  String _shortBaseline() {
+    final int estimate = _model.vocabEstimate?.value ?? 0;
+    if (estimate <= 0) return '未测 · 去测';
+    final String cefr = (_model.cefr?.value ?? '').trim();
+    return cefr.isEmpty ? '约 $estimate 词' : '约 $estimate 词 · $cefr';
+  }
+
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -80,7 +89,7 @@ class _ProfileNameCardState extends State<ProfileNameCard> {
       child: ProfileCardView(
         settings: _card,
         vocabCount: widget.vocabCount,
-        baselineText: LearnerContext.describeBaseline(_model),
+        baselineText: _shortBaseline(),
         dailyMinutes: _model.dailyMinutes?.value ?? 0,
         // 整卡可点 + 卡上按钮都指向同一个编辑弹层(用户两次说"无法编辑")
         onEdit: _edit,
@@ -122,13 +131,39 @@ class ProfileCardView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: Radii.cardRadius,
+    final BriefTheme t = BriefTheme.of(context);
+    final String bgPath = settings.backgroundPath ?? '';
+    final bool hasPhoto = bgPath.isNotEmpty && File(bgPath).existsSync();
+    // B 卡形态(2026-11-07):暖纸白 + 1px 细边 + 26 圆角 + 暖柔影,
+    // 与 brief_kit / 「我的」首页同一套局部令牌。旧版是整块深色背景 + 白字,
+    // 在每日简报的纸面语言里像"另一个 App 的卡片"。
+    return Container(
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: t.surface,
+        borderRadius: BorderRadius.circular(26),
+        border: Border.all(color: t.line, width: 0.9),
+        boxShadow: t.shadow,
+      ),
       child: Stack(
         children: [
-          // ① 背景(自选图 / 渐变)。只画背景,不含内容 ——
-          //    这样水波纹才能画在背景**之上**(见下方 Material 的注释)
-          Positioned.fill(child: _CardBackdrop(settings: settings)),
+          // 用户自选的背景图保留,但压成 10% 的"纸上暗纹":功能不丢,白字变墨字
+          if (hasPhoto)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: Opacity(
+                  opacity: 0.10,
+                  child: _CardBackdrop(settings: settings),
+                ),
+              ),
+            ),
+          // 身份条:设置里选的渐变/背景图收成顶部 3px —— 还看得见,但不再压住文字
+          Positioned(
+            left: 0,
+            right: 0,
+            top: 0,
+            child: IgnorePointer(child: _identityRule(t, hasPhoto, bgPath)),
+          ),
           // ② 内容 + 点击反馈。
           //    Material 的 ink 特性默认画在 child **下面**,所以上一版
           //    `Material(透明) > InkWell > 背景图` 的结构里,水波纹被背景图整块盖住 ——
@@ -138,8 +173,8 @@ class ProfileCardView extends StatelessWidget {
             color: Colors.transparent,
             child: InkWell(
               onTap: onEdit,
-              splashColor: Colors.white.withAlpha(38),
-              highlightColor: Colors.white.withAlpha(20),
+              splashColor: t.accent.withValues(alpha: 0.06),
+              highlightColor: t.accent.withValues(alpha: 0.04),
               child: SizedBox(
                 width: double.infinity,
                 child: Padding(
@@ -147,10 +182,32 @@ class ProfileCardView extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      // B 语言:首行是眉标 + 右上编辑键(旧版铅笔在卡片右下角)
+                      Row(
+                        children: <Widget>[
+                          Text(
+                            'PROFILE · 我的名片',
+                            style: AppFont.tagStyle.copyWith(
+                              fontSize: 9.5,
+                              letterSpacing: 1.6,
+                              fontWeight: FontWeight.w800,
+                              color: t.accent,
+                            ),
+                          ),
+                          const Spacer(),
+                          _editPencil(t),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
-                          ProfileCardAvatar(settings: settings),
+                          // 暖纸卡上不再用"白字白描边"的头像(会白底白字),
+                          // 改成跟随主题的墨色(文字头像与无图兜底都清楚)
+                          ProfileCardAvatar(
+                            settings: settings,
+                            onBackdrop: false,
+                          ),
                           const SizedBox(width: Gap.sm),
                           Expanded(
                             child: Column(
@@ -160,11 +217,12 @@ class ProfileCardView extends StatelessWidget {
                                   settings.displayName,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 21,
+                                  style: AppFont.titleStyle.copyWith(
+                                    color: t.ink,
+                                    fontSize: 20,
                                     height: 1.2,
-                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: -0.3,
+                                    fontWeight: FontWeight.w800,
                                   ),
                                 ),
                                 const SizedBox(height: 3),
@@ -182,11 +240,10 @@ class ProfileCardView extends StatelessWidget {
                                       : settings.signature.trim(),
                                   maxLines: 2,
                                   overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    color: Color(0xD1CFE3E8),
-                                    fontSize: 12,
-                                    height: 1.35,
-                                    letterSpacing: 0.2,
+                                  style: AppFont.metaStyle.copyWith(
+                                    color: t.inkSoft,
+                                    fontSize: 11.5,
+                                    height: 1.45,
                                   ),
                                 ),
                               ],
@@ -196,41 +253,25 @@ class ProfileCardView extends StatelessWidget {
                       ),
                       if (showStats) ...[
                         const SizedBox(height: Gap.sm),
-                        // 数据行:三格 + 细分隔线(比"一串小字"清楚)
-                        Container(
-                          padding: const EdgeInsets.symmetric(vertical: 8),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withAlpha(26),
-                            borderRadius: Radii.controlRadius,
-                          ),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: _stat('生词', '${vocabCount ?? 0}'),
-                              ),
-                              _statDivider(),
-                              Expanded(child: _stat('水平', baselineText)),
-                              _statDivider(),
-                              Expanded(
-                                child: _stat(
-                                    '每天', dailyMinutes > 0 ? '$dailyMinutes 分' : '—'),
-                              ),
-                            ],
-                          ),
+                        // 三栏数据:一条 hairline + 两条竖线(B 的纸面表格感);
+                        // 旧版是白色半透明胶囊 + 白字,只在深色大背景上成立
+                        Container(height: 1, color: t.line),
+                        const SizedBox(height: Gap.xs),
+                        Row(
+                          children: <Widget>[
+                            Expanded(child: _stat(t, '生词', '${vocabCount ?? 0}')),
+                            _statDivider(t),
+                            Expanded(child: _stat(t, '水平', baselineText)),
+                            _statDivider(t),
+                            Expanded(
+                              child: _stat(t, '每天',
+                                  dailyMinutes > 0 ? '$dailyMinutes 分' : '—'),
+                            ),
+                          ],
                         ),
+                        const SizedBox(height: Gap.xxs),
                       ],
-                      const SizedBox(height: Gap.sm),
-                      // v2.11(用户 10/5 第 3 条):"去掉我图中圈起来的现在这些多余的描述,
-                      // 个性名片要精美、简洁"。
-                      // 用户圈的是**整行**(那句"点这里改名字 · 头像大小形状 · 背景图"
-                      // + 右侧宽大的「编辑名片」按钮)。两样都去掉,只留右上角一个小铅笔:
-                      //   - 那句描述是 v2.10 为了"让用户看见入口"加的,现在入口本身有铅笔,
-                      //     再用一句话解释"点这里改什么"就是啰嗦(卡上已经写着名字、有头像了);
-                      //   - 整卡可点(上面那层 InkWell)+ 小铅笔,一共两个入口,够用且不占版面。
-                      Align(
-                        alignment: Alignment.topRight,
-                        child: _editPencil(),
-                      ),
+                      // 编辑入口已上移到卡首行(与眉标同一行),这里不再重复
                     ],
                   ),
                 ),
@@ -250,22 +291,68 @@ class ProfileCardView extends StatelessWidget {
   /// - 面积做成 40×40 的可点区(视觉上只有 16px 图标,但触控目标够大,
   ///   免得用户"点了没点准"又以为坏了);
   /// - 只有图标没有文字:卡面要"精美简洁",文字说明交给弹层自己。
-  Widget _editPencil() {
+  /// B 卡顶部身份条:用户在设置里选的渐变 / 背景图收成 3px 一条。
+  ///
+  /// 为什么不是"去掉背景选择":用户两次要求自定义名片(头像/背景/签名),
+  /// 功能不能丢;但整块深色背景会让这张卡脱离暖纸白页(每日简报是黑字纸面)。
+  /// 所以:背景"还在"(看得见、还能换),只是从"压住文字的底色"变成"卡的身份条"。
+  Widget _identityRule(BriefTheme t, bool hasPhoto, String bgPath) {
+    final dynamic bg = ProfileCardSettings.backgroundOf(settings.backgroundId);
+    final List<Color> colors = <Color>[
+      Color((bg['colors'] as List)[0] as int),
+      Color((bg['colors'] as List)[1] as int),
+    ];
+    // 没主动挑过背景(id 仍是默认 'dawn' 的蓝)时,身份条走简报的砖红系 ——
+    // 否则"默认用户"会看到一张暖纸卡顶上顶一条蓝色条,像没改干净;
+    // 主动挑过其它渐变的用户,仍显示他自己选的颜色(否则"换了背景没变化")。
+    final bool untouched = settings.backgroundId.isEmpty ||
+        settings.backgroundId == 'dawn';
+    final List<Color> ruleColors = untouched
+        ? const <Color>[Color(0xFFC4562E), Color(0xFF9A572F)]
+        : colors;
+    return SizedBox(
+      height: 3,
+      child: hasPhoto
+          ? Image.file(
+              File(bgPath),
+              fit: BoxFit.cover,
+              alignment: settings.backgroundAlignment,
+            )
+          : DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.centerLeft,
+                  end: Alignment.centerRight,
+                  colors: ruleColors,
+                ),
+              ),
+            ),
+    );
+  }
+
+  /// 卡上的编辑入口:**砖红小铅笔**(旧版是白色半透明铅笔,只在深色卡上成立)。
+  ///
+  /// 设计取舍:
+  /// - 保留 `InkWell` 而不是画一个容器 —— 没有水波纹的"假按钮"正是 v2.10 用户
+  ///   以为"名片无法编辑"的原因之一(那时铅笔是纯装饰、点了没反应);
+  /// - 面积做成 34×34 的可点区(视觉上只有 15px 图标,但触控目标够大);
+  /// - 只有图标没有文字:卡面要"精美简洁",文字说明交给弹层自己。
+  Widget _editPencil(BriefTheme t) {
     return Semantics(
       // 无障碍标签 + 测试用的稳定入口(文字按钮删掉后,这里必须还有"能说出名字"的入口)
       label: '编辑名片',
       button: true,
       child: Material(
-        color: Colors.white.withAlpha(38),
+        color: t.tint(t.accent, alpha: 0.10),
         shape: const CircleBorder(),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onEdit,
-          splashColor: Colors.white.withAlpha(70),
-          child: const SizedBox(
+          splashColor: t.accent.withValues(alpha: 0.12),
+          child: SizedBox(
             width: 34,
             height: 34,
-            child: Icon(Icons.edit_outlined, size: 15, color: Colors.white),
+            child: Icon(Icons.edit_outlined, size: 15, color: t.accent),
           ),
         ),
       ),
@@ -277,29 +364,31 @@ class ProfileCardView extends StatelessWidget {
   /// 圈里的正是"说明文案 + 这个宽按钮"。删掉而不是留着 —— 死代码会误导下一个人
   /// 以为卡上还有两个入口。要去旧实现看 `git log -p`(搜索"编辑名片"即可)。
 
-  Widget _statDivider() => Container(
+  Widget _statDivider(BriefTheme t) => Container(
         width: 1,
-        height: 22,
-        color: Colors.white.withAlpha(56),
+        height: 24,
+        color: t.line,
       );
 
-  Widget _stat(String label, String value) {
+  Widget _stat(BriefTheme t, String label, String value) {
     return Column(
-      children: [
+      children: <Widget>[
         Text(
           value.isEmpty ? '—' : value,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: const TextStyle(
-            fontSize: 13.5,
-            fontWeight: FontWeight.w700,
-            color: Colors.white,
+          textAlign: TextAlign.center,
+          style: AppFont.bodyStyle.copyWith(
+            fontSize: 15,
+            fontWeight: FontWeight.w800,
+            color: t.ink,
           ),
         ),
-        const SizedBox(height: 1),
+        const SizedBox(height: 2),
         Text(
           label,
-          style: TextStyle(fontSize: 10.5, color: Colors.white.withAlpha(200)),
+          textAlign: TextAlign.center,
+          style: AppFont.tagStyle.copyWith(fontSize: 10, color: t.inkFaint),
         ),
       ],
     );

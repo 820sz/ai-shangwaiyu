@@ -181,18 +181,8 @@ class _SubCategoryInputSheetState extends State<_SubCategoryInputSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 拖拽条
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.outlineVariant,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
+            // 拖拽条由全局主题提供,这里不再画第二条(双横杠修复)。
+            const SizedBox(height: 8),
             // 标题
             Row(
               children: [

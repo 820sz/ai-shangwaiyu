@@ -59,11 +59,15 @@ class MaterialDirectionDef {
 /// 材料分类法(纯常量)。
 abstract final class MaterialTaxonomy {
   /// 按需求(特殊页:难度 + 目标 + 形式 + 补充需求 → 全局推送)
+  ///
+  /// 2026-11-06 用户选型后改名为「找材料」:入口不再直接进频道页,而是走
+  /// `FindMaterialScreen` 的并列大卡(自由搜 / 按我的情况找);这个定义仍被
+  /// 频道页「按需求」方向与需求设置页复用,`label` 只影响展示。
   static const MaterialDirectionDef need = MaterialDirectionDef(
     id: MaterialDirection.need,
-    label: '按需求找材料',
-    subtitle: '难度 · 目标 · 形式 组合后,全 App 的材料都会按它推',
-    icon: Icons.tune_rounded,
+    label: '找材料',
+    subtitle: '自由搜 · 或按你的学习情况找',
+    icon: Icons.travel_explore_rounded,
     subtopics: <MaterialSubtopic>[],
   );
 

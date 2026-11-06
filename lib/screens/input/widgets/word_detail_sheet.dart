@@ -36,18 +36,8 @@ void showWordDetailSheet({
         child: ListView(
           controller: scrollCtrl,
           children: [
-            // 拖拽条
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                margin: const EdgeInsets.only(bottom: 16),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.outlineVariant,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
+            // 拖拽条由全局主题提供,这里不再画第二条(双横杠修复)。
+            const SizedBox(height: 4),
             // 单词大标题:截断词条回退显示完整句子(F8,与列表/横幅一致)
             // v1.5.0:点单词本体即朗读(系统 TTS);右侧另有喇叭按钮
             Row(

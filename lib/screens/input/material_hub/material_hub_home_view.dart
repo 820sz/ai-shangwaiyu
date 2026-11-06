@@ -237,7 +237,7 @@ class _MaterialHubHomeViewState extends State<MaterialHubHomeView> {
             const SizedBox(height: 8),
             Row(
               children: <Widget>[
-                _pill(skin, '按需求找材料', onTap: widget.onOpenNeed),
+                _pill(skin, '找材料', onTap: widget.onOpenNeed),
                 const SizedBox(width: Gap.xs),
                 _pill(skin, '换一批', onTap: widget.onShuffleDaily, tonal: true),
               ],
@@ -652,14 +652,14 @@ class _MaterialHubHomeViewState extends State<MaterialHubHomeView> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  Text('按需求找材料',
+                  Text('找材料',
                       style: TextStyle(
                           fontSize: 14.5,
                           fontWeight: FontWeight.w800,
                           color: skin.ink)),
                   const SizedBox(height: 2),
                   Text(
-                    empty ? '先花 10 秒设一下:难度 · 目标 · 形式' : widget.need.summary,
+                    empty ? '自由搜,或按你的学习情况找' : widget.need.summary,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(

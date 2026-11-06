@@ -44,6 +44,22 @@ class TappablePassage extends StatefulWidget {
   /// 超过这么多个词就不再逐词挂手势(性能保护)
   final int maxSpans;
 
+  /// 词本身的颜色(C 方案:保持正文墨色,不再是"满屏主色链接感")。
+  /// 为空时退回旧行为(主题 primary),保证另外两个阅读器零改动。
+  final Color? wordColor;
+
+  /// 生词下划线的颜色(C 方案传砖红)。
+  /// 为空时退回旧行为(主题 primary 60% 虚线)。
+  final Color? underlineColor;
+
+  /// 下划线粗细(C 方案 1.5~1.6)
+  final double underlineThickness;
+
+  /// 生词高亮集合(小写)。为空 = 旧行为(每个词都画线,材料阅读器现状);
+  /// 非空 = 只给集合里的词画砖红实线 + w600(C 方案:满屏红线等于没重点,
+  /// 只有真生词配得上强调色;其余词仍然可点,只是不画线)。
+  final Set<String>? highlightWords;
+
   const TappablePassage({
     super.key,
     required this.text,
@@ -51,6 +67,10 @@ class TappablePassage extends StatefulWidget {
     required this.onWordTap,
     this.onSelectionAction,
     this.maxSpans = 1200,
+    this.wordColor,
+    this.underlineColor,
+    this.underlineThickness = 1.5,
+    this.highlightWords,
   });
 
   /// 选中菜单的按钮表(纯函数,便于单测)。
@@ -127,15 +147,37 @@ class _TappablePassageState extends State<TappablePassage> {
       final recognizer = TapGestureRecognizer()
         ..onTap = () => widget.onWordTap(word);
       _recognizers.add(recognizer);
-      spans.add(TextSpan(
-        text: word,
-        recognizer: recognizer,
-        style: TextStyle(
+      // 三种画法:
+      // - highlightWords == null:旧行为(全部主色虚线,外观不变);
+      // - highlightWords 命中:生词 = w600 + 砖红实线;
+      // - 未命中:普通词,**不画线**(仍是可点热区)。
+      final highlight = widget.highlightWords;
+      final marked =
+          highlight == null || highlight.contains(word.toLowerCase());
+      TextStyle? wordStyle;
+      if (!marked) {
+        wordStyle = null;
+      } else if (highlight == null) {
+        wordStyle = TextStyle(
           color: theme.colorScheme.primary,
           decoration: TextDecoration.underline,
           decorationStyle: TextDecorationStyle.dotted,
           decorationColor: theme.colorScheme.primary.withAlpha(60),
-        ),
+        );
+      } else {
+        wordStyle = TextStyle(
+          color: widget.wordColor ?? theme.colorScheme.primary,
+          fontWeight: FontWeight.w600,
+          decoration: TextDecoration.underline,
+          decorationStyle: TextDecorationStyle.solid,
+          decorationColor: widget.underlineColor,
+          decorationThickness: widget.underlineThickness,
+        );
+      }
+      spans.add(TextSpan(
+        text: word,
+        recognizer: recognizer,
+        style: wordStyle,
       ));
       cursor = m.end;
     }

@@ -3,12 +3,13 @@ import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 import 'package:provider/provider.dart';
 
 import '../../config/constants.dart';
 import '../../config/design_tokens.dart';
-import '../../config/theme.dart';
-import '../../config/v4_theme.dart';
+
+
 import '../../models/bookmark.dart';
 import '../../models/vocabulary.dart';
 import '../../providers/bookmark_provider.dart';
@@ -29,6 +30,10 @@ import '../../widgets/app_ui.dart';
 import '../../widgets/audio_player_bar.dart';
 import '../../widgets/material_blocks.dart';
 import '../../widgets/reader_action_bar.dart';
+import '../../widgets/reader_console.dart';
+import '../../widgets/reader_paper.dart';
+import '../../widgets/reader_progress.dart';
+import '../../widgets/reader_sheets.dart';
 import '../../widgets/reader_text.dart';
 import '../../widgets/waiting.dart';
 import '../../widgets/word_action_sheet.dart';
@@ -106,6 +111,32 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
   /// 阅读设置(v2.5):字号乘数与行距,落 Hive,两个阅读器共用
   double _fontScale = ReaderSettings.defaultFontScale;
   double _lineHeight = ReaderSettings.defaultLineHeight;
+
+  // ═══════════ v2.27 · 阅读器 C 方案(2026-11-06 用户拍板)═══════════
+  //
+  // 用户三条抱怨:底部拥挤 / 字体色调差 / 滑动没有进度百分比。C 的解法是
+  // "零常驻按钮 + 一张纸 + 常驻进度",全部落在本文件与 `widgets/reader_*`。
+
+  /// 纸张三色:纸白(冷灰纸,默认)/ 米黄(暖纸)/ 墨夜(深色纸)。
+  /// 持久化在 `ReaderSettings`(settings Hive box),切换立即生效、重启保留。
+  ReaderPaper _paper = ReaderPaper.white;
+
+  /// 当前纸张的调色板(色值见 `lib/widgets/reader_paper.dart`)
+  ReaderPalette _palette = paletteOf(ReaderPaper.white);
+
+  /// 阅读进度 0~1,**只**通知进度组件(右侧胶囊/竖轨、贴底 2px 线、控制台数字)。
+  ///
+  /// 为什么用 ValueNotifier 而不是 setState:滚动每帧都变,整屏重建会让
+  /// [#_buildUnit] 里上千个 TapGestureRecognizer 与译文卡片跟着重建,低端机
+  /// 必然掉帧;而进度只需要重建 3 个像素级小组件。
+  final ValueNotifier<double> _readingPercent = ValueNotifier<double>(0);
+
+  /// 最近一次滚动比例(0~1)。落库 percent 用它,不再按"2500 词一块"粗估
+  /// (典型文章只有 1 块 → 旧逻辑永远写 0 或 100)。
+  double _lastScrollRatio = 0;
+
+  /// C 方案 6 档字阶(标题/栏目标签/署名/首段/正文/译文),由阅读设置算出
+  ReaderType get _type => ReaderType.fromSettings();
 
   // ═══════════ 逐段翻译(v2.12.2 重做:用户 2026-10-20 原话「完全是一坨屎,稀烂,没法用」)═══════════
   //
@@ -297,6 +328,8 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     super.initState();
     _fontScale = ReaderSettings.fontScale();
     _lineHeight = ReaderSettings.lineHeight();
+    _paper = ReaderSettings.paper();
+    _palette = paletteOf(_paper);
     _stopwatch.start();
     _load();
     _scrollCtrl.addListener(_onScroll);
@@ -651,21 +684,16 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     _pumpTranslationQueue();
   }
 
-  /// 本轮进度(只在真的在翻时显示)。
+  /// 本轮翻译进度条(真实完成数 / 本轮入队数),只给翻译弹层用。
   ///
   /// 分母 = 本轮入队的**真段落数**(典型文章 6~10,不再恒 1);分子 = 已完成
-  /// (成功/失败/取消都算"已处理")。分母/进度值都来自 [TranslationRunState] ——
-  /// 完成时它会先把分子补到分母,保证 100% 那一帧真的被渲染出来。
-  Widget? _buildTranslationProgress() {
+  /// (成功 / 失败 / 取消都算"已处理")。分母/进度值都来自 [TranslationRunState]
+  /// —— 完成时它先把分子补到分母,保证 100% 那一帧真的被渲染出来。
+  Widget? _translationProgressWidget() {
     if (!_run.visible) return null;
     final total = _run.total;
     final done = _run.done;
-    // 注意:`$_units.length` 在 Dart 里是"插值 _units 再拼字面量 .length"——
-    // 会把整个 ReaderUnit 列表 dump 到界面上(用户 11/04 截图里的那坨
-    // "已翻 4/[ReaderUnit(chunk=0, para=0, 18字), ...]" 就是它)。
-    // 必须写成 ${_units.length}。
-    final detail = StringBuffer(
-        '已翻 ${_translations.length}/${_units.length} 段');
+    final detail = StringBuffer('已翻 ${_translations.length}/${_units.length} 段');
     if (_chunkErrors.isNotEmpty) {
       detail.write(' · ${_chunkErrors.length} 段待重试');
     }
@@ -678,31 +706,16 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     );
   }
 
-  /// 翻译控制条:贴在底部动作栏上方,只在翻译开着时出现。
+  /// 翻译弹层(C 方案):翻译进度与增量操作从"压在正文下的灰带"收进这里。
   ///
-  /// 为什么另起一条而不是复用旧动作栏的「换范围」:
-  /// - `ReaderActionBar` 在 `lib/widgets/`(本次冻结),只有「换范围」一个入口;
-  /// - 重做后要的是**不打断阅读的增量操作**:继续翻后文 / 整章 / 重试失败段,
-  ///   而且这些按钮只在翻完后出现,不逼用户先做选择题。
-  Widget _buildTranslationTray(ThemeData theme) {
-    final cs = theme.colorScheme;
-    // "100% 保留 2 秒"期间也算 busy:进度条要留在屏幕上给用户看见完成。
-    final busy = _activeJobs.isNotEmpty || _queue.isNotEmpty || _run.visible;
+  /// 旧实现是一条 93px 的实底灰带(_buildTranslationTray),紧贴正文、视觉上
+  /// 就是横在文字下面的一条灰条,而且和底栏翻译 chip 状态双写。C 方案下正文里
+  /// 只留译文本身,进度与动作全部进弹层;顶部只留一条 2px 细提示线。
+  void _showTranslationSheet() {
     final failed = _chunkErrors.length;
+    final busy = _activeJobs.isNotEmpty || _queue.isNotEmpty || _run.visible;
     final done = _translations.length;
     final unitCount = _units.length;
-    // 兜底:理论上 busy 就一定有 runTotal;万一状态错位,也显示"正在翻译"
-    // 而不是在任务还在跑的时候露出「继续翻后文」让人重复点。
-    final progress = busy
-        ? (_buildTranslationProgress() ??
-            ProgressStageBar(
-              stage: '正在翻译…',
-              detail: '已翻 $done/$unitCount 段',
-              startedAt: _run.startedAt,
-              onCancel: _cancelAllTranslation,
-            ))
-        : null;
-
     final String status;
     if (failed > 0) {
       status = '已翻 $done/$unitCount 段 · $failed 段没翻出来';
@@ -713,104 +726,223 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     } else {
       status = '已翻 $done/$unitCount 段 · 点译文可问 AI';
     }
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => ReaderTranslationSheet(
+        palette: _palette,
+        editing: _showTranslation,
+        done: done,
+        total: unitCount,
+        failed: failed,
+        status: status,
+        autoTranslate: _autoTranslate,
+        translateTarget: DeepseekApiService.targetSummary,
+        progressBar: busy ? _translationProgressWidget() : null,
+        lastError: failed > 0 ? _humanError(_chunkErrors.values.last) : null,
+        onContinueNext: _translateNext,
+        onWholeChapter: _translateChapter,
+        onRetryFailed: _retryFailedChunks,
+        onToggleOff: _toggleTranslation,
+      ),
+    );
+  }
 
-    return Container(
-      color: cs.surfaceContainerHighest,
-      padding: const EdgeInsets.fromLTRB(Gap.sm, Gap.xxs, Gap.xs, Gap.xxs),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (progress != null)
-            Padding(
-              padding: const EdgeInsets.only(right: Gap.xs),
-              child: progress,
-            )
-          else
-            Row(
-              children: [
-                Icon(Icons.translate, size: 14, color: cs.primary),
-                const SizedBox(width: Gap.xxs),
-                Expanded(
-                  child: Text(
-                    status,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      fontSize: AppFont.meta,
-                      color: cs.onSurfaceVariant,
-                    ),
-                  ),
-                ),
-                if (failed > 0)
-                  Tooltip(
-                    message: '重试 $failed 段没翻出来的段落',
-                    child: IconButton(
-                      onPressed: _retryFailedChunks,
-                      visualDensity: VisualDensity.compact,
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(
-                        minWidth: 28,
-                        minHeight: 28,
-                      ),
-                      icon: Icon(Icons.refresh, size: 17, color: cs.primary),
-                    ),
-                  ),
-                TextButton(
-                  style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: Gap.xxs),
-                    minimumSize: const Size(0, 28),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  onPressed: _translateNext,
-                  child: const Text(
-                    '继续翻后文',
-                    style: TextStyle(fontSize: AppFont.tag),
-                  ),
-                ),
-                TextButton(
-                  style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: Gap.xxs),
-                    minimumSize: const Size(0, 28),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  onPressed: _translateChapter,
-                  child: const Text(
-                    '整章',
-                    style: TextStyle(fontSize: AppFont.tag),
-                  ),
-                ),
-              ],
+  /// 模型与思考档(C 版弹层):原来挤在底栏最左、属于"低频却常驻"的典型,
+  /// 现在归到控制台「材料」组。
+  Future<void> _showModelSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => ReaderModelSheet(
+        palette: _palette,
+        model: ReaderModelSheet.currentModel(),
+        thinking: ReaderModelSheet.currentThinking(),
+        onPick: (model, thinking) async {
+          final box = Hive.box(AppConstants.hiveBoxSettings);
+          await box.put(AppConstants.keyDoubaoModel, model);
+          await box.put(AppConstants.keyDoubaoThinking, thinking);
+          if (mounted) setState(() {});
+        },
+      ),
+    );
+  }
+
+  /// 材料动作(导出 / 听写 / 读完 / 原文链接)
+  void _showMaterialActions() {
+    final url = '${_material?['url'] ?? ''}'.trim();
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => ReaderActionSheet(
+        palette: _palette,
+        title: '材料',
+        note: '导出/听写/读完都会记进学习数据;原文链接用系统浏览器打开。',
+        actions: <ReaderActionItem>[
+          if (_chunks.isNotEmpty)
+            ReaderActionItem(
+              icon: Icons.download_outlined,
+              label: '导出这篇(Markdown)',
+              hint: '阅读包',
+              onTap: _exportPack,
             ),
-          if (!busy && failed > 0)
-            // 只显示最近一条失败原因(单行、省略):用户至少知道是网络还是额度,
-            // 又不至于让 20 条错误铺满屏幕。
-            Padding(
-              padding: const EdgeInsets.only(left: Gap.lg, bottom: 2),
-              child: Text(
-                '最近一次:${_humanError(_chunkErrors.values.last)}',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  fontSize: AppFont.tag,
-                  color: cs.onSurfaceVariant,
-                ),
-              ),
+          if (_chunks.isNotEmpty)
+            ReaderActionItem(
+              icon: Icons.headphones_outlined,
+              label: '听写练习',
+              onTap: () => _onMoreAction('dictation'),
             ),
-          // v2.16.0:标注翻译**实际**走哪个槽位/模型。
-          // 阅读器底部「模型」菜单改的是主槽位,而翻译在副槽位已配置时走副槽位
-          // —— 不标出来,用户会以为"换了模型没用"(这正是历史上被反复吐槽的点)。
-          Padding(
-            padding: const EdgeInsets.only(left: Gap.lg, bottom: 2),
-            child: Text(
-              '翻译使用:${DeepseekApiService.targetSummary}',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodySmall?.copyWith(
-                fontSize: AppFont.tag,
-                color: cs.onSurfaceVariant,
-              ),
+          if (!_finished)
+            ReaderActionItem(
+              icon: Icons.check_circle_outline,
+              label: '读完了(进度记 100%)',
+              onTap: _finishReading,
             ),
+          if (url.isNotEmpty)
+            ReaderActionItem(
+              icon: Icons.open_in_new,
+              label: '原文链接',
+              hint: '浏览器',
+              onTap: () => _openSourceLink(url),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// 上滑「阅读控制台」:底部零常驻按钮的唯一动作入口。
+  Future<void> _openConsole() async {
+    if (_chunks.isEmpty) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      useSafeArea: false,
+      builder: (_) => ReaderConsoleSheet(data: _consoleData()),
+    );
+  }
+
+  /// 控制台的数据快照(控制台是纯展示组件,不碰业务状态)
+  ReaderConsoleData _consoleData() {
+    final t = _type;
+    final model = ReaderModelSheet.currentModel();
+    final thinking = ReaderModelSheet.currentThinking();
+    return ReaderConsoleData(
+      palette: _palette,
+      progress: _readingPercent,
+      currentUnit: _currentUnitIndex(),
+      totalUnits: _units.length,
+      currentChunk: _currentChunkIndex(),
+      chunkTitles: <String>[
+        for (var i = 0; i < _chunks.length; i++)
+          '${_chunks[i]['title'] ?? ''}'.trim().isEmpty
+              ? '第 ${i + 1} 节'
+              : '${_chunks[i]['title']}'.trim(),
+      ],
+      chunkPercents: _chunkPercents(),
+      translationDone: _translations.length,
+      translationTotal: _units.length,
+      showTranslation: _showTranslation,
+      pickedCount: _pickedWords.length,
+      finished: _finished,
+      onShelf: _onShelf,
+      fontLabel:
+          '${ReaderSettings.cFontLabel(t.body)} · ${ReaderSettings.lineHeightLabel(_lineHeight)}',
+      modelLabel:
+          '$model · ${AppConstants.thinkingOptionsFor(model)[thinking] ?? thinking}',
+      saveTargetLabel: _saveTarget.label,
+      hasRichForms: _chunks.isNotEmpty,
+      onContinue: _continueReading,
+      onToggleTranslation: _showTranslationSheet,
+      onFollowUp: _openFollowUp,
+      onSavePicked: _showPickedSummary,
+      onChangeSaveTarget: _changeSaveTarget,
+      onToggleShelf: _toggleShelf,
+      onJumpChunk: _scrollToChunk,
+      onOpenFullToc: _showToc,
+      onOpenSettings: _showReaderSettings,
+      onOpenModel: _showModelSheet,
+      onOpenRichForms: _openRichForms,
+      onOpenMaterialActions: _showMaterialActions,
+    );
+  }
+
+  /// 当前读到第几节(0 起)。
+  ///
+  /// 用**连续单元坐标**（floor）而不是 `_lastChunkIndex`（round）：控制台目录
+  /// 高亮/本节 % 必须和总进度同一套坐标，否则出现在"高亮下一节 + 本节 0%"
+  /// 的错位观感。
+  int _currentChunkIndex() {
+    if (_chunks.isEmpty) return 0;
+    if (_units.isEmpty) return _lastChunkIndex.clamp(0, _chunks.length - 1);
+    final cursor = _lastScrollRatio * (_units.length - 1);
+    var current = 0;
+    for (var i = 0; i < _firstUnitOfChunk.length && i < _chunks.length; i++) {
+      if (_firstUnitOfChunk[i] <= cursor) current = i;
+    }
+    return current.clamp(0, _chunks.length - 1);
+  }
+
+  /// 当前读到第几段(0 起;按滚动比例估算,和进度同一份真值)
+  int _currentUnitIndex() {
+    if (_units.isEmpty) return 0;
+    return (_lastScrollRatio * (_units.length - 1))
+        .round()
+        .clamp(0, _units.length - 1);
+  }
+
+  /// 每节(块)的阅读 %:按单元覆盖算,和总进度同一套比例。
+  List<double> _chunkPercents() {
+    if (_chunks.isEmpty) return const <double>[];
+    if (_units.isEmpty) {
+      return <double>[
+        for (var i = 0; i < _chunks.length; i++)
+          i < _lastChunkIndex
+              ? 100
+              : i == _lastChunkIndex
+                  ? (_lastScrollRatio * 100).clamp(0.0, 100.0)
+                  : 0,
+      ];
+    }
+    final cursor =
+        (_lastScrollRatio * (_units.length - 1)).clamp(0.0, _units.length - 1.0);
+    final out = <double>[];
+    for (var c = 0; c < _chunks.length; c++) {
+      final start =
+          c < _firstUnitOfChunk.length ? _firstUnitOfChunk[c] : 0;
+      var end = c + 1 < _firstUnitOfChunk.length
+          ? _firstUnitOfChunk[c + 1] - 1
+          : _units.length - 1;
+      if (end < start) end = start;
+      final span = end - start + 1;
+      out.add((((cursor - start) / span).clamp(0.0, 1.0)) * 100);
+    }
+    return out;
+  }
+
+  /// 「继续阅读」= 收起控制台继续读(进度已经在那儿,不跳)
+  void _continueReading() {
+    if (mounted) Navigator.of(context).maybePop();
+  }
+
+  /// 顶部 2px 翻译细提示(不压正文):翻译进行中 / 已翻比例的一条细线。
+  Widget _translationHintLine(ReaderPalette p) {
+    final total = _units.isEmpty ? 1 : _units.length;
+    final ratio = _run.visible
+        ? _run.progress.clamp(0.0, 1.0)
+        : (_translations.length / total).clamp(0.0, 1.0);
+    return SizedBox(
+      height: 2,
+      child: Stack(
+        fit: StackFit.expand,
+        children: <Widget>[
+          ColoredBox(color: p.hairline),
+          FractionallySizedBox(
+            alignment: Alignment.centerLeft,
+            widthFactor: ratio,
+            child: ColoredBox(color: p.accent.withValues(alpha: 0.55)),
           ),
         ],
       ),
@@ -1001,226 +1133,118 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
   }
 
   /// 阅读设置面板:字号 / 行距 —— 边调边生效(不用"确定"按钮),退出时已落盘
-  /// 正文前的大标题卡(v5):来源/难度/翻译进度都放在滚动内容里,
-  /// 下滑会跟着正文一起滚走 —— 不再是"永远悬在顶部"的信息条。
+  /// 正文前的刊头(C 方案):栏目标签 + 标题 28/1.1/w900/-0.8 + 署名 +
+  /// 「2px 粗线 + 1px 细线」的刊头双线,然后才进正文。
+  ///
+  /// 标题 / 来源 / 难度全部在滚动内容里,下滑会滚走 —— 阅读器顶部不常驻任何信息条
+  /// (旧实现是一条永远悬在顶上的信息行 + 30 号标题卡)。
   Widget _readingLead(
     BuildContext context,
     ThemeData theme,
     dynamic a,
     String title,
   ) {
-    final skin = V4Skin.of(context);
+    final p = _palette;
+    final t = _type;
     final kind = '${_material?['kind'] ?? 'article'}';
-    final pct = (_scrollCtrl.hasClients &&
-            _scrollCtrl.position.hasContentDimensions &&
-            _scrollCtrl.position.maxScrollExtent > 0)
-        ? (_scrollCtrl.offset / _scrollCtrl.position.maxScrollExtent * 100)
-            .clamp(0.0, 100.0)
-            .round()
-        : 0;
+    final wordCount = _intOf(_material?['word_count']);
+    final kicker = 'READING · ${MaterialLibrary.kindLabel(kind)}'.toUpperCase();
+    final author = '${_material?['author'] ?? ''}'.trim();
+    final byline = <String>[
+      if (author.isNotEmpty) author,
+      if (a != null) a.cefr,
+      if (a != null) '约 ${a.estMinutes} 分钟',
+      if (a != null) '已知 ${(a.knownTokenRatio * 100).toStringAsFixed(0)}%',
+    ].join(' · ');
     return Padding(
-      padding: const EdgeInsets.only(bottom: Gap.md),
+      padding: const EdgeInsets.only(bottom: 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          // Plan A:小字 kicker + 右侧翻译进度,不再用彩色身份胶囊
           Row(
             children: <Widget>[
               Text(
-                'TODAY’S READING',
+                kicker,
                 style: TextStyle(
-                  fontSize: 9.5,
-                  letterSpacing: 1.6,
+                  fontSize: t.kicker,
+                  height: ReaderType.kickerHeight,
+                  letterSpacing: ReaderType.kickerSpacing,
                   fontWeight: FontWeight.w800,
-                  color: skin.accent,
+                  color: p.accent,
                 ),
               ),
               const Spacer(),
-              if (_showTranslation)
+              if (wordCount > 0)
                 Text(
-                  '已翻 ${_translations.length}/${_units.length} 段',
-                  style: TextStyle(fontSize: 10, color: skin.inkFaint),
+                  '$wordCount 词',
+                  style: TextStyle(
+                    fontSize: t.kicker,
+                    height: ReaderType.kickerHeight,
+                    letterSpacing: ReaderType.kickerSpacing,
+                    fontWeight: FontWeight.w800,
+                    color: p.inkFaint,
+                  ),
                 ),
-              const SizedBox(width: 8),
-              Text(
-                '$pct%',
-                style: TextStyle(
-                    fontSize: 10.5,
-                    fontWeight: FontWeight.w700,
-                    color: skin.inkSoft),
-              ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
           Text(
             title,
             maxLines: 4,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              fontSize: 30,
-              height: 1.12,
+              fontSize: t.title,
+              height: ReaderType.titleHeight,
+              letterSpacing: ReaderType.titleSpacing,
               fontWeight: FontWeight.w900,
-              letterSpacing: -0.9,
-              color: skin.ink,
+              color: p.ink,
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
           Text(
-            a == null
-                ? '${MaterialLibrary.kindLabel(kind)} · 正在分析难度…'
-                : '${a.cefr} · ${a.wordCount} 词 · 约 ${a.estMinutes} 分钟 · '
-                    '已知 ${(a.knownTokenRatio * 100).toStringAsFixed(0)}%',
+            byline.isEmpty ? '正在分析难度…' : byline,
             style: TextStyle(
-                fontSize: 11.5, height: 1.4, color: skin.inkSoft),
+              fontSize: t.signature,
+              height: ReaderType.signatureHeight,
+              letterSpacing: ReaderType.signatureSpacing,
+              color: p.inkSoft,
+            ),
           ),
-          const SizedBox(height: 16),
-          Container(height: 1, color: skin.hairline),
-          const SizedBox(height: 20),
+          const SizedBox(height: 12),
+          // 刊头双线:2px 墨线 + 2px 空 + 1px 细线
+          Container(height: 2, color: p.ink),
+          const SizedBox(height: 2),
+          Container(height: 1, color: p.hairline),
+          const SizedBox(height: 18),
         ],
       ),
     );
   }
 
-  /// 阅读设置/目录弹层共用的小胶囊(v5:与材料中心/书架筛选同一套果冻样式)
-  Widget _sheetChip(
-    BuildContext ctx,
-    String label, {
-    required bool selected,
-    required VoidCallback onTap,
-  }) {
-    final skin = V4Skin.of(ctx);
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(999),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: BoxDecoration(
-          color: selected
-              ? skin.accent.withValues(alpha: 0.13)
-              : skin.surfaceAlt,
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(
-            color: selected
-                ? skin.accent.withValues(alpha: 0.5)
-                : skin.hairline,
-          ),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: selected ? FontWeight.w800 : FontWeight.w500,
-            color: selected ? skin.accent : skin.inkSoft,
-          ),
-        ),
-      ),
-    );
-  }
-
+  /// 阅读设置(C 版):字号 / 行距 / 纸张三色 + 实时预览卡。
+  ///
+  /// 三件事:① 改完立刻生效(不用"确定"按钮);② 落 Hive(重启保留);
+  /// ③ 纸张是整个阅读器换肤,所以连弹层自己也会跟着换纸(见 readerTheme)。
   Future<void> _showReaderSettings() async {
     await showModalBottomSheet<void>(
       context: context,
-      showDragHandle: true,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheet) {
-          final skin = V4Skin.of(ctx);
-          final muted = skin.inkSoft;
-          void apply(double scale, double height) {
-            setSheet(() {});
-            setState(() {
-              _fontScale = scale;
-              _lineHeight = height;
-            });
-          }
-
-          return SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(
-                  Gap.md, 0, Gap.md, Gap.md),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('阅读设置',
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: -0.2,
-                        color: skin.ink,
-                      )),
-                  const SizedBox(height: Gap.md),
-                  Text('字号',
-                      style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
-                          color: muted)),
-                  const SizedBox(height: Gap.xs),
-                  Wrap(
-                    spacing: Gap.xs,
-                    runSpacing: Gap.xs,
-                    children: [
-                      for (final s in ReaderSettings.fontScales)
-                        _sheetChip(
-                          ctx,
-                          ReaderSettings.scaleLabel(s),
-                          selected: _fontScale == s,
-                          onTap: () {
-                            ReaderSettings.setFontScale(s);
-                            apply(s, _lineHeight);
-                          },
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: Gap.md),
-                  Text('行距',
-                      style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
-                          color: muted)),
-                  const SizedBox(height: Gap.xs),
-                  Wrap(
-                    spacing: Gap.xs,
-                    runSpacing: Gap.xs,
-                    children: [
-                      for (var i = 0;
-                          i < ReaderSettings.lineHeights.length;
-                          i++)
-                        _sheetChip(
-                          ctx,
-                          ReaderSettings.lineHeightLabels[i],
-                          selected:
-                              _lineHeight == ReaderSettings.lineHeights[i],
-                          onTap: () {
-                            final h = ReaderSettings.lineHeights[i];
-                            ReaderSettings.setLineHeight(h);
-                            apply(_fontScale, h);
-                          },
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: Gap.md),
-                  // 预览:调完立刻能看到正文长什么样(不然要退出去才知道)
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(Gap.sm),
-                    decoration: BoxDecoration(
-                      color: skin.surfaceAlt,
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: Text(
-                      'The quick brown fox jumps over the lazy dog. '
-                      '阅读的样子大致就是这样。',
-                      style: TextStyle(
-                        fontSize: ReaderSettings.baseFontSize * _fontScale,
-                        height: _lineHeight,
-                        color: skin.ink,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => ReaderSettingsSheet(
+        initialPaper: _paper,
+        initialFontScale: _fontScale,
+        initialLineHeight: _lineHeight,
+        onChanged: (paper, scale, height) {
+          ReaderSettings.setPaper(paper);
+          ReaderSettings.setFontScale(scale);
+          ReaderSettings.setLineHeight(height);
+          if (!mounted) return;
+          setState(() {
+            _paper = paper;
+            _palette = paletteOf(paper);
+            _fontScale = scale;
+            _lineHeight = height;
+          });
         },
       ),
     );
@@ -1229,6 +1253,9 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
   @override
   void dispose() {
     _scrollCtrl.removeListener(_onScroll);
+    // 常驻进度的通知源:页面销毁必须释放,否则定时器/异步回调晚到会报
+    // "used after dispose"
+    _readingPercent.dispose();
     _stopwatch.stop();
     // 离开页面 = 真的停掉翻译:取消定时器与在途请求。这里不用
     // _stopTranslation(),因为 dispose 期间 setState 会报错。
@@ -1260,7 +1287,12 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     if (!_scrollCtrl.hasClients) return;
     final max = _scrollCtrl.position.maxScrollExtent;
     if (max <= 0 || _chunks.isEmpty) return;
-    final ratio = (_scrollCtrl.offset / max).clamp(0, 1);
+    final ratio = (_scrollCtrl.offset / max).clamp(0.0, 1.0);
+    // v2.27(C 方案):真实滚动比例 → 常驻进度(右侧胶囊/竖轨 + 贴底 2px 线)。
+    // **只**更新 ValueNotifier,不 setState 整屏;未读完最多显示 99%(100% 留给
+    // 「读完了」这个动作,否则进度条会假到 100)。
+    _lastScrollRatio = ratio;
+    _readingPercent.value = _finished ? 1.0 : ratio.clamp(0.0, 0.99);
     if (_units.isEmpty) {
       _lastChunkIndex = (ratio * (_chunks.length - 1)).round();
     } else {
@@ -1308,7 +1340,11 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
 
     final percent = finished
         ? 100.0
-        : ((_lastChunkIndex + 1) / _chunks.length * 100).clamp(0, 100).toDouble();
+        // v2.27(C 方案):落库 percent 改成**真实滚动比例**(见 _lastScrollRatio
+        // 在 _onScroll 里的更新),不再按 2500 词一块粗估 —— 典型文章只有 1 块,
+        // 旧逻辑写出来永远是 0 或 100,书架/材料中心的进度条因此是死的。
+        // 未读完最多 99:100 只留给「读完了」。
+        : (_lastScrollRatio * 100).clamp(0.0, 99.0);
     final addMinutes = seconds ~/ 60;
     final addLookups = _lookups;
     final addPicked = _picked;
@@ -1346,121 +1382,31 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     _picked = 0;
   }
 
-  /// 目录抽屉(v3 批 8 · C1-11):按章节/分块列出来,点一下跳过去。
+  /// 目录(C 版):按块(章节)列出,每行带**本节阅读 %**,正在读的一行砖红。
   ///
-  /// 为什么用"块"当目录:材料入库按 2500 词一块(长文/书就是多块),块自带
-  /// `title`(书的小节名 / 文章分节);没有标题的块给「第 N 节 · 约 xx 词」。
-  /// 这是用户 11/01 点名"阅读器视觉没重排"里的一项:长材料没有目录等于只能
-  /// 顺着滚,找内容极慢。
+  /// 旧实现是"大字裸列表"(20 号标题 + ListTile + 分割线,只有节名和词数);
+  /// C 统一成纸面紧凑行,和阅读控制台里的 3 行目录是同一套视觉。
   Future<void> _showToc() async {
-    final theme = Theme.of(context);
-    final muted = theme.colorScheme.onSurfaceVariant;
+    final titles = <String>[];
+    final words = <int>[];
+    for (var i = 0; i < _chunks.length; i++) {
+      final raw = '${_chunks[i]['title'] ?? ''}'.trim();
+      titles.add(raw.isEmpty ? '第 ${i + 1} 节' : raw);
+      final text = '${_chunks[i]['text'] ?? ''}';
+      words.add(RegExp(r"[A-Za-z']+").allMatches(text).length);
+    }
     await showModalBottomSheet<void>(
       context: context,
-      showDragHandle: true,
+      backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      builder: (ctx) {
-        final skin = V4Skin.of(ctx);
-        final chunks = _chunks;
-        return SafeArea(
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxHeight: MediaQuery.of(ctx).size.height * 0.7,
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(Gap.md, 0, Gap.md, Gap.xs),
-                  child: Row(
-                    children: [
-                      Icon(Icons.list_alt,
-                          size: 18, color: skin.accent),
-                      const SizedBox(width: 6),
-                      Text(
-                        '目录',
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: -0.2,
-                          color: skin.ink,
-                        ),
-                      ),
-                      const Spacer(),
-                      if (chunks.isNotEmpty)
-                        Text(
-                          '共 ${chunks.length} 节',
-                          style: TextStyle(
-                              fontSize: 11, color: skin.inkSoft),
-                        ),
-                    ],
-                  ),
-                ),
-                if (chunks.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.all(Gap.md),
-                    child: Text(
-                      '这篇材料没有分节信息,先往下读吧',
-                      style: theme.textTheme.bodySmall?.copyWith(color: muted),
-                    ),
-                  )
-                else
-                  Flexible(
-                    child: ListView.separated(
-                      shrinkWrap: true,
-                      padding: const EdgeInsets.fromLTRB(Gap.md, 0, Gap.md, Gap.md),
-                      itemCount: chunks.length,
-                      separatorBuilder: (_, _) =>
-                          const Divider(height: 1, thickness: 0.5),
-                      itemBuilder: (_, i) {
-                        final title = '${chunks[i]['title'] ?? ''}'.trim();
-                        final text = '${chunks[i]['text'] ?? ''}';
-                        final words = RegExp(r"[A-Za-z']+")
-                            .allMatches(text)
-                            .length;
-                        final current = i == _lastChunkIndex;
-                        return ListTile(
-                          dense: true,
-                          contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 4, vertical: 2),
-                          leading: Icon(
-                            current
-                                ? Icons.radio_button_checked
-                                : Icons.radio_button_unchecked,
-                            size: 18,
-                            color: current ? skin.accent : skin.inkFaint,
-                          ),
-                          title: Text(
-                            title.isEmpty ? '第 ${i + 1} 节' : title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 13.5,
-                              fontWeight:
-                                  current ? FontWeight.w800 : FontWeight.w500,
-                              color: current ? skin.accent : skin.ink,
-                            ),
-                          ),
-                          subtitle: Text(
-                            '${words > 0 ? '约 $words 词' : text.isEmpty ? '' : '${text.length} 字符'}'
-                            '${current ? ' · 正在读' : ''}',
-                            style: TextStyle(
-                                fontSize: 10.5, color: skin.inkSoft),
-                          ),
-                          onTap: () {
-                            Navigator.pop(ctx);
-                            _scrollToChunk(i);
-                          },
-                        );
-                      },
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        );
-      },
+      builder: (_) => ReaderTocSheet(
+        palette: _palette,
+        titles: titles,
+        wordCounts: words,
+        percents: _chunkPercents(),
+        current: _currentChunkIndex(),
+        onPick: _scrollToChunk,
+      ),
     );
   }
 
@@ -1487,79 +1433,55 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     });
   }
 
-  /// 有历史进度时的询问(用户第 4 条):「继续 / 从头开始」,不静默跳转
+  /// 有历史进度时的询问(用户第 4 条):「继续 / 从头开始」,不静默跳转。
+  ///
+  /// C 版:主按钮是 ink 实心胶囊;续读按**真实 percent** 跳(§7.2 Step 5),
+  /// 不再按"块比例"跳 —— 典型文章只有 1 块,按块跳等于永远回顶部。
   Future<void> _askResume({
     required Map<String, Object?> progress,
     required int position,
     required int percent,
     required int minutes,
   }) async {
-    final theme = Theme.of(context);
-    final muted = theme.colorScheme.onSurfaceVariant;
     final finished = progress['finished_at'] != null;
     final choice = await showModalBottomSheet<String>(
       context: context,
-      showDragHandle: true,
+      backgroundColor: Colors.transparent,
       isDismissible: false,
       enableDrag: false,
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(Gap.md, 0, Gap.md, Gap.md),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(Icons.history, size: 18, color: theme.colorScheme.primary),
-                  const SizedBox(width: Gap.xs),
-                  Text(
-                    finished ? '这篇你读完了' : '上次读到 $percent%(第 ${position + 1} 段)',
-                    style: theme.textTheme.titleMedium
-                        ?.copyWith(fontWeight: FontWeight.w700),
-                  ),
-                ],
-              ),
-              const SizedBox(height: Gap.xxs),
-              Text(
-                finished
-                    ? '已经标记读完,已读 $minutes 分钟。要从上次的位置再看一遍吗?'
-                    : '已读 $minutes 分钟。继续,还是从头开始?',
-                style: theme.textTheme.bodySmall
-                    ?.copyWith(color: muted, height: 1.5),
-              ),
-              const SizedBox(height: Gap.md),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: () => Navigator.pop(ctx, 'resume'),
-                  icon: const Icon(Icons.play_arrow, size: 18),
-                  label: Text(finished
-                      ? '回到第 ${position + 1} 段'
-                      : '继续(第 ${position + 1} 段)'),
-                ),
-              ),
-              const SizedBox(height: Gap.xs),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: () => Navigator.pop(ctx, 'restart'),
-                  icon: const Icon(Icons.restart_alt, size: 18),
-                  label: const Text('从头开始'),
-                ),
-              ),
-            ],
-          ),
-        ),
+      builder: (ctx) => ReaderResumeSheet(
+        palette: _palette,
+        finished: finished,
+        percent: percent,
+        position: position,
+        minutes: minutes,
+        onResume: () => Navigator.pop(ctx, 'resume'),
+        onRestart: () => Navigator.pop(ctx, 'restart'),
       ),
     );
     if (!mounted) return;
     if (choice == 'resume') {
-      _scrollToChunk(position);
-    } else if (_scrollCtrl.hasClients) {
-      // 从头开始:回顶部(控制器还没挂上时什么都不做,别在这里抛)
+      _scrollToPercent(percent.toDouble());
+    } else if (choice == 'restart' && _scrollCtrl.hasClients) {
       _scrollCtrl.jumpTo(0);
     }
+  }
+
+  /// 按 percent(0~100)跳转 —— 续读的准确入口。
+  ///
+  /// 列表项高度不一时 `maxScrollExtent` 与内容比例不是严格线性,但比"按块跳"
+  /// 准得多;percent 来自落库的真实滚动比例,同一份真值闭环保住了。
+  void _scrollToPercent(double percent) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scrollCtrl.hasClients) return;
+      final max = _scrollCtrl.position.maxScrollExtent;
+      if (max <= 0) return;
+      final target = (max * (percent.clamp(0.0, 100.0) / 100)).clamp(0.0, max);
+      _scrollCtrl.jumpTo(target);
+      _lastScrollRatio = max <= 0 ? 0 : (target / max).clamp(0.0, 1.0);
+      _readingPercent.value =
+          _finished ? 1.0 : _lastScrollRatio.clamp(0.0, 0.99);
+    });
   }
 
   /// 打开材料:元信息 + 正文分块 + **已存的阅读进度** + **已存的 AI 内容块**。
@@ -1639,6 +1561,13 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
         );
         _loading = false;
       });
+      // v2.27(C 方案):打开时先把**已存真实 percent** 摆到常驻进度上;
+      // 用户选「继续」后 _scrollToPercent 会再校准一次。
+      // ⚠️ 必须在 setState 之后**立刻**做:如果放在后面的 await(首开写库)之后,
+      // 它会晚于滚动监听执行,把用户刚滚出来的进度覆盖回 0 —— 历史 bug。
+      _lastScrollRatio = (percent / 100).clamp(0.0, 1.0);
+      _readingPercent.value =
+          _finished ? 1.0 : _lastScrollRatio.clamp(0.0, 0.99);
       // 首开就写 started_at(upsertMaterialProgress 只在首行写它);
       // 顺带把"这份材料被打开过"变成事实,统计页才看得到。
       if (progress == null) {
@@ -1730,6 +1659,8 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     await _persist(finished: true);
     if (!mounted) return;
     setState(() => _finished = true);
+    // 「读完了」是唯一允许 100% 的动作:常驻进度立刻满格,不再等滚动
+    _readingPercent.value = 1.0;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('已标记读完 —— 进度与用时已记入学习数据')),
     );
@@ -1978,84 +1909,16 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     _generateBlock(block.kind, block.chunkIndex);
   }
 
-  /// 「保存」= 把本次收的词再确认一遍(给用户一个明确的收口)
+  /// 「收词」= 把本次收的词再确认一遍(给用户一个明确的收口)
   void _showPickedSummary() {
-    final theme = Theme.of(context);
     showModalBottomSheet<void>(
       context: context,
-      showDragHandle: true,
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(Gap.md, 0, Gap.md, Gap.md),
-          child: _pickedWords.isEmpty
-              ? Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('还没有收词',
-                        style: theme.textTheme.titleMedium
-                            ?.copyWith(fontWeight: FontWeight.w700)),
-                    const SizedBox(height: Gap.xs),
-                    Text(
-                      '点正文里的任意英文单词(或长按选中一段),底部会弹出'
-                      '「询问 AI / 收藏进单词本」。收藏时按下方显示的保存位置入库,'
-                      '并立刻进入复习队列。',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                        height: 1.5,
-                      ),
-                    ),
-                  ],
-                )
-              : Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('本次收了 ${_pickedWords.length} 个词',
-                        style: theme.textTheme.titleMedium
-                            ?.copyWith(fontWeight: FontWeight.w700)),
-                    const SizedBox(height: Gap.xxs),
-                    Text(
-                      '存到:${_saveTarget.label}',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                    const SizedBox(height: Gap.xs),
-                    Wrap(
-                      spacing: Gap.xs,
-                      runSpacing: Gap.xs,
-                      children: [
-                        for (final w in _pickedWords)
-                          Chip(
-                            label: Text(w),
-                            visualDensity: VisualDensity.compact,
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: Gap.sm),
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: () {
-                          Navigator.pop(ctx);
-                          _changeSaveTarget();
-                        },
-                        icon: const Icon(Icons.drive_file_move_outline, size: 16),
-                        label: const Text('改保存位置'),
-                      ),
-                    ),
-                    const SizedBox(height: Gap.xs),
-                    Text(
-                      '注:收词时已即时入库,这里只是让你确认收到了哪些、存到哪儿。',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                        fontSize: 11,
-                      ),
-                    ),
-                  ],
-                ),
-        ),
+      backgroundColor: Colors.transparent,
+      builder: (_) => ReaderPickedSheet(
+        palette: _palette,
+        words: _pickedWords,
+        saveTargetLabel: _saveTarget.label,
+        onChangeTarget: _changeSaveTarget,
       ),
     );
   }
@@ -2265,296 +2128,178 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final p = _palette;
+    // C 方案:阅读器**局部**换肤(不改全局 v4_theme)。所有从这个页面弹出的
+    // 共享弹层(查词 word_action_sheet / 追问抽屉 / 分类选择器)包进这层 Theme
+    // 后也会跟着纸色走,不需要去改别人的文件。
+    final theme = readerTheme(context, p);
     final title = '${_material?['title'] ?? '阅读'}';
-    final url = '${_material?['url'] ?? ''}'.trim();
     final a = _analysis;
-    // ── v5 阅读器 · 方案 A「沉浸纸面」──
-    // 参考用户 11/05 选型:暖纸底 + 无彩色大头部 + 正文第一 + 悬浮玻璃底栏。
-    final skin = V4Skin.of(context);
-    final paperBg =
-        skin.dark ? const Color(0xFF17161C) : const Color(0xFFF7F4EC);
-    final kind = '${_material?['kind'] ?? 'article'}';
-    final metaTop = <String>[
-      MaterialLibrary.kindLabel(kind),
-      if (a != null) a.cefr,
-      if (a != null) '${a.wordCount} 词',
-    ].join(' · ');
-
-    // v2.10(用户 10/4 第 4 条):退出这篇材料时问一句
-    // "放进书架? / 放进收藏夹 / 不了,就看看" —— 用 PopScope 拦住返回,
-    // 问完再真的退出(已经在架上或没读过就不问)
-    return PopScope(
-      canPop: false,
-      onPopInvokedWithResult: (didPop, _) async {
-        if (didPop) return;
-        final nav = Navigator.of(context);
-        await _askShelfOnExit();
-        if (!mounted) return;
-        // 让最后一笔进度先落盘,再退出
-        await _persist(finished: _finished, force: true);
-        nav.pop();
-      },
-      child: Scaffold(
-        backgroundColor: paperBg,
-      // Plan A:顶部不再是彩色果冻头,只有一条极细工具行;大标题移到正文前。
-      appBar: AppBar(
-        backgroundColor: paperBg,
-        surfaceTintColor: Colors.transparent,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        centerTitle: true,
-        titleSpacing: 0,
-        iconTheme: IconThemeData(color: skin.ink),
-        actionsIconTheme: IconThemeData(color: skin.ink),
-        title: Text(
-          metaTop,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 0.2,
-            color: skin.inkSoft,
+    return Theme(
+      data: theme,
+      child: AnnotatedRegion<SystemUiOverlayStyle>(
+        // 墨夜纸上要浅色状态栏图标
+        value: p.dark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
+        child: PopScope(
+          canPop: false,
+          onPopInvokedWithResult: (didPop, _) async {
+            if (didPop) return;
+            final nav = Navigator.of(context);
+            await _askShelfOnExit();
+            if (!mounted) return;
+            // 让最后一笔进度先落盘,再退出
+            await _persist(finished: _finished, force: true);
+            nav.pop();
+          },
+          child: Scaffold(
+            backgroundColor: p.page,
+            // C 方案:没有 AppBar、没有 FAB、没有底部动作栏 ——
+            // 只有正文 + 左上返回圆钮 + 右侧进度胶囊/竖轨 + 贴底 2px 线与 42px 把手区。
+            body: _loading
+                ? _buildLoadingBody(p)
+                : _error != null
+                    ? _buildErrorBody(p)
+                    : _buildReaderBody(theme, p, title, a),
           ),
         ),
-        actions: [
-          // v2.10(用户 10/4 第 4 条):**加入书架** —— 明明白白一个按钮,
-          // 不用翻"更多"菜单(用户说的是"在文章内部增加一个 ui 即加入书架")
-          IconButton(
-            tooltip: _onShelf ? '已在书架上(点一下移出)' : '加入书架',
-            onPressed: _toggleShelf,
-            icon: Icon(
-              _onShelf ? Icons.collections_bookmark : Icons.collections_bookmark_outlined,
-            ),
-          ),
-          // v2.7(第 3 条):原来这里是 5 个图标挤在一起 —— 现在只留「更多」,
-          // 其余(翻译 / 模型 / 保存 / 追问)按用户要求挪到界面下方的动作栏
-          PopupMenuButton<String>(
-            tooltip: '更多',
-            onSelected: _onMoreAction,
-            itemBuilder: (_) => [
-              if (url.isNotEmpty)
-                const PopupMenuItem(
-                  value: 'link',
-                  height: 38,
-                  child: Row(
-                    children: [
-                      Icon(Icons.open_in_new, size: 17),
-                      SizedBox(width: Gap.xs),
-                      Text('原文链接', style: TextStyle(fontSize: 13)),
-                    ],
-                  ),
-                ),
-              const PopupMenuItem(
-                value: 'settings',
-                height: 38,
-                child: Row(
-                  children: [
-                    Icon(Icons.format_size, size: 17),
-                    SizedBox(width: Gap.xs),
-                    Text('阅读设置(字号 / 行距)', style: TextStyle(fontSize: 13)),
-                  ],
-                ),
-              ),
-              const PopupMenuItem(
-                value: 'toc',
-                height: 38,
-                child: Row(
-                  children: [
-                    Icon(Icons.list_alt, size: 17),
-                    SizedBox(width: Gap.xs),
-                    Text('目录(跳到某节)', style: TextStyle(fontSize: 13)),
-                  ],
-                ),
-              ),
-              const PopupMenuItem(
-                value: 'dictation',
-                height: 38,
-                child: Row(
-                  children: [
-                    Icon(Icons.headphones_outlined, size: 17),
-                    SizedBox(width: Gap.xs),
-                    Text('听写练习', style: TextStyle(fontSize: 13)),
-                  ],
-                ),
-              ),
-              const PopupMenuItem(
-                value: 'export',
-                height: 38,
-                child: Row(
-                  children: [
-                    Icon(Icons.download_outlined, size: 17),
-                    SizedBox(width: Gap.xs),
-                    Text('导出这篇(Markdown)', style: TextStyle(fontSize: 13)),
-                  ],
-                ),
-              ),
-              if (!_finished)
-                const PopupMenuItem(
-                  value: 'finish',
-                  height: 38,
-                  child: Row(
-                    children: [
-                      Icon(Icons.check_circle_outline, size: 17),
-                      SizedBox(width: Gap.xs),
-                      Text('读完了', style: TextStyle(fontSize: 13)),
-                    ],
-                  ),
-                ),
-            ],
-          ),
-        ],
-      ),
-      // 阅读器里**不留转圈**(用户要求等待态换成更可感的形式):
-      // 打开材料用骨架屏 —— 它先摆出"正文将要占的位置",读起来比转圈快
-      body: _loading
-          ? ListView(
-              padding: Insets.page,
-              children: [
-                Row(
-                  children: [
-                    Icon(Icons.menu_book_outlined,
-                        size: 15, color: theme.colorScheme.onSurfaceVariant),
-                    const SizedBox(width: Gap.xs),
-                    Text(
-                      '正在打开材料…',
-                      style: theme.textTheme.bodySmall
-                          ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: Gap.md),
-                const SkeletonLines(lines: 6, seed: 0),
-                const SizedBox(height: Gap.lg),
-                const SkeletonLines(lines: 4, withTitle: false, seed: 1),
-              ],
-            )
-          : _error != null
-              ? Padding(
-                  padding: Insets.page,
-                  child: AppErrorCard(
-                    message: '打不开这份材料:$_error',
-                    onRetry: () {
-                      setState(() {
-                        _loading = true;
-                        _error = null;
-                      });
-                      _load();
-                    },
-                  ),
-                )
-              : Column(
-                  children: [
-                    if (AudioService.looksPlayable(_material?['audio_url'] as String?))
-                      AudioPlayerBar(
-                        url: '${_material!['audio_url']}',
-                        title: '${_material!['title'] ?? ''}',
-                      ),
-                    Expanded(
-                      // Plan A:阅读区就是"一整张纸",正文直接印在暖纸底上,
-                      // 不再用白色卡片盖住纸色。
-                      child: Container(
-                        decoration: BoxDecoration(color: paperBg),
-                        child: ListView.builder(
-                          // v2.12.2:用列表视口的真实矩形判断"哪几段可见"
-                          // (设备/字号/行距不同,按滚动比例猜会把范围翻错)
-                          // v2.13.1:列表项 = **段落单元**(翻译/可见性/译文的最小
-                          // 单元),不再是 2500 词的正文块 —— 这样每一段原文下面
-                          // 才能单独出现译文与进度。
-                          // v5(用户 11/04):标题/来源/难度信息也放进滚动内容里,
-                          // 下滑时会滚走,不再永久悬在正文上方。
-                          key: _listKey,
-                          controller: _scrollCtrl,
-                          padding: const EdgeInsets.fromLTRB(
-                              Gap.md, Gap.sm, Gap.md, 80),
-                          itemCount: _units.length + 1,
-                          itemBuilder: (_, index) => index == 0
-                              ? _readingLead(context, theme, a, title)
-                              : _buildUnit(theme, index - 1),
-                        ),
-                      ),
-                    ),
-                    // ── 翻译控制条(v2.12.2 重做)──
-                    // 只放增量动作(继续翻后文 / 整章 / 重试失败段)与真实进度;
-                    // 打开翻译不再先弹范围选择。
-                    if (_showTranslation) _buildTranslationTray(theme),
-                    // ── 底部动作栏(v2.7,用户第 3 条):模型 / 翻译 / 保存 / 追问,
-                    //    位置与拍照识图页下方的动作栏一致 ──
-                    ReaderActionBar(
-                      translating: _showTranslation,
-                      onToggleTranslation: _toggleTranslation,
-                      pickedCount: _pickedWords.length,
-                      onSave: _showPickedSummary,
-                      onFollowUp: _openFollowUp,
-                      saveTargetLabel: _saveTarget.label,
-                      onChangeTarget: _changeSaveTarget,
-                      onModelChanged: () {
-                        if (mounted) setState(() {});
-                      },
-                      // v2.9(第 3(5) 条):丰富形式的入口
-                      onRichForms: _openRichForms,
-                      // 翻译状态/进度全部移到上面的控制条:
-                      // 动作栏只保留开关,避免两套文案/两条进度条互相打架。
-                      moreActions: [
-                        ReaderMoreAction(
-                          id: 'rich',
-                          label: '丰富形式(表格 / 导图 …)',
-                          icon: Icons.auto_awesome_outlined,
-                          onSelected: _openRichForms,
-                        ),
-                        if (url.isNotEmpty)
-                          ReaderMoreAction(
-                            id: 'link',
-                            label: '原文链接',
-                            icon: Icons.open_in_new,
-                            onSelected: () => _openSourceLink(url),
-                          ),
-                        ReaderMoreAction(
-                          id: 'settings',
-                          label: '阅读设置(字号 / 行距)',
-                          icon: Icons.format_size,
-                          onSelected: _showReaderSettings,
-                        ),
-                        ReaderMoreAction(
-                          id: 'dictation',
-                          label: '听写练习',
-                          icon: Icons.headphones_outlined,
-                          onSelected: () => _onMoreAction('dictation'),
-                        ),
-                        ReaderMoreAction(
-                          id: 'export',
-                          label: '导出这篇(Markdown)',
-                          icon: Icons.download_outlined,
-                          onSelected: () => _onMoreAction('export'),
-                        ),
-                        if (!_finished)
-                          ReaderMoreAction(
-                            id: 'finish',
-                            label: '读完了',
-                            icon: Icons.check_circle_outline,
-                            onSelected: _finishReading,
-                          ),
-                      ],
-                    ),
-                  ],
-                ),
-      floatingActionButton: _loading || _chunks.isEmpty
-          ? null
-          : FloatingActionButton.small(
-              tooltip: '回到顶部',
-              onPressed: () => _scrollCtrl.animateTo(
-                0,
-                duration: const Duration(milliseconds: 260),
-                curve: Curves.easeOut,
-              ),
-              child: const Icon(Icons.arrow_upward),
-            ),
       ),
     );
   }
 
-  /// 就地译文区:紧贴原段下方,左侧主题色细线 + 比正文小一号 + 次要文字色。
+  /// 打开中的骨架(C 版:纸面上直接摆出正文将占的位置,不用转圈)
+  Widget _buildLoadingBody(ReaderPalette p) {
+    return SafeArea(
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(26, 16, 26, 30),
+        children: <Widget>[
+          Text(
+            '正在打开材料…',
+            style: TextStyle(fontSize: 10.5, color: p.inkFaint),
+          ),
+          const SizedBox(height: 14),
+          const SkeletonLines(lines: 6, seed: 0),
+          const SizedBox(height: 20),
+          const SkeletonLines(lines: 4, withTitle: false, seed: 1),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildErrorBody(ReaderPalette p) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(26, 16, 26, 30),
+        child: AppErrorCard(
+          message: '打不开这份材料:$_error',
+          onRetry: () {
+            setState(() {
+              _loading = true;
+              _error = null;
+            });
+            _load();
+          },
+        ),
+      ),
+    );
+  }
+
+  /// C 方案正文区
+  Widget _buildReaderBody(
+    ThemeData theme,
+    ReaderPalette p,
+    String title,
+    MaterialAnalysis? a,
+  ) {
+    final playable =
+        AudioService.looksPlayable(_material?['audio_url'] as String?);
+    return SafeArea(
+      bottom: false,
+      child: Stack(
+        children: <Widget>[
+          Column(
+            children: <Widget>[
+              // 顶部安全条:返回圆钮独占一条纸色顶条,正文从它下面开始滚
+              // —— 悬浮圆钮在任何滚动位置都会压住第一行字(用户截图里
+              // "What multitasking..." 被圆钮盖住),这里用让位彻底解决。
+              _readerTopBar(p),
+              if (playable)
+                AudioPlayerBar(
+                  url: '${_material!['audio_url']}',
+                  title: '${_material!['title'] ?? ''}',
+                ),
+              // 翻译进度:一条 2px 细线,不占正文、不压正文
+              // (旧实现是 93px 的实底灰带,见 _buildTranslationTray 的历史)
+              if (_showTranslation) _translationHintLine(p),
+              Expanded(
+                child: ListView.builder(
+                  // 用列表视口的真实矩形判断"哪几段可见"(见 _visibleUnitIndices)
+                  key: _listKey,
+                  controller: _scrollCtrl,
+                  // 右侧 46 给进度胶囊/竖轨让位;26 的左右留白 = C 的最大行宽
+                  padding: const EdgeInsets.fromLTRB(26, 8, 46, 30),
+                  itemCount: _units.length + 1,
+                  itemBuilder: (_, index) => index == 0
+                      ? _readingLead(context, theme, a, title)
+                      : _buildUnit(theme, index - 1),
+                ),
+              ),
+              // 贴底 2px 进度线 + 42px 把手区:零常驻按钮
+              ReaderBottomDock(
+                progress: _readingPercent,
+                palette: p,
+                onOpenConsole: _openConsole,
+                bottomInset: MediaQuery.viewPaddingOf(context).bottom,
+              ),
+            ],
+          ),
+          // 右侧悬浮 % 胶囊 + 96px 竖轨(点胶囊也能打开控制台)
+          Positioned.fill(
+            child: Align(
+              alignment: const Alignment(1, -0.21),
+              child: Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: ReaderProgressRail(
+                  progress: _readingPercent,
+                  palette: p,
+                  onTap: _openConsole,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 顶部安全条(C 方案):只有一颗返回圆钮,纸色底给正文让位。
+  ///
+  /// 「零常驻按钮」说的是**底部**(动作全部收进控制台);返回是导航必需,
+  /// 但它不能浮在正文上面 —— 这里固定一条 44px 纸色顶条,正文从顶条下沿
+  /// 开始滚,任何滚动位置都不会有按钮压字。
+  Widget _readerTopBar(ReaderPalette p) {
+    return Container(
+      height: 44,
+      width: double.infinity,
+      color: p.page,
+      padding: const EdgeInsets.only(left: 12),
+      alignment: Alignment.centerLeft,
+      child: ReaderCircleButton(
+        icon: Icons.arrow_back_ios_new,
+        size: 14,
+        palette: p,
+        onTap: () async {
+          final nav = Navigator.of(context);
+          await _askShelfOnExit();
+          if (!mounted) return;
+          await _persist(finished: _finished, force: true);
+          nav.pop();
+        },
+      ),
+    );
+  }
+
+  /// 就地译文区(C 方案):紧贴这一段原文下方 —— 左侧 2px 砖红竖线 +
+  /// 「中译」小标 + 13.5/1.8 的次要文字色译文。
   ///
   /// 三件事**不做**,否则阅读会被打断:
   /// - 不加整块底色(会和正文抢注意力,深色下还会变成一块亮色);
@@ -2564,7 +2309,8 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
   /// 点译文本身 = 追问这一段(带原文 + 译文上下文);右侧「…」里是
   /// 追问 / 重翻这段 —— 重翻只重发这一段,不影响其它段。
   Widget _buildTranslationArea(ThemeData theme, int index) {
-    final cs = theme.colorScheme;
+    final p = _palette;
+    final t = _type;
     final translation = _translations[index];
     final error = _chunkErrors[index];
     final note = _translationNotes[index];
@@ -2572,15 +2318,11 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
 
     if (error != null) {
       return Padding(
-        padding: const EdgeInsets.only(top: Gap.xs),
+        padding: const EdgeInsets.only(top: 10),
         child: Row(
-          children: [
-            Icon(
-              Icons.error_outline,
-              size: 14,
-              color: AppTheme.warningColor(context),
-            ),
-            const SizedBox(width: Gap.xxs),
+          children: <Widget>[
+            Icon(Icons.error_outline, size: 14, color: p.accent),
+            const SizedBox(width: 6),
             Expanded(
               child: Tooltip(
                 message: error,
@@ -2588,24 +2330,14 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
                   '这段没翻出来',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    fontSize: AppFont.meta,
-                    color: cs.onSurfaceVariant,
-                  ),
+                  style: TextStyle(fontSize: 10.5, color: p.inkFaint),
                 ),
               ),
             ),
-            TextButton(
-              style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: Gap.xs),
-                minimumSize: const Size(0, 26),
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              onPressed: () => _retryChunk(index),
-              child: const Text(
-                '重试',
-                style: TextStyle(fontSize: AppFont.tag),
-              ),
+            _MiniAction(
+              label: '重试',
+              palette: p,
+              onTap: () => _retryChunk(index),
             ),
           ],
         ),
@@ -2614,33 +2346,23 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
 
     if (_canceledChunks.contains(index)) {
       return Padding(
-        padding: const EdgeInsets.only(top: Gap.xs),
+        padding: const EdgeInsets.only(top: 10),
         child: Row(
-          children: [
-            Icon(Icons.translate, size: 14, color: cs.onSurfaceVariant),
-            const SizedBox(width: Gap.xxs),
+          children: <Widget>[
+            Icon(Icons.translate, size: 14, color: p.inkFaint),
+            const SizedBox(width: 6),
             Expanded(
               child: Text(
                 '这段的翻译已取消',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  fontSize: AppFont.meta,
-                  color: cs.onSurfaceVariant,
-                ),
+                style: TextStyle(fontSize: 10.5, color: p.inkFaint),
               ),
             ),
-            TextButton(
-              style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: Gap.xs),
-                minimumSize: const Size(0, 26),
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              onPressed: () => _retryChunk(index),
-              child: const Text(
-                '重试',
-                style: TextStyle(fontSize: AppFont.tag),
-              ),
+            _MiniAction(
+              label: '重试',
+              palette: p,
+              onTap: () => _retryChunk(index),
             ),
           ],
         ),
@@ -2648,19 +2370,18 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     }
 
     if (pending && translation == null) {
-      final skin = V4Skin.of(context);
+      // 便签骨架:先摆出译文的形状,不转圈
       return Padding(
-        padding: const EdgeInsets.only(top: Gap.xs),
+        padding: const EdgeInsets.only(top: 10),
         child: Container(
-          // 便签骨架:先摆出译文卡片的形状,不转圈
           decoration: BoxDecoration(
-            color: skin.surfaceAlt,
-            borderRadius: BorderRadius.circular(14),
+            color: p.transBg,
+            border: Border(left: BorderSide(color: p.accent, width: 2)),
           ),
-          padding: const EdgeInsets.fromLTRB(10, 8, 4, 6),
+          padding: const EdgeInsets.fromLTRB(12, 8, 4, 6),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+            children: <Widget>[
               SkeletonLines(
                 lines: 2,
                 withTitle: false,
@@ -2669,24 +2390,17 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
               ),
               const SizedBox(height: 2),
               Row(
-                children: [
+                children: <Widget>[
                   Expanded(
                     child: Text(
                       '正在翻译这段…',
-                      style: TextStyle(fontSize: AppFont.tag, color: skin.inkFaint),
+                      style: TextStyle(fontSize: 9.5, color: p.inkFaint),
                     ),
                   ),
-                  TextButton(
-                    style: TextButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: Gap.xs),
-                      minimumSize: const Size(0, 24),
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                    onPressed: () => _cancelChunkTranslation(index),
-                    child: const Text(
-                      '取消这段',
-                      style: TextStyle(fontSize: AppFont.tag),
-                    ),
+                  _MiniAction(
+                    label: '取消这段',
+                    palette: p,
+                    onTap: () => _cancelChunkTranslation(index),
                   ),
                 ],
               ),
@@ -2698,39 +2412,27 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
 
     if (translation == null) return const SizedBox.shrink();
 
-    final skin = V4Skin.of(context);
     return Padding(
-      padding: const EdgeInsets.only(top: Gap.xs),
+      padding: const EdgeInsets.only(top: 12),
       child: Container(
-        // Plan A:译文不再是"便签卡",改成左侧竖线 + 极浅底的内嵌注释,
-        // 读起来不打断正文,但一眼能分清原文/译文。
         decoration: BoxDecoration(
-          color: Color.alphaBlend(
-              skin.accent.withValues(alpha: 0.045), skin.surface),
-          border: Border(
-            left: BorderSide(
-              color: skin.accent.withValues(alpha: 0.55),
-              width: 2.5,
-            ),
-          ),
+          color: p.transBg,
+          border: Border(left: BorderSide(color: p.accent, width: 2)),
         ),
         padding: const EdgeInsets.fromLTRB(12, 8, 2, 8),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              margin: const EdgeInsets.only(top: 2, right: 8),
-              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-              decoration: BoxDecoration(
-                color: skin.accent.withValues(alpha: 0.10),
-                borderRadius: BorderRadius.circular(999),
-              ),
+          children: <Widget>[
+            Padding(
+              padding: const EdgeInsets.only(top: 2, right: 8),
               child: Text(
-                '译',
+                '中译',
                 style: TextStyle(
-                  fontSize: 9,
+                  fontSize: ReaderType.transLabel,
+                  height: 1.2,
+                  letterSpacing: 1.5,
                   fontWeight: FontWeight.w800,
-                  color: skin.accent,
+                  color: p.accent,
                 ),
               ),
             ),
@@ -2738,36 +2440,31 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
               child: Tooltip(
                 message: '点译文可追问 AI;右侧「…」可重翻这一段',
                 child: InkWell(
-                  borderRadius: Radii.controlRadius,
+                  borderRadius: BorderRadius.circular(8),
                   onTap: () => _askAboutChunk(index),
                   child: Padding(
-                    padding: const EdgeInsets.only(
-                      top: 1,
-                      bottom: 2,
-                      right: Gap.xxs,
-                    ),
+                    padding:
+                        const EdgeInsets.only(top: 1, bottom: 2, right: 4),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
+                      children: <Widget>[
                         Text(
                           translation,
                           style: TextStyle(
-                            fontSize: ReaderSettings.baseFontSize *
-                                _fontScale *
-                                0.86,
-                            height: _lineHeight * 0.95,
-                            color: cs.onSurfaceVariant,
+                            fontSize: t.translation,
+                            height: ReaderType.translationHeight,
+                            color: p.inkSoft,
                           ),
                         ),
-                        // v2.13.1:模型段数对不上时的提示(**不能再静默丢弃**)——
-                        // 旧实现只取第一段译文、note 直接扔掉,用户以为整段都翻好了。
+                        // v2.13.1:模型段数对不上时的提示(**不能再静默丢弃**)
                         if (note != null && note.trim().isNotEmpty) ...[
                           const SizedBox(height: 2),
                           Text(
                             '可能不完整:$note',
                             style: TextStyle(
-                              fontSize: AppFont.tag,
-                              color: AppTheme.warningColor(context),
+                              fontSize: 9.5,
+                              height: 1.3,
+                              color: p.accent,
                             ),
                           ),
                         ],
@@ -2782,11 +2479,8 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
               tooltip: '译文操作',
               padding: EdgeInsets.zero,
               iconSize: 16,
-              icon: Icon(
-                Icons.more_horiz,
-                size: 16,
-                color: cs.onSurfaceVariant,
-              ),
+              color: p.sheet,
+              icon: Icon(Icons.more_horiz, size: 16, color: p.inkFaint),
               onSelected: (v) {
                 if (v == 'ask') {
                   _askAboutChunk(index);
@@ -2794,15 +2488,16 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
                   _retranslateChunk(index);
                 }
               },
-              itemBuilder: (_) => const [
+              itemBuilder: (_) => [
                 PopupMenuItem(
                   value: 'ask',
                   height: 38,
                   child: Row(
                     children: [
-                      Icon(Icons.chat_bubble_outline, size: 16),
-                      SizedBox(width: Gap.xs),
-                      Text('追问这段', style: TextStyle(fontSize: 13)),
+                      Icon(Icons.chat_bubble_outline,
+                          size: 16, color: p.inkSoft),
+                      const SizedBox(width: 8),
+                      Text('追问这段', style: TextStyle(fontSize: 13, color: p.ink)),
                     ],
                   ),
                 ),
@@ -2811,9 +2506,9 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
                   height: 38,
                   child: Row(
                     children: [
-                      Icon(Icons.refresh, size: 16),
-                      SizedBox(width: Gap.xs),
-                      Text('重翻这段', style: TextStyle(fontSize: 13)),
+                      Icon(Icons.refresh, size: 16, color: p.inkSoft),
+                      const SizedBox(width: 8),
+                      Text('重翻这段', style: TextStyle(fontSize: 13, color: p.ink)),
                     ],
                   ),
                 ),
@@ -2825,13 +2520,28 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     );
   }
 
+  /// 生词高亮集合(小写):来自材料的 `top_new_words` 分析结果。
+  ///
+  /// C 方案口径:只有**真生词**画砖红实线 + w600;其余词保持墨色(仍可点)。
+  /// 旧实现给每个英文词都画下划线,一屏几十条红线 = 没有重点、字面脏,
+  /// 这也是"字体非常差"的一部分。
+  Set<String> get _highlightWords => <String>{
+        for (final w in _analysis?.topNewWords ?? const <String>[])
+          w.toLowerCase(),
+      };
+
   /// 渲染一个**段落单元**(列表项 = 真段落,不再是 2500 词的正文块)。
   ///
   /// 块独有的东西只出现在块的边界上:
-  /// - 块标题(`chunk.title`)挂在该块第一个单元上方;
+  /// - 块标题(`chunk.title`)挂在该块第一个单元上方(C 的"栏目标签"式小标);
   /// - AI 内容块(表格/导图…)挂在该块最后一个单元之后。
-  /// 中间每个单元就是"一段原文 + 段下译文" —— 用户才能真正逐段英中对照。
+  ///
+  /// C 排印:**首段 20/1.82(导语),其余 18 号 × 用户字号档 / 用户行距档**;
+  /// 生词 = 墨色词 + 砖红实线下划线(不再是全词主色 + 虚线,那种"满屏蓝链接"
+  /// 正是用户说的"字体非常差"的原因之一)。
   Widget _buildUnit(ThemeData theme, int index) {
+    final p = _palette;
+    final t = _type;
     final unit = _units[index];
     final chunkIndex = unit.chunkIndex;
     final chunkTitle = _chunks[chunkIndex]['title'];
@@ -2839,11 +2549,12 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
         _firstUnitOfChunk[chunkIndex] == index;
     final isLastOfChunk =
         index + 1 >= _units.length || _units[index + 1].chunkIndex != chunkIndex;
-    // 正文样式由**阅读设置**决定(字号乘数 × 基准号 + 行距档位),
-    // 系统无障碍字号仍由 MediaQuery 叠加,不在这里覆盖
-    final bodyStyle = (theme.textTheme.bodyLarge ?? const TextStyle()).copyWith(
-      fontSize: ReaderSettings.baseFontSize * _fontScale,
-      height: _lineHeight,
+    final isLead = index == 0;
+    final bodyStyle = TextStyle(
+      fontSize: isLead ? t.lead : t.body,
+      height: isLead ? ReaderType.leadHeight : _lineHeight,
+      letterSpacing: isLead ? 0.1 : 0.05,
+      color: p.ink,
     );
     // v2.9(第 3(5) 条):这个块挂着的 AI 内容块(表格/导图/时间线/要点/自测)
     final chunkBlocks = [
@@ -2861,18 +2572,24 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     return Padding(
       // 每个单元挂一个稳定 key:滚动停下的"可见段"判断要拿它的 RenderBox
       key: _unitKey(index),
-      // 段间距比块间距小:同一块里的段落读起来是一个整体
-      padding: EdgeInsets.only(bottom: isLastOfChunk ? Gap.lg : Gap.md),
+      padding: EdgeInsets.only(bottom: isLastOfChunk ? 24 : 18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
+        children: <Widget>[
           if (isFirstOfChunk &&
               chunkTitle is String &&
               chunkTitle.trim().isNotEmpty) ...[
-            Text(chunkTitle.trim(),
-                style: theme.textTheme.titleSmall
-                    ?.copyWith(fontWeight: FontWeight.w700)),
-            const SizedBox(height: Gap.sm),
+            Text(
+              chunkTitle.trim(),
+              style: TextStyle(
+                fontSize: 10.5,
+                height: 1.2,
+                letterSpacing: 1.4,
+                fontWeight: FontWeight.w800,
+                color: p.inkFaint,
+              ),
+            ),
+            const SizedBox(height: 10),
           ],
           if (unit.text.isNotEmpty)
             TappablePassage(
@@ -2880,18 +2597,21 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
               onWordTap: _onWordTap,
               onSelectionAction: _onSelectionAction,
               style: bodyStyle,
+              wordColor: p.ink,
+              underlineColor: p.accent,
+              underlineThickness: isLead ? 1.6 : 1.5,
+              highlightWords: _highlightWords,
             ),
-          // 逐段译文(v2.12.2 重做):紧贴**这一段**原文下方,不挪版面、不弹浮层。
-          // 成功 / 失败 / 在途三种状态各占一个很轻的槽位,详见 _buildTranslationArea。
+          // 逐段译文:紧贴**这一段**原文下方,不挪版面、不弹浮层。
           if (_showTranslation) _buildTranslationArea(theme, index),
-          // ── AI 内容块(第 3(5) 条):插在块末尾,与正文用留白 + 卡片分开 ──
+          // ── AI 内容块:插在块末尾,与正文用留白 + 卡片分开 ──
           if (isLastOfChunk && waitingHere && waitingKind != null) ...[
-            const SizedBox(height: Gap.sm),
+            const SizedBox(height: 10),
             MaterialBlockWaiting(kind: waitingKind),
           ],
           if (isLastOfChunk)
             for (final b in chunkBlocks) ...[
-              const SizedBox(height: Gap.xxs),
+              const SizedBox(height: 8),
               if (_blockErrors[_blockKey(chunkIndex, b.kind)] != null)
                 MaterialBlockErrorCard(
                   message: _blockErrors[_blockKey(chunkIndex, b.kind)]!,
@@ -2906,6 +2626,34 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
             ],
         ],
       ),
+    );
+  }
+}
+
+
+/// 译文卡里的小动作(重试 / 取消这段):9.5 号、无按钮壳、只占一行
+class _MiniAction extends StatelessWidget {
+  const _MiniAction({
+    required this.label,
+    required this.palette,
+    required this.onTap,
+  });
+
+  final String label;
+  final ReaderPalette palette;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextButton(
+      style: TextButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        minimumSize: const Size(0, 26),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        foregroundColor: palette.accent,
+      ),
+      onPressed: onTap,
+      child: Text(label, style: const TextStyle(fontSize: 9.5)),
     );
   }
 }

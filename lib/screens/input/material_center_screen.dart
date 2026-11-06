@@ -16,6 +16,7 @@ import '../../services/original_search.dart';
 
 import '../../widgets/material_cover.dart';
 
+import 'find_material_screen.dart';
 import 'material_channel_screen.dart';
 import 'material_hub/material_hub_home_view.dart';
 import 'material_import_flow.dart';
@@ -239,6 +240,19 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
     });
   }
 
+  /// 「找材料」(2026-11-06 用户选型 A):并列大卡入口,两条路各自独立页面。
+  ///
+  /// 旧「按需求找材料」入口下线:需求设置并入「按我的情况找」页的「改需求」,
+  /// 不再从材料中心直接进需求编辑页。
+  void _openFindMaterial() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const FindMaterialScreen()),
+    ).then((_) {
+      if (mounted) unawaited(_load());
+    });
+  }
+
   void _openLibrary() {
     Navigator.push(
       context,
@@ -314,7 +328,7 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
                     }
                   },
                   onShuffleDaily: _shuffleDaily,
-                  onOpenNeed: () => _openDirection(MaterialTaxonomy.need),
+                  onOpenNeed: _openFindMaterial,
                   onOpenDirection: _openDirection,
                   onOpenLibrary: _openLibrary,
                   onOpenBookshelf: _openBookshelf,
@@ -389,7 +403,7 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
                     _hubCircle(
                       skin,
                       icon: Icons.tune_rounded,
-                      onTap: () => _openDirection(MaterialTaxonomy.need),
+                      onTap: _openFindMaterial,
                     ),
                     const SizedBox(width: Gap.xs),
                     _hubCircle(
@@ -492,7 +506,7 @@ class _MaterialCenterScreenState extends State<MaterialCenterScreen> {
           _hubCircle(
             skin,
             icon: Icons.tune_rounded,
-            onTap: () => _openDirection(MaterialTaxonomy.need),
+            onTap: _openFindMaterial,
           ),
           const SizedBox(width: Gap.xs),
           _hubCircle(

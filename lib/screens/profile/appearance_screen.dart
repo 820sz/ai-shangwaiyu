@@ -7,6 +7,7 @@ import '../../services/splash_settings.dart';
 import '../../services/theme_controller.dart';
 import '../../widgets/app_ui.dart';
 import '../../widgets/design_kit.dart';
+import '../../widgets/v4/v4_kit.dart';
 
 /// 外观设置(v2.2 深色模式)。
 ///
@@ -28,7 +29,7 @@ class _AppearanceScreenState extends State<AppearanceScreen> {
     final theme = Theme.of(context);
     final muted = theme.colorScheme.onSurfaceVariant;
     return Scaffold(
-      appBar: AppBar(title: const Text('外观')),
+      appBar: const V4JellyAppBar(title: '外观'),
       body: ValueListenableBuilder<ThemeMode>(
         valueListenable: ThemeController.mode,
         builder: (context, mode, _) => ListView(
