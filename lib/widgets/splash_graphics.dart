@@ -375,8 +375,8 @@ class SplashGlassBlock extends StatelessWidget {
     required this.child,
   });
 
-  static const double _size = 132;
-  static const double _radius = 40;
+  static const double _size = 168;
+  static const double _radius = 46;
 
   @override
   Widget build(BuildContext context) {
@@ -530,13 +530,14 @@ class SplashKineticA extends StatelessWidget {
     final sigma = _lerp(16, 4, _seg(t, 0.26, 0.90));
     final shine = _lerp(-0.8, 1.8, _seg(t, 0.48, 0.90));
 
-    final quoteIn = _seg(t, 0.20, 0.62);
-    final quoteX = _lerp(-62, -17, _ease(quoteIn));
-    final starIn = _seg(t, 0.28, 0.74);
-    final starX = _lerp(62, 17, _ease(starIn));
-    final layerOut = _seg(t, 0.88, 1.02);
-    final mergeT = _seg(t, 0.98, 1.18);
-    final wave = _seg(t, 0.80, 1.02);
+    // 2026-11-07 用户提供了自己的 Logo（琉璃气泡 +「語」+ AI）：
+    // 开屏不再画旧引号/星芒，改为「琉璃块凝结 → 新 Logo 淡入放大」，
+    // 旧的两元素汇合动画留参数但置零（避免删代码引发无关回归）。
+    final quoteIn = 0.0;
+    final starIn = 0.0;
+    final wave = 0.0;
+    final layerOut = 0.0;
+    final mergeT = _seg(t, 0.86, 1.14);
     final wordT = _seg(t, 1.00, 1.32);
     final tagT = _seg(t, 1.08, 1.42);
     final skipT = _seg(t, 0.70, 1.00) * 0.85;
@@ -588,7 +589,7 @@ class SplashKineticA extends StatelessWidget {
                         Opacity(
                           opacity: quoteIn * (1 - layerOut),
                           child: Transform.translate(
-                            offset: Offset(quoteX, 4),
+                            offset: Offset.zero,
                             child: const _QuotePair(size: 74),
                           ),
                         ),
@@ -596,7 +597,7 @@ class SplashKineticA extends StatelessWidget {
                         Opacity(
                           opacity: starIn * (1 - layerOut),
                           child: Transform.translate(
-                            offset: Offset(starX, -6),
+                            offset: Offset.zero,
                             child: Transform.scale(
                               scale: _lerp(0.74, 1.0, _ease(starIn)),
                               child: const _StarBurst(size: 68),
@@ -608,7 +609,7 @@ class SplashKineticA extends StatelessWidget {
                           opacity: mergeT,
                           child: Transform.scale(
                             scale: _lerp(0.90, 1.0, _ease(mergeT)),
-                            child: const SplashMark(size: 84),
+                            child: const _LogoCardImage(size: 168),
                           ),
                         ),
                       ],
@@ -678,3 +679,32 @@ class SplashKineticA extends StatelessWidget {
     );
   }
 }
+
+/// 用户自己的 Logo（整图，`assets/logo/app_logo_full.png`）：直接铺满琉璃块，
+/// 不再叠一层手绘引号/星芒——开屏主视觉就是用户选的那张图。
+class _LogoCardImage extends StatelessWidget {
+  final double size;
+
+  const _LogoCardImage({required this.size});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: size,
+      height: size,
+      child: Image.asset(
+        'assets/logo/app_logo_full.png',
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+        filterQuality: FilterQuality.high,
+        errorBuilder: (BuildContext _, Object _, StackTrace? _) =>
+            const SizedBox.shrink(),
+      ),
+    );
+  }
+}
+
+/// 透明底 Logo（`assets/logo/app_logo_fg.png`）保留在资源里，
+/// 开屏当前用整图 `_LogoCardImage`；需要抠图叠加时再用这张。
+

@@ -70,6 +70,7 @@ flutter:
   assets:
     - assets/
     - assets/about/
+    - assets/logo/
     - assets/icons/
     # v2.13:鲸鱼尾(全 App 的"AI 思考中"形象,用户指定)
     - assets/images/
