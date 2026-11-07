@@ -709,16 +709,22 @@ List<OutputTaskSpec> parseSentenceRewriteTasks(String content) {
 }
 
 /// 路径 3 专用解析:段落任务(摘要用 summary rubric;其余用写作 rubric)。
+///
+/// [examType] 决定写作 rubric 的等级(六级 → `cet6_writing`);
+/// 摘要 rubric 与考试等级无关,保持不变。
 List<OutputTaskSpec> parseParagraphTasks(
   String content, {
   String taskKind = 'summary',
+  String examType = 'none',
 }) {
   final kind = taskKind.trim().isEmpty ? 'summary' : taskKind.trim();
   return parseTaskList(
     content,
     tier: OutputTier.paragraph,
     type: kind,
-    rubricId: kind == 'summary' ? 'summary' : 'cet4_writing',
+    rubricId: kind == 'summary'
+        ? 'summary'
+        : OutputRubric.rubricIdFor(examType: examType, kind: 'writing'),
     source: 'ai',
     verifyStatus: 'pending',
   );
@@ -747,7 +753,12 @@ List<OutputTaskSpec> parseExamWritingTasks(
     content,
     tier: OutputTier.essay,
     type: isTranslation ? 'exam_translation' : 'exam_writing',
-    rubricId: isTranslation ? 'cet4_translation' : 'cet4_writing',
+    // 2026-11-07(P0 真机反馈):等级 → rubric id 统一走 rubricIdFor,
+    // 六级真题不再借四级评分标准。
+    rubricId: OutputRubric.rubricIdFor(
+      examType: examType,
+      kind: isTranslation ? 'translation' : 'writing',
+    ),
     source: 'exam',
     sourceUrl: urls.first,
     // 真题由 AI 从抓取页面结构化而来,未人工校对 → pending
@@ -1011,7 +1022,11 @@ class OutputComposer {
           examGoal: examType == 'none' ? null : examLabelFor(examType),
         );
         type = kind;
-        rubricId = kind == 'summary' ? 'summary' : 'cet4_writing';
+        rubricId =
+            kind == 'summary' ? 'summary' : OutputRubric.rubricIdFor(
+              examType: examType,
+              kind: 'writing',
+            );
       case OutputTier.essay:
         // 写篇：材料只提供"话题语境",题目本身是写作任务 — 用观点段提示词，
         // 但题组 tier/section 记 essay，方便 UI 走"作文"骨架。
@@ -1024,7 +1039,10 @@ class OutputComposer {
           examGoal: examType == 'none' ? null : examLabelFor(examType),
         );
         type = 'opinion';
-        rubricId = 'cet4_writing';
+        rubricId = OutputRubric.rubricIdFor(
+          examType: examType,
+          kind: 'writing',
+        );
         finalTier = OutputTier.essay;
       case OutputTier.word:
         return null; // 上面已拦，防御性兜底

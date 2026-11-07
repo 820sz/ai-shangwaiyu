@@ -3,26 +3,38 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../services/splash_settings.dart';
+import '../widgets/splash_graphics.dart';
 
-/// 开屏动画(v2.5,M3 用户要求)。
+/// 开屏动画(v2.29.0 · 方案 A「琉璃凝结」)。
 ///
-/// 用户原话:「增加开屏动画 —— 软件 logo 渐显动画 + 下面的一行文案渐显,
-/// 支持用户自定义文案,目前开屏文案定为"让语言,回归本质"」。
+/// 历史:用户 v2.5 要求「logo 渐显 + 文案渐显、支持自定义文案」(那时是素底 + 84 方块);
+/// 2026-11-07 用户提出:「现在素白背景,我想改成你软件内置那个琉璃玻璃,
+/// 然后 logo 和开屏动画想想有没有更好的方案」。
+/// 选型与关键帧见 `docs/SPLASH-LOGO-OPTIONS-2026-11-07.md`;实现就在
+/// [SplashKineticA](纯函数 `t → 画面`),预览渲染与线上是**同一份代码**。
 ///
-/// 实现要点(不啰嗦,只做该做的):
-/// - logo:淡入 + 轻微放大(0.92 → 1.0),700ms,`easeOutCubic`;
-/// - 文案:延迟 350ms 后淡入 + 上移 8px,600ms —— 两段错开才有"渐次出现"的呼吸感,
-///   同时出现会显得像页面没加载完;
-/// - 总时长约 1.45 秒;**点一下可跳过**(不想等的人不该被强制看动画);
-/// - 文案每次进入都重新读(用户改完立刻生效,不用重启)。
+/// 保留的行为(一个都不能丢):
+/// - **点击任意处跳过**(不想等的人不该被强制看动画);
+/// - 文案每次进入都重新读 [SplashSettings.tagline](用户改完立刻生效);
+/// - `hold` 参数保留(动画结束后的额外停留,默认 0);
+/// - 结束用 250ms 交叉淡出切到 [child];
+/// - [child] 里包的 `AboutNoticeGate` 顺序不变 —— 只有 `_done == true` 之后它才首次
+///   build,所以首启「关于」公告永远弹在开屏之后。
+///
+/// 无障碍/降级:`MediaQuery.disableAnimations == true` 时**不等动画**,
+/// 直接渲染终帧 + 200ms 淡入(不让"减少动效"的用户干等 1.5 秒)。
 class SplashScreen extends StatefulWidget {
   /// 动画结束后进入的主界面
   final Widget child;
 
-  /// 动画总时长(测试可缩短)
+  /// 动画结束后的额外停留(默认 0:总时长约 1.5s,含 80ms 静止尾)
   final Duration hold;
 
-  const SplashScreen({super.key, required this.child, this.hold = const Duration(milliseconds: 450)});
+  const SplashScreen({
+    super.key,
+    required this.child,
+    this.hold = Duration.zero,
+  });
 
   @override
   State<SplashScreen> createState() => _SplashScreenState();
@@ -30,49 +42,52 @@ class SplashScreen extends StatefulWidget {
 
 class _SplashScreenState extends State<SplashScreen>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl;
-  late final Animation<double> _logoFade;
-  late final Animation<double> _logoScale;
-  late final Animation<double> _textFade;
-  /// 文案的位移量(px,8 → 0)
-  late final Animation<double> _textSlide;
+  /// 动画总长 1.5s:预览里的时间轴是 0~1.5s(t = value × 1.5)
+  static const Duration _animDuration = Duration(milliseconds: 1500);
+
+  /// 减少动效时的淡入时长
+  static const Duration _reducedFade = Duration(milliseconds: 200);
+
+  late final AnimationController _ctrl = AnimationController(
+    vsync: this,
+    duration: _animDuration,
+  )..addStatusListener(_onStatus);
+
   late String _tagline;
   bool _done = false;
-  Timer? _timer;
+  bool _started = false;
+  bool _reduced = false;
+  Timer? _holdTimer;
 
   @override
   void initState() {
     super.initState();
     _tagline = SplashSettings.tagline();
-    _ctrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 700),
-    );
-    _logoFade = CurvedAnimation(
-      parent: _ctrl,
-      curve: const Interval(0, 0.75, curve: Curves.easeOut),
-    );
-    _logoScale = Tween<double>(begin: 0.92, end: 1.0).animate(
-      CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic),
-    );
-    // 文案比 logo 晚 350ms 起(用整条时间线的 0.35~1.0 段表示)
-    _textFade = CurvedAnimation(
-      parent: _ctrl,
-      curve: const Interval(0.5, 1.0, curve: Curves.easeOut),
-    );
-    _textSlide = Tween<double>(begin: 8, end: 0).animate(
-      CurvedAnimation(
-        parent: _ctrl,
-        curve: const Interval(0.5, 1.0, curve: Curves.easeOutCubic),
-      ),
-    );
+  }
 
-    _ctrl.forward();
-    // 动画 + 停顿时长后进入主界面
-    _timer = Timer(
-      const Duration(milliseconds: 700) + widget.hold,
-      _finish,
-    );
+  /// 首次拿到 MediaQuery 后再决定走动画还是走降级(disableAnimations 只在 context 里)
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_started) return;
+    _started = true;
+    final reduce = MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+    if (reduce) {
+      _reduced = true;
+      _ctrl.value = 1.0; // 直接终帧
+      _holdTimer = Timer(_reducedFade, _finish);
+    } else {
+      _ctrl.forward();
+    }
+  }
+
+  void _onStatus(AnimationStatus status) {
+    if (status != AnimationStatus.completed || _reduced) return;
+    if (widget.hold <= Duration.zero) {
+      _finish();
+    } else {
+      _holdTimer = Timer(widget.hold, _finish);
+    }
   }
 
   void _finish() {
@@ -82,109 +97,36 @@ class _SplashScreenState extends State<SplashScreen>
 
   @override
   void dispose() {
-    _timer?.cancel();
+    _holdTimer?.cancel();
     _ctrl.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    // 交叉淡出:开屏结束后用 250ms 淡入主界面,避免"硬切"
+    final dark = Theme.of(context).brightness == Brightness.dark;
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 250),
       child: _done
           ? widget.child
           : GestureDetector(
               // 点一下跳过(不想等的人不该被强制看动画)
-              onTap: _finish,
               behavior: HitTestBehavior.opaque,
-              child: ColoredBox(
-                color: theme.scaffoldBackgroundColor,
-                child: Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      FadeTransition(
-                        opacity: _logoFade,
-                        child: ScaleTransition(
-                          scale: _logoScale,
-                          child: _logo(theme),
-                        ),
-                      ),
-                      const SizedBox(height: 18),
-                      AnimatedBuilder(
-                        animation: _ctrl,
-                        builder: (_, child) => Opacity(
-                          opacity: _textFade.value,
-                          child: Transform.translate(
-                            offset: Offset(0, _textSlide.value),
-                            child: child,
-                          ),
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 32),
-                          child: Text(
-                            _tagline,
-                            textAlign: TextAlign.center,
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              fontSize: 16,
-                              letterSpacing: 2.5,
-                              color: theme.colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
+              onTap: _finish,
+              child: Material(
+                // 开屏页没有 Scaffold:补一层透明 Material,让文字继承主题的
+                // DefaultTextStyle(否则中文会落到平台兜底样式上)。
+                type: MaterialType.transparency,
+                child: AnimatedBuilder(
+                  animation: _ctrl,
+                  builder: (context, _) => SplashKineticA(
+                    t: _ctrl.value * 1.5,
+                    dark: dark,
+                    tagline: _tagline,
                   ),
                 ),
               ),
             ),
     );
   }
-
-  /// logo:优先用打包进来的资源图;没有就退回"文字标"(不引入新资源依赖)
-  Widget _logo(ThemeData theme) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 84,
-          height: 84,
-          decoration: BoxDecoration(
-            color: theme.colorScheme.primary,
-            borderRadius: BorderRadius.circular(22),
-            boxShadow: [
-              BoxShadow(
-                color: theme.colorScheme.primary.withAlpha(60),
-                blurRadius: 24,
-                offset: const Offset(0, 8),
-              ),
-            ],
-          ),
-          child: Center(
-            child: Text(
-              'AI',
-              style: TextStyle(
-                fontSize: 30,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 1,
-                color: theme.colorScheme.onPrimary,
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 12),
-        Text(
-          'AI上外语',
-          style: theme.textTheme.titleLarge?.copyWith(
-            fontWeight: FontWeight.w700,
-            letterSpacing: 3,
-          ),
-        ),
-      ],
-    );
-  }
 }
-
-/// 给 Tween 加个链式小工具(保持上面代码可读)

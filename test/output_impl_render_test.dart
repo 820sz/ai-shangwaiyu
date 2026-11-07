@@ -46,6 +46,7 @@ import 'package:readflow/screens/writing/write_review_screen.dart';
 import 'package:readflow/services/database.dart';
 import 'package:readflow/services/learner_model_store.dart';
 import 'package:readflow/services/output_composer.dart';
+import 'package:readflow/services/output_draft.dart';
 import 'package:readflow/services/output_rubric.dart';
 
 const String _fontFamily = 'PreviewCJK';
@@ -128,13 +129,12 @@ Future<void> _capture(
 // 假数据(与生产无关,只用于视觉评审)
 // ═══════════════════════════════════════════════════════════════════
 
-/// 一份真实感的四级真题题组(来源/年份/套数/站点都齐)。
-/// 用「写句·回译」题:作答框更矮,一屏能同时看到来源行 + rubric 预告。
+/// 一份真实感的**六级**真题题组(来源/年份/套数/站点都齐;三题用于展示答题卡跳题)。
 OutputSetSpec _examSet() => const OutputSetSpec(
-      title: '英语四级(CET-4) · 2023 年 12 月第 1 套 · 写作真题',
+      title: '英语六级(CET-6) · 2023 年 12 月第 1 套 · 写句真题',
       tier: OutputTier.sentence,
       source: 'exam',
-      examType: 'cet4',
+      examType: 'cet6',
       section: 'back_translation',
       paperYear: 2023,
       paperLabel: '2023 年 12 月 · 第 1 套',
@@ -153,6 +153,56 @@ OutputSetSpec _examSet() => const OutputSetSpec(
           wordCount: 0,
           hint: '注意 not...until 的语序与过去完成时',
           sourceUrl: 'https://www.neea.edu.cn/html1/report/2312/1-1.htm',
+        ),
+        OutputTaskSpec(
+          tier: OutputTier.sentence,
+          type: 'back_translation',
+          promptZh: '把这句话译回英文：尽管困难重重，他们还是按时完成了任务。',
+          promptEn:
+              'Despite all the difficulties, they finished the task on time.',
+          reference: 'Despite all the difficulties, they finished the task on time.',
+          rubricId: 'back_translation',
+          wordCount: 0,
+          hint: '让步状语用 despite / in spite of',
+          sourceUrl: 'https://www.neea.edu.cn/html1/report/2312/1-1.htm',
+        ),
+        OutputTaskSpec(
+          tier: OutputTier.sentence,
+          type: 'back_translation',
+          promptZh: '把这句话译回英文：这项研究的结果值得进一步讨论。',
+          promptEn: 'The results of the study deserve further discussion.',
+          reference: 'The results of the study deserve further discussion.',
+          rubricId: 'back_translation',
+          wordCount: 0,
+          hint: 'deserve + 名词/动名词',
+          sourceUrl: 'https://www.neea.edu.cn/html1/report/2312/1-1.htm',
+        ),
+      ],
+    );
+
+/// 六级作文题组:用来渲染「批改标准 = 六级写作评分标准」这一屏。
+OutputSetSpec _examSetCet6Essay() => const OutputSetSpec(
+      title: '英语六级(CET-6) · 写作真题',
+      tier: OutputTier.essay,
+      source: 'exam',
+      examType: 'cet6',
+      section: 'writing',
+      paperYear: 2023,
+      paperLabel: '2023 年 12 月 · 第 1 套',
+      sourceSite: '中国教育考试网',
+      verifyStatus: 'pending',
+      rubricId: 'cet6_writing',
+      tasks: <OutputTaskSpec>[
+        OutputTaskSpec(
+          tier: OutputTier.essay,
+          type: 'exam_writing',
+          promptZh: 'Directions: Write an essay on the value of lifelong '
+              'learning. You should write at least 150 words.',
+          promptEn: '',
+          reference: '',
+          rubricId: 'cet6_writing',
+          wordCount: 150,
+          hint: '先定立场 → 两个理由各配例子 → 收尾',
         ),
       ],
     );
@@ -305,7 +355,8 @@ Future<void> _render(
 /// 不用 pumpAndSettle:首页/计划页里有循环骨架动画,settle 会死等;
 /// 这里用"真时间片(runAsync)+ 帧"交替,直到异步 setState 落地。
 Future<void> _settle(WidgetTester tester) async {
-  for (var i = 0; i < 8; i++) {
+  // 12 轮:首页要等 4 段串行异步(模型/进度/到期词/草稿)全部落地才截图
+  for (var i = 0; i < 12; i++) {
     await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 200)));
     await tester.pump(const Duration(milliseconds: 80));
@@ -402,22 +453,32 @@ void main() {
         'source_span': '',
       },
     ]);
-    await DatabaseService.insertExerciseSet(<String, Object?>{
+    final cet6SetId = await DatabaseService.insertExerciseSet(<String, Object?>{
       'source': 'exam',
       'exam_type': 'cet6',
-      'section': 'translation',
-      'title': '英语六级(CET-6) · 段落翻译真题',
-      'rubric_id': 'cet4_translation',
+      'paper_year': 2023,
+      'paper_label': '2023 年 12 月 · 第 1 套',
+      'section': 'writing',
+      'title': '英语六级(CET-6) · 2023 年 12 月第 1 套 · 写作真题',
+      'rubric_id': 'cet6_writing',
       'license_note': '题目来自公开网页抓取(https://i.xdf.cn/cet6/1.html)。',
       'verify_status': 'verified',
       'created_at': '2026-11-04T20:00:00',
     }, items: <Map<String, Object?>>[
       <String, Object?>{
-        'type': 'exam_translation',
-        'prompt_zh': '将下面段落译成英文：中国茶文化历史悠久。',
+        'type': 'exam_writing',
+        'prompt_zh': 'Directions: Write an essay on the value of lifelong learning.',
         'reference_answer': '',
-        'rubric_id': 'cet4_translation',
-        'word_count': 0,
+        'rubric_id': 'cet6_writing',
+        'word_count': 150,
+        'source_span': '',
+      },
+      <String, Object?>{
+        'type': 'exam_writing',
+        'prompt_zh': 'Directions: Write an essay on how to manage stress.',
+        'reference_answer': '',
+        'rubric_id': 'cet6_writing',
+        'word_count': 150,
         'source_span': '',
       },
     ]);
@@ -439,6 +500,16 @@ void main() {
         'source_span': 'Reading makes a full man.',
       },
     ]);
+    // ③ W4:预置一份"上次没做完"的草稿 → 输出首页显示「继续上次练习」
+    await OutputDraftStore.save(OutputDraft(
+      setId: cet6SetId,
+      title: '英语六级(CET-6) · 2023 年 12 月第 1 套 · 写作真题',
+      index: 1,
+      texts: const <int, String>{
+        0: 'Lifelong learning is important because...',
+      },
+      updatedAt: DateTime.now(),
+    ));
   });
 
   tearDown(() async {
@@ -493,6 +564,19 @@ void main() {
       tester,
       PracticeFlowScreen(set: _examSet(), savedSetId: 1),
       'output-impl-answer.png',
+    );
+  });
+
+  testWidgets('答题页(六级 rubric 中文名)', (tester) async {
+    await _render(
+      tester,
+      PracticeFlowScreen(set: _examSetCet6Essay(), savedSetId: 0),
+      'output-impl-answer-cet6.png',
+      afterPump: (tester) async {
+        // 滚到 rubric 预告:验证显示的是「六级写作评分标准」而不是 cet4_writing
+        await tester.drag(find.byType(ListView).first, const Offset(0, -430));
+        await tester.pump();
+      },
     );
   });
 

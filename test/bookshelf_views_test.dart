@@ -11,6 +11,18 @@ import 'package:readflow/services/bookshelf.dart';
 import 'package:readflow/widgets/shelf_carousel_view.dart';
 import 'package:readflow/widgets/shelf_cover_grid.dart';
 
+/// 书架两形态的真实渲染 + 交互回归(2026-11-07 用户真机第 3 条:
+/// 「书架 3D 老毛病——每次点进去都会有一本书横档」)。
+///
+/// 3 张 3D 书架图:
+/// 1. `shelf-carousel-initial.png` —— 初始态:只有一排书脊 + 底部提示,
+///    **没有**任何"抽出的封面卡"(旧实现一进页面就把封面横在书脊前);
+/// 2. `shelf-carousel-open.png` —— 点书脊后:封面抽出并浮在书架排**上方**,
+///    不遮挡任何书脊/底部提示;
+/// 3. `shelf-carousel-swiped.png` —— 左右滑动后:书脊照常滚动,封面不会变成
+///    "横在中间的挡板"。
+///
+/// 交互断言:初始无封面 → 点书脊出现 → 再点同一书脊收回 → 点空白收回。
 const String _fontFamily = 'PreviewCJK';
 
 Future<void> _loadFont() async {
@@ -121,18 +133,40 @@ List<BookshelfBook> _books() => const <BookshelfBook>[
 Future<void> _capture(
   WidgetTester tester,
   GlobalKey key,
-  String fileName,
-) async {
+  String fileName, {
+  /// 兼容文档里引用的旧文件名(如 shelf-carousel.png),同一张图写多份
+  List<String> aliases = const <String>[],
+}) async {
   final boundary =
       key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
   await tester.runAsync(() async {
     final image = await boundary.toImage(pixelRatio: 3);
     final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-    Directory('build/ui_real').createSync(recursive: true);
-    File('build/ui_real/$fileName')
-        .writeAsBytesSync(bytes!.buffer.asUint8List());
+    final data = bytes!.buffer.asUint8List();
+    // 同时写两处:
+    // - build/ui_real/:渲染中间产物(惯例)
+    // - docs/ui-preview/real/:交付给用户看的真实渲染图(任务要求 shelf-*.png)
+    // 直接写两处,避免依赖 shell cp(多 agent 并发时 shell 经常排队超时)
+    for (final dir in <String>['build/ui_real', 'docs/ui-preview/real']) {
+      Directory(dir).createSync(recursive: true);
+      for (final name in <String>[fileName, ...aliases]) {
+        File('$dir/$name').writeAsBytesSync(data);
+      }
+    }
     image.dispose();
   });
+}
+
+/// 有界推帧:书架里有 AnimatedSize/AnimatedContainer,用固定帧数代替
+/// pumpAndSettle(避免任何持续动画把测试挂住)
+Future<void> _pumpFrames(
+  WidgetTester tester, {
+  int frames = 4,
+  Duration step = const Duration(milliseconds: 100),
+}) async {
+  for (var i = 0; i < frames; i++) {
+    await tester.pump(step);
+  }
 }
 
 void main() {
@@ -149,7 +183,7 @@ void main() {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1.0;
 
-    // ① 详细书架(封面网格)
+    // ① 详细书架(封面网格)—— 回归:文字版式封面不受 3D 改动影响
     final keyDetail = GlobalKey();
     await tester.pumpWidget(
       RepaintBoundary(
@@ -174,11 +208,11 @@ void main() {
         ),
       ),
     );
-    await tester.pump(const Duration(milliseconds: 200));
+    await _pumpFrames(tester);
     expect(find.text('The Elements of Style'), findsWidgets);
-    await _capture(tester, keyDetail, 'shelf_detail.png');
+    await _capture(tester, keyDetail, 'shelf-detail.png');
 
-    // ② 3D 轮播书架(书脊)
+    // ② 3D 轮播书架:用户"一进去就有书横档"的回归用例
     final keyCarousel = GlobalKey();
     await tester.pumpWidget(
       RepaintBoundary(
@@ -203,8 +237,59 @@ void main() {
         ),
       ),
     );
-    await tester.pump(const Duration(milliseconds: 200));
+    await _pumpFrames(tester);
     expect(find.text('Moby Dick'), findsWidgets);
-    await _capture(tester, keyCarousel, 'shelf_carousel.png');
+
+    // 初始态:**没有**抽出封面(只有一排书脊 + hint)——这就是"横档"回归
+    expect(
+      find.byKey(ShelfCarouselView.featuredCoverKey),
+      findsNothing,
+      reason: '初始态不应该有抽出的封面卡(用户真机第 3 条)',
+    );
+    await _capture(tester, keyCarousel, 'shelf-carousel-initial.png');
+
+    // 点书脊 → 该本抽出并浮在书架排上方
+    await tester.tap(find.byKey(ShelfCarouselView.spineKey(1)));
+    await _pumpFrames(tester);
+    expect(find.byKey(ShelfCarouselView.featuredCoverKey), findsOneWidget);
+    await _capture(
+      tester,
+      keyCarousel,
+      'shelf-carousel-open.png',
+      // 文档(V5-INPUT-STATUS / V5-BOOKSHELF-REDESIGN)里引用的是旧文件名,
+      // 同一张图再写一份,保证文档里的图也是修好后的界面
+      aliases: const <String>['shelf-carousel.png'],
+    );
+
+    // 再点同一本书脊 → 收回
+    await tester.tap(find.byKey(ShelfCarouselView.spineKey(1)));
+    await _pumpFrames(tester);
+    expect(find.byKey(ShelfCarouselView.featuredCoverKey), findsNothing);
+
+    // 点书架空白 → 也收回
+    await tester.tap(find.byKey(ShelfCarouselView.spineKey(3)));
+    await _pumpFrames(tester);
+    expect(find.byKey(ShelfCarouselView.featuredCoverKey), findsOneWidget);
+    final surfaceTopLeft =
+        tester.getTopLeft(find.byKey(ShelfCarouselView.surfaceKey));
+    await tester.tapAt(surfaceTopLeft + const Offset(8, 8));
+    await _pumpFrames(tester);
+    expect(find.byKey(ShelfCarouselView.featuredCoverKey), findsNothing);
+
+    // 左右滑动:书脊照常滚,封面不会跟着变成"横在中间的挡板"
+    await tester.tap(find.byKey(ShelfCarouselView.spineKey(3)));
+    await _pumpFrames(tester);
+    expect(find.byKey(ShelfCarouselView.featuredCoverKey), findsOneWidget);
+    await tester.drag(
+      find.byKey(ShelfCarouselView.spineKey(3)),
+      const Offset(-120, 0),
+    );
+    await _pumpFrames(tester);
+    expect(
+      find.byKey(ShelfCarouselView.featuredCoverKey),
+      findsOneWidget,
+      reason: '滑动只滚书脊,不应把抽出的封面弄丢或变成遮挡',
+    );
+    await _capture(tester, keyCarousel, 'shelf-carousel-swiped.png');
   });
 }

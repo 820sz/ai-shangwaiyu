@@ -63,10 +63,10 @@ C 的「零常驻按钮 + 一张纸 + 常驻进度」全部落到生产代码，
 
 | 设计条目 | 实现 | 渲染图 |
 |---|---|---|
-| 右侧悬浮 `%` 胶囊（10.5/w800，纸底 0.92 + 边框） | `lib/widgets/reader_progress.dart:20` `ReaderProgressRail` | `reader-c-paper-white.png`（37%） |
-| 96px 竖轨道（3px 宽，砖红按比例填充） | 同上（`railHeight = 96`、`railWidth = 3`） | `reader-c-paper-white/beige/night.png` |
-| 正文右侧内边距 46 让位 | `_buildReaderBody` 列表 padding 右 46 | 全部正文图 |
-| 点胶囊也能打开控制台 | `ReaderProgressRail.onTap` → `_openConsole` | — |
+| `%` 胶囊常驻（第三轮整改：移到顶部右侧，不压正文） | `lib/widgets/reader_progress.dart:91` `ReaderProgressBadge`；挂在 `_readerTopBar`（`material_reader_screen.dart:2286`） | `reader-c-first-white.png`、`reader-c-paper-white.png` |
+| 96px 竖轨道（3px 宽，砖红按比例填充，**overlay 悬浮**不挤压正文） | `lib/widgets/reader_progress.dart:23` `ReaderProgressRail`（3px 轨道 + 12px 透明热区）；未填充轨道色 = 该纸 `ink` 18% 混纸底（`trackColor`，`reader_progress.dart:50`），三纸对比度 1.42~1.65:1，可辨但不抢眼 | `reader-c-paper-white/beige/night.png`、改前/改后对照图 |
+| 正文右侧安全区（第三轮整改：46 → 20，其中 ~10px 给竖轨） | `_buildReaderBody` 列表 `padding: 16/4/20/18`（`material_reader_screen.dart:2241`） | 全部正文图 |
+| 点胶囊/竖轨都能打开控制台 | `ReaderProgressBadge.onTap` / `ReaderProgressRail.onTap` → `_openConsole` | — |
 
 ### 1.5 上滑「阅读控制台」4 组（§4 弹层）
 
@@ -156,7 +156,9 @@ C 的「零常驻按钮 + 一张纸 + 常驻进度」全部落到生产代码，
 | 10 | `reader-c-resume.png` | 续读弹层（上次 37%） | 真库预置 37% 进度后打开 |
 | 11 | `reader-c-translating.png` | 翻译进行中（生产弹层 + 真实 ProgressStageBar） | 生产组件 + 假进度数据 |
 | 12 | `reader-c-console-night.png` | 墨夜纸上的控制台 | 真实页 + 控制台 |
-| 13 | `reader-c-word.png` | 查词弹层（共享件 + C 纸色主题） | 生产共享件 + 零配置降级态 |
+| 13 | `reader-c-word.png` | 查词弹层（共享件 + C 纸色主题 + 假词条预览） | 生产共享件 + 默认 null 预览注入口 |
+| 14 | `reader-c-before-first.png` / `reader-c-before-scroll.png` | **改前**（第三轮整改前：正文 318px、右侧 46px 让位） | 整改前代码快照（12:04 复制） |
+| 15 | `reader-c-after-first.png` / `reader-c-after-scroll.png` | **改后**（正文 354px、竖轨 overlay + 顶条胶囊） | 真实页 |
 
 ---
 
@@ -165,8 +167,9 @@ C 的「零常驻按钮 + 一张纸 + 常驻进度」全部落到生产代码，
 | 命令 | 结果 |
 |---|---|
 | `bash tool/lockrun.sh test test/reader_c_widget_test.dart --no-pub` | **5/5 通过**（底部零按钮 / 控制台上滑 4 组 / 控制台滚到底进设置 / 纸色切换持久化 + 重开保留 / 进度%真值 37%） |
-| `bash tool/lockrun.sh test test/reader_c_paper_test.dart --no-pub` | **8/8 通过**（C 6 档字阶 / 三纸对比度逐项 / 墨夜提亮 / 纸张持久化往返 + 脏数据） |
-| `bash tool/lockrun.sh test test/reader_c_render_test.dart --no-pub` | **14/14 通过**（出 13 张真图；含「落库 percent ≤99」断言 + 翻译屏主题探针：共享组件 `LinearProgressIndicator` 必须解析到砖红主色，防共享件漏出全局果冻蓝） |
+| `bash tool/lockrun.sh test test/reader_c_layout_test.dart --no-pub` | **1/1 通过**（正文列宽 354px ±1、竖轨 3×96 overlay 与正文间距 8~16px、% 胶囊在顶条不压正文） |
+| `bash tool/lockrun.sh test test/reader_c_paper_test.dart --no-pub` | **9/9 通过**（C 6 档字阶 / 三纸对比度逐项 / 竖轨未填充色三纸可辨识 / 墨夜提亮 / 纸张持久化往返 + 脏数据） |
+| `bash tool/lockrun.sh test test/reader_c_render_test.dart --no-pub` | **16/16 通过**（当前布局出 15 张真图：13 张标准 + 2 张改后；另 2 张改前方为 12:04 整改前快照；含「落库 percent ≤99」断言 + 翻译屏主题探针） |
 | `bash tool/lockrun.sh test test/reader_settings_test.dart test/reader_text_test.dart test/reader_units_test.dart --no-pub --concurrency=1` | **29/29 通过**（阅读设置/选词/切段旧逻辑回归，EXIT=0） |
 | `bash tool/lockrun.sh analyze --no-pub lib/screens/input lib/widgets` | **本主题 8 个文件 0 error / 0 warning / 0 info**；目录里剩 6 条**存量 info** 全在别人的文件（`process_chat.dart` ×5、`ai_article_section.dart` ×1），按 plan §0.4「存量 info 不算」 |
 
@@ -279,3 +282,74 @@ C 的「零常驻按钮 + 一张纸 + 常驻进度」全部落到生产代码，
 | 4 | 全篇每个词都有砖红下划线（满屏红线 = 没重点） | C 改造初期给所有词都上了 accent 下划线（旧 TappablePassage 行为是"全部主色虚线"） | `TappablePassage.highlightWords`：只有材料分析出的 `top_new_words` 才画砖红实线（`reader_text.dart:61`、`material_reader_screen.dart:2514`） |
 | 5 | 墨夜纸选中态上的砖红对比度只有 3.76:1 | 深色选中底 `#2C3037` 太亮 | 选中底改 `#23262B`，`test/reader_c_paper_test.dart` 断言 ≥4:1 |
 | 6 | 渲染 fixture 正文里露出字面量 `\n\n` | 测试 fixture 用了 `'\\n\\n'`（转义成反斜杠+n）而不是真实换行 | fixture 改真换行，全部图重出 |
+
+---
+
+## 9. 第三轮整改（2026-11-07 用户真机反馈第 2 条：空间利用率 / 右侧留白）
+
+**用户原话**："空间利用率、排版太低，右侧缺失有些稍多"。真机现象：正文列偏窄，
+右侧一大条留白（96px 竖轨让位的 46px + 页面边距叠加），上下留白也偏大。
+
+### 9.1 改前 / 改后数字（390×844 逻辑尺寸）
+
+| 项 | 改前 | 改后 | 差 |
+|---|---|---|---|
+| 正文列宽 | 390 − 26 − 46 = **318px** | 390 − 16 − 20 = **354px** | **+36px（+11.3%）** |
+| 左侧内边距 | 26 | 16 | −10 |
+| 右侧内边距 | 46（给竖轨让位） | 20（其中 ~10px 是竖轨安全区） | −26 |
+| 竖轨 | 3px 轨道 + 封顶 `%` 胶囊（占正文布局宽度） | **3px 悬浮 overlay**（右侧 4、距正文 8~12px）+ 12px 透明热区 | 不再挤压正文 |
+| `%` 胶囊 | 右侧悬浮（会与正文同列） | **顶部右侧**（40px 纸色顶条内，全滚动位置不压字） | 常驻且零遮挡 |
+| 顶部安全条 | 44 | 40 | −4 |
+| 列表上/下内边距 | 8 / 30 | 4 / 18 | −6 / −12 |
+| 刊头间距（kicker→标题→署名→双线→正文） | 10 / 10 / 12 / 18 | 8 / 8 / 10 / 14 | −8 合计 |
+| 段间距 / 块末间距 | 18 / 24 | 14 / 18 | −6 / −6 |
+| 底部把手区下方留白 | 8 | 4 | −4 |
+
+首屏（844 高）由此多露出约 **26px 内容**（≈0.8 行正文）+ 每行多 2 个汉字宽度；
+滚动中正文与竖轨之间保持 8~12px 安全区，不遮挡文字。
+
+### 9.2 实现位置（file:line）
+
+- 正文列宽/上下收紧：`lib/screens/input/material_reader_screen.dart:2241`（列表 padding）、
+  `_readingLead`（刊头间距）、`_buildUnit`（段距）、`_buildTranslationArea`（译区间距）、
+  `_buildLoadingBody`/`_buildErrorBody`（骨架/错误页 padding）
+- 竖轨 overlay：`lib/widgets/reader_progress.dart:23` `ReaderProgressRail`（只画 3px 轨道，
+  外层 12px 透明热区；`key: reader-rail-track`）
+- `%` 胶囊：`lib/widgets/reader_progress.dart:91` `ReaderProgressBadge`，
+  挂载在 `_readerTopBar`（`material_reader_screen.dart:2286`，40px 纸色顶条：返回圆钮 + 右侧胶囊）
+- 悬浮定位：`material_reader_screen.dart:2262`（`Positioned(right: 4, top: 0, bottom: 0)` +
+  `Align(alignment: Alignment(0, -0.18))`）
+- 底部把手区下方留白：`lib/widgets/reader_action_bar.dart:140`（8 → 4）
+
+### 9.3 改前 / 改后对照渲染
+
+| 屏 | 改前 | 改后 |
+|---|---|---|
+| 首屏 | `docs/ui-preview/real/reader-c-before-first.png` | `reader-c-after-first.png` |
+| 滚动中（37%） | `docs/ui-preview/real/reader-c-before-scroll.png` | `reader-c-after-scroll.png` |
+
+13 张标准图已全部按改后布局重出（`reader-c-first-white` / `paper-white/beige/night` /
+`console` / `console-material` / `settings` / `settings-night` / `toc` / `resume` /
+`translating` / `console-night` / `word`），加 4 张前后对照共 **17 张** `reader-c-*.png`。
+控制台/设置弹层是 sheet，不受正文留白调整影响。
+
+### 9.4 断言（机器守门）
+
+`test/reader_c_layout_test.dart`（新增）：真实页 390 宽下断言
+① 正文 `TappablePassage` 宽度 = 354±1（>350，改前 318）；
+② 竖轨 `reader-rail-track` = 3×96 且 `track.left - text.right ∈ [8,16]`（不压字）；
+③ `%` 胶囊在正文上方（顶条内）、右边界 ≤ 390。
+（该文件单跑：布局断言与交互用例分开，避免多用例连续跑时 DB 收尾互相拖住。）
+
+---
+
+## 10. 第四轮微调（QA 复核 W3 后）
+
+| 项 | 内容 |
+|---|---|
+| 反馈 | 354px / +11.3% / C 特征无回退都通过；但 **0% 时未填充竖轨 `#D7D9D2` on `#EEEFEA` 太淡（1.23:1），看似有若无**；保持 3px 宽度不要加宽 |
+| 做法 | 未填充轨道色改为「该纸墨色 18% 混纸底」的纯函数 `ReaderProgressRail.trackColor(palette)`（`lib/widgets/reader_progress.dart:50`）；不新增纸色令牌、三纸自动一致 |
+| 新色值 | 纸白 `#C7C8C5`（对纸底 1.45:1） / 米黄 `#CFCABE`（1.42:1） / 墨夜 `#3D3E41`（1.65:1）；已填充砖红对未填充轨道 ≥3:1（一眼分得出读到哪） |
+| 不变 | 轨道仍 3px、9px 宽热区不动、已填充色仍砖红；控制台 3px 进度条不受影响（它在 sheet 里） |
+| 守门 | `test/reader_c_paper_test.dart` 新增一条：三纸 `trackColor` 对纸底 ∈[1.35, 2.6]、砖红对 track ≥2.5、且 ≠ hairline |
+| 图 | 13 张标准图 + 改后 2 张全部重出（改前 2 张快照保留不动）；0% 首屏可看到右侧一条浅灰轨道，37% 时砖红填充清晰可分 |

@@ -149,7 +149,19 @@ bash tool/lockrun.sh test test/output_impl_render_test.dart --no-pub
 5. **动手边界**：`lib/screens/input/**` 只改了 Lead 授权的 1 行文案（目标说明），其余未动；`profile/**`、`tutor/**`、全局 `widgets/**` 一行未改；`write_review_screen.dart` 保留了另一位 agent 的"双横杠修复"改动。
 6. 渲染图是**假数据 + 生产组件**；真机首帧仍需用户验收（本轮不出包）。
 
-## 8. 渲染清单（`docs/ui-preview/real/`，同名也写 `build/ui_real/`）
+## 8. W4 · 真机反馈 4 条（2026-11-07 第二轮）
+
+| # | 用户反馈 | 根因 | 修法（file:line） | 证据 |
+|---|---|---|---|---|
+| 1 | 四阶卡副标题被卡片底边裁字 | 首页四阶用固定 `childAspectRatio: 1.28`，卡片高度不够两行副标题 + 进度行 | `output_home.dart` 四阶网格 `childAspectRatio: 1.02`（高度 171→168 逻辑像素以上的呼吸）；`widgets/output_tier_card.dart` 内容在固定高度内用 `Expanded + Flexible`，副标题保持 2 行不裁 | `output-impl-home.png` |
+| 2 | 练 CET-6 却显示 `cet4_writing` 评分标准 | ① rubric 选取只按题目存的 id，材料/作文链路一律写死 `cet4_*`；② rubrics 表只有四级 seed；③ UI 直接 `Text(rubric.id)` | ① `output_rubric.dart`：新增 `cet6_writing`/`cet6_translation` 内置 rubric + `rubricIdFor()`（按 examType 选）+ `resolveFor()`（老数据 cet4_* → cet6_* 纠正）+ `displayNameOf()`（中文名）；② `database.dart:_builtinRubricRows` 幂等补六级 seed（`INSERT OR IGNORE`，开库自检时补，老库也补）；③ 出题链路改用 `rubricIdFor`（`output_composer.parseExamWritingTasks`/`composeFromMaterial`、`output_bank.buildEssaySet(examType:)`）；④ 答题页预览显示中文名（`practice_flow_screen._buildRubricPreview`） | `output-impl-answer-cet6.png` + `test/output_rubric_cet6_test.dart` |
+| 3 | 练习必须按顺序做、不能跳题 | 答题页只有"当前题"，没有题目导航/整组状态 | `practice_flow_screen.dart`：每题草稿与批改结果按题号存（`_texts`/`_scored`）+ 顶部与底栏「答题卡」入口 + 任意跳题 + 上一题/下一题 + 完成前校验未批改数（可继续作答或仍然完成） | `output-impl-answer.png`（第 1/3 题 + 答题卡）+ `practice_flow_test.dart` 跳题用例 |
+| 4 | 练习退出不留存、下次重新找 | 题组其实已落库，但**没记录停在第几题/每题草稿**，首页也无恢复入口 | 新增 `lib/services/output_draft.dart`：`OutputDraftStore`（Hive 单行 JSON：setId/题号/每题文本，不加表不加列）、`setSpecFromExerciseRow`（与题库重练共用还原口径）、`loadResumablePractice`、`loadScoredByIndex`（已批改从 `output_attempts.score_json` 还原）；练习器退出/跳题/提交时写草稿、全部批改后清草稿；输出首页新增「继续上次练习」卡片（`output_home._resumable`） | `output-impl-home.png`（继续上次练习卡）+ `test/output_draft_test.dart` + `practice_flow_test.dart` 恢复用例 |
+
+> 说明：草稿只存**未提交的作答文本 + 当前位置**（客户端状态，Hive）；已批改结果仍以
+> `output_attempts` 为唯一权威数据源，不落第二份分数。全程**未加数据库列/表、未改 dbVersion**。
+
+## 9. 渲染清单（`docs/ui-preview/real/`，同名也写 `build/ui_real/`）
 
 | 文件 | 屏 |
 |---|---|
@@ -157,7 +169,8 @@ bash tool/lockrun.sh test test/output_impl_render_test.dart --no-pub
 | `output-impl-practice-center.png` | 练习中心弹层 |
 | `output-impl-setup.png` | 四阶设置（含等级筛选/来源/年份套数入口） |
 | `output-impl-setup-bottom.png` | 四阶设置**滚到底**（验证底部固定 CTA 不遮挡最后一张材料卡） |
-| `output-impl-answer.png` | 答题页（来源行 + 等级徽标 + rubric 预告 + 白纸作答区） |
+| `output-impl-answer.png` | 答题页（来源行 + 等级徽标 + rubric 预告 + 白纸作答区；W4 起含答题卡跳题） |
+| `output-impl-answer-cet6.png` | 答题页滚到 rubric 预告：证明显示「六级写作评分标准」而不是 `cet4_writing` |
 | `output-impl-result.png` | 批改结果（分数环 + 编号区块 + 低干扰问题条） |
 | `output-impl-history.png` | 题库（等级筛选 + 来源行 + 回填按钮） |
 | `output-impl-plan.png` | 旧计划页（练习中心） |

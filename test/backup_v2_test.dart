@@ -337,9 +337,9 @@ void main() {
         82.0,
       );
 
-      // ⑤ rubrics:内置 4 + 自定义 1 = 5(全导且只插缺失)
+      // ⑤ rubrics:内置 6 + 自定义 1 = 7(全导且只插缺失;v2.28 起内置多了六级两套)
       final rubrics = await db.query('rubrics');
-      expect(rubrics, hasLength(5));
+      expect(rubrics, hasLength(7));
       expect(rubrics.map((r) => '${r['id']}'), contains('custom_rubric'));
       expect(
         rubrics.map((r) => '${r['id']}'),

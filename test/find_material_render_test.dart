@@ -15,6 +15,7 @@ import 'package:readflow/screens/input/free_search_screen.dart';
 import 'package:readflow/screens/input/need_search_screen.dart';
 import 'package:readflow/services/find_need_context.dart';
 import 'package:readflow/services/input_prefs.dart';
+import 'package:readflow/services/material_ai_rewrite.dart';
 import 'package:readflow/services/material_library.dart';
 import 'package:readflow/services/material_need.dart';
 import 'package:readflow/services/material_prefs.dart';
@@ -38,6 +39,9 @@ void main() {
   setUpAll(() async {
     await _loadFont();
     await _loadIcons();
+    // 卡片封面懒加载:渲染测试不碰网络(确定性);"有封面"对照图用注入的
+    // 真实图片源(MemoryImage)画,而不是等一个连不上的站点。
+    MaterialCoverProbeCache.debugOverride = (_) async => null;
   });
 
   testWidgets('入口页(并列大卡 + 最近搜过 + 上次结果)', (tester) async {
@@ -176,6 +180,308 @@ void main() {
     await tester.pumpAndSettle();
     await _capture(tester, key, 'find-material-impl-history.png');
   });
+
+  // ═══════════════════════════════════════════════════════════════════
+  // 2026-11-07 第三轮(用户真机反馈第 4/5 条)新增渲染
+  // ═══════════════════════════════════════════════════════════════════
+
+  testWidgets('自由搜 · 顶部输入框不裁字(长中英混合关键词)', (tester) async {
+    _phoneView(tester);
+    await _shoot(
+      tester,
+      const FreeSearchScreen(
+        initialQuery: '原子习惯 atomic habits 与微小改变 practice',
+      ),
+      'find-material-impl-free-input.png',
+    );
+  });
+
+  testWidgets('自由搜 · 筛选面板展开(限高可滚动,可收起)', (tester) async {
+    _phoneView(tester);
+    final key = GlobalKey();
+    await tester.pumpWidget(
+      RepaintBoundary(
+        key: key,
+        child: MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: _theme(),
+          home: const FreeSearchScreen(initialQuery: 'climate change'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle(const Duration(milliseconds: 50));
+    await tester.tap(find.byKey(const ValueKey('free-filter-toggle')));
+    await tester.pumpAndSettle(const Duration(milliseconds: 50));
+    expect(tester.takeException(), isNull);
+    await _capture(tester, key, 'find-material-impl-free-filters.png');
+  });
+
+  testWidgets('结果卡 · 有真封面(缩略图)对照', (tester) async {
+    _phoneView(tester);
+    final bytes = await tester.runAsync(_coverPngBytes);
+    expect(bytes, isNotNull);
+    final cover = MemoryImage(bytes!);
+    final key = GlobalKey();
+    await tester.pumpWidget(
+      RepaintBoundary(
+        key: key,
+        child: MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: _theme(),
+          home: _CoverGallery(coverProvider: cover),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle(const Duration(milliseconds: 50));
+    // 测试环境没有网络:把注入的真实图片先解码进内存,截图里才是真缩略图
+    await tester.runAsync(() async {
+      final context = tester.element(find.byType(MaterialResultCard));
+      await precacheImage(cover, context, onError: (error, stackTrace) {});
+    });
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    await _capture(tester, key, 'find-material-impl-cover-with.png');
+  });
+
+  testWidgets('结果卡 · 无封面(纯文字版式)对照', (tester) async {
+    _phoneView(tester);
+    await _shoot(
+      tester,
+      const _CoverGallery(coverProvider: null),
+      'find-material-impl-cover-without.png',
+    );
+  });
+
+  testWidgets('自由搜 · 没找到原文(真实原因 + AI 改写入口)', (tester) async {
+    _phoneView(tester);
+    await _shoot(
+      tester,
+      FreeSearchScreen(
+        initialQuery: '原子习惯',
+        initialResults: const <MaterialResultItem>[],
+        debugSources: _aiSources(),
+        debugNotes: const <String>[
+          'Project Gutenberg:没有匹配的原文(换个英文关键词试试)',
+          '中文关键词:公版书与论文库只认英文',
+        ],
+        aiRewriter: _fakeAiRewriter(),
+      ),
+      'find-material-impl-ai-empty.png',
+      scroll: 200,
+    );
+  });
+
+  testWidgets('自由搜 · AI 改写学习版生成结果(标注/来源/字数/可读可存)', (tester) async {
+    _phoneView(tester);
+    final key = GlobalKey();
+    await tester.pumpWidget(
+      RepaintBoundary(
+        key: key,
+        child: MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: _theme(),
+          home: FreeSearchScreen(
+            initialQuery: '原子习惯',
+            initialResults: const <MaterialResultItem>[],
+            debugSources: _aiSources(),
+            debugNotes: const <String>[
+              'Project Gutenberg:没有匹配的原文(换个英文关键词试试)',
+            ],
+            aiRewriter: _fakeAiRewriter(),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle(const Duration(milliseconds: 50));
+    final generate = find.text('生成 AI 改写学习版(非原文)');
+    await tester.ensureVisible(generate);
+    await tester.tap(generate);
+    for (var i = 0; i < 8; i++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(tester.takeException(), isNull);
+    // 滚到 AI 结果卡,让"非原文标注 + 来源 + 真实字数/难度 + 按钮"整块入镜
+    final vertical = find.byWidgetPredicate(
+      (widget) => widget is ListView && widget.scrollDirection == Axis.vertical,
+    );
+    await tester.drag(vertical.first, const Offset(0, -260), warnIfMissed: false);
+    await tester.pumpAndSettle(const Duration(milliseconds: 50));
+    await _capture(tester, key, 'find-material-impl-ai-generated.png');
+  });
+}
+
+/// 渲染 AI 改写结果用的**注入式**模型(不碰网络;正文是真的英文段落)。
+MaterialAiRewriter _fakeAiRewriter() {
+  final body = List<String>.generate(
+    180,
+    (i) => switch (i % 6) {
+      0 => 'habits',
+      1 => 'shape',
+      2 => 'small',
+      3 => 'changes',
+      4 => 'every',
+      _ => 'day',
+    },
+  ).join(' ');
+  final json = '```json\n'
+      '{"topic": "Small Habits, Big Changes", '
+      '"title_cn": "微小习惯,巨大改变", '
+      '"summary_cn": "这是 AI 基于你这次搜到的线索改写的学习版,不是原文。", '
+      '"body": "$body", '
+      '"used_sources": [1, 2]}\n```';
+  return MaterialAiRewriter(
+    handler: (_, _) async => json,
+    measurer: (_) async => const AiRewriteMeasurement(
+      wordCount: 180,
+      estMinutes: 3,
+      coverage: 0.955,
+      cefr: 'B1',
+    ),
+  );
+}
+
+List<AiRewriteSource> _aiSources() => const <AiRewriteSource>[
+      AiRewriteSource(
+        title: 'Atomic Habits — James Clear',
+        url: 'https://example.com/atomic-habits',
+        site: 'example.com',
+        snippet: '习惯养成与微小改变:每天进步 1% 的复利效应。',
+        kind: 'book',
+      ),
+      AiRewriteSource(
+        title: 'How Tiny Habits Work',
+        url: 'https://example.org/tiny-habits',
+        site: 'example.org',
+        snippet: '行为设计:提示、惯常行为、奖励。',
+        kind: 'article',
+      ),
+    ];
+
+/// 生成一张用于"有封面"对照渲染的 PNG(渐变 + 标题条 + 红色书脊带)。
+///
+/// 只是渲染验证用的**真实图片**,不是生产兜底:生产路径永远是页面 og:image
+/// 的 `Image.network` 或 Gutenberg 官方封面,抓不到就走文字版式。
+Future<Uint8List> _coverPngBytes() async {
+  final recorder = ui.PictureRecorder();
+  final canvas = Canvas(recorder);
+  const size = Size(120, 160);
+  final paint = Paint()
+    ..shader = ui.Gradient.linear(
+      Offset.zero,
+      const Offset(120, 160),
+      <Color>[const Color(0xFF20465B), const Color(0xFF7FB2C9)],
+    );
+  canvas.drawRect(Offset.zero & size, paint);
+  // 顶部标题条(白)+ 红色书脊带 + 底部两行小条:看起来像一张真封面缩略图
+  final white = Paint()..color = const Color(0xFFFFFFFF);
+  canvas.drawRect(const Rect.fromLTWH(12, 20, 84, 9), white);
+  canvas.drawRect(const Rect.fromLTWH(12, 36, 58, 6), white);
+  canvas.drawCircle(const Offset(60, 76), 18, Paint()..color = const Color(0x33FFFFFF));
+  canvas.drawRect(
+    const Rect.fromLTWH(0, 118, 120, 42),
+    Paint()..color = const Color(0xFFB23A2C),
+  );
+  canvas.drawRect(
+    const Rect.fromLTWH(8, 130, 70, 6),
+    Paint()..color = const Color(0xCCFFFFFF),
+  );
+  canvas.drawRect(
+    const Rect.fromLTWH(8, 142, 44, 5),
+    Paint()..color = const Color(0x88FFFFFF),
+  );
+  final image = await recorder.endRecording().toImage(120, 160);
+  final data = await image.toByteData(format: ui.ImageByteFormat.png);
+  image.dispose();
+  return data!.buffer.asUint8List();
+}
+
+/// "有封面 / 无封面"两种结果卡并排对照(同一张卡、同一套数据形状)。
+class _CoverGallery extends StatelessWidget {
+  final ImageProvider? coverProvider;
+
+  const _CoverGallery({required this.coverProvider});
+
+  @override
+  Widget build(BuildContext context) {
+    final skin = V4Skin.of(context);
+    return Scaffold(
+      backgroundColor: skin.pageBg,
+      body: SafeArea(
+        child: ListView(
+          padding:
+              const EdgeInsets.fromLTRB(Gap.page, Gap.sm, Gap.page, Gap.xl),
+          children: <Widget>[
+            Text(
+              coverProvider == null ? '结果卡 · 没有抓到封面' : '结果卡 · 有真封面',
+              style: TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.w900,
+                letterSpacing: -0.4,
+                color: skin.ink,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              coverProvider == null
+                  ? '抓不到 og:image / 材料本身无图 → 纯文字版式(标题 + 来源/类型/难度),不画渐变假封面。'
+                  : '页面 og:image 抓到真图 → 卡片左侧 58×76 圆角缩略图,右侧文字信息不变。',
+              style: TextStyle(fontSize: 11, height: 1.5, color: skin.inkSoft),
+            ),
+            const SizedBox(height: Gap.md),
+            MaterialResultCard(
+              title: 'Climate Change and Coastal Cities',
+              url: 'https://example.com/npr/climate',
+              sourceLabel: 'NPR News',
+              kind: 'news',
+              snippet: 'NPR 报道:海平面上升正在改变沿海城市的基础设施规划与迁移政策。',
+              imageUrl: coverProvider == null
+                  ? null
+                  : 'https://cdn.example.com/og-cover.jpg',
+              coverage: 0.96,
+              cefr: 'B1',
+              date: DateTime(2026, 11, 4),
+              fromSearchApi: true,
+              authority: 3,
+              // 渲染确定性:不探测网络;有图那张用注入的真实图片源
+              enableLazyCoverFetch: false,
+              coverImageOverride: coverProvider,
+              onRead: () {},
+              onSave: () {},
+              onOpenOriginal: () {},
+            ),
+            const SizedBox(height: Gap.sm),
+            Row(
+              children: <Widget>[
+                AppTag('无封面 → 文字版式'),
+                const SizedBox(width: 6),
+                AppTag('有封面 → 58×76 缩略图', tone: AppTagTone.primary),
+              ],
+            ),
+            const SizedBox(height: Gap.md),
+            Container(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+              decoration: BoxDecoration(
+                color: skin.surface,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: skin.hairline),
+              ),
+              child: Text(
+                '取图顺序:① 数据自带 imageUrl(补抓正文时回填的 og:image)→ '
+                '② 公版书按书号现算(Gutenberg 官方封面,零网络)→ '
+                '③ 卡片级懒加载:一次轻量 GET 页面拿 og:image(有缓存、失败静默)。'
+                '抓不到就保持文字版式,绝不画像书封的假图。',
+                style: TextStyle(
+                  fontSize: 10.5,
+                  height: 1.5,
+                  color: skin.inkSoft,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════

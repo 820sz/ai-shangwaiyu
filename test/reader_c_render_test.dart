@@ -524,4 +524,14 @@ void main() {
     );
     expect(rail.data, isNot('100%'));
   });
+  testWidgets('改后 · 首屏(空间利用率整改:正文 354px)', (tester) async {
+    final key = await pumpReader(tester, paper: ReaderPaper.white);
+    await _capture(tester, key, 'reader-c-after-first.png');
+  });
+
+  testWidgets('改后 · 滚动中(竖轨悬浮不挤压正文)', (tester) async {
+    final key = await pumpReader(tester, paper: ReaderPaper.white);
+    await jumpToRatio(tester, 0.37);
+    await _capture(tester, key, 'reader-c-after-scroll.png');
+  });
 }

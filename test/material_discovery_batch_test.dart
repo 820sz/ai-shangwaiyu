@@ -459,6 +459,100 @@ The trade off is flexibility. A specialized chip is hard to change once it is bu
       expect(run.droppedCount, 1);
     });
   });
+
+  // ─────────────────────────────────────────────────────────────────────
+  // ③ 候选级质量过滤(2026-11-07 用户真机:越南语/报名网/弱相关)
+  // ─────────────────────────────────────────────────────────────────────
+  group('候选级质量过滤 — 发现流水线真的把坏候选挡在抓取之前', () {
+    test('越南语 / 报名公告 / 弱相关的候选被过滤,不占抓取名额', () async {
+      final transport = _FakeSearchTransport(
+        defaultResults: <Map<String, Object?>>[
+          // ① 正常英文真题页(应通过 → 被抓取)
+          <String, Object?>{
+            'title': 'CET-4 真题 2024 阅读（附答案解析）',
+            'url': 'https://example.com/cet4/2024-reading',
+            'site_name': '教育站',
+            'snippet': '大学英语四级真题阅读部分',
+            'summary': '',
+            'authority': 2,
+            'rerank_score': 2.0,
+          },
+          // ② 越南语文章(非英文 → 丢弃)
+          <String, Object?>{
+            'title': 'Cách học tiếng Anh hiệu quả cho người mới',
+            'url': 'https://example.com/vi/learn-english',
+            'site_name': 'Tiếng Anh',
+            'snippet': 'bài viết về cách học tiếng anh',
+            'summary': '',
+            'authority': 2,
+            'rerank_score': 2.0,
+          },
+          // ③ 考试报名网(公告页 → 丢弃)
+          <String, Object?>{
+            'title': '大学英语四级考试报名入口 · 考试简介',
+            'url': 'https://exam.example.com/baoming/cet4',
+            'site_name': '教育考试院',
+            'snippet': '报名时间 考试时间 准考证打印',
+            'summary': '',
+            'authority': 2,
+            'rerank_score': 2.0,
+          },
+          // ④ 与分类完全无关(弱相关 → 丢弃)
+          <String, Object?>{
+            'title': 'Best pizza restaurants in town',
+            'url': 'https://example.com/food/pizza',
+            'site_name': 'Food Blog',
+            'snippet': 'dough and cheese',
+            'summary': '',
+            'authority': 0,
+            'rerank_score': 0.0,
+          },
+        ],
+        fetchContent: longMarkdown,
+      );
+
+      final run = await MaterialDiscovery(searchClient: clientWith(transport))
+          .discover(
+        queries: const <String>['CET-4 真题阅读'],
+        prefs: InputPreferences(),
+        model: LearnerModel(),
+        maxFetch: 8,
+        usePublicSources: false,
+        enableRefine: false,
+        categoryHint: '按形式 · 四级真题',
+      );
+
+      // 只有 ① 被真的抓取 → 证明坏候选在"抓取/付钱之前"就被挡掉了
+      expect(transport.fetchedUrls, ['https://example.com/cet4/2024-reading']);
+      expect(run.items.map((c) => c.url).toList(),
+          ['https://example.com/cet4/2024-reading']);
+      // 过滤结果对用户透明:notes 里写明过滤了多少条、各是什么原因
+      expect(run.notes.any((n) => n.contains('已过滤')), isTrue);
+      expect(run.notes.any((n) => n.contains('非英文')), isTrue);
+      expect(run.notes.any((n) => n.contains('公告/报名页')), isTrue);
+      expect(run.notes.any((n) => n.contains('弱相关')), isTrue);
+    });
+
+    test('promptHintOverride 生效:频道页只给分类+难度,不夹带用户目标', () async {
+      final transport = _FakeSearchTransport(
+        defaultResults: <Map<String, Object?>>[hit('https://example.com/a')],
+        fetchContent: longMarkdown,
+      );
+      final run = await MaterialDiscovery(searchClient: clientWith(transport))
+          .discover(
+        queries: const <String>['ai chips'],
+        prefs: InputPreferences(examGoals: const <String>['四六级']),
+        model: LearnerModel(),
+        maxFetch: 1,
+        usePublicSources: false,
+        enableRefine: false,
+        promptHintOverride: '分类:按题材 · 科学与技术。',
+      );
+      // 只验证"能正常跑通且 override 不影响候选收集";提示词是否夹带目标
+      // 由 material_channel_query_test 的纯函数单测钉死(提示词不进传输层)。
+      expect(run.items, isNotEmpty);
+    });
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════════════

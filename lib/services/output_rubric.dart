@@ -249,6 +249,73 @@ class OutputRubric {
     return null;
   }
 
+  /// rubric 的**中文显示名**(UI 一律用它,绝不把 `cet4_writing` 这种 id 打到界面)。
+  static const Map<String, String> displayNames = <String, String>{
+    'cet4_writing': '四级写作评分标准',
+    'cet4_translation': '四级翻译评分标准',
+    'cet6_writing': '六级写作评分标准',
+    'cet6_translation': '六级翻译评分标准',
+    'back_translation': '回译评分标准',
+    'summary': '摘要评分标准',
+  };
+
+  /// 中文名;[id] 未知时给可读兜底(不显示裸 id)
+  static String displayNameOf(String id) {
+    final name = displayNames[id.trim()];
+    if (name != null) return name;
+    final rubric = byId(id);
+    if (rubric != null) return '${rubric.type}评分标准';
+    return '评分标准';
+  }
+
+  /// 按考试等级 + 题型给出 rubric id(六级 → cet6_*;其余等级沿用 cet4_* 通用口径)。
+  ///
+  /// 为什么不是"每级一套":考研/雅思/托福目前没有独立评分维度,
+  /// 四级写作四维(内容/组织/语言/词汇句式)对它们同样适用;
+  /// 但**六级必须有独立 id**,否则用户会看到"练六级、标准是四级"。
+  static String rubricIdFor({
+    required String examType,
+    required String kind,
+  }) {
+    final isTranslation = kind.trim().toLowerCase() == 'translation';
+    if (examType.trim().toLowerCase() == 'cet6') {
+      return isTranslation ? 'cet6_translation' : 'cet6_writing';
+    }
+    return isTranslation ? 'cet4_translation' : 'cet4_writing';
+  }
+
+  /// 解析一道题该用哪套 rubric(练题页唯一入口)。
+  ///
+  /// - 优先用题组里存的 [rubricId];
+  /// - 但**等级以题组 `exam_type` 为准**:老数据可能给六级题存了 `cet4_writing`,
+  ///   这里按 examType 纠正成 `cet6_*`(不写回库,展示与评分都按正确等级);
+  /// - 没有 rubricId 时按题型推;全部失败才回落到摘要 rubric(绝不抛)。
+  static OutputRubric? resolveFor({
+    String rubricId = '',
+    String examType = 'none',
+    String taskType = '',
+  }) {
+    var id = rubricId.trim();
+    final isCet6 = examType.trim().toLowerCase() == 'cet6';
+    if (id.isEmpty) {
+      final type = taskType.trim().toLowerCase();
+      if (type == 'translation' || type == 'exam_translation') {
+        id = rubricIdFor(examType: examType, kind: 'translation');
+      } else if (type == 'back_translation') {
+        id = 'back_translation';
+      } else if (type == 'summary') {
+        id = 'summary';
+      } else if (type == 'spelling' || type == 'blank_filling') {
+        id = '';
+      } else {
+        id = rubricIdFor(examType: examType, kind: 'writing');
+      }
+    } else if (isCet6 && id.startsWith('cet4_')) {
+      id = id.replaceFirst('cet4_', 'cet6_');
+    }
+    return byId(id) ?? byId('summary') ?? (_builtin.isEmpty ? null : _builtin.first);
+  }
+
   static final List<OutputRubric> _builtin = <OutputRubric>[
     OutputRubric(
       id: 'cet4_writing',
@@ -405,6 +472,91 @@ class OutputRubric {
       promptTemplate:
           '评分目标是"读后概括":先看要点是否覆盖,再看压缩比、'
           '结构与语言;照抄原文过多要明显扣"压缩概括"分。',
+    ),
+    // ── 六级(2026-11-07 用户真机反馈)──
+    //
+    // 六级材料/真题必须有自己的 rubric id,不能借 cet4_*:
+    // ① 用户会看到"批改标准:四级"这种错等级的展示;
+    // ② 统计按 rubric 归档时四级/六级会串。
+    // 维度沿用同一套教学口径(内容/组织/语言/词汇/句式),差别在提示词口径与 id;
+    // 数据库侧由 `_seedBuiltinRubrics` 以 INSERT OR IGNORE 幂等补齐(老库开库即补)。
+    OutputRubric(
+      id: 'cet6_writing',
+      type: 'writing',
+      scoringMode: ScoringMode.aiRubric,
+      dimensions: const <RubricDimension>[
+        RubricDimension(
+          key: 'content',
+          label: '内容切题',
+          weight: 0.25,
+          maxScore: 25,
+          hint: '是否按题目要求展开?论点是否清楚、论据是否相关?',
+        ),
+        RubricDimension(
+          key: 'organization',
+          label: '组织连贯',
+          weight: 0.20,
+          maxScore: 20,
+          hint: '段落结构与衔接是否清楚?论证层次是否分明?',
+        ),
+        RubricDimension(
+          key: 'language',
+          label: '语言准确',
+          weight: 0.25,
+          maxScore: 25,
+          hint: '语法、拼写、标点是否正确?复杂句是否用对?',
+        ),
+        RubricDimension(
+          key: 'vocabulary',
+          label: '词汇丰富',
+          weight: 0.15,
+          maxScore: 15,
+          hint: '用词是否准确、有变化?有没有中式表达/重复用词?',
+        ),
+        RubricDimension(
+          key: 'sentence_variety',
+          label: '句式多样',
+          weight: 0.15,
+          maxScore: 15,
+          hint: '长难句、从句/非谓语/倒装等是否有有效变化?',
+        ),
+      ],
+      bands: _cetWritingBands,
+      promptTemplate:
+          '按 CET-6 写作 15 分制口径评分:立意与论证深度要求高于四级,'
+          '词汇与句式需有明显变化,语言小错从宽、影响理解从严;折成 100 分制上报。',
+    ),
+    OutputRubric(
+      id: 'cet6_translation',
+      type: 'translation',
+      scoringMode: ScoringMode.aiRubric,
+      dimensions: const <RubricDimension>[
+        RubricDimension(
+          key: 'comprehension',
+          label: '原文理解',
+          weight: 0.30,
+          maxScore: 30,
+          hint: '是否读懂中文原句的文化/逻辑内涵?有没有理解错?',
+        ),
+        RubricDimension(
+          key: 'accuracy',
+          label: '译文准确',
+          weight: 0.40,
+          maxScore: 40,
+          hint: '信息是否完整?长句拆分后有没有漏译、误译?',
+        ),
+        RubricDimension(
+          key: 'fluency',
+          label: '表达通顺',
+          weight: 0.30,
+          maxScore: 30,
+          hint: '英文是否自然连贯?复杂结构处理是否得当?',
+        ),
+      ],
+      bands: _cetTranslationBands,
+      promptTemplate:
+          '按 CET-6 翻译 15 分制口径评分:长句与文化负载表达的处理是重点;'
+          '准确完整优先于华丽,中式英语与漏译明显扣分;折成 100 分制上报。',
     ),
   ];
 
@@ -624,6 +776,66 @@ class ScoredOutput {
     'correction': correction ?? '',
     'summary': summary,
   };
+
+  /// 从 `output_attempts.score_json` 还原(草稿恢复/历史复盘用)。
+  ///
+  /// 容错:Map 或 JSON 字符串都收;缺 total_score / 坏 JSON → null;
+  /// 单条维度/问题坏数据跳过,不让一条脏数据毁掉整份历史评分。
+  static ScoredOutput? fromJson(Object? raw) {
+    Map<String, dynamic>? map;
+    if (raw is Map) {
+      map = Map<String, dynamic>.from(raw);
+    } else if (raw is String && raw.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map) map = Map<String, dynamic>.from(decoded);
+      } catch (_) {
+        return null;
+      }
+    }
+    if (map == null) return null;
+    final total = (map['total_score'] as num?)?.toDouble();
+    if (total == null) return null;
+
+    final dims = <ScoredDimension>[];
+    final rawDims = map['dimensions'];
+    if (rawDims is List) {
+      for (final d in rawDims) {
+        if (d is! Map) continue;
+        final key = '${d['key'] ?? ''}'.trim();
+        if (key.isEmpty) continue;
+        dims.add(ScoredDimension(
+          key: key,
+          label: '${d['label'] ?? key}'.trim(),
+          maxScore: (d['max_score'] as num?)?.toDouble() ?? 0,
+          score: (d['score'] as num?)?.toDouble(),
+          evidence: '${d['evidence'] ?? ''}'.trim(),
+        ));
+      }
+    }
+    final issues = <ScoredIssue>[];
+    final rawIssues = map['issues'];
+    if (rawIssues is List) {
+      for (final i in rawIssues) {
+        if (i is! Map) continue;
+        issues.add(ScoredIssue(
+          span: '${i['span'] ?? ''}'.trim(),
+          type: '${i['type'] ?? ''}'.trim(),
+          reason: '${i['reason'] ?? ''}'.trim(),
+          suggestion: '${i['suggestion'] ?? ''}'.trim(),
+        ));
+      }
+    }
+    final correction = '${map['correction'] ?? ''}'.trim();
+    return ScoredOutput(
+      totalScore: total,
+      bandLabel: '${map['band_label'] ?? ''}'.trim(),
+      dimensions: dims,
+      issues: issues,
+      correction: correction.isEmpty ? null : correction,
+      summary: '${map['summary'] ?? ''}'.trim(),
+    );
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════

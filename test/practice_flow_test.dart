@@ -6,6 +6,7 @@ import 'package:readflow/config/theme.dart';
 import 'package:readflow/screens/output/practice_flow_screen.dart';
 import 'package:readflow/screens/output/widgets/practice_result_view.dart';
 import 'package:readflow/services/output_composer.dart';
+import 'package:readflow/services/output_draft.dart';
 import 'package:readflow/services/output_rubric.dart';
 
 /// 批 3 · 练习器/结果页的渲染回归。
@@ -126,5 +127,131 @@ void main() {
     expect(find.text('未评'), findsOneWidget);
     expect(find.textContaining('需要改的地方'), findsOneWidget);
     expect(find.textContaining('建议：finish reading the paper'), findsOneWidget);
+  });
+
+  // ── 2026-11-07 真机反馈第 6 条第 3 点:自由跳题(不强制顺序)──
+
+  OutputSetSpec fakeSet3() => const OutputSetSpec(
+        title: '六级写作真题',
+        tier: OutputTier.sentence,
+        source: 'exam',
+        examType: 'cet6',
+        section: 'back_translation',
+        rubricId: 'cet6_writing',
+        tasks: [
+          OutputTaskSpec(
+            tier: OutputTier.sentence,
+            type: 'back_translation',
+            promptZh: '第一题:把这句话译回英文。',
+            reference: 'First sentence.',
+            rubricId: 'cet6_writing',
+            wordCount: 0,
+          ),
+          OutputTaskSpec(
+            tier: OutputTier.sentence,
+            type: 'back_translation',
+            promptZh: '第二题:把这句话译回英文。',
+            reference: 'Second sentence.',
+            rubricId: 'cet6_writing',
+            wordCount: 0,
+          ),
+          OutputTaskSpec(
+            tier: OutputTier.sentence,
+            type: 'back_translation',
+            promptZh: '第三题:把这句话译回英文。',
+            reference: 'Third sentence.',
+            rubricId: 'cet6_writing',
+            wordCount: 0,
+          ),
+        ],
+      );
+
+  testWidgets('答题卡:可跳到任意题,答题草稿随题切换不丢', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    // 草稿落盘(Hive)在测试里也要可用;清掉上一用例的残留。
+    // 注意:Hive 写入内部用 Future.delayed(0),在 fake-async 的 testWidgets 里
+    // 必须放进 runAsync 才会真正完成(直接 await 会挂到测试超时)。
+    await tester.runAsync(() => OutputDraftStore.clear());
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.lightTheme,
+        home: PracticeFlowScreen(set: fakeSet3(), savedSetId: 0),
+      ),
+    );
+    await tester.pump();
+    expect(find.textContaining('第 1/3 题'), findsOneWidget);
+
+    // 打开答题卡 → 跳到第 3 题
+    await tester.tap(find.byIcon(Icons.grid_view_rounded).first);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('答题卡'), findsOneWidget);
+    await tester.tap(find.text('3').last);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.textContaining('第 3/3 题'), findsOneWidget);
+
+    // 在第 3 题写草稿,跳回第 1 题,再跳回第 3 题 → 文本还在
+    await tester.enterText(find.byType(TextField), 'third answer draft');
+    await tester.pump();
+    await tester.tap(find.byIcon(Icons.grid_view_rounded).first);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('1').last);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.textContaining('第 1/3 题'), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.grid_view_rounded).first);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('3').last);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.textContaining('第 3/3 题'), findsOneWidget);
+    expect(find.text('third answer draft'), findsOneWidget);
+  });
+
+  testWidgets('继续上次练习:按草稿恢复题号与作答', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    // 模拟"上次练到第 2 题、第 1 题写了草稿"后退出。
+    // setId 用 0:本用例只验证**草稿恢复**(Hive 同步路径),不触发读库;
+    // 已批改结果的库内还原由 output_draft_test 的 loadScoredByIndex 用例覆盖。
+    await tester.runAsync(() => OutputDraftStore.save(OutputDraft(
+          setId: 0,
+          title: '六级写作真题',
+          index: 1,
+          texts: const <int, String>{0: 'first question draft'},
+          updatedAt: DateTime.now(),
+        )));
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.lightTheme,
+        home: PracticeFlowScreen(set: fakeSet3(), savedSetId: 0),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 120));
+
+    expect(find.textContaining('第 2/3 题'), findsOneWidget,
+        reason: '应恢复到上次停下的第 2 题');
+
+    // 跳回第 1 题:草稿文本应还在
+    await tester.tap(find.byIcon(Icons.grid_view_rounded).first);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('1').last);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('first question draft'), findsOneWidget);
+
+    await tester.runAsync(() => OutputDraftStore.clear());
   });
 }

@@ -25,6 +25,7 @@ import 'package:readflow/services/database.dart';
 import 'package:readflow/services/reader_settings.dart';
 import 'package:readflow/widgets/reader_action_bar.dart';
 import 'package:readflow/widgets/reader_paper.dart';
+import 'package:readflow/widgets/reader_text.dart';
 
 int? _materialId;
 

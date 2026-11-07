@@ -8,6 +8,7 @@ import '../../services/drill_planner.dart';
 import '../../services/database.dart';
 import '../../services/learner_model_store.dart';
 import '../../services/output_composer.dart';
+import '../../services/output_draft.dart';
 import '../../widgets/app_page_route.dart';
 import '../../widgets/app_ui.dart';
 import '../../widgets/v4/v4_kit.dart';
@@ -19,6 +20,7 @@ import 'drill_plan_screen.dart';
 // DrillMode 枚举定义在 drill_screen.dart;四阶卡片的进度摘要按模式取
 import 'drill_screen.dart' show DrillMode;
 import 'practice_history_screen.dart';
+import 'practice_flow_screen.dart';
 import 'practice_setup_screen.dart';
 import 'widgets/output_tier_card.dart';
 import 'widgets/paper_kit.dart';
@@ -65,6 +67,9 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
   int _dueWords = 0;
   int _writes7d = 0;
 
+  /// 上次没做完的练习(首页「继续上次练习」;没有就 null,不占位)
+  ResumablePractice? _resumable;
+
   @override
   void initState() {
     super.initState();
@@ -102,6 +107,25 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
       _writes7d = writes;
       _loading = false;
     });
+    // 「继续上次练习」:草稿存在且题组还能从库里还原才显示(失败静默隐藏)
+    try {
+      final resumable = await loadResumablePractice();
+      if (mounted) setState(() => _resumable = resumable);
+    } catch (_) {
+      // 草稿读取失败不影响输出首页其它内容
+    }
+  }
+
+  /// 继续上次没做完的练习:题组已落库,直接带 set 进练习器(不重新搜索/生成)
+  Future<void> _continuePractice(ResumablePractice resumable) async {
+    await appPush(
+      context,
+      (_) => PracticeFlowScreen(
+        set: resumable.set,
+        savedSetId: resumable.draft.setId,
+      ),
+    );
+    if (mounted) _load();
   }
 
   Future<void> _openPlan({DrillMode? mode}) async {
@@ -466,6 +490,24 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
             ),
             const SizedBox(height: Gap.sm),
 
+            // ②.2 继续上次练习(2026-11-07 真机反馈第 6 条第 4 点):
+            // 题组在出题时**已经落库**,这里只把"停在第几题 + 未提交草稿"接回来,
+            // 点进去不重新搜索/不重新生成。
+            if (_resumable != null) ...<Widget>[
+              PaperRow(
+                leading: Icon(
+                  Icons.play_arrow_rounded,
+                  size: 22,
+                  color: theme.colorScheme.primary,
+                ),
+                title: '继续上次练习',
+                meta:
+                    '${_resumable!.set.title} · ${_resumable!.progressLabel} · ${_resumable!.answeredLabel}',
+                onTap: () => _continuePractice(_resumable!),
+              ),
+              const SizedBox(height: Gap.sm),
+            ],
+
             // ②.5 今日建议:只用真实数据(到期复习词数 / 近 7 天写译篇数)
             //
             // 不再套 AppStagger:它的入场延迟在首帧/截图里会留下"看不见但占位"
@@ -486,7 +528,7 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
                 physics: const NeverScrollableScrollPhysics(),
                 mainAxisSpacing: Gap.xs,
                 crossAxisSpacing: Gap.xs,
-                childAspectRatio: 1.28,
+                childAspectRatio: 1.02,
                 children: [
                   OutputTierCard(
                     tier: outputTierCatalog[0].tier,

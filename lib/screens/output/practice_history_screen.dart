@@ -4,6 +4,7 @@ import '../../config/design_tokens.dart';
 import '../../config/v4_theme.dart';
 import '../../services/database.dart';
 import '../../services/output_composer.dart';
+import '../../services/output_draft.dart';
 import '../../services/output_exam_backfill.dart';
 import '../../widgets/app_page_route.dart';
 import '../../widgets/graphics/graphics.dart';
@@ -112,41 +113,9 @@ class _PracticeHistoryScreenState extends State<PracticeHistoryScreen> {
     if (id == null) return;
     try {
       final full = await DatabaseService.getExerciseSet(id);
-      final items = (full?['items'] as List?) ?? const [];
-      final tasks = <OutputTaskSpec>[];
-      for (final raw in items) {
-        if (raw is! Map) continue;
-        final tier = _tierOf('${full?['section'] ?? ''}', '${raw['type'] ?? ''}');
-        tasks.add(OutputTaskSpec(
-          tier: tier,
-          type: '${raw['type'] ?? ''}',
-          promptZh: '${raw['prompt_zh'] ?? ''}',
-          promptEn: '${raw['prompt_en'] ?? ''}',
-          reference: '${raw['reference_answer'] ?? ''}',
-          rubricId: '${raw['rubric_id'] ?? ''}',
-          wordCount: _int(raw['word_count']),
-          sourceSpan: '${raw['source_span'] ?? ''}',
-          source: '${full?['source'] ?? 'builtin'}',
-          verifyStatus: '${full?['verify_status'] ?? 'pending'}',
-        ));
-      }
-      if (!mounted || tasks.isEmpty) return;
-      final set = OutputSetSpec(
-        title: '${full?['title'] ?? '历史题组'}',
-        tier: tasks.first.tier,
-        source: '${full?['source'] ?? 'builtin'}',
-        examType: '${full?['exam_type'] ?? 'none'}',
-        section: '${full?['section'] ?? ''}',
-        rubricId: '${full?['rubric_id'] ?? ''}',
-        // P0-1:历史题组重练也要带上卷面身份与来源(以前这里全丢,
-        // 从题库点进去就变成"无名卷子")
-        paperYear: (full?['paper_year'] as num?)?.toInt(),
-        paperLabel: '${full?['paper_label'] ?? ''}',
-        sourceSite: siteOfLicenseNote('${full?['license_note'] ?? ''}'),
-        licenseNote: '${full?['license_note'] ?? ''}',
-        verifyStatus: '${full?['verify_status'] ?? 'pending'}',
-        tasks: tasks,
-      );
+      // 与「继续上次练习」共用同一套还原口径(避免两处字段漂移)
+      final set = setSpecFromExerciseRow(full);
+      if (!mounted || set == null) return;
       await appPush(
         context,
         (_) => PracticeFlowScreen(set: set, savedSetId: id),
@@ -158,39 +127,6 @@ class _PracticeHistoryScreenState extends State<PracticeHistoryScreen> {
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('打开题组失败:$e')));
     }
-  }
-
-  OutputTier _tierOf(String section, String type) {
-    if (type == 'spelling' || type == 'blank_filling') return OutputTier.word;
-    if (type == 'back_translation' ||
-        type == 'sentence_rewrite' ||
-        type == 'error_correction') {
-      return OutputTier.sentence;
-    }
-    if (type == 'summary' || type == 'paragraph' || type == 'opinion') {
-      return OutputTier.paragraph;
-    }
-    if (type == 'exam_writing' || type == 'writing' || type == 'translation') {
-      return OutputTier.essay;
-    }
-    switch (section) {
-      case 'back_translation':
-      case 'sentence_rewrite':
-        return OutputTier.sentence;
-      case 'summary':
-        return OutputTier.paragraph;
-      case 'writing':
-      case 'translation':
-        return OutputTier.essay;
-      default:
-        return OutputTier.paragraph;
-    }
-  }
-
-  int _int(Object? v) {
-    if (v is int) return v;
-    if (v is num) return v.toInt();
-    return int.tryParse('$v') ?? 0;
   }
 
   @override
@@ -288,7 +224,7 @@ class _PracticeHistoryScreenState extends State<PracticeHistoryScreen> {
   Widget _buildCard(BuildContext context, Map<String, Object?> row) {
     final skin = V4Skin.of(context);
     final section = '${row['section'] ?? ''}';
-    final tier = _tierOf(section, '');
+    final tier = outputTierOfItem(section: section, type: '');
     final source = '${row['source'] ?? ''}';
     final sourceLabel = switch (source) {
       'exam' => '真题',

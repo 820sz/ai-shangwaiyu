@@ -313,3 +313,60 @@
   `material_category_screen.dart:210`、`category_material_screen.dart:833`）。
   现在材料中心的「找材料」已走新页（自由搜 / 按我的情况找），这条旧 AI 检索链路**是否下线/合并**
   需要用户拍板（它不在本轮「找材料」写作用域内，未擅自删除）。
+
+---
+
+## 14. 第三轮补强(2026-11-07 · 用户真机反馈第 4/5 条)
+
+> 范围:只动「自由搜 / 结果卡」+ 新增 AI 改写服务。**不改**检索逻辑(归 W1a 的
+> `material_discovery`/`content_quality`/`material_taxonomy`/频道页)、不改 DB 结构、
+> 不加依赖(封面用的 `dio` 是已有直接依赖)。
+
+### 14.1 反馈 → 根因 → 实现 → 渲染
+
+| # | 用户反馈 | 根因(本轮核验) | 实现(file:line) | 渲染图 |
+|---|---|---|---|---|
+| 4-① | 自由搜顶部输入框文字上半截被裁 | 搜索框容器写死 `height: 42` + `TextField(isDense)` 的默认内边距,文字可用高度不足,InputDecorator 把内容裁掉 | `lib/screens/input/free_search_screen.dart` `_searchBar`(:837):容器只给 `minHeight: 46`、文字行高 1.35、`contentPadding` 上下各 12 → 内高 ~41.6px 装得下 13px 字号整行 | `find-material-impl-free-input.png` |
+| 4-② | 筛选区默认全展开、悬置挡大半屏、无法收起 | 4 行 chip 常驻在 Column 顶部,没有收起态 | 同文件 `_filterBar`(:945):收起态一行「筛选(n) + 已选条件摘要 chips + 清空」;`_filterPanel`(:1103)展开为**限高 42% 可滚动**的面板 + 「收起筛选」;`_runSearch` 开始/结束都置 `_filtersOpen=false`(:`_runSearch`) | `find-material-impl-free-filters.png`(展开)、`find-material-impl-free-empty.png`(默认收起) |
+| 4-③ | 没找到原文只给无关的"真实材料" | 空结果只有"再搜一次",没有解释也没有保底内容;AI 检索链路与"自由搜"是两条腿 | 空结果卡 `_emptyAfterRun`(:1581):用**真实检索信息**说清关键词/检索源/原始命中条数/筛选后 0 条/源说明;`_aiEntryCard`(:1666) → `_generateAiRewrite`(:691) → `_aiResultCard`(:1814) | `find-material-impl-ai-empty.png`、`find-material-impl-ai-generated.png` |
+| 5 | 材料卡普遍不显示封面(能爬到就展示) | 检索结果大多没有 `imageUrl`,卡片"有图才显示"→ 永远文字版式 | `lib/widgets/material_result_list.dart`:卡片封面位 `_MaterialResultCardCover`(:908) 取图顺序 ①数据自带 → ②Gutenberg 按书号现算(零网络) → ③**卡片级懒加载** og:image(`MaterialCoverProbeCache` :462 + `httpMaterialCoverProbe` :545,内存缓存/并发 3/失败静默);`material_result_list.dart:709` `enableLazyCoverFetch`(默认 true,测试可关) | `find-material-impl-cover-with.png` / `find-material-impl-cover-without.png` |
+
+### 14.2 AI 改写学习版(非原文)链路
+
+- 服务:`lib/services/material_ai_rewrite.dart`(新)
+  - 标注常量 `aiRewriteMarker`(:39)/ `aiRewriteLicense`(:42);
+  - 提示词纯函数 `buildAiRewritePrompt`(:287):只喂**过滤前**真实线索(标题/site/kind/摘要/url,≤8 条)+ 难度档 + 目标/兴趣/屏蔽项;硬规则:不许编链接/作者/数据、明确改写非原文、英文 3~4 段目标词数、只输出 JSON;
+  - 解析纯函数 `parseAiRewrite`(:344):容错围栏/别名字段;正文必须英文且 ≥80 词;`used_sources` 只映射**真实候选编号**(模型编的 URL 一律丢);不足 2 条线索时 `basisLimited=true`(界面明说依据有限);
+  - 来源与许可 `buildAiRewriteProvenanceText`(:496):正文末尾保留来源清单链接 + 非原文说明 + license;
+  - 入库行纯函数 `buildAiRewriteMaterialRow`(:526):`source='ai'`、`title` 带「AI 改写学习版（非原文）」、`license` 标注、`url` 保留首条真实来源、`difficulty_json` 用真实分析;
+  - 执行器 `MaterialAiRewriter`(:599):handler/measurer 可注入(默认 `DeepseekApiService.completeJson(thinkingLevel: output)` + `MaterialLibrary.analyze` 量真实字数/覆盖率);失败返回人话原因,不抛到界面;
+  - 入库 `MaterialAiRewriteStore.ingest`(:673):先本地算难度再写材料库(1 个 chunk),返回 materialId。
+- 界面:`free_search_screen.dart` `_aiEntryCard` / `_aiResultCard` / `_useAiMaterial`(:730)
+  - 有原文 → 原文在上,AI 块在下方以不同底色「这些都不合适?」+「AI 改写 · 非原文」tag,**不自动生成、不替换**;
+  - 无原文 → 「没找到想读的原文?」为主路径;零线索时按钮禁用并说明不凭空编;
+  - 生成后展示:标注 + 真实字数/覆盖率/CEFR/时长 + 「基于 N 条真实来源」+ 开始读/保存到我的/重新生成;
+  - 开始读/保存到我的都先 `MaterialAiRewriteStore.ingest`,再进 `MaterialReaderScreen` 或记 `MaterialChannelStore.addSavedMaterial(free:<词>, id)`。
+
+### 14.3 本轮测试与渲染
+
+| 文件 | 用例数 | 结果 |
+|---|---|---|
+| `test/find_material_ai_rewrite_test.dart` | 21 | 全绿(纯函数 + 注入 handler/measurer) |
+| `test/material_result_list_test.dart` | 21(新增 6 条封面) | 全绿 |
+| `test/find_material_free_search_test.dart` | 12(输入框/筛选收起/AI 保底/回归) | 全绿 |
+| `test/find_material_render_test.dart` | 17(出图 17 张) | 全绿 |
+| `flutter analyze --no-pub lib` | — | 0 error / 0 warning |
+| `test/ui_copy_lint_test.dart` | 1 | 全绿(新文案无 Markdown 星号) |
+
+新增/刷新渲染(docs/ui-preview/real/):`find-material-impl-free-input.png`、
+`find-material-impl-free-filters.png`、`find-material-impl-cover-with.png`、
+`find-material-impl-cover-without.png`、`find-material-impl-ai-empty.png`、
+`find-material-impl-ai-generated.png`,并重渲染原有 11 张(自由搜空态/结果/页码、
+按需找面板/结果/页码/缺数据、入口、历史、无封面卡)。
+
+### 14.4 纪律自检
+
+- 封面**绝不画假封面**:抓不到就保持文字版式;懒加载失败静默且缓存负结果;渲染测试注入"抓不到"实现,不靠网络;
+- AI 改写**绝不冒充原文**:标题/license/tag/正文末尾四处固定标注;模型编的来源 URL 丢弃;没有线索就不生成;
+- 数字**全是本地实数**:字数/覆盖率/CEFR/时长来自 `MaterialLibrary.analyze`,不用模型自报的数字;
+- 无新依赖、无 DB 结构变更、无 dbVersion 改动;未 commit。

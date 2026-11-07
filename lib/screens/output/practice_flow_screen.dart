@@ -11,6 +11,7 @@ import '../../services/ability_recorder.dart';
 import '../../services/database.dart';
 import '../../services/doubao_api.dart';
 import '../../services/output_composer.dart';
+import '../../services/output_draft.dart';
 import '../../services/output_feedback.dart';
 import '../../services/output_rubric.dart';
 import '../../widgets/answer_image_input.dart';
@@ -57,7 +58,18 @@ class _PracticeFlowScreenState extends State<PracticeFlowScreen> {
   int _index = 0;
   bool _scoring = false;
   String? _error;
-  ScoredOutput? _result;
+
+  /// 每题批改结果(按题目下标):跳题/草稿恢复都要"回到某题时它已经批过"。
+  final Map<int, ScoredOutput> _scored = <int, ScoredOutput>{};
+
+  /// 每题作答草稿(按题目下标):跳题不丢、退出写进草稿(下次继续)。
+  final Map<int, String> _texts = <int, String>{};
+
+  /// 当前题的批改结果(UI 唯一读口,保持旧代码语义)
+  ScoredOutput? get _result => _scored[_index];
+
+  /// 已批改题数(底部"完成"校验口径)
+  int get _scoredCount => _scored.length;
 
   /// 数据库里的题目 id(与按 idx 对齐;没有就 null,作答仍会保存到 attempts)
   List<int?> _itemIds = const [];
@@ -69,6 +81,84 @@ class _PracticeFlowScreenState extends State<PracticeFlowScreen> {
     super.initState();
     _stopwatch.start();
     if (widget.savedSetId > 0) _loadItemIds();
+    _restoreDraft();
+  }
+
+  /// 恢复上次练习:**先同步恢复草稿**(题号 + 每题文本,纯 Hive 读取),
+  /// 再在后台补"哪些题已经批改"(要读库,慢一步不挡首帧)。
+  ///
+  /// 只在 `savedSetId` 与草稿对得上时恢复 —— 从题库点开另一套题时不会被旧草稿串台。
+  void _restoreDraft() {
+    try {
+      final draft = OutputDraftStore.load();
+      if (draft == null || draft.setId != widget.savedSetId) return;
+      setState(() {
+        _texts.addAll(draft.texts);
+        _index = draft.index.clamp(0, widget.set.tasks.length - 1);
+        _answerCtrl.text = _texts[_index] ?? '';
+      });
+      unawaited(_restoreScored());
+    } catch (_) {
+      // 恢复失败只是回到第 1 题,不影响练习
+    }
+  }
+
+  /// 已批改题目的还原(读 `output_attempts`;失败静默,不影响练习)
+  Future<void> _restoreScored() async {
+    if (widget.savedSetId <= 0) return;
+    try {
+      final scored = await loadScoredByIndex(widget.savedSetId);
+      if (!mounted || scored.isEmpty) return;
+      setState(() => _scored.addAll(scored));
+    } catch (_) {
+      // 历史批改读不到就当作"都没批改过"
+    }
+  }
+
+  /// 把当前输入落到内存草稿(跳题/提交/退出前调用)
+  void _saveCurrentText() {
+    final text = _answerCtrl.text;
+    if (text.trim().isEmpty) {
+      _texts.remove(_index);
+    } else {
+      _texts[_index] = text;
+    }
+  }
+
+  /// 写 Hive 草稿:全部题都批改完了 → 清草稿(练习已完成);
+  /// 否则记录当前题号 + 每题文本,首页据此显示「继续上次练习」。
+  Future<void> _persistDraft() async {
+    if (widget.savedSetId <= 0) return;
+    _saveCurrentText();
+    if (_scoredCount >= widget.set.tasks.length) {
+      await OutputDraftStore.clear();
+      return;
+    }
+    await OutputDraftStore.save(OutputDraft(
+      setId: widget.savedSetId,
+      title: widget.set.title,
+      index: _index,
+      texts: Map<int, String>.from(_texts),
+      updatedAt: DateTime.now(),
+    ));
+  }
+
+  /// 跳到任意题(不强制顺序):保存当前文本 → 载入目标题文本/清错误/重开计时。
+  void _switchTo(int target) {
+    if (target < 0 || target >= widget.set.tasks.length || target == _index) {
+      return;
+    }
+    _saveCurrentText();
+    setState(() {
+      _index = target;
+      _answerCtrl.text = _texts[target] ?? '';
+      _answerImages.clear();
+      _error = null;
+      _stopwatch
+        ..reset()
+        ..start();
+    });
+    _persistDraft();
   }
 
   Future<void> _loadItemIds() async {
@@ -93,10 +183,13 @@ class _PracticeFlowScreenState extends State<PracticeFlowScreen> {
   }
 
   OutputRubric _rubricOf(OutputTaskSpec task) {
-    final id = task.rubricId.isNotEmpty
-        ? task.rubricId
-        : (task.tier == OutputTier.sentence ? 'back_translation' : 'summary');
-    return OutputRubric.byId(id) ??
+    // 2026-11-07(P0 真机反馈):按题组的 exam_type 纠正 rubric ——
+    // 老数据可能给六级题存了 cet4_writing,等级以题组为准,不把错等级展示给用户。
+    return OutputRubric.resolveFor(
+          rubricId: task.rubricId,
+          examType: widget.set.examType,
+          taskType: task.type,
+        ) ??
         OutputRubric.byId('summary') ??
         OutputRubric.builtin().first;
   }
@@ -139,9 +232,12 @@ class _PracticeFlowScreenState extends State<PracticeFlowScreen> {
       setState(() {
         _scoring = false;
         _transcribing = false;
-        _result = scored;
+        _scored[_index] = scored;
+        _texts[_index] = answer;
         _answerImages.clear();
       });
+      // 批完就落一次草稿:用户随时退出,下次进来这题已是"已批改"
+      unawaited(_persistDraft());
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -203,20 +299,201 @@ class _PracticeFlowScreenState extends State<PracticeFlowScreen> {
   }
 
   void _next() {
+    _saveCurrentText();
     if (_index + 1 >= widget.set.tasks.length) {
-      Navigator.pop(context, true);
+      _finish();
       return;
     }
-    setState(() {
-      _index++;
-      _result = null;
-      _error = null;
-      _answerCtrl.clear();
-      _answerImages.clear();
-      _stopwatch
-        ..reset()
-        ..start();
-    });
+    _switchTo(_index + 1);
+  }
+
+  /// 上一题(不强制顺序;第 1 题时无动作)
+  void _prev() => _switchTo(_index - 1);
+
+  /// 完成:整组校验未批改数;有未完成 → 先确认,不拦死用户。
+  Future<void> _finish() async {
+    _saveCurrentText();
+    final pending = widget.set.tasks.length - _scoredCount;
+    if (pending > 0) {
+      final go = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('还有题没批改'),
+          content: Text(
+            '本组共 ${widget.set.tasks.length} 题，已批改 $_scoredCount 题，'
+            '还有 $pending 题没提交批改。\n\n'
+            '现在完成会影响本次统计（未批改的题不计分），可以先回去补完。',
+            style: AppFont.tagStyle.copyWith(height: 1.5),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('继续作答'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('仍然完成'),
+            ),
+          ],
+        ),
+      );
+      if (go != true || !mounted) return;
+    }
+    await _persistDraft();
+    if (!mounted) return;
+    Navigator.pop(context, true);
+  }
+
+  /// 答题卡:整组题目一览(当前/已批改/已写/未答),点任意题跳转。
+  Future<void> _openAnswerSheet() async {
+    _saveCurrentText();
+    final picked = await showModalBottomSheet<int>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (ctx) {
+        return PaperSkin(
+          child: Builder(builder: (ctx) {
+            final skin = V4Skin.of(ctx);
+            final total = widget.set.tasks.length;
+            return SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(
+                    Gap.page, 0, Gap.page, Gap.lg),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      '答题卡',
+                      style: AppFont.subheadStyle.copyWith(
+                        color: skin.ink,
+                        fontSize: 17,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '共 $total 题 · 已批改 $_scoredCount 题 · 点任意题可跳转',
+                      style: AppFont.tagStyle.copyWith(
+                        color: skin.inkSoft,
+                        fontSize: 10.5,
+                      ),
+                    ),
+                    const SizedBox(height: Gap.md),
+                    Wrap(
+                      spacing: Gap.xs,
+                      runSpacing: Gap.xs,
+                      children: <Widget>[
+                        for (var i = 0; i < total; i++)
+                          _answerCell(ctx, i),
+                      ],
+                    ),
+                    const SizedBox(height: Gap.md),
+                    Row(
+                      children: <Widget>[
+                        Text(
+                          '图例：',
+                          style: AppFont.tagStyle.copyWith(
+                            color: skin.inkFaint,
+                            fontSize: 10,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        _legend(ctx, skin.ink, '当前'),
+                        const SizedBox(width: 10),
+                        _legend(ctx, skin.accentAlt, '已批改'),
+                        const SizedBox(width: 10),
+                        _legend(ctx, skin.surfaceAlt, '已写/未答'),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }),
+        );
+      },
+    );
+    if (picked != null && mounted) _switchTo(picked);
+  }
+
+  Widget _answerCell(BuildContext context, int i) {
+    final skin = V4Skin.of(context);
+    final current = i == _index;
+    final done = _scored.containsKey(i);
+    final written = (_texts[i] ?? '').trim().isNotEmpty;
+    final Color bg;
+    final Color fg;
+    if (current) {
+      bg = skin.ink;
+      fg = skin.onAccent;
+    } else if (done) {
+      bg = skin.accentAlt.withValues(alpha: 0.16);
+      fg = skin.accentAlt;
+    } else {
+      bg = written ? skin.surfaceAlt : Colors.transparent;
+      fg = skin.inkSoft;
+    }
+    return GestureDetector(
+      onTap: () => Navigator.pop(context, i),
+      child: Container(
+        width: 52,
+        height: 46,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(11),
+          border: Border.all(
+            color: current ? skin.ink : skin.hairline,
+            width: 1,
+          ),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: <Widget>[
+            Text(
+              '${i + 1}',
+              style: AppFont.subheadStyle.copyWith(
+                color: fg,
+                fontSize: 15,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            if (done)
+              Icon(Icons.check_rounded, size: 11, color: fg)
+            else
+              Text(
+                written ? '已写' : '未答',
+                style: AppFont.tagStyle.copyWith(color: fg, fontSize: 8.5),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _legend(BuildContext context, Color color, String label) {
+    return Row(
+      children: <Widget>[
+        Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(3),
+          ),
+        ),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: AppFont.tagStyle.copyWith(
+            color: V4Skin.of(context).inkFaint,
+            fontSize: 9.5,
+          ),
+        ),
+      ],
+    );
   }
 
   @override
@@ -243,7 +520,13 @@ class _PracticeFlowScreenState extends State<PracticeFlowScreen> {
     final levelLabel = widget.set.examType.trim().toLowerCase() == 'none'
         ? ''
         : examShortLabelFor(widget.set.examType);
-    return PaperScaffold(
+    return PopScope(
+      // 退出时落草稿:下次从首页「继续上次练习」进来可恢复题号与作答
+      canPop: true,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) unawaited(_persistDraft());
+      },
+      child: PaperScaffold(
       topBar: PaperTopBar(
         // 眉标只放"哪一级 · 哪一套",不重复长标题(长标题会被截成省略号)
         eyebrow: <String>[
@@ -254,6 +537,14 @@ class _PracticeFlowScreenState extends State<PracticeFlowScreen> {
                 ? '${task.tier.label}练习'
                 : widget.set.title,
         ].join(' · '),
+        actions: <Widget>[
+          if (total > 1)
+            PaperIconAction(
+              icon: Icons.grid_view_rounded,
+              tooltip: '答题卡（可跳题）',
+              onTap: _openAnswerSheet,
+            ),
+        ],
       ),
       // 唯一主行动放底部固定条:作答时不被按钮打断,滚动也一直在手边
       bottomBar: _buildBottomBar(context),
@@ -297,7 +588,7 @@ class _PracticeFlowScreenState extends State<PracticeFlowScreen> {
           PaperProgressLine(
             value: total <= 0
                 ? 0
-                : (_index + (_result == null ? 0.4 : 1)) / total,
+                : (_scoredCount + (_result == null ? 0.5 : 0)) / total,
           ),
           const SizedBox(height: Gap.md),
 
@@ -486,6 +777,7 @@ class _PracticeFlowScreenState extends State<PracticeFlowScreen> {
           const SizedBox(height: Gap.lg),
         ],
       ),
+      ),
     );
   }
 
@@ -511,11 +803,13 @@ class _PracticeFlowScreenState extends State<PracticeFlowScreen> {
                 ),
               ),
               const Spacer(),
+              // 显示**中文 rubric 名**(绝不显示 cet4_writing 这种 id)
               Text(
-                rubric.id,
+                OutputRubric.displayNameOf(rubric.id),
                 style: AppFont.tagStyle.copyWith(
                   color: skin.inkFaint,
                   fontSize: 10,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
             ],
@@ -538,26 +832,51 @@ class _PracticeFlowScreenState extends State<PracticeFlowScreen> {
     );
   }
 
-  /// 底部唯一主行动:作答态 = 提交批改;结果态 = 再写一遍 / 下一题。
+  /// 底部:作答态 = 上一题 + 提交批改 + 答题卡;结果态 = 再写一遍 + 下一题。
   Widget _buildBottomBar(BuildContext context) {
+    final hasPrev = _index > 0;
     if (_result == null) {
       final canSubmit = !_scoring &&
           !_transcribing &&
           (_answerCtrl.text.trim().isNotEmpty || _answerImages.isNotEmpty);
       return PaperBottomAction(
-        child: PaperPillButton(
-          label: _transcribing
-              ? '正在转写图片…'
-              : (_answerImages.isEmpty ? '提交批改' : '转写并提交批改'),
-          icon: Icons.fact_check_outlined,
-          onTap: canSubmit ? _submit : null,
-          expand: true,
+        child: Row(
+          children: <Widget>[
+            PaperIconAction(
+              icon: Icons.chevron_left_rounded,
+              tooltip: '上一题',
+              onTap: hasPrev ? _prev : null,
+            ),
+            const SizedBox(width: Gap.xs),
+            Expanded(
+              child: PaperPillButton(
+                label: _transcribing
+                    ? '正在转写图片…'
+                    : (_answerImages.isEmpty ? '提交批改' : '转写并提交批改'),
+                icon: Icons.fact_check_outlined,
+                onTap: canSubmit ? _submit : null,
+                expand: true,
+              ),
+            ),
+            const SizedBox(width: Gap.xs),
+            PaperIconAction(
+              icon: Icons.grid_view_rounded,
+              tooltip: '答题卡（可跳题）',
+              onTap: _openAnswerSheet,
+            ),
+          ],
         ),
       );
     }
     return PaperBottomAction(
       child: Row(
         children: <Widget>[
+          PaperIconAction(
+            icon: Icons.chevron_left_rounded,
+            tooltip: '上一题',
+            onTap: hasPrev ? _prev : null,
+          ),
+          const SizedBox(width: Gap.xs),
           Expanded(
             child: PaperPillButton(
               label: '再写一遍',
@@ -582,13 +901,15 @@ class _PracticeFlowScreenState extends State<PracticeFlowScreen> {
   /// 看完结果想再写一遍:清空答案重新作答(计时也重开)。
   void _resetAnswer() {
     setState(() {
-      _result = null;
+      _scored.remove(_index);
+      _texts.remove(_index);
       _answerCtrl.clear();
       _answerImages.clear();
       _stopwatch
         ..reset()
         ..start();
     });
+    unawaited(_persistDraft());
   }
 
   // ── 四阶形态差异(批 8 · D1-13)────────────────────────────────

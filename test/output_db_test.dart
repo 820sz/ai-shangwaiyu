@@ -13,7 +13,7 @@ import 'package:readflow/services/database.dart';
 /// 为什么用真 SQLite:这批表是"输出/评分/统计"三条链路的共同地基 —— 迁移写错
 /// 或事务没回滚,用户会看到"有卷面没题目"/"做题记录消失",而且库已经在手机上,
 /// 没有重装这个选项。测试覆盖:
-/// ① 全新安装(版本/四表/4 条内置 rubric 的结构与权重);
+/// ① 全新安装(版本/四表/6 条内置 rubric 的结构与权重);
 /// ② v20 → v21 升级(建表 + seed,旧数据不丢,重复打开幂等);
 /// ③ insertExerciseSet 事务(items 全进 / 失败整体回滚);
 /// ④ getExerciseSet(含 items)+ listExerciseSets 过滤;
@@ -54,7 +54,7 @@ void main() {
     return (rows.first['c'] as num?)?.toInt() ?? 0;
   }
 
-  test('全新安装:版本为当前 dbVersion + 四张新表 + 4 条内置 rubric(权重和=1、档位非空)', () async {
+  test('全新安装:版本为当前 dbVersion + 四张新表 + 6 条内置 rubric(权重和=1、档位非空)', () async {
     final db = await DatabaseService.database;
     expect(await db.getVersion(), AppConstants.dbVersion);
     // 只锁下限:v21 才引入输出四表;以后每批继续升版本不能把这条测试打红
@@ -72,10 +72,17 @@ void main() {
     );
 
     final rubrics = await DatabaseService.listRubrics();
-    expect(rubrics.length, 4, reason: '内置 rubric 只能 seed 一次');
+    expect(rubrics.length, 6, reason: '内置 rubric 只能 seed 一次（v2.28 起含六级写作/翻译两套）');
     expect(
       rubrics.map((r) => r['id']).toSet(),
-      {'cet4_writing', 'cet4_translation', 'back_translation', 'summary'},
+      {
+        'cet4_writing',
+        'cet4_translation',
+        'cet6_writing',
+        'cet6_translation',
+        'back_translation',
+        'summary',
+      },
       reason: '出题器/评分层按固定 id 对齐,不能改名',
     );
     for (final r in rubrics) {
@@ -171,7 +178,7 @@ void main() {
       containsAll(
           ['exercise_sets', 'exercise_items', 'rubrics', 'output_attempts']),
     );
-    expect(await count(db, 'rubrics'), 4);
+    expect(await count(db, 'rubrics'), 6);
 
     // ③ 旧数据不丢(词汇 + 上一批的译文)
     expect(await count(db, 'vocabulary'), 1);
@@ -181,7 +188,7 @@ void main() {
     await DatabaseService.resetForTest();
     final db2 = await DatabaseService.database;
     expect(await db2.getVersion(), AppConstants.dbVersion);
-    expect(await count(db2, 'rubrics'), 4, reason: 'seed 不能重复插入');
+    expect(await count(db2, 'rubrics'), 6, reason: 'seed 不能重复插入');
     expect(await count(db2, 'vocabulary'), 1);
     expect(await DatabaseService.loadMaterialTranslations(7), {0: '你好。'});
   });
@@ -353,7 +360,7 @@ void main() {
 
   test('内置 rubric seed:重复打开不重复插入,也不覆盖已被修改的内容', () async {
     final db = await DatabaseService.database;
-    expect(await count(db, 'rubrics'), 4);
+    expect(await count(db, 'rubrics'), 6);
 
     // 模拟用户/后续版本修改了内置 rubric(比如换了提示词)
     await db.update(
@@ -368,7 +375,7 @@ void main() {
     // 重启:seed 必须 INSERT OR IGNORE(不重复插入、不覆盖手改内容)
     await DatabaseService.resetForTest();
     final db2 = await DatabaseService.database;
-    expect(await count(db2, 'rubrics'), 4);
+    expect(await count(db2, 'rubrics'), 6);
     expect((await DatabaseService.getRubric('cet4_writing'))!['prompt_template'],
         '自定义评分提示词');
     expect(await DatabaseService.getRubric('not_exist_rubric'), isNull);

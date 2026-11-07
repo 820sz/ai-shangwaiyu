@@ -17,6 +17,15 @@ import 'package:readflow/widgets/material_result_list.dart';
 /// - 页码控件首末页禁用、点击回调;
 /// - 控制器:去重合并 / 追加跳页 / 分页夹紧。
 void main() {
+  setUp(() {
+    // 2026-11-07:卡片会对"没有 imageUrl"的结果做页面级封面懒加载。
+    // 单测/渲染不许真打网络 —— 默认注入"抓不到",需要验证的用例自己换实现。
+    MaterialCoverProbeCache.debugReset();
+    MaterialCoverProbeCache.debugOverride = (_) async => null;
+  });
+
+  tearDown(MaterialCoverProbeCache.debugReset);
+
   group('分页纯函数', () {
     test('0 条也算 1 页,永远不出现 第 1 / 0 页', () {
       expect(materialResultPageCount(0), 1);
@@ -354,6 +363,128 @@ void main() {
       controller.goPage(5);
       expect(controller.page, 0);
       controller.dispose();
+    });
+  });
+
+  // ═════════════════════════════════════════════════════════════════════
+  // 封面懒加载(2026-11-07 用户真机反馈第 5 条:材料卡普遍不显示封面)
+  // ═════════════════════════════════════════════════════════════════════
+  group('封面懒加载:能抓到就显示,抓不到不画假封面', () {
+    Future<void> pumpCard(
+      WidgetTester tester,
+      MaterialResultCard card,
+    ) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.lightTheme,
+          home: Scaffold(
+            body: SingleChildScrollView(child: card),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+    }
+
+    MaterialResultCard card({
+      String? imageUrl,
+      String url = 'https://example.com/article',
+      bool enableLazyCoverFetch = true,
+    }) =>
+        MaterialResultCard(
+          title: 'Climate Change and Coastal Cities',
+          url: url,
+          sourceLabel: 'NPR News',
+          kind: 'news',
+          snippet: '海平面上升正在改变沿海城市的基础设施规划。',
+          imageUrl: imageUrl,
+          enableLazyCoverFetch: enableLazyCoverFetch,
+          onRead: () {},
+          onSave: () {},
+          onOpenOriginal: () {},
+        );
+
+    testWidgets('有 imageUrl → 直接显示真封面,不发探测请求', (tester) async {
+      var probes = 0;
+      MaterialCoverProbeCache.debugOverride = (_) async {
+        probes++;
+        return null;
+      };
+      await pumpCard(
+        tester,
+        card(imageUrl: 'https://cdn.example.com/cover.jpg'),
+      );
+      expect(find.byType(Image), findsOneWidget);
+      expect(probes, 0, reason: '已有封面就不该再抓页面');
+    });
+
+    testWidgets('imageUrl 空 → 懒加载拿到 og:image 后显示缩略图', (tester) async {
+      MaterialCoverProbeCache.debugOverride =
+          (_) async => 'https://cdn.example.com/og-cover.jpg';
+      await pumpCard(tester, card());
+      expect(tester.takeException(), isNull);
+      expect(find.byType(Image), findsOneWidget);
+    });
+
+    testWidgets('抓不到 → 保持文字版式(没有 Image,更没有渐变假封面)', (tester) async {
+      MaterialCoverProbeCache.debugOverride = (_) async => null;
+      await pumpCard(tester, card());
+      expect(find.byType(Image), findsNothing);
+      expect(find.text('Climate Change and Coastal Cities'), findsOneWidget);
+      expect(find.text('NPR News'), findsWidgets);
+    });
+
+    testWidgets('同一 URL 只抓一次(会话内缓存,翻页/重建不重复打站点)',
+        (tester) async {
+      var probes = 0;
+      MaterialCoverProbeCache.debugOverride = (_) async {
+        probes++;
+        return 'https://cdn.example.com/og-cover.jpg';
+      };
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.lightTheme,
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: Column(
+                children: <Widget>[
+                  card(),
+                  card(),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+      expect(probes, 1, reason: '同 URL 的第二次卡片必须命中缓存');
+    });
+
+    testWidgets('公版书按书号现算封面(零网络);enableLazyCoverFetch=false 完全不探测',
+        (tester) async {
+      var probes = 0;
+      MaterialCoverProbeCache.debugOverride = (_) async {
+        probes++;
+        return null;
+      };
+      await pumpCard(
+        tester,
+        card(url: 'https://www.gutenberg.org/ebooks/1342'),
+      );
+      expect(find.byType(Image), findsOneWidget,
+          reason: 'Gutenberg 书号能直接推出官方封面,不该等网络');
+      expect(probes, 0);
+
+      await pumpCard(tester, card(enableLazyCoverFetch: false));
+      expect(find.byType(Image), findsNothing);
+      expect(probes, 0);
+    });
+
+    testWidgets('探测结果是脏 URL(非 http) → 丢弃,不显示假封面', (tester) async {
+      MaterialCoverProbeCache.debugOverride = (_) async => 'ftp://bad/cover.jpg';
+      await pumpCard(tester, card());
+      expect(find.byType(Image), findsNothing);
     });
   });
 }

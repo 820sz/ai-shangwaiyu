@@ -1,0 +1,719 @@
+<!DOCTYPE HTML>
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="renderer" content="webkit">
+﻿<!-- 主菜单 -->
+  <title>内蒙古大学图书馆书目检索系统</title>
+<link type="text/css" rel="stylesheet" href="../tpl/css/style.css">
+<link type="text/css" rel="stylesheet" href="../tpl/css/mylib.css" />
+<link type="text/css" rel="stylesheet" href="../tpl/css/ui-lightness/jquery-ui.css">
+<link type="text/css" rel="stylesheet" href="../tpl/css/font-awesome.css">
+
+
+<script  type="text/javascript" src="../tpl/js/jquery.js"></script>
+<script  type="text/javascript" src="../tpl/js/jquery-ui.js"></script>
+<script  type="text/javascript" src="../tpl/js/highlighter.js"></script>
+
+
+<script type="text/javascript" src="../tpl/js/md5.js"></script>
+<script type="text/javascript" src="../tpl/js/base64.js"></script>
+</head>
+<body>
+<div id="header_opac">
+	<h1 class="header_opac_img">
+		<div class="header_opac_logo">
+        内蒙古大学图书馆书目检索系统<br>
+			<p>Online Public Access Catalogue</p>
+
+		</div>
+	</h1>
+	<div class="header_right header_right_top">
+		<p class="header_right_font">       </p>
+		<p style="margin-top: 60px;" class="header_right_font">
+			<select class="option" name="locale" size="1" style="width: 60px;"
+				onchange="changeLocale(this.value);">
+      		<option value='zh_CN' selected>中文</option><option value='en_US'>English</option>          </select>
+         | <a href="../opac/book_cart.php">暂存书架(<span id="bookcartCount">0</span>)
+			</a> | <font color="blue"></font> <a href="../reader/login.php" style="color:#ff0000;">登录</a></p>
+	</div>
+</div>
+
+<div id="menubar">
+	<ul id="menu_top">
+    		  	<li><a class="menu_top_on" style="color: #6C5B23;"
+			href="../opac/search_adv.php" target="_self">书目检索</a></li>
+	  		  	<li><a href="../top/top_lend.php" target="_self">热门推荐</a></li>
+	  		  	<li><a href="../browse/cls_browsing.php" target="_self">分类浏览</a></li>
+	  		  	<li><a href="../newbook/newbook_cls_browse.php" target="_self">新书通报</a></li>
+	  		  	<li><a href="../peri/peri_nav_e.php" target="_self">期刊导航</a></li>
+	  		  	<li><a href="../asord/asord_hist.php" target="_self">读者荐购</a></li>
+	  		  	<li><a href="../shelf/curriculum_browse.php" target="_self">学科参考</a></li>
+	  		  	<li><a href="../info/info_guide.php" target="_self">信息发布</a></li>
+	  		  	<li><a href="../reader/redr_info.php" target="_self">我的图书馆</a></li>
+	  		  	 	  	        <div class="clear"></div>
+	</ul>
+</div>
+<div id="submenu">
+	  	
+	  	<a href="../opac/search_adv.php" target="_self">馆藏检索</a>
+	  	
+	  	<a href="../opac/search.php" target="_self">简单检索</a>
+	  	
+	  	<a href="../opac/search_more.php" target="_self">多字段检索</a>
+	        <div class="clear"></div>
+</div>
+
+<script type="text/javascript"> 
+    function changeLocale(obj) {  
+    	$.ajax({
+			 url: "../locale/ajax_change_locale.php",
+ 			  data: "lan="+obj,
+ 			  type: 'POST',
+			  success: function(html){
+// 				  setTimeout(function(){  //使用  setTimeout（）方法设定定时2000毫秒
+// 					  window.location.reload(true);//页面刷新
+// 					  },500);
+				  window.location.reload(true);
+			  }
+		}); 
+    }
+    
+</script>
+
+
+<!-- 图书明细 右侧的相关资源自定义链接 -->
+<script type="text/javascript" src="../tpl/js/contact.js"></script>
+<script language="JavaScript" type="text/javascript">
+	$(function(){
+/*		*/		
+		$('#tabs1').tabs({
+			spinner: '加载中...' 
+		});
+		$('#tabs2').tabs({
+			spinner: '加载中...' 
+		});
+		
+		$("#accordion").accordion({
+	      heightStyle: "fill", active:false,collapisable:true
+	    });
+		
+		$("#showMoreAnchor").click(function(){
+			$("#book_info dl:gt(99)").show();
+			$("#showMoreAnchor").hide();
+		});
+		
+		if($("#book_info dl").length > 99 + 1){
+			$("#book_info dl:gt(99)").hide();
+			$("#showMoreAnchor").show();
+		} else {
+			$("#showMoreAnchor").hide();
+		}
+			
+		$( "#dialog:ui-dialog" ).dialog( "destroy" );
+		$( "#dialog-form" ).dialog({
+			autoOpen: false,
+			modal: true 
+		});
+		$( "#dialog-fav" ).dialog({
+			autoOpen: false,
+			modal: true ,
+		      buttons: {
+		        "确定": function() {
+	        	  $("#favMsg").load("../reader/book_shelf_ajax_addbook.php?classid=" + $("#favSel option:selected").val() + "&marc_no=0000534720&time=" + new Date().getTime());	
+		          $(this).dialog( "close" );
+		        },
+		        "取消": function() {
+		          $( this ).dialog( "close" );
+		        }
+		      }
+		});
+				
+		 
+		$("a[title^=login_]").click(function() {
+			$("#returnUrl").val(escape(location.href));
+			//$('#tabs1').tabs("abort" );
+			//$('#tabs2').tabs("abort" );
+			$("#dialog-form").dialog("open" );
+		});
+		$("#myFav").click(function() {
+			$("#returnUrl").val(escape(location.href));
+			$("#dialog-form").dialog("open" );
+		}) ;
+			
+		
+		$("#spanItemMore").click(function(){
+			$("#item tr:gt(30)").show();
+			$("#spanItemMore").hide();
+		});
+		
+		if($("#item tr").length > 30 + 1){
+			$("#item tr:gt(30)").hide();
+			$("#spanItemMore").show();
+		} else {
+			$("#spanItemMore").hide();
+		}
+
+		$( "#dialog_add_addr" ).dialog({
+			autoOpen: false,
+			modal: true,
+			width: 400 ,
+			height: 180
+		});
+	});
+	
+</script>
+<script type="text/javascript">
+    $(function(){
+		$("#epa").load("../reader/ajax_ep.php");
+	});
+
+function encode(){
+	//var _str = document.getElementById("passwd").value;
+	var _str = document.getElementsByName("passwd")[0].value;
+	//var staticchars = "PXhw7UT1B0a9kQDKZsjIASmOezxYG4CHo5Jyfg2b8FLpEvRr3WtVnlqMidu6cN";
+    //var staticchars = document.getElementById("sca").value;
+	var staticchars = document.getElementsByName("sca")[0].value;
+    //var staticchars = "";
+	var encodechars = "";
+    if(staticchars !='') {
+	for(var i=0;i<_str.length;i++){
+		var num0 = staticchars.indexOf(_str[i]);
+		if(num0 == -1){
+		    var code = _str[i].charCodeAt(0);
+            code = code.toString(16);
+		}else{
+		    var code = staticchars[(num0+3)%62];
+            code = code.charCodeAt(0).toString(16);
+		}
+		var num1 = parseInt(Math.random()*62,10);
+		var num2 = parseInt(Math.random()*62,10);
+		encodechars += staticchars[num1]+code+staticchars[num2];
+	}
+	//document.getElementById("passwd").value = encodechars;
+	document.getElementsByName("passwd")[0].value = encodechars;
+    }
+	return true;
+}
+
+</script>
+<style>
+#accordion-resizer {
+	padding: 10px;
+	width: 100%;
+	height: 220px;
+}
+</style>
+<div id="mainbox">
+	<div id="container">
+		<div id="sidebar_item">
+			<div class="left_content">
+				<h4>借阅关系图</h4>
+				<p class="center">
+					<a target="_blank" title="点击查看详细"
+						href="../data/book_graph.php?id=0000534720"> <img
+						src="../tpl/images/visual.png" border="0" width="190" height="150" /></a>
+				</p>
+			</div>
+			<div class="left_content">
+				<h4>相关资源</h4>
+				<ul class="sharing_zy">
+										<li><a href="http://book.douban.com/isbn/978-7-301-16310-8/" target="_blank"><img src="../tpl/images/link/douban.jpg" border="0" /></a></li>
+										<li><a href="http://books.google.cn/books?q=%E8%AF%AD%E8%A8%80%E5%AD%A6%E7%BA%B2%E8%A6%81" target="_blank"><img src="../tpl/images/link/google.jpg" border="0"  /></a></li>
+										<li><a href="http://searchb.dangdang.com/?key=%E8%AF%AD%E8%A8%80%E5%AD%A6%E7%BA%B2%E8%A6%81" target="_blank"><img src="../tpl/images/link/dangdang.jpg" border="0" /></a></li>
+									</ul>
+				<div class="clear"></div>
+			</div>
+						
+						<div class="left_content">
+				<h4>
+					<span><a class="blue" target="_blank"
+						href="ajax_qr_usage.php">使用说明</a></span>二维码
+				</h4>
+				<p class="center">
+					<a href="ajax_qr.php?qrcode=6aKY5ZCN77ya6K%2Bt6KiA5a2m57qy6KaBDQrotKPku7vogIXvvJrlj7bonJrlo7AsIOW%2BkOmAmumUteiRlw0K6aaG6JeP5L%2Bh5oGvKOe0ouS5puWPty%2Fppobol4%2FlnLAv5Zyo6aaGL%2BWPr%2BeUqCnvvJoNCkgwL1k0MzIuMiDljZfmoKHljLrkv53nlZnmnKzlm77kuabol4%2FpmIXlrqQgMS8xDQpIMC9ZNDMyLjIg5Zu96ZmF5pWZ6IKy5a2m6Zmi6LWE5paZ5a6kIDIvMg0KSDAvWTQzMi4yIOWNl%2BagoeWMuuaxieaWh%2BekvuenkeWbvuS5puWAn%2BmYheWupCAyLzINCkgwL1k0MzIuMiDmloflrabkuI7mlrDpl7vkvKDmkq3lrabpmaLotYTmlpnlrqQgMS8xDQo%3D" target="_blank" title="新窗口打开"><img
+						src="ajax_qr.php?qrcode=6aKY5ZCN77ya6K%2Bt6KiA5a2m57qy6KaBDQrotKPku7vogIXvvJrlj7bonJrlo7AsIOW%2BkOmAmumUteiRlw0K6aaG6JeP5L%2Bh5oGvKOe0ouS5puWPty%2Fppobol4%2FlnLAv5Zyo6aaGL%2BWPr%2BeUqCnvvJoNCkgwL1k0MzIuMiDljZfmoKHljLrkv53nlZnmnKzlm77kuabol4%2FpmIXlrqQgMS8xDQpIMC9ZNDMyLjIg5Zu96ZmF5pWZ6IKy5a2m6Zmi6LWE5paZ5a6kIDIvMg0KSDAvWTQzMi4yIOWNl%2BagoeWMuuaxieaWh%2BekvuenkeWbvuS5puWAn%2BmYheWupCAyLzINCkgwL1k0MzIuMiDmloflrabkuI7mlrDpl7vkvKDmkq3lrabpmaLotYTmlpnlrqQgMS8xDQo%3D" border="0" width="165"
+						height="162" /></a>
+				</p>
+			</div>
+			<div class="left_content">
+				<h4>收藏此书的书架</h4>
+							</div>
+			<!--   
+<div class="left_content">
+		<p><img id="calis_eread" src="../calis_eread/calis_logo.gif" title="点击查看CALIS E读信息"/></p>
+		<p id="calis_content"></p>
+		<script>
+			$("#calis_eread").mouseover(function(){
+				if($("#calis_content").html() == ''){
+					$("#calis_content").load("../calis_eread/book_info.php?marc_no=0000534720");
+					$("#calis_eread").hide();
+				}
+			});					
+		</script>
+</div>
+ -->
+			<div class="clear"></div>
+		</div>
+		<div id="content_item">
+			<div class="book_article">
+				<p id="marc">
+					<span></span>
+										MARC状态：审校
+										文献类型：中文图书 浏览次数：235
+				</p>
+			</div>
+			<div id="tabs1" style="margin: 10px auto;">
+				<ul>
+					<li><a href="#tabs-1" title="intro">书目信息</a></li>
+					<li><a href="show_format_marc.php?marc_no=5332093800610631513150675a3a0566073b523f"
+						title="marc_format"><span title="spinner">机读格式(MARC)</span></a></li>
+														</ul>
+				<div id="tabs-1" class="tab_article">
+					<div class="book_article">
+						<div id="book_info">
+							<div class="book_article">
+								<div id="book_pic">
+									<img id="book_img" width="105" height="155"
+										style="border: 1px solid #efefef;" />
+								</div>
+								<div id="item_detail" style="float: left; width: 80%;">
+																		<dl class="booklist">
+										<dt>题名/责任者:</dt>
+										<dd><a href="openlink.php?title=%E8%AF%AD%E8%A8%80%E5%AD%A6%E7%BA%B2%E8%A6%81">&#x8bed;&#x8a00;&#x5b66;&#x7eb2;&#x8981;</a>/&#x53f6;&#x871a;&#x58f0;&#x002c;&#x0020;&#x5f90;&#x901a;&#x9535;&#x8457;</dd>
+									</dl>
+																		<dl class="booklist">
+										<dt>版本说明:</dt>
+										<dd>&#x7b2c;&#x0034;&#x7248;</dd>
+									</dl>
+																		<dl class="booklist">
+										<dt>出版发行项:</dt>
+										<dd>&#x5317;&#x4eac;:&#x5317;&#x4eac;&#x5927;&#x5b66;&#x51fa;&#x7248;&#x793e;,&#x0032;&#x0030;&#x0031;&#x0030;</dd>
+									</dl>
+																		<dl class="booklist">
+										<dt>ISBN及定价:</dt>
+										<dd>&#x0039;&#x0037;&#x0038;&#x002d;&#x0037;&#x002d;&#x0033;&#x0030;&#x0031;&#x002d;&#x0031;&#x0036;&#x0033;&#x0031;&#x0030;&#x002d;&#x0038;/&#x0043;&#x004e;&#x0059;&#x0032;&#x0033;&#x002e;&#x0030;&#x0030;</dd>
+									</dl>
+																		<dl class="booklist">
+										<dt>载体形态项:</dt>
+										<dd>&#x0032;&#x0037;&#x0035;&#x9875;:&#x56fe;;&#x0032;&#x0033;&#x0063;&#x006d;</dd>
+									</dl>
+																		<dl class="booklist">
+										<dt>丛编项:</dt>
+										<dd><a href="openlink.php?series=%E5%8D%9A%E9%9B%85%E8%AF%AD%E8%A8%80%E5%AD%A6%E6%95%99%E6%9D%90%E7%B3%BB%E5%88%97">&#x535a;&#x96c5;&#x8bed;&#x8a00;&#x5b66;&#x6559;&#x6750;&#x7cfb;&#x5217;</a></dd>
+									</dl>
+																		<dl class="booklist">
+										<dt>个人责任者:</dt>
+										<dd><a href="openlink.php?author=%E5%8F%B6%E8%9C%9A%E5%A3%B0">&#x53f6;&#x871a;&#x58f0;</a> &#x8457;</dd>
+									</dl>
+																		<dl class="booklist">
+										<dt>个人责任者:</dt>
+										<dd><a href="openlink.php?author=%E5%BE%90%E9%80%9A%E9%94%B5">&#x5f90;&#x901a;&#x9535;</a> &#x8457;</dd>
+									</dl>
+																		<dl class="booklist">
+										<dt>学科主题:</dt>
+										<dd><a href="openlink.php?keyword=%E8%AF%AD%E8%A8%80%E5%AD%A6">&#x8bed;&#x8a00;&#x5b66;</a>-&#x6559;&#x6750;</dd>
+									</dl>
+																		<dl class="booklist">
+										<dt>中图法分类号:</dt>
+										<dd><a href="openlink.php?coden=H0">&#x0048;&#x0030;</a></dd>
+									</dl>
+																		<dl class="booklist">
+										<dt>书目附注:</dt>
+										<dd>&#x6709;&#x4e66;&#x76ee;</dd>
+									</dl>
+									
+									<!-- 添加随书光盘 -->
+																		<dl class="booklist">
+										<dt></dt>
+										<dd>
+											<p id="asyn_link"></p>
+										</dd>
+									</dl>
+
+									<dl class="booklist" id="douban_content" style="display: none;">
+										<dt>豆瓣简介：</dt>
+										<dd>
+											<p id="intro"></p>
+											<p id="author"></p>
+										</dd>
+									</dl>
+									<div style="text-align: left; color: blue;" id="showMoreAnchor">
+										<strong>全部MARC细节信息>></strong>
+									</div>
+								</div>
+
+								<div class="clear"></div>
+							</div>
+							<div id="sharing">
+								<div style="margin: 5px auto 10px auto;">
+									<a id="put2cart" class="btn" href="javascript:add2cart();">放入暂存书架</a>
+									<a class="btn" href="book_cart.php" target="_blank">查看暂存书架(<span
+										id="cartCount">0</span>)
+									</a> &nbsp;&nbsp;<a class="btn" id="myFav">收藏</a><span id="favMsg"></span>
+								</div>
+																							</div>
+						</div>
+					</div>
+				</div>
+			</div>
+
+			<div id="tabs2" class="tabs_M">
+				<ul>
+					<li><a href="#tab_item" title="item">馆藏信息</a></li>
+										<li><a href="userpreg.php?marc_no=0000534720"
+						title="login_preg"><span title="spinner">预约申请</span></a></li>
+															<li><a href="userrelegate.php?marc_no=0000534720"
+						title="login_relegate"><span title="spinner">委托申请</span></a></li>
+										<li><a
+						href="ajax_curriculum_list.php?marc_no=0000534720"
+						title="shelf" name="shelf"><span title="spinner">参考书架</span></a></li>
+										<li><a
+						href="ajax_lend_related.php?marc_no=0000534720&call_no=H0/Y432.2"
+						title="related_lend"><span title="spinner">相关借阅</span></a></li>
+					<li><a
+						href="ajax_shelf_related.php?marc_no=0000534720&call_no=H0/Y432.2"
+						title="related_shelf"><span title="spinner">相关收藏</span></a></li>
+				</ul>
+				<div id="tab_item">
+					<div id="accordion"></div>
+					<table width="100%" border="0" align="center" cellpadding="5"
+						cellspacing="0" id="item">
+																		<tr align="left" class="greytext1">
+							<td>索书号</td>
+							<td>条码号</td>
+							<td>年卷期</td>
+							<td>馆藏地</td>
+							<td>书刊状态</td>
+														<td>还书位置</td>
+													</tr>
+												<tr align="left" class="whitetext">
+							<td width="10%">H0/Y432.2</td>
+							<td width="15%">K01000620</td>
+							<td width="15%">&nbsp;</td>
+							<td width="25%" title="国际教育学院资料室"><img
+								src="../tpl/images/place_marker.gif"> 国际教育学院资料室</span>
+								 
+								<a href="http://202.207.7.53:80/tsdw/GotoFlash.aspx?szBarCode=K01000620">图书定位</a>
+								&nbsp;&nbsp;&nbsp; </td>
+							<td width="25%">非可借</td>
+																				</tr>
+												<tr align="left" class="whitetext">
+							<td width="10%">H0/Y432.2</td>
+							<td width="15%">K01000621</td>
+							<td width="15%">&nbsp;</td>
+							<td width="25%" title="国际教育学院资料室"><img
+								src="../tpl/images/place_marker.gif"> 国际教育学院资料室</span>
+								 
+								<a href="http://202.207.7.53:80/tsdw/GotoFlash.aspx?szBarCode=K01000621">图书定位</a>
+								&nbsp;&nbsp;&nbsp; </td>
+							<td width="25%">非可借</td>
+																				</tr>
+												<tr align="left" class="whitetext">
+							<td width="10%">H0/Y432.2</td>
+							<td width="15%">010439204</td>
+							<td width="15%">&nbsp;-</td>
+							<td width="25%" title="南校区保留本图书藏阅室"><img
+								src="../tpl/images/place_marker.gif"> 南校区保留本图书藏阅室</span>
+								 
+								<a href="http://202.207.7.53:80/tsdw/GotoFlash.aspx?szBarCode=010439204">图书定位</a>
+								&nbsp;&nbsp;&nbsp; </td>
+							<td width="25%">阅览</td>
+																				</tr>
+												<tr align="left" class="whitetext">
+							<td width="10%">H0/Y432.2</td>
+							<td width="15%">010600993</td>
+							<td width="15%">&nbsp;-</td>
+							<td width="25%" title="南校区汉文社科图书借阅室"><img
+								src="../tpl/images/place_marker.gif"> 南校区汉文社科图书借阅室</span>
+								 
+								<a href="http://202.207.7.53:80/tsdw/GotoFlash.aspx?szBarCode=010600993">图书定位</a>
+								&nbsp;&nbsp;&nbsp; </td>
+							<td width="25%"><font color=green>可借</font></td>
+														<td>南校区总借还书处</td>
+													</tr>
+												<tr align="left" class="whitetext">
+							<td width="10%">H0/Y432.2</td>
+							<td width="15%">010600994</td>
+							<td width="15%">&nbsp;-</td>
+							<td width="25%" title="南校区汉文社科图书借阅室"><img
+								src="../tpl/images/place_marker.gif"> 南校区汉文社科图书借阅室</span>
+								 
+								<a href="http://202.207.7.53:80/tsdw/GotoFlash.aspx?szBarCode=010600994">图书定位</a>
+								&nbsp;&nbsp;&nbsp; </td>
+							<td width="25%"><font color=green>可借</font></td>
+														<td>南校区总借还书处</td>
+													</tr>
+												<tr align="left" class="whitetext">
+							<td width="10%">H0/Y432.2</td>
+							<td width="15%">R01055695</td>
+							<td width="15%">&nbsp;</td>
+							<td width="25%" title="文学与新闻传播学院资料室"><img
+								src="../tpl/images/place_marker.gif"> 文学与新闻传播学院资料室</span>
+								 
+								<a href="http://202.207.7.53:80/tsdw/GotoFlash.aspx?szBarCode=R01055695">图书定位</a>
+								&nbsp;&nbsp;&nbsp; </td>
+							<td width="25%"><font color=green>可借</font></td>
+																				</tr>
+																							</table>
+										<table width="100%" border="0" align="center" cellpadding="5"
+						cellspacing="0">
+											</table>
+										
+					<!-- //CADAL -->
+					
+					<div
+						style="color: #D4A639; border: 1px solid #F9F2A7; background-color: #fffcdf; text-align: center;"
+						id="spanItemMore">
+						<strong>显示全部馆藏信息</strong><br />
+					</div>
+				</div>
+			</div>
+			<div class="book_article">
+				<h5>
+					<span>借阅趋势</span>
+				</h5>
+                <iframe width="100%" height="100px" scrolling="no" frameborder="0" src="lendline.php?id=0000534720"></iframe>
+                <!--
+				<object classid="clsid:d27cdb6e-ae6d-11cf-96b8-444553540000"
+					codebase="http://fpdownload.macromedia.com/pub/shockwave/cabs/flash/swflash.cab#version=8,0,0,0"
+					width="100%" height="100" id="graph-2" align="middle">
+					<param name="allowScriptAccess" value="sameDomain" />
+					<param name="movie" value="lend_trend.swf" />
+					<param name="quality" value="high" />
+					<param name="wmode" value="opaque" />
+					<param name="FlashVars"
+						value="data-file=ajax_lend_trend.php?id=0000534720" />
+					<embed src="lend_trend.swf" quality="high" bgcolor="#FFFFFF"
+						width="100%" height="100" name="open-flash-chart" align="middle"
+						allowScriptAccess="sameDomain"
+						type="application/x-shockwave-flash"
+						FlashVars="data-file=ajax_lend_trend.php?id=0000534720"
+						wmode="opaque"
+						pluginspage="http://www.macromedia.com/go/getflashplayer" />
+				</object>
+                -->
+				<br />
+			</div>
+			<!-- 5.6版本后默认屏蔽这个功能 -->
+			<!-- 
+            <div class="book_article">
+           		<h5><span onclick="loadLikehoodBook();" class="cursor">您可能感兴趣的图书(点击查看)</span></h5>
+				<script type="text/javascript" src="../tpl/js/jquery.jcarousel.min.js"></script>
+				<div id="likehood_book_div"></div>
+            </div>
+            -->
+			<div class="book_article">
+				<h5>
+					<span onclick="loadSameAuthorBook(this);" class="cursor">同名作者的其他著作(点击查看)</span>
+				</h5>
+				<div id="same_author_div" style="padding-bottom: 15px;"></div>
+			</div>
+			            <!--
+			<div class="book_article">
+				<iframe width="100%" height="300" frameborder="0" scrolling="no"
+					src="http://service.t.sina.com.cn/widget/livestream/listlive.php?width=0&height=300&uid=2165774984&skin=1&pic=1&titlebar=1&border=1&publish=0&atalk=1&recomm=0&at=0&atopic=语言学纲要&appkey=3314736260&ptopic=语言学纲要"></iframe>
+			</div>
+            -->
+					</div>
+		<div class="clear"></div>
+	</div>
+</div>
+<div id="dialog-form" title="登录我的图书馆">
+	<form action="../reader/redr_verify.php" name="frm_login" method="POST" onsubmit="return encode()">
+		<input type="hidden" id="returnUrl" name="returnUrl" value="" />
+		<table width="95%" border="0" cellpadding="3" cellspacing="1">
+			<tr>
+				<td align="right">用户名：</td>
+				<td align="left"><input class="input" name="number" type="text"
+					size="20" style="width: 150px" autocomplete="off" ></td>
+			</tr>
+			<tr>
+				<td align="right">密码：</td>
+				<td align="left"><input class="input" name="passwd"
+					type="password" size="20" style="width: 150px" autocomplete="new-password" ></td>
+			</tr>
+						<tr>
+				<td align="right">验证码：</td>
+				<td align="left"><input id="captcha" class="input"
+					name="captcha" type="text" size="20" style="width: 150px"
+					placeholder="验证码"></td>
+			</tr>
+			<tr>
+				<td align="right"></td>
+				<td align="left" id="captcha_tips"><font size="2">请输入下面显示的内容</font><br />
+				<img id="img" title="点击刷新" src="../reader/captcha.php" onclick="this.src='captcha.php?'+Math.random();" /></td>
+			</tr>
+						<tr>
+				<td align="right">&nbsp;</td>
+				<td align="left"><input type="Radio" name="select"
+					value="cert_no" checked="checked" />证件号 <input type="Radio"
+					name="select" value="bar_no" />条码号 <input type="Radio"
+					name="select" value="email" />Email</td>
+			</tr>
+			<tr>
+				<td align="right">&nbsp;</td>
+				<td align="left"><input type="submit" value="登录"></td>
+			</tr>
+		</table>
+        <span id="epa"></span>
+		
+        <!--  CSRF TOKEN -->        
+<!--       	<input type="hidden" id="csrf_token" name="csrf_token" value="P02QPY3EPV" /> -->
+      	<!--  END -->
+	</form>
+</div>
+
+<div id="dialog_add_addr" title="修改我的送书地">
+	<form action="../opac/ajax_send_addr.php" onsubmit="check_send_addr()"
+		name="frm_login" method="POST">
+		<input type="hidden" id="marc_no" name="marc_no" value="0000534720" /> <input
+			type="hidden" id="fromUrl" name="fromUrl" value="" /> <input
+			type="hidden" id="readerToken" name="readerToken"
+			value="" />
+		<table width="95%" border="0" cellpadding="3" cellspacing="1">
+			<tr>
+				<td align="right">姓名：</td>
+				<td align="left"><input class="input" name="sendName"
+					id="sendName" type="text" size="20" style="width: 150px" value=""
+					readonly="readonly"></td>
+			</tr>
+			<tr>
+				<td align="right">手机号：</td>
+				<td align="left"><input class="input" name="sendMobile"
+					id="sendMobile" type="text" size="20" style="width: 150px" value=""></td>
+			</tr>
+			<tr>
+				<td align="right">送 书 地：</td>
+				<td align="left"><input class="input" name="sendAddr"
+					id="sendAddr" type="text" size="20" style="width: 250px" value=""></td>
+			</tr>
+			<tr>
+				<td colspan="2" align="center"><input type="submit" value="保存"></td>
+			</tr>
+		</table>
+		
+			        <!--  CSRF TOKEN -->        
+<!-- 			      	<input type="hidden" id="csrf_token" name="csrf_token" value="P02QPY3EPV" /> -->
+			      	<!--  END -->
+	</form>
+</div>
+
+<div id="dialog-fav" title="添加到我的书架">
+	收藏到： <select id="favSel" name="favSel">
+			</select> <a style="color: blue" href="../reader/book_shelf_man.php">管理书架</a>
+</div>
+<div id="nrms-operation"></div>
+
+<script type="text/javascript">
+	//$("#asyn_link").load("../zplug/ajax_asyn_link.php?url=");
+	//OLD 模式
+	//$("#cadal_book").load("cadal_book.php?isbn=9787301163108");	
+	
+	//$("#cadal_book").load("cadal_book.php?isbn=9787301163108&title=&#x8bed;&#x8a00;&#x5b66;&#x7eb2;&#x8981;".replace(/&#x/g,'%u').replace(/;/g,''));
+	
+
+	function add2cart(){
+		$.ajax({
+   			  url: "ajax_bookcart.php?action=add&id=0000534720",
+   			  success: function(html){
+   			     $("#put2cart").html("已放入暂存架");
+				 $("#put2cart").attr('disabled','disabled');
+   				 $('#bookcartCount').html($.trim(html));
+				 $('#cartCount').html($.trim(html));
+   			  } 
+    	});
+	}
+
+	function add2fav(){
+		$("#dialog-fav").dialog("open");
+	}
+	
+	function loadSameAuthorBook(id){
+		$("#same_author_div").load("ajax_same_author.php?marc_no=0000534720");
+	}
+	
+	function loadLikehoodBook(id){
+		$("#likehood_book_div").load("ajax_likehood_book.php?marc_no=0000534720");
+		$(id).click(function(){});
+	}
+	var rank = 1;
+	function change_rating(rating){
+		rank = rating;
+		var w = 14*rating; 
+		document.getElementById("div_rate").style.width = w+"px";
+	}
+	
+	function back_white(){
+		document.getElementById("div_rate").style.width = "0px";
+	}
+
+	function showMore(){
+		$("#detail_more").show();
+		$("#showMoreAnchor").hide();
+	}
+
+	function add2shelf(classid){
+		$("#favMsg").load("../reader/book_shelf_ajax_addbook.php?classid=" + classid + "&marc_no=0000534720&time=" + new Date().getTime());
+	}
+	
+	function scoreIt(marcNo){
+		$.ajax({
+   			  url: "ajax_score_it.php?marc_no=" + marcNo + "&rank=" + rank,
+   			  success: function(html){
+   			     $("#score").html(html);
+   				 $('#div_rate').hide();
+   				 $('#div_rate_star').hide();
+   			  }
+    	});
+	}
+
+	function modifySendAddr(marcNo,fromUrl)
+	{
+		$.ajax({
+			  url: "../opac/ajax_get_address_info.php",
+			  success: function(html){
+			  	var obj = eval('(' + html + ')');
+			    $("#marcNo").val(marcNo);
+			    $("#fromUrl").val(fromUrl);
+			    $("#sendName").val(obj['name']);
+			    $("#sendAddr").val(obj['sendAddr']);
+			    $("#sendMobile").val(obj['mobile']);
+			    $("#dialog_add_addr").dialog("open" );
+			  }
+		});
+	}
+
+	function check_send_addr()
+	{
+		if($("#sendMobile").val() == '' )
+		{
+			alert('手机号为空') ;
+			return false ;
+		}
+		else if($("#sendAddr").val()  == '' )
+		{
+			alert('送书地为空') ;
+			return false ;
+		}
+		else 
+			return true ;
+	}
+
+
+
+	$(function(){
+		$.getJSON("ajax_douban.php?isbn=9787301163108",function(json){ 
+			$("#intro").html(json.summary );
+			$("#author").html(json.author_intro);
+			$("#book_img").attr("src",json.image);
+			if(json.summary.length > 0 || json.author_intro.length>0 )
+				$("#douban_content").show();
+		});
+	});
+	
+	document.title = "语言学纲要";
+</script>
+<div id="footer"><div id="copy"><p> 内蒙古大学图书馆&nbsp;&nbsp; OPAC v5.6.1.240429  &nbsp;&nbsp;</p><p>&copy; 1999-2026 <a target="_blank" href="http://www.libsys.com.cn">Jiangsu Huiwen Software Ltd. 江苏汇文软件有限公司</a></p></div></div></body></html>
+

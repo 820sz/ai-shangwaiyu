@@ -1,0 +1,29 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta http-equiv="X-UA-Compatible" content="IE=edge"><title>文泉学堂</title><style>:root {
+        --vh: 1vh;
+      }
+      .udesk-client-btn {
+        z-index: 5 !important;
+        bottom: 57px !important;
+        margin: 18px !important;
+      }
+      .m-home .udesk-client-btn, .m-bookshelf .udesk-client-btn, .m-mine .udesk-client-btn {
+        bottom: 110px !important;
+      }</style><script>var coverSupport =
+        'CSS' in window &&
+        typeof CSS.supports === 'function' &&
+        (CSS.supports('top: env(a)') || CSS.supports('top: constant(a)'));
+      document.write(
+        '<meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0' +
+          (coverSupport ? ', viewport-fit=cover' : '') +
+          '" />',
+      );
+
+      !(function (n, e) {
+        function setViewHeight() {
+          var windowVH = e.innerHeight / 100;
+          n.documentElement.style.setProperty('--vh', windowVH + 'px');
+        }
+        var i = 'orientationchange' in window ? 'orientationchange' : 'resize';
+        n.addEventListener('DOMContentLoaded', setViewHeight);
+        e.addEventListener(i, setViewHeight);
+      })(document, window);</script><script src="https://static-public.wqxuetang.com/static/vendor/typed.js"></script><link rel="stylesheet" href="/m/static/index.e8e070f7.css"></head><body><noscript><strong>Please enable JavaScript to continue.</strong></noscript><div id="app"></div><script src="/m/static/js/chunk-vendors.d8f383b1.js"></script><script src="/m/static/js/index.bb3c75b2.js"></script></body></html>

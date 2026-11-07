@@ -11,6 +11,7 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:readflow/config/constants.dart';
 import 'package:readflow/services/reader_settings.dart';
 import 'package:readflow/widgets/reader_paper.dart';
+import 'package:readflow/widgets/reader_progress.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -59,6 +60,24 @@ void main() {
         expect(contrastRatio(p.onInk, p.ink), greaterThanOrEqualTo(7));
       });
     }
+
+    test('竖轨「未填充」三纸都能看见,且与「已填充砖红」可区分(第三轮 QA)', () {
+      for (final paper in ReaderPaper.values) {
+        final p = paletteOf(paper);
+        final track = ReaderProgressRail.trackColor(p);
+        // 0% 时未填充轨道对纸底:比 hairline(1.23)深一档,但不抢眼
+        final trackOnPage = contrastRatio(track, p.page);
+        expect(trackOnPage, greaterThanOrEqualTo(1.35),
+            reason: '${paper.label} 未填充轨道太淡(0% 时看不清进度轨)');
+        expect(trackOnPage, lessThanOrEqualTo(2.6),
+            reason: '${paper.label} 未填充轨道太抢眼(会和已填充砖红打架)');
+        // 已填充 vs 未填充:必须一眼能分出"读到哪"
+        expect(contrastRatio(p.accent, track), greaterThanOrEqualTo(2.5),
+            reason: '${paper.label} 已填充砖红与未填充轨道区分度不足');
+        // 也不能退化成和 hairline 几乎一样(等价于没改)
+        expect(track, isNot(p.hairline));
+      }
+    });
 
     test('墨夜纸的砖红是提亮版(原色 #B23A2C 在深纸上只有 2.9:1)',
         () {

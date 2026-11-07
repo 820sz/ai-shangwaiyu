@@ -40,9 +40,9 @@ void main() {
   });
 
   group('内置 rubric(与数据库 seed 同一口径)', () {
-    test('恰好 4 套,id 与 DB seed 一致', () {
+    test('恰好 6 套(2026-11-07 补六级),id 与 DB seed 一致', () {
       final builtin = OutputRubric.builtin();
-      expect(builtin, hasLength(4));
+      expect(builtin, hasLength(6));
       expect(
         builtin.map((r) => r.id).toList(),
         <String>[
@@ -50,6 +50,8 @@ void main() {
           'cet4_translation',
           'back_translation',
           'summary',
+          'cet6_writing',
+          'cet6_translation',
         ],
         reason: 'id 必须与 exercise_sets.rubric_id / rubrics seed 对齐',
       );
@@ -240,7 +242,7 @@ void main() {
 
     test('没有题目/没有补充说明时也能生成可用提示词', () {
       final prompt = buildScoringPrompt(
-        rubric: OutputRubric.builtin().last,
+        rubric: OutputRubric.byId('summary')!,
         task: '',
         answer: 'The article mainly discusses AI.',
       );

@@ -1,16 +1,18 @@
 import 'package:flutter/material.dart';
 
 import '../../config/design_tokens.dart';
+import '../../services/about_content.dart';
 import '../../widgets/dash_kit.dart';
 import '../../widgets/graphics/graphics.dart';
 import '../../widgets/v4/v4_kit.dart';
+import 'about_doc_screen.dart';
+import 'about_notice_screen.dart';
 
-/// 「关于与更新」页(v5 新增)。
+/// 「关于与更新」页。
 ///
-/// 为什么单独成页:以前「诊断信息」「检查更新」是「我的」页里两个与
-/// 「学习统计/错误档案」同级的 `AppActionTile` —— 设置项混在数据入口里,
-/// 用户找不到"版本/隐私/更新"的集中位置。这一页把它们收在一起,
-/// 同时明确写出**数据只存本机**这件事(用户最关心的是隐私)。
+/// v5.1(2026-11-07,用户第 8 条):在原有「数据与隐私 / 更新与诊断 / 关于软件」
+/// 之上新增**关于三入口**(软件声明 / 软件特色 / 软件思想)、**开屏公告重看**
+/// 与**开源许可**(软件声明里承诺过的入口 → `showLicensePage` 汇总依赖许可证)。
 class AboutScreen extends StatelessWidget {
   const AboutScreen({
     super.key,
@@ -24,12 +26,47 @@ class AboutScreen extends StatelessWidget {
   /// 诊断信息弹层(API 配置摘要 + 崩溃日志)
   final Future<void> Function() onShowDiagnostics;
 
+  Future<void> _openDoc(BuildContext context, AboutDoc doc) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => AboutDocScreen(doc: doc)),
+    );
+  }
+
+  void _openNotice(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => const AboutNoticeScreen(firstRun: false),
+      ),
+    );
+  }
+
+  void _openLicenses(BuildContext context) {
+    // Flutter 自带:把 pubspec 所有依赖的 LICENSE 汇总成一页(无需自己维护列表)
+    showLicensePage(
+      context: context,
+      applicationName: 'ReadFlow · 语流',
+      applicationVersion: AboutContent.versionLabel,
+      applicationLegalese: '个人非商业项目 · 作者 xi283',
+      applicationIcon: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Icon(
+          Icons.auto_stories_outlined,
+          size: 40,
+          color: Theme.of(context).colorScheme.primary,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final DashTheme d = DashTheme.of(context);
     return Scaffold(
       backgroundColor: d.skin.pageBg,
-      appBar: const V4JellyAppBar(title: '关于与更新', domain: GraphicDomain.custom),
+      appBar: const V4JellyAppBar(
+        title: '关于与更新',
+        domain: GraphicDomain.custom,
+      ),
       body: ListView(
         padding: Insets.page,
         children: <Widget>[
@@ -65,7 +102,7 @@ class AboutScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      'AI 外语学习:读进去,写出来',
+                      '${AboutContent.versionLabel} · AI 外语学习:读进去,写出来',
                       style: AppFont.metaStyle.copyWith(
                         fontSize: 11,
                         color: d.inkSoft,
@@ -77,7 +114,42 @@ class AboutScreen extends StatelessWidget {
             ],
           ),
           const SizedBox(height: Gap.lg),
-          const DashSectionTitle(index: '01', title: '数据与隐私', top: 0),
+
+          // ── 01 关于软件(三入口 + 开屏公告)──
+          const DashSectionTitle(index: '01', title: '关于软件', top: 0),
+          DashCard(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+            child: Column(
+              children: <Widget>[
+                for (final AboutDoc doc in AboutDoc.values) ...<Widget>[
+                  DashListRow(
+                    title: doc.title,
+                    subtitle: doc.subtitle,
+                    leading: Icon(
+                      switch (doc) {
+                        AboutDoc.declaration => Icons.gavel_outlined,
+                        AboutDoc.features => Icons.auto_awesome_outlined,
+                        AboutDoc.philosophy => Icons.psychology_alt_outlined,
+                      },
+                      size: 20,
+                      color: d.inkSoft,
+                    ),
+                    onTap: () => _openDoc(context, doc),
+                  ),
+                  Divider(height: 1, thickness: 0.8, color: d.line),
+                ],
+                DashListRow(
+                  title: '开屏公告',
+                  subtitle: '首次启动读过的三份说明 · 可重看',
+                  leading: Icon(Icons.campaign_outlined, size: 20, color: d.inkSoft),
+                  onTap: () => _openNotice(context),
+                ),
+              ],
+            ),
+          ),
+
+          // ── 02 数据与隐私 ──
+          const DashSectionTitle(index: '02', title: '数据与隐私'),
           DashCard(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -93,8 +165,9 @@ class AboutScreen extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(height: Gap.lg),
-          const DashSectionTitle(index: '02', title: '更新与诊断', top: 0),
+
+          // ── 03 更新与诊断 ──
+          const DashSectionTitle(index: '03', title: '更新与诊断'),
           DashCard(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
             child: Column(
@@ -112,11 +185,20 @@ class AboutScreen extends StatelessWidget {
                   leading: Icon(Icons.medical_information, size: 20, color: d.inkSoft),
                   onTap: () async => onShowDiagnostics(),
                 ),
+                Divider(height: 1, thickness: 0.8, color: d.line),
+                DashListRow(
+                  title: '开源许可',
+                  subtitle: '本软件使用的第三方开源库许可证汇总',
+                  leading: Icon(Icons.workspace_premium_outlined,
+                      size: 20, color: d.inkSoft),
+                  onTap: () => _openLicenses(context),
+                ),
               ],
             ),
           ),
-          const SizedBox(height: Gap.lg),
-          const DashSectionTitle(index: '03', title: '关于这份软件', top: 0),
+
+          // ── 04 关于这份软件 ──
+          const DashSectionTitle(index: '04', title: '关于这份软件'),
           DashCard(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,

@@ -26,8 +26,10 @@
 /// - 文案/颜色/间距一律走 [V4Skin]/[AppFont]/[Gap],不写裸值。
 library;
 
+import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -439,6 +441,142 @@ class MaterialResultItem {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+// 封面懒加载(卡片 imageUrl 为空时,异步轻量抓页面 og:image)
+// ═══════════════════════════════════════════════════════════════════════
+
+/// 卡片级封面抓取器:输入页面 URL,返回**真实**封面 URL(抓不到/没有返回 null)。
+typedef MaterialCoverProbe = Future<String?> Function(String pageUrl);
+
+/// 懒加载封面的注入点 + 会话内缓存(用户 2026-11-07 真机反馈第 5 条)。
+///
+/// 为什么要有这一层:检索结果(官方搜索/公开源列表)大多**没有** imageUrl,
+/// 卡片就永远只有文字版式 —— 用户原话"能爬到封面/插图就展示"。所以在卡片侧
+/// 对"没有图"的结果做一次**轻量**的页面探测(只为一个 og:image 抓一次 HTML)。
+///
+/// 纪律:
+/// - **只抓一次**:同 URL 成功/失败都记缓存(失败记 null,不反复打站点);
+/// - **失败静默**:抓不到就保持文字版式 —— 不画渐变假封面、不报错打扰用户;
+/// - 并发上限 [maxConcurrent],避免一屏 10 张卡同时打 10 个站点;
+/// - 测试/渲染可 [debugOverride] 注入假实现(返回 null 即彻底禁用网络),
+///   或给 [MaterialResultCard.enableLazyCoverFetch] 传 false。
+class MaterialCoverProbeCache {
+  MaterialCoverProbeCache._();
+
+  static const int maxConcurrent = 3;
+
+  /// 会话内缓存:key = 页面 URL;value = 封面 URL,`null` = 抓过但没有图。
+  static final Map<String, String?> _entries = <String, String?>{};
+
+  /// 请求中的同 URL 去重(只发一次)
+  static final Map<String, Future<String?>> _inflight =
+      <String, Future<String?>>{};
+
+  /// 测试/渲染注入:非 null 时**完全替代**真实抓取(返回 null = 禁用)。
+  static MaterialCoverProbe? debugOverride;
+
+  static int _active = 0;
+  static final List<Completer<void>> _waiters = <Completer<void>>[];
+
+  /// 清缓存并恢复默认(测试隔离用)
+  static void debugReset() {
+    _entries.clear();
+    _inflight.clear();
+    _active = 0;
+    _waiters.clear();
+    debugOverride = null;
+  }
+
+  /// 已缓存的封面(没抓过 / 抓过没图都返回 null;用 [hasEntry] 区分)
+  static String? cached(String pageUrl) => _entries[pageUrl.trim()];
+
+  static bool hasEntry(String pageUrl) => _entries.containsKey(pageUrl.trim());
+
+  /// 解析:缓存 → 抓取(并发上限 + 同 URL 去重)→ 写缓存;任何失败返回 null。
+  static Future<String?> resolve(String pageUrl, {MaterialCoverProbe? probe}) {
+    final url = pageUrl.trim();
+    if (url.isEmpty) return Future<String?>.value();
+    if (_entries.containsKey(url)) {
+      return Future<String?>.value(_entries[url]);
+    }
+    final pending = _inflight[url];
+    if (pending != null) return pending;
+    final fetcher = probe ?? debugOverride ?? httpMaterialCoverProbe;
+    final future = _withSlot<String?>(() async {
+      try {
+        final raw = await fetcher(url);
+        final cover = (raw ?? '').trim();
+        final ok =
+            cover.startsWith('http://') || cover.startsWith('https://');
+        _entries[url] = ok ? cover : null;
+        return _entries[url];
+      } catch (e) {
+        debugPrint('ReadFlow 封面懒加载失败(静默): $e');
+        _entries[url] = null;
+        return null;
+      }
+    });
+    _inflight[url] = future;
+    return future.whenComplete(() {
+      _inflight.remove(url);
+    });
+  }
+
+  static Future<T> _withSlot<T>(Future<T> Function() run) async {
+    while (_active >= maxConcurrent) {
+      final waiter = Completer<void>();
+      _waiters.add(waiter);
+      await waiter.future;
+    }
+    _active++;
+    try {
+      return await run();
+    } finally {
+      _active--;
+      if (_waiters.isNotEmpty) _waiters.removeAt(0).complete();
+    }
+  }
+}
+
+/// 生产默认的轻量抓取:一次 GET 页面 → [MaterialSourceService.articleCoverUrl]。
+///
+/// 复用它是因为 og:image 的坑都写在那一处(属性名是 `property=` 不是 `name=`、
+/// NPR 的 CDN 带参数地址要拆包、相对路径要绝对化)—— 在这里重写一遍必漏。
+/// 超时短(6s/8s)、普通浏览器 UA、只取 HTML 文本;任何失败返回 null。
+Future<String?> httpMaterialCoverProbe(String pageUrl) async {
+  final url = pageUrl.trim();
+  if (!url.startsWith('http://') && !url.startsWith('https://')) return null;
+  try {
+    final response = await _coverDio.get<String>(url);
+    final html = response.data ?? '';
+    if (html.trim().isEmpty) return null;
+    return MaterialSourceService.articleCoverUrl(html, url);
+  } catch (e) {
+    debugPrint('ReadFlow 抓封面失败(${_hostOf(url)}): $e');
+    return null;
+  }
+}
+
+final Dio _coverDio = Dio(
+  BaseOptions(
+    connectTimeout: const Duration(seconds: 6),
+    receiveTimeout: const Duration(seconds: 8),
+    followRedirects: true,
+    maxRedirects: 4,
+    responseType: ResponseType.plain,
+    headers: const <String, Object?>{
+      'User-Agent':
+          'Mozilla/5.0 (Linux; Android 13; ReadFlow) AppleWebKit/537.36',
+      'Accept': 'text/html,application/xhtml+xml',
+    },
+  ),
+);
+
+String _hostOf(String url) {
+  final host = Uri.tryParse(url)?.host ?? '';
+  return host.isEmpty ? url : host;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 // 展示件
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -455,6 +593,11 @@ class MaterialResultCoverThumb extends StatelessWidget {
   final double height;
   final double radius;
 
+  /// **仅渲染/测试注入**:给了就用它代替 `Image.network` 取图(生产永远 null)。
+  /// 渲染图需要"有封面"的真实观感,而测试环境没有网络,所以才留这个口子;
+  /// 生产路径始终走 [url] 的 `Image.network`(加 errorBuilder 回落中性占位)。
+  final ImageProvider? imageProvider;
+
   const MaterialResultCoverThumb({
     super.key,
     required this.url,
@@ -463,6 +606,7 @@ class MaterialResultCoverThumb extends StatelessWidget {
     this.width = 58,
     this.height = 76,
     this.radius = 12,
+    this.imageProvider,
   });
 
   @override
@@ -490,15 +634,31 @@ class MaterialResultCoverThumb extends StatelessWidget {
         height: height,
         child: ClipRRect(
           borderRadius: BorderRadius.circular(radius),
-          child: Image.network(
-            url,
-            width: width,
-            height: height,
-            fit: BoxFit.cover,
-            frameBuilder: (context, child, frame, wasSynchronouslyLoaded) =>
-                (wasSynchronouslyLoaded || frame != null) ? child : placeholder,
-            errorBuilder: (context, error, stackTrace) => placeholder,
-          ),
+          child: imageProvider != null
+              ? Image(
+                  image: imageProvider!,
+                  width: width,
+                  height: height,
+                  fit: BoxFit.cover,
+                  frameBuilder:
+                      (context, child, frame, wasSynchronouslyLoaded) =>
+                          (wasSynchronouslyLoaded || frame != null)
+                              ? child
+                              : placeholder,
+                  errorBuilder: (context, error, stackTrace) => placeholder,
+                )
+              : Image.network(
+                  url,
+                  width: width,
+                  height: height,
+                  fit: BoxFit.cover,
+                  frameBuilder:
+                      (context, child, frame, wasSynchronouslyLoaded) =>
+                          (wasSynchronouslyLoaded || frame != null)
+                              ? child
+                              : placeholder,
+                  errorBuilder: (context, error, stackTrace) => placeholder,
+                ),
         ),
       ),
     );
@@ -544,6 +704,16 @@ class MaterialResultCard extends StatelessWidget {
   final VoidCallback? onSave;
   final VoidCallback? onOpenOriginal;
 
+  /// [imageUrl] 为空时是否懒加载页面 og:image(生产默认 true;
+  /// 单测/渲染传 false 可完全避免网络等待)
+  final bool enableLazyCoverFetch;
+
+  /// 抓取实现覆盖(**仅测试/渲染用**;null = 生产默认 [httpMaterialCoverProbe])
+  final MaterialCoverProbe? coverProbe;
+
+  /// **仅渲染/测试注入**的图片源(给出时缩略图用它代替 `Image.network`)
+  final ImageProvider? coverImageOverride;
+
   const MaterialResultCard({
     super.key,
     required this.title,
@@ -567,13 +737,14 @@ class MaterialResultCard extends StatelessWidget {
     this.onRead,
     this.onSave,
     this.onOpenOriginal,
+    this.enableLazyCoverFetch = true,
+    this.coverProbe,
+    this.coverImageOverride,
   });
 
   @override
   Widget build(BuildContext context) {
     final skin = V4Skin.of(context);
-    final coverUrl = (imageUrl ?? '').trim();
-    final hasCover = shelfCoverHasImage(coverUrl);
     final tags = <Widget>[
       AppTag(sourceLabel.trim().isEmpty ? '未知来源' : sourceLabel),
       AppTag(materialResultKindChipLabel(kind)),
@@ -599,14 +770,15 @@ class MaterialResultCard extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              if (hasCover) ...<Widget>[
-                MaterialResultCoverThumb(
-                  url: coverUrl,
-                  title: title,
-                  kind: kind,
-                ),
-                const SizedBox(width: Gap.sm),
-              ],
+              _MaterialResultCardCover(
+                imageUrl: imageUrl,
+                pageUrl: url,
+                title: title,
+                kind: kind,
+                enableLazyCoverFetch: enableLazyCoverFetch,
+                probe: coverProbe,
+                imageProvider: coverImageOverride,
+              ),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -722,6 +894,107 @@ class MaterialResultCard extends StatelessWidget {
             ),
         ],
       ),
+    );
+  }
+}
+
+/// 卡片左侧的封面位:有真图就画缩略图,没有就**什么都不占**(文字版式)。
+///
+/// 取图顺序(纯本地 → 轻量网络,逐级降级):
+/// 1. 数据里自带的 `imageUrl`(发现流水线/补抓正文时回填的 og:image);
+/// 2. **公版书按书号现算**(`MaterialSourceService.coverFor`,零网络);
+/// 3. 页面级懒加载(**只有卡片的 imageUrl 为空时才发一次轻量请求**,
+///    见 [MaterialCoverProbeCache]);抓不到就保持文字版式,不画假封面。
+class _MaterialResultCardCover extends StatefulWidget {
+  final String? imageUrl;
+  final String pageUrl;
+  final String title;
+  final String kind;
+  final bool enableLazyCoverFetch;
+  final MaterialCoverProbe? probe;
+  final ImageProvider? imageProvider;
+
+  const _MaterialResultCardCover({
+    required this.imageUrl,
+    required this.pageUrl,
+    required this.title,
+    required this.kind,
+    required this.enableLazyCoverFetch,
+    this.probe,
+    this.imageProvider,
+  });
+
+  @override
+  State<_MaterialResultCardCover> createState() =>
+      _MaterialResultCardCoverState();
+}
+
+class _MaterialResultCardCoverState extends State<_MaterialResultCardCover> {
+  String? _lazyCover;
+  bool _probeStarted = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _resolve();
+  }
+
+  @override
+  void didUpdateWidget(covariant _MaterialResultCardCover oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.imageUrl != widget.imageUrl ||
+        oldWidget.pageUrl != widget.pageUrl ||
+        oldWidget.enableLazyCoverFetch != widget.enableLazyCoverFetch) {
+      _lazyCover = null;
+      _probeStarted = false;
+      _resolve();
+    }
+  }
+
+  /// 本地就能确定的封面(数据自带 / 公版书按书号现算);没有返回 null。
+  String? get _localCover {
+    final direct = (widget.imageUrl ?? '').trim();
+    if (shelfCoverHasImage(direct)) return direct;
+    final derived = MaterialSourceService.coverFor(sourceUrl: widget.pageUrl);
+    return shelfCoverHasImage(derived) ? derived : null;
+  }
+
+  void _resolve() {
+    if (_localCover != null) return;
+    if (!widget.enableLazyCoverFetch) return;
+    final page = widget.pageUrl.trim();
+    if (!page.startsWith('http://') && !page.startsWith('https://')) return;
+    final cached = MaterialCoverProbeCache.cached(page);
+    if (cached != null) {
+      _lazyCover = cached;
+      return;
+    }
+    // 抓过但没图(负缓存)→ 不重复打网络,也不重复尝试
+    if (MaterialCoverProbeCache.hasEntry(page)) return;
+    if (_probeStarted) return;
+    _probeStarted = true;
+    MaterialCoverProbeCache.resolve(page, probe: widget.probe).then((cover) {
+      if (!mounted || cover == null) return;
+      setState(() => _lazyCover = cover);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cover = _localCover ?? _lazyCover ?? '';
+    if (!shelfCoverHasImage(cover)) return const SizedBox.shrink();
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        MaterialResultCoverThumb(
+          url: cover,
+          title: widget.title,
+          kind: widget.kind,
+          imageProvider: widget.imageProvider,
+        ),
+        const SizedBox(width: Gap.sm),
+      ],
     );
   }
 }

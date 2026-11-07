@@ -36,8 +36,8 @@ else
   echo "✅ 渲染测试全绿（$RENDER_TESTS）"
 fi
 
-echo "=== [3/4] 全量 flutter test ==="
-bash tool/lockrun.sh test --no-pub > "$LOG_DIR/fulltest.log" 2>&1
+echo "=== [3/4] 全量 flutter test（串行 -j 1：多个测试文件共用同一 sqflite 磁盘库，并行会偶发 database is locked；闸门要确定性）==="
+bash tool/lockrun.sh test --no-pub -j 1 > "$LOG_DIR/fulltest.log" 2>&1
 TEST_EXIT=$?
 if [ "$TEST_EXIT" -ne 0 ]; then
   # 已知假失败：profile_card_test（Hive 假时钟，交接文档明确「别修」，2026-11-06 前就在）。

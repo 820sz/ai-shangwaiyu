@@ -122,6 +122,11 @@ class ContentQuality {
     if (looksLikeBookOrProductPage(text)) {
       return '抓到的是图书/课程介绍或售卖页,不是正文';
     }
+    // 第三轮（用户真机：搜出越南语文章）：拉丁字母但非英语的正文不能当阅读材料。
+    // 中文页面的拦截仍交给下面的 latinLetterRatio（教材/真题的中文站旧口径不变）。
+    if (looksLatinNonEnglish(text)) {
+      return '抓到的不是英文正文(疑似越南语/印尼语等)';
+    }
     if (latinLetterRatio(text) < 0.08) {
       return '抓到的是中文站点页面,不是英文正文';
     }
@@ -226,4 +231,266 @@ class ContentQuality {
       return null;
     }
   }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // 第三轮（2026-11-07 用户真机反馈）：候选级三层过滤
+  // ═══════════════════════════════════════════════════════════════════
+  //
+  // 真机问题：搜「四六级真题」时结果里混进 ①越南语文章 ②「考试报名网 / 考试简介」
+  // ③与分类完全无关的条目。正文级闸门（rejectReason）要抓完正文才生效，
+  // 这些候选会先占掉抓取名额与官方搜索的钱；所以在**候选阶段**补一层同样
+  // 可解释的过滤（纯函数，全部可单测）。
+
+  /// 英语功能词（高频）。长文本语言判定用：英语正文通常占 10%~50%，
+  /// 越南语/印尼语等拉丁语系几乎不命中。
+  static const Set<String> _englishStopwords = <String>{
+    'the', 'and', 'of', 'to', 'in', 'is', 'that', 'for', 'with', 'as', 'on',
+    'are', 'was', 'were', 'be', 'been', 'by', 'this', 'these', 'those', 'it',
+    'from', 'at', 'or', 'an', 'but', 'not', 'have', 'has', 'had', 'its',
+    'their', 'they', 'we', 'you', 'he', 'she', 'which', 'who', 'will',
+    'would', 'can', 'could', 'should', 'more', 'than', 'into', 'about',
+    'also', 'when', 'what', 'how', 'all', 'one', 'two', 'said', 'there',
+    'such', 'may', 'if', 'so', 'no', 'do', 'does', 'did', 'our', 'out',
+    'up', 'any', 'some', 'most', 'other', 'new', 'only', 'just', 'over',
+    'after', 'before', 'between', 'because', 'while', 'where', 'through',
+    'during', 'without', 'against', 'per', 'via', 'used', 'using', 'use',
+    'each', 'both', 'many', 'much', 'very', 'well', 'then', 'them', 'her',
+    'his', 'my', 'me', 'us', 'am', 'here', 'now', 'still', 'even',
+  };
+
+  /// 越南语高频词（无重音写法也能命中）。
+  static const Set<String> _vietnameseMarkers = <String>{
+    'và', 'của', 'là', 'những', 'được', 'trong', 'với', 'cho', 'không',
+    'người', 'cách', 'học', 'tiếng', 'các', 'một', 'khi', 'để', 'này',
+    'từ', 'anh', 'viết', 'bài', 'hiệu', 'quả', 'cũng', 'như', 'nhiều',
+  };
+
+  /// 印尼语高频词。
+  static const Set<String> _indonesianMarkers = <String>{
+    'yang', 'dan', 'dengan', 'untuk', 'dari', 'adalah', 'ini', 'itu',
+    'tidak', 'cara', 'belajar', 'bahasa', 'inggris', 'bisa', 'akan',
+    'pada', 'juga', 'lebih', 'kamu', 'saya', 'atau', 'karena', 'sudah',
+  };
+
+  /// 公告/报名/考试信息页信号（中文）。命中即不是可读材料。
+  static const List<String> _announcementSignals = <String>[
+    '报名',
+    '公告',
+    '考试简介',
+    '招生简章',
+    '招生',
+    '培训',
+    '辅导班',
+    '网校',
+    '官网',
+    '考试时间',
+    '准考证',
+    '成绩查询',
+    '查分',
+    '分数线',
+    '报考',
+    '考试大纲',
+    '考试安排',
+    '考试科目',
+    '报名入口',
+    '报名时间',
+    '报名条件',
+    '考试流程',
+    '考试报名',
+    '成绩单',
+    '校园招聘',
+    '课程介绍',
+    '课程大纲',
+    '课程安排',
+  ];
+
+  /// 公告/报名/考试信息页信号（英文）。
+  static const List<String> _announcementSignalsEn = <String>[
+    'registration',
+    'sign up',
+    'signup',
+    'admission',
+    'admissions',
+    'enrollment',
+    'official website',
+    'exam schedule',
+    'admission ticket',
+    'exam guide',
+    'exam dates',
+    'tuition',
+    'apply now',
+    'application form',
+    'how to apply',
+  ];
+
+  /// URL 里的公告/报名信号（路径级）。
+  static const List<String> _announcementUrlSignals = <String>[
+    '/baoming',
+    '/zhaosheng',
+    '/signup',
+    '/sign-up',
+    '/registration',
+    '/peixun',
+    '/apply',
+    '/kaoshi/',
+    '/notice/',
+    '/announcement',
+    '/news/notice',
+  ];
+
+  /// 英文功能词占比（0~1）；没有拉丁词返回 0。
+  static double englishStopwordRatio(String raw) {
+    final words = RegExp(r'[a-z]+')
+        .allMatches(raw.toLowerCase())
+        .map((match) => match.group(0)!)
+        .toList();
+    if (words.isEmpty) return 0;
+    var hits = 0;
+    for (final word in words) {
+      if (_englishStopwords.contains(word)) hits++;
+    }
+    return hits / words.length;
+  }
+
+  /// 是否「拉丁字母但内容不是英语」（越南语/印尼语等）。
+  ///
+  /// 判定顺序（保守优先，宁可漏判不误杀）：
+  /// 1. 中文占一定比例 → 这是中文页面（教材/真题/教辅多在中文站），**不算**外语乱入；
+  /// 2. 词数太少（标题短语）不下结论，交给正文级闸门；
+  /// 3. 越南语/印尼语高频词命中 → 非英文；
+  /// 4. 越南语密集重音字符 → 非英文；
+  /// 5. 长文本（≥40 词）英文功能词占比过低 + 有外语特征 → 非英文。
+  static bool looksLatinNonEnglish(String raw) {
+    final text = raw.trim();
+    if (text.isEmpty) return false;
+    var cjk = 0;
+    var latin = 0;
+    var diacritic = 0;
+    for (final rune in text.runes) {
+      if (rune >= 0x4e00 && rune <= 0x9fff) {
+        cjk++;
+        continue;
+      }
+      final isLatin =
+          (rune >= 0x41 && rune <= 0x5a) || (rune >= 0x61 && rune <= 0x7a);
+      if (isLatin) latin++;
+      if ((rune >= 0x00c0 && rune <= 0x024f) ||
+          (rune >= 0x1e00 && rune <= 0x1eff)) {
+        diacritic++;
+      }
+    }
+    // 中文页面：不当"外语乱入"拒（中文教材/真题是合法材料）
+    if (cjk >= 8 || (cjk > 0 && cjk >= latin)) return false;
+    final words = RegExp(r'[a-zà-ỹ]+')
+        .allMatches(text.toLowerCase())
+        .map((match) => match.group(0)!)
+        .toList();
+    if (words.length < 4) return false;
+    var vi = 0;
+    var id = 0;
+    for (final word in words) {
+      if (_vietnameseMarkers.contains(word)) vi++;
+      if (_indonesianMarkers.contains(word)) id++;
+    }
+    if (vi >= 2) return true;
+    if (id >= 3) return true;
+    if (diacritic >= 3 && latin > 0 && diacritic * 60 >= latin) return true;
+    if (words.length >= 40) {
+      final ratio = englishStopwordRatio(text);
+      if (ratio < 0.04 && vi + id >= 1) return true;
+      if (ratio < 0.02 && diacritic >= 2) return true;
+    }
+    return false;
+  }
+
+  /// 是否像公告/报名/考试信息页（标题/摘要/URL 任一命中）。
+  static bool looksLikeAnnouncementPage({
+    required String title,
+    String url = '',
+    String snippet = '',
+  }) {
+    final hay = '${title.toLowerCase()} ${snippet.toLowerCase()}';
+    for (final signal in _announcementSignals) {
+      if (hay.contains(signal)) return true;
+    }
+    for (final signal in _announcementSignalsEn) {
+      if (hay.contains(signal)) return true;
+    }
+    final path = url.toLowerCase();
+    if (path.isNotEmpty) {
+      for (final signal in _announcementUrlSignals) {
+        if (path.contains(signal)) return true;
+      }
+    }
+    return false;
+  }
+
+  /// 弱相关：标题+摘要与「检索词/分类」没有任何实质命中。
+  ///
+  /// 为什么不误杀官方搜索的好结果：
+  /// - `rerankScore > 0`（官方搜索已排过相关性）或 `authority >= 2`（权威站点）→ 直接信任；
+  /// - 中文用 2 字子串命中，英文用前 4 个字母做前缀匹配（`reading` 能命中 `read`）；
+  /// - 没有种子词时不判（调用方没给依据就别乱杀）。
+  static bool isWeaklyRelated({
+    required String title,
+    String snippet = '',
+    required List<String> seeds,
+    int rerankScore = 0,
+    int authority = -1,
+  }) {
+    if (seeds.isEmpty) return false;
+    if (rerankScore > 0 || authority >= 2) return false;
+    final hay = '$title $snippet'.toLowerCase().trim();
+    if (hay.isEmpty) return false;
+    for (final seed in seeds) {
+      final text = seed.toLowerCase().trim();
+      if (text.isEmpty) continue;
+      if (text.length >= 2 && hay.contains(text)) return false;
+      final cjk = text.replaceAll(RegExp(r'[^\u4e00-\u9fff]'), '');
+      for (var i = 0; i + 2 <= cjk.length; i++) {
+        if (hay.contains(cjk.substring(i, i + 2))) return false;
+      }
+      for (final match in RegExp(r'[a-z0-9]+').allMatches(text)) {
+        final token = match.group(0)!;
+        final probe = token.length > 4 ? token.substring(0, 4) : token;
+        if (probe.length >= 3 && hay.contains(probe)) return false;
+      }
+    }
+    return true;
+  }
+
+  /// 候选级综合过滤：通过返回 null，否则返回拒收类别。
+  static ContentReject? rejectCandidate({
+    required String title,
+    required String url,
+    String snippet = '',
+    List<String> seeds = const <String>[],
+    int rerankScore = 0,
+    int authority = -1,
+  }) {
+    if (looksLikeAnnouncementPage(title: title, url: url, snippet: snippet)) {
+      return ContentReject.announcement;
+    }
+    if (looksLatinNonEnglish('$title $snippet')) return ContentReject.nonEnglish;
+    if (isWeaklyRelated(
+      title: title,
+      snippet: snippet,
+      seeds: seeds,
+      rerankScore: rerankScore,
+      authority: authority,
+    )) {
+      return ContentReject.weakRelated;
+    }
+    return null;
+  }
+
+  /// 拒收类别 → 给用户看的短说明（发现页 notes 汇总用）。
+  static String rejectLabel(ContentReject reject) => switch (reject) {
+        ContentReject.announcement => '公告/报名页',
+        ContentReject.nonEnglish => '非英文内容',
+        ContentReject.weakRelated => '与分类弱相关',
+      };
 }
+
+/// 候选级拒收类别（发现流水线统计用）。
+enum ContentReject { announcement, nonEnglish, weakRelated }

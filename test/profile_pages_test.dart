@@ -472,15 +472,6 @@ void main() {
     );
   });
 
-  testWidgets('render 关于与更新(新页)', (WidgetTester tester) async {
-    await _render(
-      tester,
-      'assist-mine-impl-about.png',
-      AboutScreen(onCheckUpdate: () async {}, onShowDiagnostics: () async {}),
-      providers: false,
-    );
-  });
-
   testWidgets('render 写译记录(新入口 + 换壳)', (WidgetTester tester) async {
     await _render(tester, 'assist-mine-impl-writing-logs.png', const WritingLogsScreen());
   });

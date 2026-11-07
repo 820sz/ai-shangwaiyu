@@ -6,20 +6,29 @@ import '../config/v4_theme.dart';
 import '../services/bookshelf.dart';
 import 'shelf_cover_grid.dart';
 
-/// 书架形态 B · **3D 立体轮播书架**(v5 · 第二版,对齐用户参考图)。
+/// 书架形态 B · **3D 立体轮播书架**(v6 · 2026-11-07 修"每次点进去有书横档")。
 ///
 /// 用户参考图(轻小说文库 W8 书架)的关键不是"一次一本大书",而是:
 /// 1. **一排书脊同时立在书架上**(书脊朝外、密密麻麻,能看到每本书的侧标题);
-/// 2. 中间选中那本**被抽出来、微微倾斜地展示封面**(立体感来自封面卡 + 阴影 + 透视);
-/// 3. 左右滑动/点书脊切换"被抽出来"的那本。
+/// 2. 点某一本书脊后,那本**被抽出来、微微倾斜地展示封面**(阴影 + 透视);
+/// 3. 左右滑动浏览书脊。
 ///
-/// v5 第一版做成了 PageView 一次一本,和参考图差得远(用户 11/04 指出)。
-/// 本文件按参考图重写:
-/// - `SingleChildScrollView + Row` 铺**一排书脊**,宽度/高度按书名与进度稳定生成;
-/// - 滚动到视口中心的那本 = 选中,顶部用 `Matrix4` 透视**倾斜抽出封面**;
-/// - 点书脊 = 滚到它;点封面 = 打开阅读器;长按 = 原书架弹层。
+/// ## v6 修的 bug(用户真机第 3 条:"每次点进去都会有一本书横档")
+/// 旧实现有两个问题:
+/// - `_selected` 初始就被设成"中间那本"(旧 `initState`),于是**一进页面**
+///   就有一张"抽出的封面卡";
+/// - 抽出封面用 `bottom: _bookBottomGap + 4` 定位,和书脊排(`bottom: _bookBottomGap + 6`)
+///   **几乎同一层** → 封面正好横在书脊前面,挡住中间几本书,看起来像"横了一个东西"。
 ///
-/// 裁剪:外层 `ClipRect`(v2.13 3D 回退的坑),书脊不超出书架面。
+/// 现在:
+/// - 初始 `_selected = null`(见 [ShelfCarouselView.spineKey] 附近注释),
+///   只显示一排书脊 + 底部提示;
+/// - 点书脊 → 该本抽出,**封面浮在书架排上方**(不覆盖任何书脊/hint),整条书架
+///   高度用 [AnimatedSize] 平滑长高;
+/// - 再点同一本书脊 / 点书架空白 → 收回;
+/// - 左右滑动只滚书脊,不会自动"抽出"某本(旧实现滑到哪本就抽哪本,是横档的来源)。
+///
+/// 裁剪:外层 `ClipRect`,书脊不超出书架面。
 class ShelfCarouselView extends StatefulWidget {
   final List<BookshelfBook> books;
   final ValueChanged<BookshelfBook>? onTapBook;
@@ -38,47 +47,72 @@ class ShelfCarouselView extends StatefulWidget {
     this.enableCoverFetch = true,
   });
 
+  /// 抽出封面卡的 Key(渲染/测试用:断言"初始态没有抽出封面")
+  static const Key featuredCoverKey = Key('shelf_carousel_featured_cover');
+
+  /// 整个书架面的 Key(点空白收回时,测试用它算空白坐标)
+  static const Key surfaceKey = Key('shelf_carousel_surface');
+
+  /// 第 [i] 本书脊的 Key(测试点书脊用)
+  static Key spineKey(int i) => ValueKey<String>('shelf_carousel_spine_$i');
+
   @override
   State<ShelfCarouselView> createState() => _ShelfCarouselViewState();
 }
 
 class _ShelfCarouselViewState extends State<ShelfCarouselView> {
   final ScrollController _ctrl = ScrollController();
-  int _selected = 0;
+
+  /// 当前"抽出来"的书;null = **没有抽出任何一本**(初始态 / 收回态)。
+  ///
+  /// 旧实现这里是 `int _selected = 0` 并在 initState 里改成"中间那本",
+  /// 所以一进页面就有封面横在书脊前(用户真机第 3 条)。
+  int? _selected;
+
   double _viewportWidth = 0;
+
+  /// 书架排(书脊 + 搁板 + 底部提示)的固定高度;抽出封面浮在它**上方**,
+  /// 所以这个高度不随开合变化(变化的是外层 AnimatedSize 的总高度)
+  static const double _shelfBandHeight =
+      _maxSpineHeight + _bookBottomGap + 26;
 
   @override
   void initState() {
     super.initState();
-    _ctrl.addListener(_onScroll);
-    // 参考图构图:把"被抽出来"的那本放在中间,左右都能看到书脊
-    _selected = widget.books.isEmpty ? 0 : widget.books.length ~/ 2;
+    // 抽出封面要一直"悬在选中那本书的正上方":滚动书脊时跟着对齐
+    _ctrl.addListener(_realignCover);
+    // 初始只滚到中间,让书脊铺满书架;**不**选中、不抽出封面
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      _centerOn(_selected, animate: false);
+      if (!mounted || widget.books.isEmpty) return;
+      _centerOn(widget.books.length ~/ 2, animate: false);
     });
+  }
+
+  /// 滚动时重算抽出封面的横向位置(只在有抽出封面时才重建)
+  void _realignCover() {
+    if (!mounted || _selected == null) return;
+    setState(() {});
   }
 
   @override
   void didUpdateWidget(covariant ShelfCarouselView oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // 筛选/排序变了:选中的书可能已不在列表里 —— 重置到中间那本,
-    // 否则会停在越界索引,出现"只显示一本、其余书脊看不到"的真机 bug。
+    // 筛选/排序变了:抽出的那本可能已不在列表里 —— 收回封面,把书架回正。
     if (oldWidget.books.length != widget.books.length ||
         (oldWidget.books.isNotEmpty &&
             widget.books.isNotEmpty &&
             oldWidget.books.first.materialId != widget.books.first.materialId)) {
-      _selected = widget.books.isEmpty ? 0 : widget.books.length ~/ 2;
+      _selected = null;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        _centerOn(_selected, animate: false);
+        if (!mounted || widget.books.isEmpty) return;
+        _centerOn(widget.books.length ~/ 2, animate: false);
       });
     }
   }
 
   @override
   void dispose() {
-    _ctrl.removeListener(_onScroll);
+    _ctrl.removeListener(_realignCover);
     _ctrl.dispose();
     super.dispose();
   }
@@ -99,6 +133,7 @@ class _ShelfCarouselViewState extends State<ShelfCarouselView> {
   static const double _maxSpineHeight = 200;
   static const double _bookBottomGap = 30; // 书底离容器底(给搁板+阴影)
   static const double _featuredHeight = 168;
+  static const double _featuredWidth = 132;
 
   int _seedOf(BookshelfBook b) {
     final s = '${b.materialId}:${b.title}'.runes.fold<int>(
@@ -110,6 +145,10 @@ class _ShelfCarouselViewState extends State<ShelfCarouselView> {
 
   double _gap(int i) => 2.5;
 
+  /// 书脊排左右内边距:让"任意一本都能滚到视口正中"(首尾也能居中)。
+  /// 必须和 [_centerOn] 用同一个口径,否则选中后书脊会偏到一边(实测差 ~100px)。
+  double get _sidePadding => math.max(24, (_viewportWidth - 60) / 2);
+
   /// 第 i 本书在 Row 里的左偏移
   double _offsetOf(int i) {
     var x = 0.0;
@@ -119,25 +158,32 @@ class _ShelfCarouselViewState extends State<ShelfCarouselView> {
     return x;
   }
 
-  void _onScroll() {
-    if (!_ctrl.hasClients || _viewportWidth <= 0) return;
-    final center = _ctrl.offset + _viewportWidth / 2;
-    var idx = 0;
-    for (var i = 0; i < widget.books.length; i++) {
-      final left = _offsetOf(i);
-      final right = left + _spineWidth(i);
-      if (center >= left && center <= right) {
-        idx = i;
-        break;
-      }
-      if (center > right) idx = math.min(i + 1, widget.books.length - 1);
+  /// 点书脊:没抽出 → 抽出这本并把它滚到中间;已抽出同一本 → 收回。
+  ///
+  /// 为什么用"点同一本再收回"而不是"点哪本换哪本":收回是明确的可达操作
+  /// (否则封面一旦抽出就只能靠点空白收回,而空白区域在书脊满屏时很小)。
+  void _toggleBook(int i) {
+    if (i < 0 || i >= widget.books.length) return;
+    if (_selected == i) {
+      _closeFeatured();
+      return;
     }
-    if (idx != _selected) setState(() => _selected = idx);
+    setState(() => _selected = i);
+    _centerOn(i);
+  }
+
+  /// 收回抽出的封面(点空白 / 再点书脊都走这里)
+  void _closeFeatured() {
+    if (_selected == null) return;
+    setState(() => _selected = null);
   }
 
   Future<void> _centerOn(int i, {bool animate = true}) async {
     if (!_ctrl.hasClients) return;
-    final target = (_offsetOf(i) + _spineWidth(i) / 2) - _viewportWidth / 2;
+    // 书脊在滚动内容里的真实 x = 左内边距 + 前面所有书脊宽度;旧实现漏了
+    // padding,导致"点了某本,它还是偏在一边"(实测偏 ~100px)
+    final target =
+        (_sidePadding + _offsetOf(i) + _spineWidth(i) / 2) - _viewportWidth / 2;
     final clamped =
         target.clamp(0.0, _ctrl.position.maxScrollExtent).toDouble();
     if (animate) {
@@ -158,144 +204,188 @@ class _ShelfCarouselViewState extends State<ShelfCarouselView> {
     return LayoutBuilder(
       builder: (context, constraints) {
         _viewportWidth = constraints.maxWidth;
-        final selected =
-            widget.books[_selected.clamp(0, widget.books.length - 1)];
-        return SizedBox(
-          // 高度按"最高书脊 + 底部搁板 + 封面露出的顶"算;之前的公式把
-          // 封面高度和书脊高度相加,真机上顶部空出一大块(用户 11/04 反馈)
-          height: _maxSpineHeight + _bookBottomGap + 26,
-          child: Stack(
-            clipBehavior: Clip.hardEdge,
-            children: <Widget>[
-              // 书架背景:淡果冻纸面(参考图是奶白/纸感,这里用主题浅底)
-              Positioned.fill(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: Color.alphaBlend(
-                      skin.pastelAt(0).first.withValues(alpha: 0.25),
-                      skin.pageBg,
+        final selected = _selected;
+        final open = selected != null && selected < widget.books.length;
+        // 抽出封面**浮在书架排上方**,不压在书脊上 —— 这是"横档"bug 的直接修法。
+        // 收起时这块高度为 0,所以初始态就是一整排书脊。
+        final featuredSlot = open ? _featuredHeight + 14 : 0.0;
+        // 抽出封面的横向落点:对准选中书脊在屏幕上的中心(再夹在左右安全边距内),
+        // 这样"抽出来"的封面总是悬在**那本书**正上方,不会在正中飘着像别的卡
+        double? coverLeft;
+        if (open) {
+          final centerOnScreen = _sidePadding +
+              _offsetOf(selected) +
+              _spineWidth(selected) / 2 -
+              (_ctrl.hasClients ? _ctrl.offset : 0);
+          final minCenter = _featuredWidth / 2 + 10;
+          final maxCenter = constraints.maxWidth - _featuredWidth / 2 - 10;
+          final clampedCenter = maxCenter <= minCenter
+              ? constraints.maxWidth / 2
+              : centerOnScreen.clamp(minCenter, maxCenter).toDouble();
+          coverLeft = clampedCenter - _featuredWidth / 2;
+        }
+        return GestureDetector(
+          key: ShelfCarouselView.surfaceKey,
+          behavior: HitTestBehavior.opaque,
+          // 点书架空白 = 收回;书脊/封面的 GestureDetector 在里层,会先拿到手势
+          onTap: _closeFeatured,
+          child: AnimatedSize(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+            alignment: Alignment.topCenter,
+            child: SizedBox(
+              height: _shelfBandHeight + featuredSlot,
+              child: Stack(
+                clipBehavior: Clip.hardEdge,
+                children: <Widget>[
+                  // 书架背景:淡果冻纸面(参考图是奶白/纸感,这里用主题浅底)
+                  Positioned.fill(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: Color.alphaBlend(
+                          skin.pastelAt(0).first.withValues(alpha: 0.25),
+                          skin.pageBg,
+                        ),
+                        borderRadius: BorderRadius.circular(22),
+                      ),
                     ),
-                    borderRadius: BorderRadius.circular(22),
                   ),
-                ),
-              ),
-              // ① 一排书脊(真正"书架"的主体)
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: _bookBottomGap + 6,
-                height: _maxSpineHeight + 6,
-                child: ClipRect(
-                  child: SingleChildScrollView(
-                    controller: _ctrl,
-                    scrollDirection: Axis.horizontal,
-                    physics: const BouncingScrollPhysics(),
-                    padding: EdgeInsets.symmetric(
-                      horizontal: math.max(24, (constraints.maxWidth - 60) / 2),
+                  // ① 一排书脊(真正"书架"的主体;初始可见的全部内容)
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: _bookBottomGap + 6,
+                    height: _maxSpineHeight + 6,
+                    child: ClipRect(
+                      child: SingleChildScrollView(
+                        controller: _ctrl,
+                        scrollDirection: Axis.horizontal,
+                        physics: const BouncingScrollPhysics(),
+                        padding: EdgeInsets.symmetric(
+                          horizontal: _sidePadding,
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: <Widget>[
+                            for (var i = 0; i < widget.books.length; i++)
+                              Padding(
+                                padding: EdgeInsets.only(right: _gap(i)),
+                                child: _spine(
+                                  skin,
+                                  i,
+                                  selected: i == selected,
+                                  // 没选中时以"中间那本"为透视锚点,
+                                  // 书脊排仍有纵深,不会变成一张平面卡片墙
+                                  anchor: selected ?? (widget.books.length ~/ 2),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
                     ),
+                  ),
+                  // ② 搁板(书底那条板)
+                  Positioned(
+                    left: 8,
+                    right: 8,
+                    bottom: _bookBottomGap - 6,
+                    child: Container(
+                      height: 12,
+                      decoration: BoxDecoration(
+                        color: skin.surface,
+                        borderRadius: BorderRadius.circular(999),
+                        boxShadow: skin.shadow,
+                      ),
+                    ),
+                  ),
+                  // ③ 被抽出来的那本:只在点开时出现,且**浮在书架排上方**
+                  //    (bottom 从书架排顶部再往上 4px,压不到任何书脊)
+                  if (open && coverLeft != null)
+                    Positioned(
+                      left: coverLeft,
+                      width: _featuredWidth,
+                      bottom: _shelfBandHeight + 4,
+                      height: _featuredHeight,
+                      child: GestureDetector(
+                        key: ShelfCarouselView.featuredCoverKey,
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () =>
+                            widget.onTapBook?.call(widget.books[selected]),
+                        onLongPress: () => widget
+                            .onLongPressBook
+                            ?.call(widget.books[selected]),
+                        // 封面不再压住书脊,但保留"在封面上横向拖 = 翻书"
+                        onHorizontalDragUpdate: (details) {
+                          if (!_ctrl.hasClients) return;
+                          final next = (_ctrl.offset - details.delta.dx)
+                              .clamp(0.0, _ctrl.position.maxScrollExtent)
+                              .toDouble();
+                          _ctrl.jumpTo(next);
+                        },
+                        child: _featuredCover(skin, widget.books[selected]),
+                      ),
+                    ),
+                  // ④ 底部状态(始终在书架排底部,不会被封面盖住)
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 2,
                     child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.end,
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: <Widget>[
-                        for (var i = 0; i < widget.books.length; i++)
-                          Padding(
-                            padding: EdgeInsets.only(right: _gap(i)),
-                            child: _spine(skin, i, selected: i == _selected),
+                        Icon(Icons.swipe, size: 12, color: skin.inkFaint),
+                        const SizedBox(width: 4),
+                        Text(
+                          open
+                              ? '点书脊收回 · 点封面打开 · 左右滑翻书'
+                              : '左右滑翻书 · 点书脊抽出封面',
+                          style: TextStyle(fontSize: 10, color: skin.inkFaint),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          open
+                              ? '${selected + 1}/${widget.books.length}'
+                              : '${widget.books.length} 本',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                            color: skin.inkSoft,
                           ),
+                        ),
                       ],
                     ),
                   ),
-                ),
+                ],
               ),
-              // ② 搁板(书底那条板)
-              Positioned(
-                left: 8,
-                right: 8,
-                bottom: _bookBottomGap - 6,
-                child: Container(
-                  height: 12,
-                  decoration: BoxDecoration(
-                    color: skin.surface,
-                    borderRadius: BorderRadius.circular(999),
-                    boxShadow: skin.shadow,
-                  ),
-                ),
-              ),
-              // ③ 被抽出来的那本:透视倾斜的封面(参考图的核心视觉)
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: _bookBottomGap + 4,
-                height: _featuredHeight,
-                child: Center(
-                  // 封面会盖住中间书脊;如果它只吃 tap,用户在封面上左右滑
-                  // 会完全滑不动(用户 11/05 反馈"每次都有一本书挡住卡着")。
-                  // 这里把横向拖拽转交给书脊滚动条,点按仍然打开。
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () => widget.onTapBook?.call(selected),
-                    onLongPress: () => widget.onLongPressBook?.call(selected),
-                    onHorizontalDragUpdate: (details) {
-                      if (!_ctrl.hasClients) return;
-                      final next = (_ctrl.offset - details.delta.dx)
-                          .clamp(0.0, _ctrl.position.maxScrollExtent)
-                          .toDouble();
-                      _ctrl.jumpTo(next);
-                    },
-                    child: _featuredCover(skin, selected),
-                  ),
-                ),
-              ),
-              // ④ 底部状态
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 2,
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: <Widget>[
-                    Icon(Icons.swipe, size: 12, color: skin.inkFaint),
-                    const SizedBox(width: 4),
-                    Text(
-                      '左右滑 · 点书脊切换 · 点封面打开',
-                      style: TextStyle(fontSize: 10, color: skin.inkFaint),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      '${_selected + 1}/${widget.books.length}',
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w800,
-                        color: skin.inkSoft,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
+            ),
           ),
         );
       },
     );
   }
 
-  /// 书脊:窄长条 + 竖排标题 + 进度条;选中那本微微抬高/提亮
-  Widget _spine(V4Skin skin, int i, {required bool selected}) {
+  /// 书脊:窄长条 + 竖排标题 + 进度条;抽出那本微微抬高/提亮
+  Widget _spine(
+    V4Skin skin,
+    int i, {
+    required bool selected,
+    required int anchor,
+  }) {
     final book = widget.books[i];
     final palette = _spinePalette(_seedOf(book));
     final pct = (book.percent / 100).clamp(0.0, 1.0);
     final width = _spineWidth(i);
     final height = _spineHeight(i);
     return GestureDetector(
-      onTap: () {
-        setState(() => _selected = i);
-        _centerOn(i);
-      },
+      key: ShelfCarouselView.spineKey(i),
+      // 点书脊 = 抽出/收回;不再"点一下就永久选中"
+      onTap: () => _toggleBook(i),
       child: Transform(
         alignment: Alignment.bottomCenter,
-        // 参考图是"一排书在透视里":离中心越远越向内收一点,整排才有 3D 纵深
+        // 参考图是"一排书在透视里":离锚点越远越向内收一点,整排才有 3D 纵深
         transform: Matrix4.identity()
           ..setEntry(3, 2, 0.0010)
-          ..rotateY(((i - _selected) * 0.030).clamp(-0.28, 0.28)),
+          ..rotateY(((i - anchor) * 0.030).clamp(-0.28, 0.28)),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 180),
           width: width,
@@ -416,7 +506,7 @@ class _ShelfCarouselViewState extends State<ShelfCarouselView> {
         ..rotateZ(-0.012)
         ..scaleByDouble(1.0, 1.0, 1.0, 1.0),
       child: Container(
-        width: 132,
+        width: _featuredWidth,
         height: _featuredHeight,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(8),
@@ -443,7 +533,7 @@ class _ShelfCarouselViewState extends State<ShelfCarouselView> {
               kind: book.kind,
               coverUrl: book.coverUrl,
               levelLabel: level,
-              width: 132,
+              width: _featuredWidth,
               height: _featuredHeight,
               radius: 8,
             ),

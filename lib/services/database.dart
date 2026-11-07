@@ -1127,6 +1127,50 @@ class DatabaseService {
 {"score":总分(0-5),"dimensions":[{"key":"维度key","score":0-5,"band":"档位","evidence":"学生摘要中的依据"}],"issues":[{"span":"片段","type":"漏要点/冗余/语言","reason":"中文说明"}],"correction":"参考摘要","summary":"一句中文总评"}''',
         'created_at': createdAt,
       },
+      // ── 六级(2026-11-07 用户真机反馈:练六级却显示 cet4_writing)──
+      //
+      // 只补 **id + 提示词口径**,不改表结构、不加列;`INSERT OR IGNORE` 幂等,
+      // 老库在启动自检 `_seedBuiltinRubrics` 里就会补齐(可重复执行)。
+      {
+        'id': 'cet6_writing',
+        'type': 'writing',
+        'scoring_mode': 'ai_rubric',
+        'dimensions_json': jsonEncode(dims([
+          ('content', '内容切题', 0.25),
+          ('organization', '组织连贯', 0.20),
+          ('language', '语言准确', 0.25),
+          ('vocabulary', '词汇丰富', 0.15),
+          ('sentence', '句式多样', 0.15),
+        ])),
+        'bands_json': jsonEncode(bands15),
+        'prompt_template': '''你是 CET-6 写作阅卷员。先给依据、再给分,不许只给总分。
+评分维度(权重见括号):{维度}
+分档参考:{档位}
+题目:{题目}
+学生作文:{学生答案}
+只输出 JSON:
+{"score":总分(0-15),"dimensions":[{"key":"维度key","score":0-15,"band":"档位","evidence":"原文依据"}],"issues":[{"span":"原文片段","type":"语法/词汇/结构/内容","reason":"中文说明"}],"correction":"修改后的完整作文","summary":"一句中文总评"}''',
+        'created_at': createdAt,
+      },
+      {
+        'id': 'cet6_translation',
+        'type': 'translation',
+        'scoring_mode': 'ai_rubric',
+        'dimensions_json': jsonEncode(dims([
+          ('comprehension', '原文理解', 0.30),
+          ('accuracy', '译文准确', 0.40),
+          ('fluency', '表达通顺', 0.30),
+        ])),
+        'bands_json': jsonEncode(bands15),
+        'prompt_template': '''你是 CET-6 翻译阅卷员。先给依据、再给分。
+评分维度(权重见括号):{维度}
+分档参考:{档位}
+中文原文:{题目}
+学生译文:{学生答案}
+只输出 JSON:
+{"score":总分(0-15),"dimensions":[{"key":"维度key","score":0-15,"band":"档位","evidence":"学生译文中的依据"}],"issues":[{"span":"片段","type":"语法/词汇/漏信息","reason":"中文说明"}],"correction":"更自然的英文版本","summary":"一句中文总评"}''',
+        'created_at': createdAt,
+      },
     ];
   }
 

@@ -299,6 +299,8 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
         await _startBuiltinSet(OutputBank.buildEssaySet(
           prompts: prompts.take(1).toList(),
           title: source.title,
+          // 等级跟着设置页筛选走:六级 → cet6_writing,答题页显示六级标准
+          examType: _effectiveExam ?? 'none',
         ));
     }
   }

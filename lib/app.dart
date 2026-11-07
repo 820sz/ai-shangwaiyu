@@ -4,6 +4,7 @@ import 'config/theme.dart';
 import 'services/theme_controller.dart';
 import 'widgets/bottom_nav.dart';
 import 'widgets/exit_prompt.dart';
+import 'widgets/about_notice_gate.dart';
 import 'screens/splash_screen.dart';
 import 'screens/tutor/tutor_home.dart';
 import 'screens/input/input_home.dart';
@@ -56,9 +57,13 @@ class _ReadFlowAppState extends State<ReadFlowApp> {
         // v2.5(M3):开屏动画(logo 渐显 + 文案渐显)包在主界面外面,
         // 动画结束或用户点一下即进入;分页切换等仍走原来的路由
         home: SplashScreen(
-          child: _RootShell(
-            currentTab: _currentTab,
-            onTabChanged: (tab) => setState(() => _currentTab = tab),
+          // v2.28.0：首次启动「关于」开屏公告（只弹一次；组件内部用 Hive 标记，
+          // 首帧后检查，不影响开屏动画与启动速度）。
+          child: AboutNoticeGate(
+            child: _RootShell(
+              currentTab: _currentTab,
+              onTabChanged: (tab) => setState(() => _currentTab = tab),
+            ),
           ),
         ),
       ),

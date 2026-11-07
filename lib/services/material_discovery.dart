@@ -231,11 +231,33 @@ class MaterialDiscovery {
     /// 「继续找更多」时模型新给出的检索词:与 [queries] 合并去重后最多 8 条
     /// (公开源只跑拉丁字母 query,官方搜索按原有逻辑取前 4 条)。
     List<String> extraQueries = const <String>[],
+    /// **频道页专用**:检索提示词覆盖(只写"分类 + 难度",不写用户目标/需求)。
+    ///
+    /// 用户 2026-11-07 真机反馈:材料中心(按题材/形式/场景)被"用户需求/目标"
+    /// 框太死,结果少且怪。所以频道页会传一个**只含分类与难度**的提示词;
+    /// 空串 = 沿用 [InputPreferences.promptHint](按需找/旧链路行为不变)。
+    String promptHintOverride = '',
+    /// 分类描述(如「按题材 · 科学与技术」),只用于候选弱相关过滤的种子词。
+    String categoryHint = '',
     void Function(String label)? onEvent,
   }) async {
     final notes = <String>[];
     final raw = <DiscoveredCandidate>[];
     final seen = <String>{};
+
+    // 检索计划要在 addAll 之前算好:候选过滤(弱相关)要拿它当种子词。
+    final plan = mergeDiscoveryQueries(
+      queries: queries,
+      extraQueries: extraQueries,
+    );
+    // 候选级质量过滤计数(公告/报名页、非英文、弱相关);一轮过滤,两轮共用。
+    var filteredAnnouncement = 0;
+    var filteredNonEnglish = 0;
+    var filteredWeak = 0;
+    final filterSeeds = <String>[
+      ...plan,
+      if (categoryHint.trim().isNotEmpty) categoryHint.trim(),
+    ];
 
     // 排除集:原始写法 + 归一 key 都收进来,调用方传哪种都能命中。
     final excluded = <String>{};
@@ -262,14 +284,31 @@ class MaterialDiscovery {
         )) {
           continue;
         }
+        // 第三轮(2026-11-07):候选级三层过滤 ——
+        // 越南语/印尼语等非英文、考试报名/公告页、与分类弱相关。
+        // 放在这里:公开源与官方搜索、首轮与补救轮共用同一套口径。
+        final reject = ContentQuality.rejectCandidate(
+          title: c.title,
+          url: c.url,
+          snippet: c.snippet,
+          seeds: filterSeeds,
+          rerankScore: c.rerankScore.round(),
+          authority: c.authority,
+        );
+        if (reject != null) {
+          switch (reject) {
+            case ContentReject.announcement:
+              filteredAnnouncement++;
+            case ContentReject.nonEnglish:
+              filteredNonEnglish++;
+            case ContentReject.weakRelated:
+              filteredWeak++;
+          }
+          continue;
+        }
         raw.add(c);
       }
     }
-
-    final plan = mergeDiscoveryQueries(
-      queries: queries,
-      extraQueries: extraQueries,
-    );
 
     final client = _injectedClient ?? DeepSeekSearchClient();
     final apiAvailable = client.available;
@@ -377,12 +416,17 @@ class MaterialDiscovery {
           targetCount: maxFetch,
         )) {
       onEvent?.call('换几个关键词再找…');
+      // 频道页会传"只含分类+难度"的提示词(promptHintOverride):
+      // 材料中心不再被用户目标/需求框死(用户 2026-11-07 真机反馈)。
+      final neutralHint = promptHintOverride.trim();
+      final hintForModel =
+          neutralHint.isNotEmpty ? neutralHint : prefs.promptHint;
       final refineInput = MaterialRefineInput(
         userQuery: userQuery.trim().isNotEmpty
             ? userQuery.trim()
-            : prefs.promptHint,
+            : hintForModel,
         candidates: refineCandidateMaps(raw),
-        prefsHint: prefs.promptHint,
+        prefsHint: hintForModel,
       );
       var proposed = const <String>[];
       try {
@@ -410,6 +454,18 @@ class MaterialDiscovery {
 
     final apiRequests = client.requestCount;
     final apiCost = client.estimatedCostCny;
+
+    // 候选级过滤的透明说明:用户能看到"不是搜不到,是质量不达标被挡了"
+    final filteredTotal =
+        filteredAnnouncement + filteredNonEnglish + filteredWeak;
+    if (filteredTotal > 0) {
+      final parts = <String>[
+        if (filteredAnnouncement > 0) '公告/报名页 $filteredAnnouncement 条',
+        if (filteredNonEnglish > 0) '非英文内容 $filteredNonEnglish 条',
+        if (filteredWeak > 0) '与分类弱相关 $filteredWeak 条',
+      ];
+      notes.add('已过滤 $filteredTotal 条质量不合格的候选(${parts.join('、')})。');
+    }
 
     if (raw.isEmpty) {
       notes.add('这些渠道都没有找到合适的材料。可以换个关键词,或降低/提高难度档再试。');

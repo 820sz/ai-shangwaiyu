@@ -35,7 +35,11 @@ import '../services/profile_card.dart';
 class ProfileNameCard extends StatefulWidget {
   final int? vocabCount;
 
-  const ProfileNameCard({super.key, this.vocabCount});
+  /// **仅用于测试/渲染**:直接指定名片设置,跳过 Hive 读取
+  /// (有背景图/无背景图两态对照必须能确定性复现,不能依赖本机磁盘状态)
+  final ProfileCardSettings? settingsOverride;
+
+  const ProfileNameCard({super.key, this.vocabCount, this.settingsOverride});
 
   @override
   State<ProfileNameCard> createState() => _ProfileNameCardState();
@@ -48,7 +52,7 @@ class _ProfileNameCardState extends State<ProfileNameCard> {
   @override
   void initState() {
     super.initState();
-    _card = ProfileCardSettings.load();
+    _card = widget.settingsOverride ?? ProfileCardSettings.load();
     _model = LearnerModelStore.load();
   }
 
@@ -147,16 +151,38 @@ class ProfileCardView extends StatelessWidget {
       ),
       child: Stack(
         children: [
-          // 用户自选的背景图保留,但压成 10% 的"纸上暗纹":功能不丢,白字变墨字
-          if (hasPhoto)
+          // 用户自选的背景图保留,但按"照片 → 磨砂纸"处理(用户第 7 条真机反馈:
+          // 背景图直接铺上去,文字与标签看不清):
+          // ① 轻模糊 6px —— 把照片细节打散,避免文字压在杂乱纹理上;
+          // ② 纸面渐变 scrim(上 92% → 中 84% → 下 94% 纸色) —— 照片仍看得出来,
+          //    但墨字/标签/三栏数据都有足够对比度(无图时完全不出现这两层)。
+          if (hasPhoto) ...[
             Positioned.fill(
               child: IgnorePointer(
-                child: Opacity(
-                  opacity: 0.10,
+                child: ImageFiltered(
+                  imageFilter: ImageFilter.blur(sigmaX: 6, sigmaY: 6),
                   child: _CardBackdrop(settings: settings),
                 ),
               ),
             ),
+            Positioned.fill(
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: <Color>[
+                        t.surface.withValues(alpha: 0.92),
+                        t.surface.withValues(alpha: 0.84),
+                        t.surface.withValues(alpha: 0.94),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
           // 身份条:设置里选的渐变/背景图收成顶部 3px —— 还看得见,但不再压住文字
           Positioned(
             left: 0,

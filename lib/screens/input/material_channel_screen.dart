@@ -68,10 +68,22 @@ class MaterialChannelScreen extends StatefulWidget {
   /// 从材料中心点进来时预选的子分类 id(为空 = 整个方向)
   final String? initialSubtopic;
 
+  /// **仅渲染 / 质检测试用**:注入"实跑一轮后"的发现结果(快照 9 字段 map)。
+  ///
+  /// 生产永不传。为什么要这个口子:频道页的质量过滤汇总(`_notes`,如
+  /// 「已过滤 N 条质量不合格的候选(公告/报名页 x、非英文 y、弱相关 z)」)
+  /// 来自**真实运行结果**,质检验收需要一张"过滤后可见"的截图,不能靠联网碰运气。
+  final List<Map<String, Object?>> debugItems;
+
+  /// **仅渲染 / 质检测试用**:配合 [debugItems] 显示的说明行(同上,生产不传)。
+  final List<String> debugNotes;
+
   const MaterialChannelScreen({
     super.key,
     required this.direction,
     this.initialSubtopic,
+    this.debugItems = const <Map<String, Object?>>[],
+    this.debugNotes = const <String>[],
   });
 
   @override
@@ -94,6 +106,17 @@ String inferChannelKind(
   String fallback = 'article',
 }) =>
     inferMaterialKind(title, url, fallback: fallback);
+
+/// 真题的展示标签:把「四级真题 / 六级真题」并进来源胶囊(判不出就不加假标签)。
+///
+/// 为什么放来源位而不是新加组件:结果卡由公共件 `MaterialResultCard` 渲染
+/// (卡片本体归结果列表,不在本页改),来源胶囊是第一枚可见标签,能直接承载
+/// 「CET-4 / CET-6」的分级信息(用户真机:真题分不出四级六级)。
+String _examTaggedSourceLabel(String sourceLabel, String title, String url) {
+  final tag = MaterialTaxonomy.examLevelTag(title, url: url);
+  if (tag.isEmpty) return sourceLabel;
+  return sourceLabel.trim().isEmpty ? tag : '$tag · ${sourceLabel.trim()}';
+}
 
 /// 每页条数(用户 2026-11-06 拍板:结果按页翻,不再"显示更多"无限追加)。
 ///
@@ -195,12 +218,18 @@ class _ChannelItem {
     required int seq,
   }) {
     final title = c.title.trim();
+    final displayTitle = title.isEmpty ? c.url : title;
     final content = c.content;
     return _ChannelItem(
-      title: title.isEmpty ? c.url : title,
+      title: displayTitle,
       url: c.url.trim(),
-      sourceLabel: c.sourceLabel.trim(),
-      kind: inferChannelKind(title, c.url, fallback: c.kind.trim().isEmpty ? 'article' : c.kind.trim()),
+      sourceLabel: _examTaggedSourceLabel(
+        c.sourceLabel.trim(),
+        displayTitle,
+        c.url,
+      ),
+      kind: inferChannelKind(displayTitle, c.url,
+          fallback: c.kind.trim().isEmpty ? 'article' : c.kind.trim()),
       snippet: c.snippet.trim(),
       imageUrl: (c.imageUrl ?? '').trim().isEmpty ? null : c.imageUrl!.trim(),
       authority: c.authority,
@@ -241,7 +270,11 @@ class _ChannelItem {
     return _ChannelItem(
       title: title.isEmpty ? url : title,
       url: url,
-      sourceLabel: '${map['sourceLabel'] ?? ''}'.trim(),
+      sourceLabel: _examTaggedSourceLabel(
+        '${map['sourceLabel'] ?? ''}'.trim(),
+        title.isEmpty ? url : title,
+        url,
+      ),
       kind: inferChannelKind(title, url, fallback: kind.isEmpty ? 'article' : kind),
       snippet: '${map['snippet'] ?? ''}'.trim(),
       imageUrl: imageUrl.isEmpty ? null : imageUrl,
@@ -449,12 +482,14 @@ class _MaterialChannelScreenState extends State<MaterialChannelScreen>
       if (sub != null) labels.add(sub.label);
     }
     final needSummary = _need.summary;
+    // 2026-11-07 用户真机反馈(第 1 条):材料中心(按题材/形式/场景)不再把
+    // 用户需求/目标写进检索提示 —— 否则「四六级 + 商业政治」这种组合会一起
+    // 为难 AI,结果又少又怪。需求画像只留给「按需求」频道 /「找材料·按我的情况找」。
     final needText = widget.direction == MaterialDirection.need
         ? (needSummary.trim().isEmpty ? '按我的需求找真实材料' : needSummary)
         : <String>[
             _shortTitle,
             if (labels.isNotEmpty) labels.join('、'),
-            if (!_need.isEmpty) '我的需求:$needSummary',
           ].join(' · ');
     return MaterialChannel(
       id: '${widget.direction.name}:${ids.isEmpty ? 'all' : ids.join(',')}',
@@ -511,47 +546,29 @@ class _MaterialChannelScreenState extends State<MaterialChannelScreen>
 
   /// 频道检索词:子分类自带的 queries + 展示名(中文给官方搜索)。
   ///
-  /// 按题材/按形式的子分类在 taxonomy 里**没有** queries(那是给「按场景」配的),
-  /// 若不补英文词,公开源(RSS/Gutenberg/arXiv 只认拉丁字母)一条都搜不到。
-  /// 所以这里按 id 补一组**通用英文检索词**(不是假数据,是真实检索词),
-  /// 保证没配官方 Key 时频道也有发现能力。
-  List<String> _buildQueries(List<String> selectedIds) {
-    if (widget.direction == MaterialDirection.need) return _needQueries();
-    final subs = <MaterialSubtopic>[];
-    if (selectedIds.isEmpty) {
-      subs.addAll(_def.subtopics);
-    } else {
-      for (final id in selectedIds) {
-        final sub = MaterialTaxonomy.subtopicOf(widget.direction, id);
-        if (sub != null) subs.add(sub);
-      }
-    }
-    final out = <String>[];
-    for (final sub in subs) {
-      out.addAll(sub.queries);
-      out.add(sub.label);
-      if (sub.queries.isEmpty) {
-        out.addAll(
-          _subQueryFallback['${widget.direction.name}:${sub.id}'] ??
-              const <String>[],
-        );
-      }
-    }
-    return _dedupeTake(out, 6);
-  }
+  /// 2026-11-07 用户真机反馈后收口成**纯函数** [MaterialTaxonomy.buildChannelQueries]:
+  /// - 按题材/形式/场景:只用「分类检索词」,**不注入用户目标/需求**;
+  /// - 按需求:沿用需求自由文本 + 目标 + 拉丁兴趣(独立入口的个性化)。
+  /// 子分类没配 queries 时用 [_subQueryFallback] 补真实英文检索词。
+  List<String> _buildQueries(List<String> selectedIds) =>
+      MaterialTaxonomy.buildChannelQueries(
+        direction: widget.direction,
+        def: _def,
+        selectedIds: selectedIds,
+        goals: _prefs.examGoals,
+        interests: _prefs.interests,
+        extraNeed: _need.extra,
+        fallbackQueries: _subQueryFallback,
+      );
 
-  /// 按需求方向:需求里的自由文本/目标/英文兴趣直接当检索词(官方搜索认中文)。
-  List<String> _needQueries() {
-    final out = <String>[];
-    final extra = _need.extra.trim();
-    if (extra.isNotEmpty) out.add(extra);
-    out.addAll(_prefs.examGoals);
-    for (final interest in _prefs.interests) {
-      if (_hasLatin(interest)) out.add(interest);
-    }
-    if (out.isEmpty) out.add('english reading');
-    return _dedupeTake(out, 6);
-  }
+  /// 频道页给 AI 的**中性提示词**(只含分类 + 难度;「按需求」方向返回空串,
+  /// 由 [MaterialDiscovery.discover] 回落到 `InputPreferences.promptHint`)。
+  String get _channelPromptHint => MaterialTaxonomy.buildChannelPromptHint(
+        direction: widget.direction,
+        def: _def,
+        selectedIds: _selected.toList(),
+        bandHint: _need.band.isAny ? '' : _need.band.hintForAi,
+      );
 
   /// 子分类补全检索词(仅当 taxonomy 没给 queries 时使用)。
   ///
@@ -575,20 +592,6 @@ class _MaterialChannelScreenState extends State<MaterialChannelScreen>
         'form:fragment': <String>['english article'],
         'form:other': <String>[],
       };
-
-  static bool _hasLatin(String text) => RegExp(r'[A-Za-z]').hasMatch(text);
-
-  /// 去空白/去重/截断(检索词和展示都靠它,避免同一词重复出现在来源里)
-  static List<String> _dedupeTake(Iterable<String> raw, int max) {
-    final out = <String>[];
-    for (final item in raw) {
-      final text = item.trim();
-      if (text.isEmpty || out.contains(text)) continue;
-      out.add(text);
-      if (out.length >= max) break;
-    }
-    return out;
-  }
 
   // ═══════════════════════════════════════════════════════════════════
   // 数据加载
@@ -675,6 +678,24 @@ class _MaterialChannelScreenState extends State<MaterialChannelScreen>
       if (_discoverScroll.hasClients) _discoverScroll.jumpTo(0);
       if (_mineScroll.hasClients) _mineScroll.jumpTo(0);
     });
+
+    if (widget.debugItems.isNotEmpty) {
+      // 仅渲染/质检测试:预置"实跑一轮后"的结果与质量过滤汇总(生产不传)。
+      final injected = <_ChannelItem>[];
+      for (final map in widget.debugItems) {
+        final item = _ChannelItem.fromSnapshot(map, seq: injected.length);
+        if (item != null) injected.add(item);
+      }
+      _markSavedFromShelf(injected, shelf, savedIds);
+      if (!mounted) return;
+      setState(() {
+        _items = injected;
+        _notes = widget.debugNotes;
+        _updatedAt = DateTime.now();
+        _ranThisSession = true;
+        _page = 0;
+      });
+    }
   }
 
   /// 重读「我的」:保存关系 + 材料库(阅读进度会变,读完回来要刷)。
@@ -814,6 +835,10 @@ class _MaterialChannelScreenState extends State<MaterialChannelScreen>
     final vocab = context.read<VocabProvider>().vocabularies;
     _refreshPrefsAndNeed();
     final channel = _channel;
+    // 中性提示词(分类 + 难度):非「按需求」频道不再注入用户目标/需求白名单;
+    // 「按需求」方向返回空串 → discover 内部回落到 InputPreferences.promptHint。
+    final neutralHint = _channelPromptHint;
+    final modelHint = neutralHint.isEmpty ? _prefs.promptHint : neutralHint;
     final hadItems = _items.isNotEmpty;
     setState(() {
       _running = true;
@@ -839,7 +864,7 @@ class _MaterialChannelScreenState extends State<MaterialChannelScreen>
             seenCandidates: <Map<String, Object?>>[
               for (final item in _items) _snapshotMapOf(item),
             ],
-            prefsHint: _prefs.promptHint,
+            prefsHint: modelHint,
           );
         } catch (e) {
           debugPrint('ReadFlow 频道页换检索词失败: $e');
@@ -866,6 +891,9 @@ class _MaterialChannelScreenState extends State<MaterialChannelScreen>
         vocab: vocab,
         maxFetch: 8,
         userQuery: channel.needText,
+        // 频道页只按「分类 + 难度」找(材料中心不再被用户需求框死)
+        promptHintOverride: neutralHint,
+        categoryHint: channel.title,
         onEvent: _event,
       );
       if (!mounted) return;

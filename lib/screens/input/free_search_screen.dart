@@ -1,19 +1,66 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../../config/design_tokens.dart';
 import '../../config/v4_theme.dart';
+import '../../models/vocabulary.dart';
+import '../../providers/vocab_provider.dart';
 import '../../services/find_need_context.dart';
 import '../../services/input_prefs.dart';
+import '../../services/material_ai_rewrite.dart';
+import '../../services/material_channel.dart';
 import '../../services/material_library.dart';
+import '../../services/material_need.dart';
+import '../../services/material_prefs.dart';
 import '../../services/material_source.dart';
 import '../../services/material_taxonomy.dart';
 import '../../services/original_search.dart';
 import '../../widgets/app_ui.dart';
+import '../../widgets/design_kit.dart';
 import '../../widgets/material_result_list.dart';
 import '../../widgets/search_timeline.dart';
 import 'material_reader_screen.dart';
+
+/// 一次自由搜的执行结果(生产 = `OriginalSearch` 的真实返回;测试可注入)。
+///
+/// 为什么不只返回结果列表:用户 2026-11-07 真机反馈第 4 条要求"没找到原文时
+/// 说清为什么没找到",这需要**过滤前**的真实信息(命中几条、筛掉了多少、
+/// 每个源给了什么说明);同时 AI 改写保底只能基于真实搜到的线索
+/// ([sources]),不能凭空编。所以一次检索把这三样一起带回来。
+class FreeSearchRun {
+  /// 按用户筛选条件过滤后、真正要展示的结果
+  final List<MaterialResultItem> items;
+
+  /// 过滤前的全部真实线索(AI 改写 / "为什么没找到"诊断用)
+  final List<AiRewriteSource> sources;
+
+  /// 过滤前的原始命中条数(用户可核对)
+  final int rawHits;
+
+  /// 这次检索了哪些源(展示名,真实)
+  final List<String> searchedSourceLabels;
+
+  /// 源自己给的真实说明(不可达/只认英文/没有匹配…)
+  final List<String> notes;
+
+  const FreeSearchRun({
+    required this.items,
+    this.sources = const <AiRewriteSource>[],
+    this.rawHits = 0,
+    this.searchedSourceLabels = const <String>[],
+    this.notes = const <String>[],
+  });
+}
+
+/// 自由搜执行器(**仅测试/渲染注入**;生产走 `OriginalSearch` 真实公开源)。
+typedef FreeSearchRunner = Future<FreeSearchRun> Function({
+  required String query,
+  required String kind,
+  required String band,
+  required Set<String> sourceIds,
+});
 
 /// 「找材料 · 自由搜」独立搜索页(用户选型 A 方案的左路)。
 ///
@@ -24,15 +71,23 @@ import 'material_reader_screen.dart';
 /// - **类型**:5 类(书籍 / 论文 / 外刊新闻 / 播客 / 百科),与 `MaterialSource.kind`
 ///   对齐并映射到真实来源(`gutenberg` / `arxiv` / `npr`系 / `bbc_le`·`voa_le`·`ted` /
 ///   `wikipedia`);百科因为维基源没有关键词检索接口,走"随机条目池 + 本地关键词筛"
-///   的如实降级(见 `_wikiFreshItems`);
+///   的如实降级(见 `_wikiRun`);
 /// - **难度**:按 `MaterialLibrary.estimateDifficulty` 的**来源级预计区间**过滤 ——
 ///   文案明说"非精确覆盖率",没抓正文**不标真实难度**(设计 §3.3 的硬规则);
 /// - **场景**:`MaterialTaxonomy.scene` 的真实检索词预设(点了填入搜索框)——
 ///   公开源没有"场景"元数据,所以它是检索词预设,不是假过滤器。
 ///
+/// 筛选区(2026-11-07 用户真机反馈第 4 条):**默认收起**成一行
+/// 「筛选(n) + 已选条件摘要」;点开是可滚动面板,再点收起;搜索开始/结束自动收起。
+///
 /// 结果走与频道页共用的 [MaterialResultList](分组 / 每页 10 条 / 页码控件 /
 /// 有真封面才显示 / 开始读·保存到我的·打开原文 / 切页回顶),快照按
 /// `free:<归一关键词>` 复用 [MaterialChannelStore]。
+///
+/// **AI 改写保底**(用户真机反馈第 4 条):结果 0 条 / 抓不到正文时,不说空话,
+/// 而是:①用真实检索信息说明"为什么没找到";②给出「AI 改写学习版(非原文)」
+/// 入口 —— 基于这次搜到的标题/摘要/来源改写一篇可读材料(标注非原文、来源、
+/// 真实字数/难度,可读可存)。有原文时原文优先,AI 版只是明确分隔的可选兜底。
 class FreeSearchScreen extends StatefulWidget {
   /// 从入口卡/历史 chips 带进来的关键词(可空 = 空态)
   final String? initialQuery;
@@ -43,11 +98,28 @@ class FreeSearchScreen extends StatefulWidget {
   /// **仅渲染测试用**:给结果时顺带展示"搜索过程"卡
   final List<SearchEvent>? initialEvents;
 
+  /// **仅渲染/测试用**:给"没找到"诊断 + AI 改写用的真实线索形状
+  /// (生产永不传:真实线索来自检索返回)
+  final List<AiRewriteSource>? debugSources;
+
+  /// **仅渲染/测试用**:给"为什么没找到"的源说明(生产来自检索返回)
+  final List<String>? debugNotes;
+
+  /// **仅渲染/测试用**:注入 AI 改写器(默认真调模型)
+  final MaterialAiRewriter? aiRewriter;
+
+  /// **仅渲染/测试用**:绕过真实公开源检索(网络)直接给一次运行结果
+  final FreeSearchRunner? debugRun;
+
   const FreeSearchScreen({
     super.key,
     this.initialQuery,
     this.initialResults,
     this.initialEvents,
+    this.debugSources,
+    this.debugNotes,
+    this.aiRewriter,
+    this.debugRun,
   });
 
   @override
@@ -64,7 +136,7 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
   /// 选中的来源 id(空 = 全部)
   final Set<String> _sources = <String>{};
 
-  /// 类型筛选:'book' / 'paper' / 'news' / 空(=不限)
+  /// 类型筛选:'book' / 'paper' / 'news' / 'podcast' / 'wiki' / 空(=不限)
   String _kind = '';
 
   /// 难度筛选:'' = 不限;否则是 `MaterialLibrary.difficultyBands` 里的区间
@@ -79,6 +151,27 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
   String? _error;
   List<String> _notes = const <String>[];
   final List<SearchEvent> _events = <SearchEvent>[];
+
+  /// 筛选面板是否展开(2026-11-07:默认收起)
+  bool _filtersOpen = false;
+
+  /// 这次会话真的跑过一轮检索(决定"为什么没找到"能不能引用真实命中数)
+  bool _ranOnce = false;
+
+  // ── 真实检索诊断("为什么没找到"用,全部来自这一轮检索)──
+  int _rawHits = 0;
+  List<String> _searchedSources = const <String>[];
+  List<AiRewriteSource> _lastSources = const <AiRewriteSource>[];
+
+  /// 「开始读」时抓不到正文的真实篇数(决定 AI 兜底是否需要提示)
+  int _contentFailCount = 0;
+
+  // ── AI 改写保底(非原文)──
+  AiRewrittenMaterial? _aiMaterial;
+  bool _aiRunning = false;
+  bool _aiBusy = false;
+  bool _aiSaved = false;
+  String? _aiError;
 
   @override
   void initState() {
@@ -100,6 +193,12 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
     if (widget.initialResults != null) {
       _controller.items.addAll(widget.initialResults!);
       _searchedThisSession = true;
+      _ranOnce = widget.debugSources != null || widget.initialResults!.isNotEmpty;
+      if (widget.debugSources != null) {
+        _lastSources = List<AiRewriteSource>.of(widget.debugSources!);
+        _rawHits = widget.debugSources!.length;
+      }
+      _notes = widget.debugNotes ?? const <String>[];
       if (widget.initialEvents != null) {
         _events.addAll(widget.initialEvents!);
         _showProcess = true;
@@ -164,95 +263,25 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
       _showProcess = true;
       _error = null;
       _events.clear();
-      if (!broaden) _notes = const <String>[];
+      // 用户第 4 条:搜索一开始就收起筛选,结果出来也不弹回
+      _filtersOpen = false;
+      _aiError = null;
+      if (!broaden) {
+        _notes = const <String>[];
+        _aiMaterial = null;
+        _aiSaved = false;
+        _contentFailCount = 0;
+      }
     });
     try {
-      // 「百科」单独走:维基源在 OriginalSearch 链路里没有关键词检索接口,
-      // 只能从**真实随机条目池**(listItems)拉一批再本地按关键词筛 ——
-      // 这是能力边界,结果页文案会明说,不假装它和别的类型一样能搜。
-      if (_kind == 'wiki') {
-        final fresh = await _wikiFreshItems(query);
-        final saved = await _controller.applyRun(
-          fresh: fresh,
-          queriesUsed: <String>[query],
-          runApiRequests: 0,
-          runCostCny: 0,
-          runNotes: const <String>[],
-          append: broaden,
-        );
-        await FindSearchHistory.remember(query);
-        if (!mounted) return;
-        setState(() {
-          _running = false;
-          _showProcess = false;
-          _searchedThisSession = true;
-          _notes = <String>[
-            '维基百科源没有关键词检索接口:这次从随机条目池里筛出 ${fresh.length} 条匹配。',
-          ];
-        });
-        _scrollToTop();
-        if (!saved && fresh.isEmpty) {
-          _snack('结果没存上快照(本地存储写入失败)。');
-        }
-        return;
-      }
-      final category = _categoryOf(_kind);
-      final result = await OriginalSearch.search(
-        query,
-        category: category,
-        sourceIds: broaden ? null : _selectedSourceIds(),
-        onProgress: _onProgress,
-      );
+      final run = await _executeSearch(query, broaden: broaden);
       if (!mounted) return;
-      final fresh = <MaterialResultItem>[];
-      var seq = _controller.items.length;
-      for (final hit in result.hits) {
-        final source = MaterialSourceService.sourceOf(hit.sourceId);
-        final kind = inferMaterialKind(
-          hit.title,
-          hit.url,
-          fallback: source?.kind ?? 'article',
-        );
-        final estimate = MaterialLibrary.estimateDifficulty(
-          sourceId: hit.sourceId,
-          kind: kind,
-        );
-        if (!_bandMatches(estimate.band)) continue;
-        // 黑名单(题材/关键词)与材料推荐口径一致:命中就不展示
-        if (!_prefs.allowsMaterial(
-          title: hit.title,
-          source: source?.label ?? '',
-          genres: const <String>[],
-        )) {
-          continue;
-        }
-        fresh.add(
-          MaterialResultItem(
-            title: hit.title.trim().isEmpty ? hit.url : hit.title.trim(),
-            url: hit.url,
-            sourceLabel: source?.label ?? hit.sourceId,
-            kind: kind,
-            snippet: hit.note,
-            imageUrl: hit.imageUrl,
-            sourceId: hit.sourceId,
-            estimateLabel: estimate.label,
-            estimateBasis: estimate.basis,
-            seq: seq++,
-          ),
-        );
-      }
-      _event(
-        fresh.isEmpty
-            ? '没有匹配的结果 —— 换个关键词,或放宽来源/难度'
-            : '找到 ${fresh.length} 篇原文',
-        stage: fresh.isEmpty ? SearchStage.sourceEmpty : SearchStage.done,
-      );
       final saved = await _controller.applyRun(
-        fresh: fresh,
+        fresh: run.items,
         queriesUsed: <String>[query],
         runApiRequests: 0,
         runCostCny: 0,
-        runNotes: result.notes,
+        runNotes: run.notes,
         append: broaden,
       );
       await FindSearchHistory.remember(query);
@@ -261,10 +290,17 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
         _running = false;
         _showProcess = false;
         _searchedThisSession = true;
-        _notes = List<String>.of(result.notes);
+        _ranOnce = true;
+        _notes = List<String>.of(run.notes);
+        _rawHits = broaden ? _rawHits + run.rawHits : run.rawHits;
+        _searchedSources = run.searchedSourceLabels;
+        _lastSources = broaden
+            ? _mergeSources(_lastSources, run.sources)
+            : run.sources;
+        _filtersOpen = false; // 结果出来后筛选区保持收起
       });
       _scrollToTop();
-      if (fresh.isEmpty && !saved) {
+      if (run.items.isEmpty && !saved) {
         _snack('结果没存上快照,下次进来可能看不到(本地存储写入失败)。');
       }
     } catch (e) {
@@ -275,6 +311,192 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
         _error = '$e';
       });
     }
+  }
+
+  /// 执行一次检索(生产:公开源 / 维基降级;测试:注入的运行结果)。
+  Future<FreeSearchRun> _executeSearch(
+    String query, {
+    bool broaden = false,
+  }) async {
+    final debug = widget.debugRun;
+    if (debug != null) {
+      final run = await debug(
+        query: query,
+        kind: _kind,
+        band: _band,
+        sourceIds: Set<String>.of(_sources),
+      );
+      _event(
+        run.items.isEmpty
+            ? '没有匹配的结果 —— 下面是这次检索的真实情况'
+            : '找到 ${run.items.length} 篇原文',
+        stage: run.items.isEmpty ? SearchStage.sourceEmpty : SearchStage.done,
+      );
+      return run;
+    }
+    // 「百科」单独走:维基源在 OriginalSearch 链路里没有关键词检索接口,
+    // 只能从**真实随机条目池**(listItems)拉一批再本地按关键词筛 ——
+    // 这是能力边界,结果页文案会明说,不假装它和别的类型一样能搜。
+    if (_kind == 'wiki') return _wikiRun(query);
+    final category = _categoryOf(_kind);
+    final requested = broaden ? null : _selectedSourceIds();
+    final searchedIds = requested ?? OriginalSearch.sourcesForCategory(category);
+    final searchedLabels = <String>[
+      for (final id in searchedIds)
+        _shortSourceLabelOf(id),
+    ];
+    final result = await OriginalSearch.search(
+      query,
+      category: category,
+      sourceIds: requested,
+      onProgress: _onProgress,
+    );
+    final fresh = <MaterialResultItem>[];
+    final sources = <AiRewriteSource>[];
+    var seq = _controller.items.length;
+    for (final hit in result.hits) {
+      final source = MaterialSourceService.sourceOf(hit.sourceId);
+      final kind = inferMaterialKind(
+        hit.title,
+        hit.url,
+        fallback: source?.kind ?? 'article',
+      );
+      // 过滤前的线索全部留下:AI 改写只能用真实搜到的东西
+      sources.add(
+        AiRewriteSource(
+          title: hit.title.trim().isEmpty ? hit.url : hit.title.trim(),
+          url: hit.url,
+          site: source?.label ?? hit.sourceId,
+          snippet: hit.note,
+          kind: kind,
+        ),
+      );
+      final estimate = MaterialLibrary.estimateDifficulty(
+        sourceId: hit.sourceId,
+        kind: kind,
+      );
+      if (!_bandMatches(estimate.band)) continue;
+      // 黑名单(题材/关键词)与材料推荐口径一致:命中就不展示
+      if (!_prefs.allowsMaterial(
+        title: hit.title,
+        source: source?.label ?? '',
+        genres: const <String>[],
+      )) {
+        continue;
+      }
+      fresh.add(
+        MaterialResultItem(
+          title: hit.title.trim().isEmpty ? hit.url : hit.title.trim(),
+          url: hit.url,
+          sourceLabel: source?.label ?? hit.sourceId,
+          kind: kind,
+          snippet: hit.note,
+          imageUrl: hit.imageUrl,
+          sourceId: hit.sourceId,
+          estimateLabel: estimate.label,
+          estimateBasis: estimate.basis,
+          seq: seq++,
+        ),
+      );
+    }
+    _event(
+      fresh.isEmpty
+          ? '没有匹配的结果 —— 换个关键词,或放宽来源/难度'
+          : '找到 ${fresh.length} 篇原文',
+      stage: fresh.isEmpty ? SearchStage.sourceEmpty : SearchStage.done,
+    );
+    return FreeSearchRun(
+      items: fresh,
+      sources: sources,
+      rawHits: result.hits.length,
+      searchedSourceLabels: searchedLabels,
+      notes: result.notes,
+    );
+  }
+
+  /// 百科类型的真实候选:拉维基的随机条目池,再按关键词本地筛。
+  ///
+  /// 为什么不做成"假检索":`OriginalSearch` 只对 Gutenberg/arXiv/RSS 三类有检索
+  /// 接口,Wikipedia 只有"随机条目"能力;硬造一个搜索框会变成"点了没反应"。
+  /// 所以这里如实:随机池 → 本地关键词筛 → 命中几条报几条。
+  Future<FreeSearchRun> _wikiRun(String query) async {
+    final feed = await MaterialSourceService.instance.listItems(
+      'wikipedia',
+      limit: 10,
+    );
+    final tokens = query
+        .toLowerCase()
+        .split(RegExp(r'\s+'))
+        .where((token) => token.length >= 3)
+        .toList();
+    final estimate = MaterialLibrary.estimateDifficulty(
+      sourceId: 'wikipedia',
+      kind: 'wiki',
+    );
+    final fresh = <MaterialResultItem>[];
+    final sources = <AiRewriteSource>[];
+    var seq = _controller.items.length;
+    for (final item in feed) {
+      sources.add(
+        AiRewriteSource(
+          title: item.title,
+          url: item.link,
+          site: 'Wikipedia(维基百科)',
+          snippet: item.summary,
+          kind: 'wiki',
+        ),
+      );
+      final hay = '${item.title} ${item.summary}'.toLowerCase();
+      if (tokens.isNotEmpty && !tokens.any(hay.contains)) continue;
+      if (!_prefs.allowsMaterial(
+        title: item.title,
+        source: 'Wikipedia(维基百科)',
+        genres: const <String>[],
+      )) {
+        continue;
+      }
+      fresh.add(
+        MaterialResultItem(
+          title: item.title.trim().isEmpty ? item.link : item.title.trim(),
+          url: item.link,
+          sourceLabel: 'Wikipedia(维基百科)',
+          kind: 'wiki',
+          snippet: item.summary,
+          imageUrl: item.imageUrl,
+          sourceId: 'wikipedia',
+          estimateLabel: estimate.label,
+          estimateBasis: estimate.basis,
+          seq: seq++,
+        ),
+      );
+    }
+    final note = '维基百科源没有关键词检索接口:这次从随机条目池里筛出 '
+        '${fresh.length} 条匹配。';
+    _event(
+      fresh.isEmpty ? note : '找到 ${fresh.length} 篇维基条目',
+      stage: fresh.isEmpty ? SearchStage.sourceEmpty : SearchStage.done,
+    );
+    return FreeSearchRun(
+      items: fresh,
+      sources: sources,
+      rawHits: feed.length,
+      searchedSourceLabels: const <String>['Wikipedia(维基百科)'],
+      notes: <String>[note],
+    );
+  }
+
+  List<AiRewriteSource> _mergeSources(
+    List<AiRewriteSource> old,
+    List<AiRewriteSource> fresh,
+  ) {
+    final out = <AiRewriteSource>[];
+    final seen = <String>{};
+    for (final source in <AiRewriteSource>[...old, ...fresh]) {
+      final key = source.url.trim().isEmpty ? source.title.trim() : source.url.trim();
+      if (key.isEmpty || !seen.add(key)) continue;
+      out.add(source);
+    }
+    return out;
   }
 
   /// 检索进度(OriginalSearch 每完成一个源回调一次)
@@ -310,11 +532,10 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
     return null;
   }
 
-
   /// 类型 → `OriginalSearch` 的分类(它按分类决定去哪些源检索)
   ///
   /// 5 类与 `MaterialSource.kind` 对齐:book / paper / news / podcast / wiki
-  /// (设计 §3.3 的五类)。wiki 不在这条公开源检索链路上(见 `_wikiFreshItems`),
+  /// (设计 §3.3 的五类)。wiki 不在这条公开源检索链路上(见 `_wikiRun`),
   /// 所以只在"不限类型"里随其他源出现,单独选「百科」走随机条目池筛选。
   String _categoryOf(String kind) => switch (kind) {
         'book' => '书籍',
@@ -323,55 +544,6 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
         'podcast' => '外刊',
         _ => '其他',
       };
-
-  /// 百科类型的真实候选:拉维基的随机条目池,再按关键词本地筛。
-  ///
-  /// 为什么不做成"假检索":`OriginalSearch` 只对 Gutenberg/arXiv/RSS 三类有检索
-  /// 接口,Wikipedia 只有"随机条目"能力;硬造一个搜索框会变成"点了没反应"。
-  /// 所以这里如实:随机池 → 本地关键词筛 → 命中几条报几条。
-  Future<List<MaterialResultItem>> _wikiFreshItems(String query) async {
-    final feed = await MaterialSourceService.instance.listItems(
-      'wikipedia',
-      limit: 10,
-    );
-    final tokens = query
-        .toLowerCase()
-        .split(RegExp(r'\s+'))
-        .where((token) => token.length >= 3)
-        .toList();
-    final estimate = MaterialLibrary.estimateDifficulty(
-      sourceId: 'wikipedia',
-      kind: 'wiki',
-    );
-    final fresh = <MaterialResultItem>[];
-    var seq = _controller.items.length;
-    for (final item in feed) {
-      final hay = '${item.title} ${item.summary}'.toLowerCase();
-      if (tokens.isNotEmpty && !tokens.any(hay.contains)) continue;
-      if (!_prefs.allowsMaterial(
-        title: item.title,
-        source: 'Wikipedia(维基百科)',
-        genres: const <String>[],
-      )) {
-        continue;
-      }
-      fresh.add(
-        MaterialResultItem(
-          title: item.title.trim().isEmpty ? item.link : item.title.trim(),
-          url: item.link,
-          sourceLabel: 'Wikipedia(维基百科)',
-          kind: 'wiki',
-          snippet: item.summary,
-          imageUrl: item.imageUrl,
-          sourceId: 'wikipedia',
-          estimateLabel: estimate.label,
-          estimateBasis: estimate.basis,
-          seq: seq++,
-        ),
-      );
-    }
-    return fresh;
-  }
 
   /// 类型 → 该类型的**真实来源 id**(来自 `MaterialSourceService.sources` 的 kind)
   ///
@@ -419,7 +591,12 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
 
   Future<void> _read(MaterialResultItem item) async {
     final message = await _controller.read(context, item);
-    if (message != null) _snack(message);
+    if (message != null) {
+      _snack(message);
+      if (item.contentUnavailable && mounted) {
+        setState(() => _contentFailCount++);
+      }
+    }
   }
 
   Future<void> _save(MaterialResultItem item) async {
@@ -430,6 +607,193 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
   Future<void> _openOriginal(MaterialResultItem item) async {
     final message = await _controller.openOriginal(item);
     if (message != null) _snack(message);
+  }
+
+  // ── AI 改写保底(非原文)────────────────────────────────────────────
+
+  /// AI 改写可用的真实线索:优先用这次检索的**过滤前**线索(比结果多、更全),
+  /// 没有(例如从快照恢复)就退回结果卡上的真实字段。
+  List<AiRewriteSource> _aiSources() {
+    final out = <AiRewriteSource>[];
+    final seen = <String>{};
+    void add(AiRewriteSource source) {
+      final key =
+          source.url.trim().isEmpty ? source.title.trim() : source.url.trim();
+      if (key.isEmpty || !seen.add(key)) return;
+      out.add(source);
+    }
+
+    for (final source in _lastSources) {
+      add(source);
+    }
+    for (final item in _controller.items) {
+      add(
+        AiRewriteSource(
+          title: item.title,
+          url: item.url,
+          site: item.sourceLabel,
+          snippet: item.snippet,
+          kind: item.kind,
+        ),
+      );
+    }
+    return out.take(8).toList();
+  }
+
+  String _aiBandLabel() {
+    final selected = _band.trim();
+    if (selected.isNotEmpty) {
+      final desc = MaterialLibrary.difficultyBandDesc[selected] ?? '';
+      return 'CEFR $selected${desc.isEmpty ? '' : ' · $desc'}';
+    }
+    try {
+      final band = MaterialNeed.load().band;
+      if (!band.isAny) {
+        final name = switch (band) {
+          MaterialBand.i1 => '舒适区',
+          MaterialBand.i10 => '挑战区',
+          MaterialBand.i100 => '快反馈区',
+          MaterialBand.any => '不限',
+        };
+        return '${band.label} · $name';
+      }
+    } catch (_) {
+      // 读不到偏好 → 按"不限难度"如实说
+    }
+    return '不限难度';
+  }
+
+  String _aiBandHint() {
+    final selected = _band.trim();
+    if (selected.isNotEmpty) {
+      final desc = MaterialLibrary.difficultyBandDesc[selected] ?? '';
+      return '目标难度 CEFR $selected${desc.isEmpty ? '' : '($desc)'}'
+          ':用词与句长按这个难度控制';
+    }
+    try {
+      final band = MaterialNeed.load().band;
+      if (!band.isAny) return band.hintForAi;
+    } catch (_) {
+      // 读不到偏好 → 不给难度约束(不编)
+    }
+    return '';
+  }
+
+  String _aiExtraNote() {
+    final blocked = <String>[
+      ..._prefs.blockedTopics.take(4),
+      ..._prefs.blockedKeywords.take(4),
+    ].where((value) => value.trim().isNotEmpty).toList();
+    if (blocked.isEmpty) return '';
+    return '避开这些题材/关键词:${blocked.join("、")}';
+  }
+
+  Future<void> _generateAiRewrite() async {
+    if (_aiRunning || _aiBusy) return;
+    final sources = _aiSources();
+    if (sources.isEmpty) {
+      _snack('这次没有任何真实线索 —— 换一个常见关键词再搜一次,AI 才有依据改写(不凭空编)。');
+      return;
+    }
+    final query = _query.text.trim().isEmpty ? _recommendedQuery() : _query.text.trim();
+    setState(() {
+      _aiRunning = true;
+      _aiError = null;
+      _aiMaterial = null;
+      _aiSaved = false;
+    });
+    final request = AiRewriteRequest(
+      query: query,
+      sources: sources,
+      bandLabel: _aiBandLabel(),
+      bandHint: _aiBandHint(),
+      goals: _prefs.examGoals.take(2).toList(),
+      interests: _prefs.interests.take(3).toList(),
+      extraNote: _aiExtraNote(),
+    );
+    final rewriter = widget.aiRewriter ?? MaterialAiRewriter();
+    final outcome = await rewriter.generate(request);
+    if (!mounted) return;
+    setState(() {
+      _aiRunning = false;
+      if (outcome.ok) {
+        _aiMaterial = outcome.material;
+        _aiError = null;
+      } else {
+        _aiError = outcome.error;
+      }
+    });
+  }
+
+  /// 开始读 / 保存到我的:先把 AI 改写材料入库(source=ai,标题/许可带标注),
+  /// 再进阅读器或记「保存到我的」关系。失败给人话提示,不静默。
+  Future<void> _useAiMaterial({required bool save}) async {
+    final material = _aiMaterial;
+    if (material == null || _aiBusy) return;
+    setState(() => _aiBusy = true);
+    try {
+      final materialId = await MaterialAiRewriteStore.ingest(
+        material,
+        vocab: _vocabOrEmpty(context),
+      );
+      if (!mounted) return;
+      if (materialId <= 0) {
+        _snack('入库失败:本地存储写入出错,请重试。');
+        return;
+      }
+      if (save) {
+        final ok = await MaterialChannelStore.addSavedMaterial(
+          _controller.storeId,
+          materialId,
+        );
+        if (!mounted) return;
+        if (!ok) {
+          _snack('保存关系没写进本地存储,可以稍后再点一次。');
+          return;
+        }
+        setState(() => _aiSaved = true);
+        _snack('已保存到「我的」:标题带「$aiRewriteMarker」标注,正文末尾保留来源链接。');
+        return;
+      }
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => MaterialReaderScreen(materialId: materialId),
+        ),
+      );
+    } catch (e) {
+      _snack('打开失败:$e');
+    } finally {
+      if (mounted) setState(() => _aiBusy = false);
+    }
+  }
+
+  List<Vocabulary> _vocabOrEmpty(BuildContext context) {
+    try {
+      return context.read<VocabProvider>().vocabularies;
+    } catch (_) {
+      // 渲染/单测没有 Provider 时按空词库算(仍能入库,只是少一层"已知词"加成)
+      return const <Vocabulary>[];
+    }
+  }
+
+  // ── 筛选(2026-11-07:默认收起 + 可滚动面板)────────────────────────
+
+  int get _filterCount =>
+      _sources.length +
+      (_kind.isEmpty ? 0 : 1) +
+      (_band.isEmpty ? 0 : 1) +
+      (_scene.isEmpty ? 0 : 1);
+
+  bool get _hasFilter => _filterCount > 0;
+
+  void _clearFilters() {
+    setState(() {
+      _sources.clear();
+      _kind = '';
+      _band = '';
+      _scene = '';
+    });
   }
 
   // ── UI ─────────────────────────────────────────────────────────────
@@ -445,11 +809,9 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
           children: <Widget>[
             const SizedBox(height: 8),
             _searchBar(skin),
-            const SizedBox(height: Gap.xs),
-            _sourceRow(skin),
-            _typeRow(skin),
-            _difficultyRow(skin),
-            _sceneRow(skin),
+            const SizedBox(height: 6),
+            _filterBar(skin),
+            if (_filtersOpen) _filterPanel(skin),
             Divider(height: 1, color: skin.hairline),
             Expanded(
               child: ListView(
@@ -465,10 +827,18 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
     );
   }
 
+  /// 顶部搜索行。
+  ///
+  /// 2026-11-07 用户真机反馈第 4 条:输入文字**上半截被圆角框切掉**。
+  /// 根因是原来给容器写死 `height: 42` + `isDense` 的 TextField,留给文字的内高
+  /// 不够(中文行高 + 光标高度超过可用区,InputDecorator 把内容裁了)。
+  /// 现在:容器只给 `minHeight`,文字区显式 `contentPadding` + 行高,
+  /// 让 TextField 自己撑到够高 —— 任何中英文输入都完整显示。
   Widget _searchBar(V4Skin skin) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(Gap.page, 2, Gap.page, 0),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: <Widget>[
           InkWell(
             onTap: () => Navigator.maybePop(context),
@@ -489,8 +859,8 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
           const SizedBox(width: Gap.xs),
           Expanded(
             child: Container(
-              height: 42,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
+              constraints: const BoxConstraints(minHeight: 46),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
               decoration: BoxDecoration(
                 color: skin.surface,
                 borderRadius: BorderRadius.circular(14),
@@ -509,33 +879,57 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
                       controller: _query,
                       textInputAction: TextInputAction.search,
                       onSubmitted: (_) => _runSearch(),
-                      style: TextStyle(fontSize: 12.5, color: skin.ink),
+                      textAlignVertical: TextAlignVertical.center,
+                      cursorColor: skin.accent,
+                      style: TextStyle(
+                        fontSize: 13,
+                        height: 1.35,
+                        color: skin.ink,
+                      ),
                       decoration: InputDecoration(
                         isDense: true,
+                        // 全局 InputDecorationTheme 是"填充+描边"的表单样式;
+                        // 搜索框在胶囊容器里,必须显式关掉所有状态的边框/填充,
+                        // 否则文字外套会多出一个灰色圆角框(真机截图上很显眼)。
+                        filled: false,
                         border: InputBorder.none,
-                        hintText: '输英文关键词,如 climate change / new concept',
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
+                        disabledBorder: InputBorder.none,
+                        errorBorder: InputBorder.none,
+                        focusedErrorBorder: InputBorder.none,
+                        hintText: '英文关键词,如 climate change',
                         hintStyle: TextStyle(
-                            fontSize: 12, color: skin.inkFaint),
+                          fontSize: 12,
+                          height: 1.3,
+                          color: skin.inkFaint,
+                        ),
+                        // 关键:文字上下留够(12+12),不再被容器高度裁掉;
+                        // 13px 字号 × 1.35 行高 ≈ 17.6,内高 ~41.6 一定装得下整行
+                        contentPadding:
+                            const EdgeInsets.symmetric(vertical: 12),
                       ),
                     ),
                   ),
-                  if (_query.text.isNotEmpty)
+                  if (_query.text.isNotEmpty) ...<Widget>[
+                    const SizedBox(width: 4),
                     InkWell(
                       onTap: () => setState(_query.clear),
                       child: Icon(Icons.close_rounded,
                           size: 15, color: skin.inkFaint),
                     ),
+                  ],
                 ],
               ),
             ),
           ),
           const SizedBox(width: 6),
           SizedBox(
-            height: 42,
+            height: 46,
             child: FilledButton(
               onPressed: _running ? null : () => _runSearch(),
               style: FilledButton.styleFrom(
-                minimumSize: const Size(0, 42),
+                minimumSize: const Size(0, 46),
                 padding: const EdgeInsets.symmetric(horizontal: 14),
                 visualDensity: VisualDensity.compact,
               ),
@@ -547,144 +941,375 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
     );
   }
 
-  Widget _sourceRow(V4Skin skin) {
-    return _chipRow(
-      skin,
-      children: <Widget>[
-        _chip(
+  /// 收起态的一行:「筛选(n)」+ 已选条件摘要 chips(+ 清空)。
+  Widget _filterBar(V4Skin skin) {
+    final summary = <Widget>[
+      for (final id in _sources)
+        _summaryChip(
           skin,
-          '全部来源',
-          selected: _sources.isEmpty,
-          onTap: () => setState(_sources.clear),
+          _shortSourceLabelOf(id),
+          onClear: () => setState(() => _sources.remove(id)),
         ),
-        for (final source in MaterialSourceService.sources)
-          _chip(
-            skin,
-            _shortSourceLabel(source),
-            selected: _sources.contains(source.id),
-            onTap: () => setState(() {
-              if (!_sources.remove(source.id)) _sources.add(source.id);
-            }),
-            badge: MaterialSourceService.measuredReachable.contains(source.id)
-                ? '实测可用'
-                : null,
-          ),
-      ],
-    );
-  }
-
-  Widget _typeRow(V4Skin skin) {
-    return _chipRow(
-      skin,
-      children: <Widget>[
-        _chip(
+      if (_kind.isNotEmpty)
+        _summaryChip(
           skin,
-          '不限类型',
-          selected: _kind.isEmpty,
-          onTap: () => setState(() => _kind = ''),
+          _kindLabel(_kind),
+          onClear: () => setState(() => _kind = ''),
         ),
-        _chip(
+      if (_band.isNotEmpty)
+        _summaryChip(
           skin,
-          '书籍',
-          selected: _kind == 'book',
-          onTap: () => setState(() => _kind = 'book'),
+          _band,
+          onClear: () => setState(() => _band = ''),
         ),
-        _chip(
+      if (_scene.isNotEmpty)
+        _summaryChip(
           skin,
-          '论文',
-          selected: _kind == 'paper',
-          onTap: () => setState(() => _kind = 'paper'),
+          _sceneLabel(_scene),
+          onClear: () => setState(() {
+            _scene = '';
+          }),
         ),
-        _chip(
-          skin,
-          '外刊新闻',
-          selected: _kind == 'news',
-          onTap: () => setState(() => _kind = 'news'),
-        ),
-        _chip(
-          skin,
-          '播客',
-          selected: _kind == 'podcast',
-          onTap: () => setState(() => _kind = 'podcast'),
-        ),
-        _chip(
-          skin,
-          '百科',
-          selected: _kind == 'wiki',
-          onTap: () => setState(() => _kind = 'wiki'),
-        ),
-      ],
-    );
-  }
-
-  Widget _difficultyRow(V4Skin skin) {
-    return _chipRow(
-      skin,
-      children: <Widget>[
-        _chip(
-          skin,
-          '不限难度',
-          selected: _band.isEmpty,
-          onTap: () => setState(() => _band = ''),
-        ),
-        for (final band in MaterialLibrary.difficultyBands)
-          _chip(
-            skin,
-            band,
-            selected: _band == band,
-            onTap: () => setState(() => _band = band),
-          ),
-        Padding(
-          padding: const EdgeInsets.only(left: 2),
-          child: Text(
-            '按来源预估,非精确覆盖率',
-            style: TextStyle(fontSize: 9.5, color: skin.inkFaint),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _sceneRow(V4Skin skin) {
-    return _chipRow(
-      skin,
-      children: <Widget>[
-        Padding(
-          padding: const EdgeInsets.only(right: 2),
-          child: Text(
-            '场景',
-            style: TextStyle(fontSize: 10, color: skin.inkFaint),
-          ),
-        ),
-        for (final sub in MaterialTaxonomy.scene.subtopics)
-          _chip(
-            skin,
-            sub.label,
-            selected: _scene == sub.id,
-            onTap: () => setState(() {
-              if (_scene == sub.id) {
-                _scene = '';
-              } else {
-                _scene = sub.id;
-                // 场景 = 检索词预设(公开源没有场景元数据)
-                if (sub.queries.isNotEmpty) _query.text = sub.queries.first;
-              }
-            }),
-          ),
-      ],
-    );
-  }
-
-  /// 筛选行容器:用 **Wrap** 换行而不是横向滚动 —— 390 宽下每个 chip 都必须
-  /// 完整可见(用户会一个个点;横向滚动会把末尾 chip 藏起来,QA 也提过)。
-  Widget _chipRow(V4Skin skin, {required List<Widget> children}) {
+    ];
     return Padding(
-      padding: const EdgeInsets.fromLTRB(Gap.page, 3, Gap.page, 3),
-      child: Wrap(
-        spacing: 6,
-        runSpacing: 6,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        children: children,
+      padding: const EdgeInsets.fromLTRB(Gap.page, 0, Gap.page, 0),
+      child: Row(
+        children: <Widget>[
+          _filterToggle(skin),
+          const SizedBox(width: 6),
+          Expanded(
+            child: summary.isEmpty
+                ? Text(
+                    '来源 · 类型 · 难度 · 场景',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 10.5, color: skin.inkFaint),
+                  )
+                : SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: <Widget>[
+                        for (var i = 0; i < summary.length; i++) ...<Widget>[
+                          if (i > 0) const SizedBox(width: 4),
+                          summary[i],
+                        ],
+                      ],
+                    ),
+                  ),
+          ),
+          if (_hasFilter)
+            InkWell(
+              onTap: _clearFilters,
+              borderRadius: BorderRadius.circular(999),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                child: Text(
+                  '清空',
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    color: skin.inkFaint,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _filterToggle(V4Skin skin) {
+    final count = _filterCount;
+    final active = _filtersOpen || count > 0;
+    return InkWell(
+      key: const ValueKey('free-filter-toggle'),
+      onTap: () => setState(() => _filtersOpen = !_filtersOpen),
+      borderRadius: BorderRadius.circular(999),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+        decoration: BoxDecoration(
+          color: active
+              ? skin.accent.withValues(alpha: 0.12)
+              : skin.surface,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: active
+                ? skin.accent.withValues(alpha: 0.5)
+                : skin.hairline,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Icon(
+              Icons.tune_rounded,
+              size: 14,
+              color: active ? skin.accent : skin.inkSoft,
+            ),
+            const SizedBox(width: 5),
+            Text(
+              count > 0 ? '筛选($count)' : '筛选',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                color: active ? skin.accent : skin.inkSoft,
+              ),
+            ),
+            Icon(
+              _filtersOpen
+                  ? Icons.expand_less_rounded
+                  : Icons.expand_more_rounded,
+              size: 15,
+              color: skin.inkFaint,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _summaryChip(V4Skin skin, String label,
+      {required VoidCallback onClear}) {
+    return InkWell(
+      onTap: onClear,
+      borderRadius: BorderRadius.circular(999),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: skin.accent.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: skin.accent.withValues(alpha: 0.35)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 10.5,
+                color: skin.accent,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(width: 3),
+            Icon(Icons.close_rounded, size: 10, color: skin.accent),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 展开的筛选面板:**限高 + 可滚动**,不再悬置挡住大半个屏幕(用户第 4 条)。
+  Widget _filterPanel(V4Skin skin) {
+    final maxHeight =
+        (MediaQuery.sizeOf(context).height * 0.42).clamp(200.0, 380.0).toDouble();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(Gap.page, 4, Gap.page, 6),
+      child: AppCard(
+        variant: AppCardVariant.compact,
+        padding: const EdgeInsets.fromLTRB(10, 4, 10, 4),
+        child: Column(
+          key: const ValueKey('free-filter-panel'),
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: maxHeight),
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    _filterGroup(
+                      skin,
+                      title: '来源',
+                      hint: '9 个真实公开源,可多选',
+                      children: <Widget>[
+                        _chip(
+                          skin,
+                          '全部来源',
+                          selected: _sources.isEmpty,
+                          onTap: () => setState(_sources.clear),
+                        ),
+                        for (final source in MaterialSourceService.sources)
+                          _chip(
+                            skin,
+                            _shortSourceLabel(source),
+                            selected: _sources.contains(source.id),
+                            onTap: () => setState(() {
+                              if (!_sources.remove(source.id)) {
+                                _sources.add(source.id);
+                              }
+                            }),
+                            badge: MaterialSourceService.measuredReachable
+                                    .contains(source.id)
+                                ? '实测可用'
+                                : null,
+                          ),
+                      ],
+                    ),
+                    _filterGroup(
+                      skin,
+                      title: '类型',
+                      hint: '按材料形态过滤(百科走随机条目池)',
+                      children: <Widget>[
+                        _chip(
+                          skin,
+                          '不限类型',
+                          selected: _kind.isEmpty,
+                          onTap: () => setState(() => _kind = ''),
+                        ),
+                        _chip(
+                          skin,
+                          '书籍',
+                          selected: _kind == 'book',
+                          onTap: () => setState(() => _kind = 'book'),
+                        ),
+                        _chip(
+                          skin,
+                          '论文',
+                          selected: _kind == 'paper',
+                          onTap: () => setState(() => _kind = 'paper'),
+                        ),
+                        _chip(
+                          skin,
+                          '外刊新闻',
+                          selected: _kind == 'news',
+                          onTap: () => setState(() => _kind = 'news'),
+                        ),
+                        _chip(
+                          skin,
+                          '播客',
+                          selected: _kind == 'podcast',
+                          onTap: () => setState(() => _kind = 'podcast'),
+                        ),
+                        _chip(
+                          skin,
+                          '百科',
+                          selected: _kind == 'wiki',
+                          onTap: () => setState(() => _kind = 'wiki'),
+                        ),
+                      ],
+                    ),
+                    _filterGroup(
+                      skin,
+                      title: '难度',
+                      hint: '按来源预估,非精确覆盖率(抓正文后才算真实难度)',
+                      children: <Widget>[
+                        _chip(
+                          skin,
+                          '不限难度',
+                          selected: _band.isEmpty,
+                          onTap: () => setState(() => _band = ''),
+                        ),
+                        for (final band in MaterialLibrary.difficultyBands)
+                          _chip(
+                            skin,
+                            band,
+                            selected: _band == band,
+                            onTap: () => setState(() => _band = band),
+                          ),
+                      ],
+                    ),
+                    _filterGroup(
+                      skin,
+                      title: '场景',
+                      hint: '公开源没有场景元数据 —— 点了是填入检索词预设',
+                      children: <Widget>[
+                        for (final sub in MaterialTaxonomy.scene.subtopics)
+                          _chip(
+                            skin,
+                            sub.label,
+                            selected: _scene == sub.id,
+                            onTap: () => setState(() {
+                              if (_scene == sub.id) {
+                                _scene = '';
+                              } else {
+                                _scene = sub.id;
+                                if (sub.queries.isNotEmpty) {
+                                  _query.text = sub.queries.first;
+                                }
+                              }
+                            }),
+                          ),
+                      ],
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        '语言:英文(当前公开源全部是英文站,没有多语言源可切)',
+                        style: TextStyle(fontSize: 9.5, color: skin.inkFaint),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: Text(
+                    _hasFilter ? '已选 $_filterCount 项' : '没有筛选条件',
+                    style: TextStyle(fontSize: 10, color: skin.inkFaint),
+                  ),
+                ),
+                TextButton(
+                  key: const ValueKey('free-filter-collapse'),
+                  onPressed: () => setState(() => _filtersOpen = false),
+                  style: TextButton.styleFrom(
+                    minimumSize: const Size(0, 32),
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  child: const Text('收起筛选'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _filterGroup(
+    V4Skin skin, {
+    required String title,
+    required String hint,
+    required List<Widget> children,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 6, bottom: 2),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Text(
+                title,
+                style: TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w700,
+                  color: skin.ink,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  hint,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 9, color: skin.inkFaint),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: children,
+          ),
+        ],
       ),
     );
   }
@@ -744,9 +1369,29 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
     );
   }
 
+  String _kindLabel(String kind) => switch (kind) {
+        'book' => '书籍',
+        'paper' => '论文',
+        'news' => '外刊新闻',
+        'podcast' => '播客',
+        'wiki' => '百科',
+        _ => kind,
+      };
+
+  String _sceneLabel(String id) {
+    for (final sub in MaterialTaxonomy.scene.subtopics) {
+      if (sub.id == id) return sub.label;
+    }
+    return id;
+  }
+
+  // ── 结果区 ──────────────────────────────────────────────────────────
+
   List<Widget> _children(V4Skin skin) {
     final children = <Widget>[];
-    if (_running || (_events.isNotEmpty && _showProcess)) {
+    // 搜索过程卡:跑完一轮后**收起但保留**(用户想回看"查了哪些源"还能点开,
+    // 不会一搜完就消失);没有任何过程事件时才不占位。
+    if (_running || _events.isNotEmpty) {
       children.add(_processCard(skin));
       children.add(const SizedBox(height: Gap.sm));
     }
@@ -780,10 +1425,14 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
           continueHint: '放宽来源再搜一轮;没有新增就说明这个关键词已经找全了。',
         ),
       );
+      children.add(const SizedBox(height: Gap.md));
+      children.add(_aiFallbackSection(skin));
       return children;
     }
     if (_searchedThisSession) {
       children.add(_emptyAfterRun(skin));
+      children.add(const SizedBox(height: Gap.sm));
+      children.add(_aiFallbackSection(skin));
       return children;
     }
     children.add(_introCard(skin));
@@ -887,7 +1536,8 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
           Text(
             '· 公开源只认英文关键词(中文需求请用「按我的情况找」)\n'
             '· 搜到的是原文链接,点「开始读」会抓正文入库并按你的词频算难度\n'
-            '· 免费:不走 AI 检索,不花官方搜索的钱',
+            '· 免费:不走 AI 检索,不花官方搜索的钱\n'
+            '· 万一没有可读原文:可以看下面「AI 改写学习版(非原文)」兜底',
             style: TextStyle(
               fontSize: 11,
               height: 1.6,
@@ -927,7 +1577,30 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
     );
   }
 
+  /// 空结果:先说清"为什么没找到"(只用真实检索信息),再给可落地的下一步。
   Widget _emptyAfterRun(V4Skin skin) {
+    final query = _query.text.trim();
+    final diagnostics = <String>[];
+    if (_ranOnce) {
+      final searched = _searchedSources.isEmpty
+          ? '公开源'
+          : _searchedSources.take(3).join('、');
+      diagnostics.add('搜了什么:关键词「${query.isEmpty ? '(空)' : query}」'
+          ' · 检索 $searched'
+          '${_searchedSources.length > 3 ? ' 等 ${_searchedSources.length} 个源' : ''}');
+      diagnostics.add('命中几条:原始命中 $_rawHits 条,按你选的筛选条件'
+          '(来源/类型/难度/屏蔽词)后 0 条可展示');
+      if (_notes.isNotEmpty) {
+        diagnostics.add('源怎么说:${_notes.take(3).join(';')}');
+      }
+      if (_rawHits == 0) {
+        diagnostics.add('为什么没抓到正文:根本没有命中结果 —— 关键词可能太窄/太新,'
+            '或这个源没有可检索的原文');
+      } else {
+        diagnostics.add('为什么没抓到正文:命中的不是可读原文(列表页/需登录/非英文),'
+            '或都被筛选条件挡掉了');
+      }
+    }
     return AppCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -938,17 +1611,337 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
                 fontWeight: FontWeight.w800,
               )),
           const SizedBox(height: 6),
-          Text(
-            _notes.isEmpty
-                ? '换个英文关键词,或放宽来源/难度再试。'
-                : _notes.take(3).join('\n'),
-            style: TextStyle(
-                fontSize: 11, height: 1.5, color: skin.inkSoft),
-          ),
+          if (diagnostics.isNotEmpty)
+            for (final line in diagnostics)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 3),
+                child: Text(
+                  '· $line',
+                  style: TextStyle(
+                      fontSize: 11, height: 1.5, color: skin.inkSoft),
+                ),
+              )
+          else
+            Text(
+              _notes.isEmpty
+                  ? '换个英文关键词,或放宽来源/难度再试。'
+                  : _notes.take(3).join('\n'),
+              style: TextStyle(
+                  fontSize: 11, height: 1.5, color: skin.inkSoft),
+            ),
           const SizedBox(height: Gap.sm),
-          FilledButton(
-            onPressed: _running ? null : () => _runSearch(),
-            child: const Text('再搜一次'),
+          Wrap(
+            spacing: Gap.xs,
+            runSpacing: 6,
+            children: <Widget>[
+              FilledButton(
+                onPressed: _running ? null : () => _runSearch(),
+                child: const Text('再搜一次'),
+              ),
+              if (_hasFilter)
+                OutlinedButton(
+                  onPressed: _running
+                      ? null
+                      : () {
+                          _clearFilters();
+                          _runSearch();
+                        },
+                  child: const Text('清掉筛选再搜'),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── AI 改写保底卡片(非原文)────────────────────────────────────────
+
+  Widget _aiFallbackSection(V4Skin skin) {
+    final material = _aiMaterial;
+    if (material != null) return _aiResultCard(skin, material);
+    return _aiEntryCard(skin);
+  }
+
+  Widget _aiEntryCard(V4Skin skin) {
+    final sources = _aiSources();
+    final hasOriginals = _controller.items.isNotEmpty;
+    return Container(
+      decoration: BoxDecoration(
+        color: skin.pastelAt(2).first.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: skin.accent.withValues(alpha: 0.28)),
+      ),
+      padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Icon(Icons.auto_awesome_rounded, size: 17, color: skin.accent),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  hasOriginals ? '这些都不合适?' : '没找到想读的原文?',
+                  style: AppFont.subheadStyle.copyWith(
+                    color: skin.ink,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              AppTag('AI 改写 · 非原文', tone: AppTagTone.primary),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            hasOriginals
+                ? '如果有原文,优先读上面的结果;都不是你要的(或抓不到正文),'
+                    '可以让 AI 基于这次搜到的标题/摘要改写一篇学习版 —— 它不是原文。'
+                : '这次没找到可读原文。可以让 AI 基于这次真实搜到的标题/摘要/来源'
+                    '改写一篇适合你难度的英文学习版 —— 它不是原文。',
+            style: TextStyle(
+              fontSize: 11,
+              height: 1.55,
+              color: skin.inkSoft,
+            ),
+          ),
+          if (_contentFailCount > 0) ...<Widget>[
+            const SizedBox(height: 4),
+            Text(
+              '· 有 $_contentFailCount 篇抓不到正文(上面已标注原因)',
+              style: TextStyle(fontSize: 10.5, color: skin.inkFaint),
+            ),
+          ],
+          const SizedBox(height: 6),
+          Text(
+            '依据:${sources.length} 条真实线索(标题/摘要/来源链接)',
+            style: TextStyle(
+              fontSize: 10.5,
+              fontWeight: FontWeight.w600,
+              color: skin.ink,
+            ),
+          ),
+          if (sources.isNotEmpty && sources.length < 2)
+            Padding(
+              padding: const EdgeInsets.only(top: 3),
+              child: Text(
+                '线索只有 ${sources.length} 条 —— 改写的依据有限,内容会偏概括,'
+                '拿到后建议对照来源链接核对。',
+                style: TextStyle(
+                  fontSize: 10,
+                  height: 1.45,
+                  color: skin.inkFaint,
+                ),
+              ),
+            ),
+          if (sources.isEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 3),
+              child: Text(
+                '这次一条线索都没有 —— AI 没有可依据的来源,不凭空编。'
+                '换一个更常见的英文关键词再搜一次。',
+                style: TextStyle(
+                  fontSize: 10,
+                  height: 1.45,
+                  color: skin.inkFaint,
+                ),
+              ),
+            ),
+          if (_aiRunning) ...<Widget>[
+            const SizedBox(height: 10),
+            Row(
+              children: <Widget>[
+                const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '正在让 AI 基于 ${sources.length} 条线索改写(通常 20~60 秒)…',
+                    style: TextStyle(fontSize: 10.5, color: skin.inkSoft),
+                  ),
+                ),
+              ],
+            ),
+          ] else ...<Widget>[
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              height: 42,
+              child: FilledButton.icon(
+                onPressed: sources.isEmpty ? null : _generateAiRewrite,
+                icon: const Icon(Icons.auto_awesome_rounded, size: 17),
+                label: const Text('生成 AI 改写学习版(非原文)'),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '会调用 1 次模型(按你的 API 计费,不花官方搜索的钱)。'
+              '生成后可直接阅读或保存到「我的」。',
+              style: TextStyle(fontSize: 9.5, color: skin.inkFaint),
+            ),
+          ],
+          if (_aiError != null) ...<Widget>[
+            const SizedBox(height: 8),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
+              decoration: BoxDecoration(
+                color: skin.surface,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: skin.hairline),
+              ),
+              child: Text(
+                _aiError!,
+                style: TextStyle(
+                    fontSize: 10.5, height: 1.45, color: skin.inkSoft),
+              ),
+            ),
+            const SizedBox(height: 6),
+            OutlinedButton(
+              onPressed: _aiRunning ? null : _generateAiRewrite,
+              child: const Text('重试'),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// AI 改写产物卡:标注(非原文)/ 来源 / 真实字数与难度 / 可读可存。
+  Widget _aiResultCard(V4Skin skin, AiRewrittenMaterial material) {
+    return Container(
+      decoration: BoxDecoration(
+        color: skin.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: skin.accent.withValues(alpha: 0.45)),
+        boxShadow: skin.shadow,
+      ),
+      padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Icon(Icons.auto_awesome_rounded, size: 17, color: skin.accent),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'AI 改写学习版(非原文)',
+                  style: AppFont.subheadStyle.copyWith(
+                    color: skin.ink,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              if (_aiSaved) const AppTag('已在我的', tone: AppTagTone.success),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            material.topic,
+            style: AppFont.subheadStyle.copyWith(
+              color: skin.ink,
+              fontWeight: FontWeight.w700,
+              height: 1.3,
+            ),
+          ),
+          if (material.titleCn.trim().isNotEmpty) ...<Widget>[
+            const SizedBox(height: 2),
+            Text(
+              material.titleCn,
+              style: TextStyle(fontSize: 11, color: skin.inkSoft),
+            ),
+          ],
+          if (material.summaryCn.trim().isNotEmpty) ...<Widget>[
+            const SizedBox(height: 5),
+            Text(
+              material.summaryCn,
+              style: TextStyle(
+                  fontSize: 11, height: 1.5, color: skin.inkSoft),
+            ),
+          ],
+          const SizedBox(height: 6),
+          Text(
+            material.metricLine,
+            style: TextStyle(
+              fontSize: 10.5,
+              fontWeight: FontWeight.w600,
+              color: skin.ink,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '基于 ${material.usedSources.length} 条真实来源:',
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+              color: skin.inkSoft,
+            ),
+          ),
+          for (var i = 0; i < material.usedSources.length; i++)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                '${i + 1}. ${material.usedSources[i].title}'
+                '${material.usedSources[i].site.trim().isEmpty ? '' : ' — ${material.usedSources[i].site}'}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 10, color: skin.inkFaint),
+              ),
+            ),
+          if (material.basisLimited)
+            Padding(
+              padding: const EdgeInsets.only(top: 3),
+              child: Text(
+                '依据有限(只有 ${material.usedSources.length} 条线索),内容偏概括。',
+                style: TextStyle(fontSize: 9.5, color: skin.inkFaint),
+              ),
+            ),
+          const SizedBox(height: 6),
+          Text(
+            '正文末尾保留来源链接与许可;入库标题带「$aiRewriteMarker」标注,'
+            '不会和原文混在一起。',
+            style: TextStyle(fontSize: 9.5, height: 1.45, color: skin.inkFaint),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: Gap.xs,
+            runSpacing: 6,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: <Widget>[
+              FilledButton(
+                onPressed: _aiBusy ? null : () => _useAiMaterial(save: false),
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size(0, 34),
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  visualDensity: VisualDensity.compact,
+                ),
+                child: Text(_aiBusy ? '处理中…' : '开始读'),
+              ),
+              OutlinedButton(
+                onPressed: _aiBusy || _aiSaved
+                    ? null
+                    : () => _useAiMaterial(save: true),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(0, 34),
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  visualDensity: VisualDensity.compact,
+                ),
+                child: Text(_aiSaved ? '已在我的' : '保存到我的'),
+              ),
+              TextButton(
+                onPressed: _aiRunning || _aiBusy
+                    ? null
+                    : () => setState(() {
+                          _aiMaterial = null;
+                          _aiSaved = false;
+                        }),
+                child: const Text('重新生成'),
+              ),
+            ],
           ),
         ],
       ),
@@ -960,5 +1953,10 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
     final paren = label.indexOf(RegExp(r'[（(]'));
     if (paren > 0) label = label.substring(0, paren);
     return label.trim().isEmpty ? source.id : label.trim();
+  }
+
+  String _shortSourceLabelOf(String id) {
+    final source = MaterialSourceService.sourceOf(id);
+    return source == null ? id : _shortSourceLabel(source);
   }
 }

@@ -124,4 +124,192 @@ Some paragraph.
       );
     });
   });
+
+  // ══════════════════════════════════════════════════════════════════
+  // 第三轮（2026-11-07 用户真机反馈）：候选级三层过滤
+  // ══════════════════════════════════════════════════════════════════
+  group('非英文内容（越南语/印尼语）', () {
+    const vietnameseTitle =
+        'Cách học tiếng Anh hiệu quả cho người mới bắt đầu';
+    const vietnameseBody = '''
+Bài viết này hướng dẫn cách học tiếng Anh hiệu quả cho người mới. Bạn nên
+bắt đầu từ những mẫu câu đơn giản, sau đó mở rộng vốn từ vựng mỗi ngày.
+Đừng cố gắng học quá nhiều từ trong một buổi, hãy chia nhỏ mục tiêu.
+''';
+    const indonesianTitle =
+        'Cara belajar bahasa Inggris dengan cepat untuk pemula';
+
+    test('越南语标题被判为非英文', () {
+      expect(ContentQuality.looksLatinNonEnglish(vietnameseTitle), isTrue);
+    });
+
+    test('越南语正文被判为非英文（正文级闸门直接拒）', () {
+      expect(ContentQuality.looksLatinNonEnglish(vietnameseBody), isTrue);
+      expect(ContentQuality.rejectReason(vietnameseBody), isNotNull);
+      expect(
+        ContentQuality.rejectReason('$vietnameseBody' * 2),
+        contains('不是英文'),
+      );
+    });
+
+    test('印尼语标题被判为非英文', () {
+      expect(ContentQuality.looksLatinNonEnglish(indonesianTitle), isTrue);
+    });
+
+    test('正常英文标题/正文不误杀', () {
+      expect(
+        ContentQuality.looksLatinNonEnglish('Climate Change and Coastal Cities'),
+        isFalse,
+      );
+      expect(ContentQuality.looksLatinNonEnglish(englishArticle), isFalse);
+      // 英文短文/短语不做语言判定（信息不足）
+      expect(ContentQuality.looksLatinNonEnglish('New Concept English 3'),
+          isFalse);
+    });
+
+    test('中文页面不算"外语乱入"（中文教材/真题合法）', () {
+      expect(
+        ContentQuality.looksLatinNonEnglish('大学英语四级真题 2024 年 6 月阅读部分'),
+        isFalse,
+      );
+    });
+  });
+
+  group('公告/报名/考试信息页', () {
+    test('中文报名/考试简介页被拒', () {
+      expect(
+        ContentQuality.looksLikeAnnouncementPage(
+          title: '2024 年 12 月大学英语四级考试报名通知',
+          url: 'https://exam.example.com/baoming/2024',
+        ),
+        isTrue,
+      );
+      expect(
+        ContentQuality.looksLikeAnnouncementPage(
+          title: '大学英语四级考试简介',
+          snippet: '考试时间、报名条件与准考证打印说明',
+        ),
+        isTrue,
+      );
+    });
+
+    test('英文报名页/官网页被拒', () {
+      expect(
+        ContentQuality.looksLikeAnnouncementPage(
+          title: 'Registration for CET-4 now open',
+          url: 'https://example.edu/registration',
+        ),
+        isTrue,
+      );
+    });
+
+    test('正常材料页不误杀', () {
+      expect(
+        ContentQuality.looksLikeAnnouncementPage(
+          title: 'CET-4 真题 2024 年 6 月阅读部分（附答案解析）',
+          url: 'https://example.com/cet4/2024-reading',
+        ),
+        isFalse,
+      );
+    });
+  });
+
+  group('弱相关过滤', () {
+    test('与分类检索词完全无命中的候选被拒', () {
+      expect(
+        ContentQuality.isWeaklyRelated(
+          title: 'Best pizza restaurants in town',
+          snippet: 'A food blog about dough and cheese.',
+          seeds: const <String>['business politics news', '商业与政治'],
+        ),
+        isTrue,
+      );
+    });
+
+    test('有真实命中不误杀（英文前缀 / 中文子串）', () {
+      expect(
+        ContentQuality.isWeaklyRelated(
+          title: 'How to Read Better: evidence from reading research',
+          snippet: 'reading comprehension strategies',
+          seeds: const <String>['reading', 'english reading'],
+        ),
+        isFalse,
+      );
+      expect(
+        ContentQuality.isWeaklyRelated(
+          title: '商业与政治：本周市场观察',
+          snippet: 'market and policy',
+          seeds: const <String>['商业与政治'],
+        ),
+        isFalse,
+      );
+    });
+
+    test('官方搜索已排序/高权威的候选直接信任', () {
+      expect(
+        ContentQuality.isWeaklyRelated(
+          title: 'A totally unrelated title',
+          seeds: const <String>['climate change'],
+          rerankScore: 2,
+        ),
+        isFalse,
+      );
+      expect(
+        ContentQuality.isWeaklyRelated(
+          title: 'A totally unrelated title',
+          seeds: const <String>['climate change'],
+          authority: 3,
+        ),
+        isFalse,
+      );
+    });
+  });
+
+  group('候选级综合判定 rejectCandidate', () {
+    test('公告页 → announcement', () {
+      expect(
+        ContentQuality.rejectCandidate(
+          title: '四级考试报名入口',
+          url: 'https://example.com/baoming',
+          seeds: const <String>['CET-4 真题'],
+        ),
+        ContentReject.announcement,
+      );
+    });
+
+    test('越南语 → nonEnglish', () {
+      expect(
+        ContentQuality.rejectCandidate(
+          title: 'Cách học tiếng Anh hiệu quả',
+          url: 'https://example.com/vi/article',
+          snippet: 'bài viết về cách học tiếng anh cho người mới',
+          seeds: const <String>['english reading'],
+        ),
+        ContentReject.nonEnglish,
+      );
+    });
+
+    test('弱相关 → weakRelated', () {
+      expect(
+        ContentQuality.rejectCandidate(
+          title: 'Best pizza in town',
+          url: 'https://example.com/food/pizza',
+          seeds: const <String>['business politics news'],
+        ),
+        ContentReject.weakRelated,
+      );
+    });
+
+    test('正常英文候选 → null', () {
+      expect(
+        ContentQuality.rejectCandidate(
+          title: 'CET-4 真题 2024 阅读（附答案）',
+          url: 'https://example.com/cet4/2024',
+          snippet: '大学英语四级真题阅读部分',
+          seeds: const <String>['CET-4 真题阅读'],
+        ),
+        isNull,
+      );
+    });
+  });
 }

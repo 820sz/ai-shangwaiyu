@@ -275,3 +275,72 @@ bash tool/lockrun.sh test test/tutor_pages_test.dart --no-pub
 
 1. **M13 裸字号**：`api_settings.dart` 的 3 处已收口（改从 `theme.textTheme` 派生）；`tutor_chat_screen.dart`（:197/232/236/500/570/661/689）与 `tutor_home` 的少量 `fontSize:` 仍存在 —— 前者不在本主题的重排范围（只换了 AppBar），已在 §8 列为 backlog；后者是 Brief/dash 组件内部的固定字号（属于设计规格而非散落裸值）。
 2. **深色模式 / 360dp** 逐屏渲染（功能已实现，缺渲染验收）。
+
+---
+
+## 10. 第三轮补充（2026-11-07 · 用户第 7/8 条）
+
+### 10.1 名片两态：背景图看不清 → 磨砂纸 + 纸面 scrim
+
+| 条目 | 实现（file:line） | 说明 |
+|---|---|---|
+| 有背景图：轻模糊 + 纸面渐变 scrim | `lib/widgets/profile_name_card.dart`（`ProfileCardView.build` 里 `hasPhoto` 分支） | `ImageFilter.blur(6)` 把照片细节打散 → 三层纸色渐变 scrim（0.92 / 0.84 / 0.94）→ 墨字、三栏数据、眉标、砖红铅笔对比度足够；照片仍看得出是用户自己的图 |
+| 无背景图：保持纸面卡 | 同上（默认路径不渲染照片层） | 与「本周」卡同一形态 |
+| 头像/名字/三栏/铅笔在两态都清晰 | 头像 `onBackdrop:false`（墨字）、名字 20/w800 墨色、三栏 ink/inkFaint、铅笔砖红 | 旧版白字白底问题不再出现 |
+| 两态可确定性复现（测试/渲染） | `ProfileNameCard({settingsOverride})` | 测试直接注入 `ProfileCardSettings`，不依赖本机磁盘/Hive 状态 |
+
+渲染图（计划名）：`assist-mine-impl-namecard-plain.png`、`assist-mine-impl-namecard-photo.png`。
+
+### 10.2 关于三入口 + 内容页 + 开源许可
+
+| 条目 | 实现（file:line） | 说明 |
+|---|---|---|
+| 「我的」底部关于栏三入口 | `lib/screens/profile/profile_home.dart`（设置卡后新增 `BriefCard`，遍历 `AboutDoc.values`） | 软件声明 / 软件特色 / 软件思想 |
+| 关于页三入口 + 公告重看 + 开源许可 | `lib/screens/profile/about_screen.dart`（01 关于软件：3 行 + 开屏公告；03 更新与诊断新增「开源许可」） | 开源许可调 `showLicensePage(applicationName/Version/Legalese/Icon)`，自动汇总依赖许可证 |
+| 内容页 Markdown | `lib/screens/profile/about_doc_screen.dart` | `V4JellyAppBar` + B 纸面排版（暖白底/墨字/墨绿引用/砖红列表点/行内码浅底），`onTapLink → launchExternalUrl`，打不开给 SnackBar；内容缺文件时占位不崩 |
+| 内容读取 | `lib/services/about_content.dart` | `AboutDoc` 枚举（标题/副标题/assetPath/公告定位）+ `markdown()`（rootBundle，失败给占位）+ `summaryOf()`（从正文取第一段人话，摘要不手写）+ `versionLabel='v2.28.0'` |
+
+### 10.3 首启开屏公告（只弹一次）
+
+| 条目 | 实现（file:line） | 说明 |
+|---|---|---|
+| 公告页（B 语言） | `lib/screens/profile/about_notice_screen.dart` | 眉标 + 一行标题 + 说明段 + 三张文档卡（摘要 + 查看全文）+ 版本号 + 「我已阅读并继续」；重看模式按钮为「关闭」 |
+| 只弹一次标记 | `lib/services/about_notice.dart` | Hive key `about_notice_seen_v1`；读不到 = 该弹；写失败吞掉（宁可多弹一次） |
+| 启动挂载点 | `lib/widgets/about_notice_gate.dart` | `AboutNoticeGate(child)`：首帧后检查、`ModalRoute.isCurrent` 才推；确认后写标记。**接线信息（给 Lead）**：类 `AboutNoticeGate`，唯一必传参数 `child`，`app.dart` 已接 |
+| 关于里重看 | `about_screen.dart` 的「开屏公告」行 → `AboutNoticeScreen(firstRun:false)` | 重看不写标记 |
+
+### 10.4 测试状态（截至交回 Lead）
+
+| 文件 | 内容 | 结果 |
+|---|---|---|
+| `test/profile_about_test.dart` | 8 项：Hive 标记只弹一次（service 级）、文档元数据、公告页 firstRun/重看、关于页三入口+公告+开源许可+版本、内容页注入 Markdown、名片无图/有图两态 | **8/8 通过**（本地一次跑完约 4s；日志 `build/about3.log` 之前一轮显示 8 项全过，仅被同批的 gate 文件拖住） |
+| 已删除 `test/profile_about_gate_test.dart` | 曾用它验证"首帧自动弹"；该用例在 Hive 写 + 路由动画 + fake-async 下会挂死（曾阻塞全队队列），按 Lead 指示**不留在仓库**；首帧挂载由 `app.dart` 接线 + 真机验收 | 移除 |
+| `test/profile_about_render_test.dart` | 4 张渲染（公告/思想内容页/名片两态），内容**注入真实文件文本**、名片用 `settingsOverride`，不依赖 rootBundle/Hive | 已写好，但本轮 flutter 锁竞争严重（多次 160s 未拿到锁被 KILL），**未跑出图** —— 待 Lead 集成后统一跑 |
+| analyze | `lib/screens/profile`、`about_notice_gate.dart`、`profile_name_card.dart`、`about_content.dart`、`about_notice.dart` | 最后一次完整 analyze：**No issues found**（之后仅 3 处小改：scrim、`settingsOverride`、`summaryOverrides`，需集成后复核一次） |
+
+### 10.5 挂死根因与纪律（写给团队）
+
+- **根因**：`pumpAndSettle` + fake-async 里的 Hive 写入 + `LicensePage` 实时汇总裁荷 + `Image.file` 解码，四者叠加导致 flutter_tester 永不 settle；一次挂死 17 分钟并占住 lockrun 锁。
+- **修法**：关于/公告相关测试全部改为**有界 pump + `tester.runAsync`**、不写 Hive（用注入参数）、不开 LicensePage 异步载荷、不 await rootBundle；渲染图用注入文本。
+- **纪律**：这类测试单独文件 + `--timeout 90s` 跑；禁止 `pumpAndSettle`。
+
+### 10.6 待 Lead 集成后执行（3 条命令）
+
+```bash
+bash tool/lockrun.sh test test/profile_about_test.dart --no-pub --timeout 90s
+bash tool/lockrun.sh test test/profile_about_render_test.dart --no-pub --timeout 90s
+bash tool/lockrun.sh test test/profile_pages_test.dart --no-pub --timeout 120s   # 重出 about.png / mine-home.png（含新关于栏）
+```
+出图后复制：`build/ui_real/assist-mine-impl-{about,about-notice,about-doc,namecard-plain,namecard-photo,mine-home}.png` → `docs/ui-preview/real/`。
+
+### 10.7 QA 终验 P2 修复（2026-11-07 14:10，打包前唯一阻塞项）
+
+| 问题 | 根因 | 修法 | 验证 |
+|---|---|---|---|
+| 首启公告摘要卡显示 Markdown 表格原文（`\| 项目 \| 内容 \| --- \|`） | `AboutContent.summaryOf` 只跳过 `#`/`>`/`---` 开头行，**表格行（以 `\|` 开头）没被识别**；声明正文开头恰好是表格 | `lib/services/about_content.dart` `summaryOf`：① 跳过所有含 `\|` 的行与 `--- \| ---` 分隔行；② 跳过 ```` ``` ```` / `![` / `<!--`；③ `_plain` 再兜底去掉 `\|`、`[..]` 残留；④ 摘要若仍含 `**`/`` ` ``/`](` 直接跳过该行。渲染测试 `test/profile_about_render_test.dart` 的本地摘要函数同步同一套规则（否则图和线上不一致） | `assist-mine-impl-about-notice.png` 重出后 read_image 确认：三块摘要均为干净中文句子，**无 `\|`、无 `---`、无 Markdown 符号** |
+| 名片两态渲染卡片被拉满整屏（照片态露出大片 scrim） | 渲染页把名片直接放在 `Scaffold.body`：body 给**紧约束**，卡片按撑满处理 | 两张名片渲染改为 `SingleChildScrollView`，让卡片高度跟随内容 | `namecard-plain/photo.png` 重出：卡片为内容高度、照片透出但文字对比清晰 |
+
+本轮重出并复制到 `docs/ui-preview/real/` 的 5 张：`about.png`（新：01 关于软件 4 行 + v2.28.0；03 更新与诊断含「开源许可」）、`about-notice.png`、`about-doc.png`、`namecard-plain.png`、`namecard-photo.png`。
+测试：`profile_about_test` **8/8**、`profile_about_render_test` **5/5**、`profile_pages_test` **14/14**；analyze（5 路径）**No issues found**。
+
+

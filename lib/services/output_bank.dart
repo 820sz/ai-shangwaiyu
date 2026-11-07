@@ -801,10 +801,22 @@ class OutputBank {
   }
 
   /// 写篇阶任务:给出作文题目 + 要点提示,按写作 rubric 评分。
+  ///
+  /// [examType] 决定用哪一级的写作 rubric(六级 → `cet6_writing`;
+  /// 其余/未知 → 内置题的 `cet4_writing`),题组 `exam_type` 一并落对,
+  /// 这样出题入口按 CET-6 出题后,答题页与题库都能显示六级标准。
   static OutputSetSpec buildEssaySet({
     required List<EssayPrompt> prompts,
     String title = '四六级作文题 · 按 rubric 批改',
+    String examType = 'none',
   }) {
+    String rubricFor(EssayPrompt p) {
+      if (examType.trim().toLowerCase() != 'cet6') return p.rubricId;
+      return p.rubricId.startsWith('cet4_')
+          ? p.rubricId.replaceFirst('cet4_', 'cet6_')
+          : p.rubricId;
+    }
+
     final tasks = <OutputTaskSpec>[
       for (final p in prompts)
         OutputTaskSpec(
@@ -813,7 +825,7 @@ class OutputBank {
           promptZh: '${p.titleZh}\n\n${p.taskZh}\n\n参考要点:\n'
               '${p.points.asMap().entries.map((e) => '${e.key + 1}. ${e.value}').join('\n')}',
           promptEn: p.taskEn,
-          rubricId: p.rubricId,
+          rubricId: rubricFor(p),
           abilityTags: const ['写作', '篇章'],
           wordCount: p.wordCount,
           source: 'builtin',
@@ -824,8 +836,9 @@ class OutputBank {
       title: title,
       tier: OutputTier.essay,
       source: 'builtin',
+      examType: examType,
       section: 'writing',
-      rubricId: 'cet4_writing',
+      rubricId: tasks.isEmpty ? 'cet4_writing' : tasks.first.rubricId,
       tasks: tasks,
       licenseNote: 'App 内置真题风格题目(人写,非官方原题)',
       verifyStatus: 'verified',

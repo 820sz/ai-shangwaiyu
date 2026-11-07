@@ -137,7 +137,7 @@ class _ReaderBottomDockState extends State<ReaderBottomDock> {
             ),
           ),
         ),
-        SizedBox(height: 8 + widget.bottomInset),
+        SizedBox(height: 4 + widget.bottomInset),
       ],
     );
   }

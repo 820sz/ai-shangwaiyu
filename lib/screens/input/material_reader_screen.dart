@@ -1157,7 +1157,7 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
       if (a != null) '已知 ${(a.knownTokenRatio * 100).toStringAsFixed(0)}%',
     ].join(' · ');
     return Padding(
-      padding: const EdgeInsets.only(bottom: 24),
+      padding: const EdgeInsets.only(bottom: 18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
@@ -1187,7 +1187,7 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
                 ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           Text(
             title,
             maxLines: 4,
@@ -1200,7 +1200,7 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
               color: p.ink,
             ),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           Text(
             byline.isEmpty ? '正在分析难度…' : byline,
             style: TextStyle(
@@ -1210,12 +1210,12 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
               color: p.inkSoft,
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           // 刊头双线:2px 墨线 + 2px 空 + 1px 细线
           Container(height: 2, color: p.ink),
           const SizedBox(height: 2),
           Container(height: 1, color: p.hairline),
-          const SizedBox(height: 18),
+          const SizedBox(height: 14),
         ],
       ),
     );
@@ -2170,7 +2170,7 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
   Widget _buildLoadingBody(ReaderPalette p) {
     return SafeArea(
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(26, 16, 26, 30),
+        padding: const EdgeInsets.fromLTRB(16, 12, 20, 20),
         children: <Widget>[
           Text(
             '正在打开材料…',
@@ -2188,7 +2188,7 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
   Widget _buildErrorBody(ReaderPalette p) {
     return SafeArea(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(26, 16, 26, 30),
+        padding: const EdgeInsets.fromLTRB(16, 12, 20, 20),
         child: AppErrorCard(
           message: '打不开这份材料:$_error',
           onRetry: () {
@@ -2235,8 +2235,10 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
                   // 用列表视口的真实矩形判断"哪几段可见"(见 _visibleUnitIndices)
                   key: _listKey,
                   controller: _scrollCtrl,
-                  // 右侧 46 给进度胶囊/竖轨让位;26 的左右留白 = C 的最大行宽
-                  padding: const EdgeInsets.fromLTRB(26, 8, 46, 30),
+                  // 第三轮整改(用户真机第 2 条):竖轨改成**悬浮 overlay**,
+                  // 不再用 46px 挤压正文。左右 16/20、上下 4/18 —— 390 宽下
+                  // 正文宽度 318 → 354px;右侧 20 里有 10px 是竖轨安全区。
+                  padding: const EdgeInsets.fromLTRB(16, 4, 20, 18),
                   itemCount: _units.length + 1,
                   itemBuilder: (_, index) => index == 0
                       ? _readingLead(context, theme, a, title)
@@ -2252,17 +2254,18 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
               ),
             ],
           ),
-          // 右侧悬浮 % 胶囊 + 96px 竖轨(点胶囊也能打开控制台)
-          Positioned.fill(
+          // 96px 竖轨悬浮在正文右侧安全区之上(3px,不挤压正文、不遮字);
+          // 右 4 + 12px 透明热区,点轨道也能打开控制台。
+          Positioned(
+            top: 0,
+            bottom: 0,
+            right: 4,
             child: Align(
-              alignment: const Alignment(1, -0.21),
-              child: Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: ReaderProgressRail(
-                  progress: _readingPercent,
-                  palette: p,
-                  onTap: _openConsole,
-                ),
+              alignment: const Alignment(0, -0.18),
+              child: ReaderProgressRail(
+                progress: _readingPercent,
+                palette: p,
+                onTap: _openConsole,
               ),
             ),
           ),
@@ -2271,29 +2274,42 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     );
   }
 
-  /// 顶部安全条(C 方案):只有一颗返回圆钮,纸色底给正文让位。
+  /// 顶部安全条(C 方案):返回圆钮 + 右侧 % 胶囊,纸色底给正文让位。
   ///
   /// 「零常驻按钮」说的是**底部**(动作全部收进控制台);返回是导航必需,
-  /// 但它不能浮在正文上面 —— 这里固定一条 44px 纸色顶条,正文从顶条下沿
+  /// 但它不能浮在正文上面 —— 这里固定一条 40px 纸色顶条,正文从顶条下沿
   /// 开始滚,任何滚动位置都不会有按钮压字。
+  ///
+  /// 第三轮整改(用户真机第 2 条):原来的右侧「% 胶囊 + 竖轨」为让位把正文
+  /// 挤窄了 46px。现在**胶囊进顶条右侧**(悬浮在纸上、不压任何字),竖轨只剩
+  /// 3px 悬浮在正文右侧安全区(见 reader_progress.dart)。
   Widget _readerTopBar(ReaderPalette p) {
     return Container(
-      height: 44,
+      height: 40,
       width: double.infinity,
       color: p.page,
-      padding: const EdgeInsets.only(left: 12),
-      alignment: Alignment.centerLeft,
-      child: ReaderCircleButton(
-        icon: Icons.arrow_back_ios_new,
-        size: 14,
-        palette: p,
-        onTap: () async {
-          final nav = Navigator.of(context);
-          await _askShelfOnExit();
-          if (!mounted) return;
-          await _persist(finished: _finished, force: true);
-          nav.pop();
-        },
+      padding: const EdgeInsets.only(left: 12, right: 10),
+      child: Row(
+        children: <Widget>[
+          ReaderCircleButton(
+            icon: Icons.arrow_back_ios_new,
+            size: 14,
+            palette: p,
+            onTap: () async {
+              final nav = Navigator.of(context);
+              await _askShelfOnExit();
+              if (!mounted) return;
+              await _persist(finished: _finished, force: true);
+              nav.pop();
+            },
+          ),
+          const Spacer(),
+          ReaderProgressBadge(
+            progress: _readingPercent,
+            palette: p,
+            onTap: _openConsole,
+          ),
+        ],
       ),
     );
   }
@@ -2318,7 +2334,7 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
 
     if (error != null) {
       return Padding(
-        padding: const EdgeInsets.only(top: 10),
+        padding: const EdgeInsets.only(top: 8),
         child: Row(
           children: <Widget>[
             Icon(Icons.error_outline, size: 14, color: p.accent),
@@ -2413,7 +2429,7 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     if (translation == null) return const SizedBox.shrink();
 
     return Padding(
-      padding: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.only(top: 10),
       child: Container(
         decoration: BoxDecoration(
           color: p.transBg,
@@ -2572,7 +2588,7 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     return Padding(
       // 每个单元挂一个稳定 key:滚动停下的"可见段"判断要拿它的 RenderBox
       key: _unitKey(index),
-      padding: EdgeInsets.only(bottom: isLastOfChunk ? 24 : 18),
+      padding: EdgeInsets.only(bottom: isLastOfChunk ? 18 : 14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[

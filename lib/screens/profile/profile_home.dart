@@ -9,6 +9,7 @@ import '../../models/learner_model.dart';
 import '../../providers/bookmark_provider.dart';
 import '../../providers/stats_provider.dart';
 import '../../providers/vocab_provider.dart';
+import '../../services/about_content.dart';
 import '../../services/api_endpoint.dart';
 import '../../services/database.dart';
 import '../../services/doubao_api.dart';
@@ -29,6 +30,7 @@ import '../input/learner_preferences_screen.dart';
 import '../review/review_screen.dart';
 import '../tutor/placement_test_screen.dart';
 import '../writing/writing_logs_screen.dart';
+import 'about_doc_screen.dart';
 import 'about_screen.dart';
 import 'api_settings.dart';
 import 'appearance_screen.dart';
@@ -387,11 +389,29 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
                 ),
                 BriefEntryRow(
                   title: '关于与更新',
-                  subtitle: '版本 / 检查更新 / 诊断信息 / 数据说明',
+                  subtitle: '版本 / 检查更新 / 诊断信息 / 开源许可 / 公告重看',
                   dense: true,
                   showDivider: false,
                   onTap: _openAbout,
                 ),
+              ],
+            ),
+          ),
+
+          // ── 关于(用户第 8 条:底部新增关于栏,三个入口)──
+          BriefCard(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+            child: Column(
+              children: <Widget>[
+                for (final AboutDoc doc in AboutDoc.values) ...<Widget>[
+                  BriefEntryRow(
+                    title: doc.title,
+                    subtitle: doc.subtitle,
+                    dense: true,
+                    showDivider: doc != AboutDoc.values.last,
+                    onTap: () => _openDoc(doc),
+                  ),
+                ],
               ],
             ),
           ),
@@ -427,6 +447,14 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
           onShowDiagnostics: _showDiagnostics,
         ),
       ),
+    );
+  }
+
+  /// 关于三入口(软件声明 / 软件特色 / 软件思想)
+  Future<void> _openDoc(AboutDoc doc) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute<void>(builder: (_) => AboutDocScreen(doc: doc)),
     );
   }
 

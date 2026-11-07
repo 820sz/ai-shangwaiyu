@@ -11,6 +11,7 @@ import '../../services/input_prefs.dart';
 import '../../services/learner_model_store.dart';
 import '../../services/material_channel.dart';
 import '../../services/material_discovery.dart';
+import '../../services/material_need.dart';
 import '../../services/material_taxonomy.dart';
 import '../../services/original_search.dart';
 import '../../widgets/app_ui.dart';
@@ -291,18 +292,15 @@ class _NeedSearchScreenState extends State<NeedSearchScreen> {
     await _loadAll();
   }
 
-  /// 「为什么推这篇」:**只有补抓到正文、算过真实覆盖率才允许出现**(级别 2)。
+  /// 「为什么推这篇」:**只有补抓到正文、算过真实覆盖率才允许出现**(级别 2)，
+  /// 且覆盖率低于 [needSearchMinReasonCoverage] 时不显示（见该常量的说明）。
   String? _reasonFor(MaterialResultItem item) {
-    final coverage = item.analysis?.knownTokenRatio;
-    if (coverage == null) return null;
     final ctx = _ctx;
-    final parts = <String>['难度 ${(coverage * 100).round()}%'];
-    if (ctx != null && !ctx.need.band.isAny) {
-      parts.add('落在你选的 ${ctx.need.band.label}');
-    }
-    final goals = ctx?.goals ?? const <String>[];
-    if (goals.isNotEmpty) parts.add('命中目标「${goals.first}」');
-    return '为什么推:${parts.join(' · ')}';
+    return needSearchReasonFor(
+      item: item,
+      need: ctx?.need ?? const MaterialNeed(),
+      goals: ctx?.goals ?? const <String>[],
+    );
   }
 
   // ── UI ─────────────────────────────────────────────────────────────
@@ -869,4 +867,32 @@ class _NeedSearchScreenState extends State<NeedSearchScreen> {
       },
     );
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// 「为什么推这篇」的阈值(纯函数,可单测)
+// ═══════════════════════════════════════════════════════════════════════
+
+/// 覆盖率低于该值就**不显示**「为什么推」。
+///
+/// 2026-11-07 用户真机反馈:覆盖率 0% 的卡片还写「为什么推:难度 0%」,既没用又
+/// 像 bug。0.10（每 100 词 ≤10 个生词）是"至少落在 i+100 档以内"的下限 ——
+/// 比这更低的材料连"能读"都谈不上,给理由只会误导用户。
+const double needSearchMinReasonCoverage = 0.10;
+
+/// 生成一张结果卡的「为什么推这篇」。
+///
+/// 只有**补抓到正文、算过真实覆盖率**且覆盖率 ≥ [needSearchMinReasonCoverage]
+/// 时才返回文案;否则返回 null(卡片不显示理由行)。
+String? needSearchReasonFor({
+  required MaterialResultItem item,
+  required MaterialNeed need,
+  required List<String> goals,
+}) {
+  final coverage = item.analysis?.knownTokenRatio;
+  if (coverage == null || coverage < needSearchMinReasonCoverage) return null;
+  final parts = <String>['难度 ${(coverage * 100).round()}%'];
+  if (!need.band.isAny) parts.add('落在你选的 ${need.band.label}');
+  if (goals.isNotEmpty) parts.add('命中目标「${goals.first}」');
+  return '为什么推:${parts.join(' · ')}';
 }

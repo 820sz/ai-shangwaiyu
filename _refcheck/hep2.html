@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+<meta name="renderer" content="webkit">
+<meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=0">
+<meta name="keywords" content="高等教育出版社产品信息检索系统；高教社产品信息检索系统；高教社产品；高教社系统；高教社检索；高教社检索系统；高教社信息检索系统；高教社信息；产品信息检索系统；产品信息系统；信息检索系统；高教社产品系统；高教社产品检索系统"/>
+<meta name="description" content="高等教育出版社，产品信息，检索，系统，包括资源下载、样书申请、信息推送、书目下载在内的教师教学服务系统"/>
+<title>高教社产品信息检索系统</title>
+<link rel="shortcut icon" type="image/x-icon" href="/static/favicon.ico"/>
+<link rel="stylesheet" href="/static/internal/common/css/h5Mobile.css"/>
+<link rel="stylesheet" href="/static/internal/common/css/h5Mobile1.css"/>
+<script src="/static/jquery/jquery-3.2.1.js"></script>
+<script src="/static/layer/mobile/layer.js"></script>
+<script src="https://cdn.authing.co/packages/authing-sso/1.x/AuthingSSO.umd.min.js"></script>
+<script>
+    window.appId = '6082593c04b5c2dab3c7f1e8';
+    window.appDomain = 'xuanshu.u2.hep.com.cn';
+    window.baseUrl = 'https://core.u2.hep.com.cn';
+    window.user = 'https://users.u2.hep.com.cn/graphql';
+    window.oauth = 'https://oauth.u2.hep.com.cn/graphql';
+    window.ctx = '';
+    window.imageCtx = 'https://hepshow-image-formal.oss-cn-beijing.aliyuncs.com';
+    window.fixedTopHeight = 120;
+</script>
+<script src="/static/internal/common/js/h5Mobile.js?a=2"></script>
+<script>
+    var _hmt = _hmt || [];
+    (function() {
+        var hm = document.createElement("script");
+        hm.src = "https://hm.baidu.com/hm.js?fbec258952e854d110faf4241b905d55";
+        var s = document.getElementsByTagName("script")[0];
+        s.parentNode.insertBefore(hm, s);
+    })();
+    $(document).ready(function(){
+        
+    });
+</script><script src="/static/internal/h5Mobile/h5BookDetails.js?value=6"></script>
+    <script src="https://res.wx.qq.com/open/js/jweixin-1.6.0.js"></script>
+    <script>
+        $(function(){
+            
+
+            var strUrl = 'https://xuanshu.hep.com.cn/front/h5Mobile/bookDetails?bookId=59cf951bba9eb884cf823c6a';
+
+            $.ajax({
+                url: ctx + "/public/getWxInfo",
+                dataType: "json",
+                data:{strUrl:strUrl},
+                async: true,
+                success: function (data) {
+                    if (data != null) {
+                        wx.config({
+                            debug: false, // 开启调试模式,调用的所有 api 的返回值会在客户端 alert 出来，若要查看传入的参数，可以在 pc 端打开，参数信息会通过 log 打出，仅在 pc 端时才会打印。
+                            appId: data.appId, // 必填，公众号的唯一标识
+                            timestamp: data.timestamp, // 必填，生成签名的时间戳
+                            nonceStr: data.nonceStr, // 必填，生成签名的随机串
+                            signature: data.signature,// 必填，签名
+                            jsApiList: ['updateAppMessageShareData', 'updateTimelineShareData'] // 必填，需要使用的 JS 接口列表
+                        });
+
+
+                        wx.ready(function () {   //需在用户可能点击分享按钮前就先调用
+                            wx.updateAppMessageShareData({
+                                title: '现代汉语（增订六版）下册', // 分享标题
+                                desc: '黄伯荣 廖序东', // 分享描述
+                                link: strUrl, // 分享链接，该链接域名或路径必须与当前页面对应的公众号 JS 安全域名一致
+                                imgUrl: 'https://hepshow-image-formal.oss-cn-beijing.aliyuncs.com/bookCover/2026-09-2w/6aa2f840e4b09843fa24ebce.jpg', // 分享图标
+                                success: function () {
+                                    // 设置成功
+                                }
+                            });
+                            wx.updateTimelineShareData({
+                                title: '现代汉语（增订六版）下册', // 分享标题
+                                link: strUrl, // 分享链接，该链接域名或路径必须与当前页面对应的公众号 JS 安全域名一致
+                                imgUrl: 'https://hepshow-image-formal.oss-cn-beijing.aliyuncs.com/bookCover/2026-09-2w/6aa2f840e4b09843fa24ebce.jpg', // 分享图标
+                                success: function () {
+                                    // 设置成功
+                                }
+                            });
+                        });
+                    }
+                }
+            });
+        });
+
+
+
+    </script>
+</head>
+<body>
+
+<div class="root">
+
+    <div class="top-nav">
+        <div class="nav-back">
+            <button class="icon icon-back" onclick="history.back()"></button>
+        </div>
+        <div class="nav-title">
+            <h1>图书详情</h1>
+        </div>
+        <div class="nav-menus">
+            <button onclick="$.goLogin()" class="icon">登录</button>
+            </div>
+    </div>
+
+    <div class="top-nav-holder"></div>
+
+    <input id="book-id" type="hidden" value="59cf951bba9eb884cf823c6a"/>
+    <div class="tab-list">
+        <div class="tab-wrap">
+            <div class="tab-item active">图书信息</div>
+            <div class="tab-item">图书目录</div>
+            <div class="tab-item">数字化资源</div>
+            <div class="tab-item">二维码资源</div>
+            </div>
+    </div>
+
+    <div>
+        <div class="tab-content" style="display: block">
+            <div class="tab-content-item active book-details">
+                <div class="book-image">
+                    <div class="slider carousel " id="carousel-advertisement" data-ride="carousel">
+                        <div class="slide-viewer" style="width: 245px;text-align: center;margin-left: 1.2rem;height:345px" >
+                            <div class="slide-group">
+                                <ol class="carousel-indicators">
+                                    <li data-target="#carousel-advertisement" data-slide-to="0" class="active"></li>
+                                    <li data-target="#carousel-advertisement" data-slide-to="1" class=""></li>
+                                    </ol>
+                                <div class="slide" style="width: 245px;height: auto">
+                                    <video id="video0" name="video" controls preload="auto" width="245rpx" height="auto">
+                                                <source src="https://hepshow-image-formal.oss-cn-beijing.aliyuncs.com/video/2020-11-17w/978-7-04-046988-2.mp4" type="video/mp4" width="145rpx" height="225rpx">
+                                            </video>
+                                    </div>
+                                <div class="slide" style="width: 245px;height: auto;">
+                                    <img src="https://hepshow-image-formal.oss-cn-beijing.aliyuncs.com/bookCover/2026-09-2w/6aa2f840e4b09843fa24ebce.jpg" style="width: 245px;height: auto;"/>
+                                </div>
+                            </div>
+                        </div>
+                        <ol class="slide-items" style="top: 8.0rem;"></ol>
+                    </div>
+                    </div>
+                <div class="book-info">
+                    <h2 class="book-title">
+                        现代汉语（增订六版）下册</h2>
+
+                    <hr class="dashed"/>
+
+                    <div class="book-content">
+                        ﻿<p>﻿本书为“十二五”普通高等教育本科国家级规划教材。分为两册，上册为绪论、语音、文字、词汇，下册为语法、修辞六章，系统讲授了现代汉语的基础理论和基本知识。注重吸收现代汉语教学研究与教学实践的最新成果，兼顾语言学知识体系的完整性；知识点阐述深入浅出，辅以丰富的例证讲解，符合一线教学实际。每节前设有“目的要求”，节后设有“思考与练习”，便于学生学习领会，加强基本技能的训练。全书紧扣教学需求，框架体系完整，逻辑严密，具有较强的实用性和可操作性。此次修订的原则是保持原有内容和结构稳定的基础上，与时俱进，适应新的教学改革与教学需求，对个别内容表述及部分例证等做了调整。除此之外，还采用二维码链接形式与数字化资源有机结合，满足当前学习手段多样化、便捷化的需求。</p><p>本书可供各类高等院校中文专业作为本科必修教材使用，也可供各大专院校其他专业作为选修课教材使用。</p></div>
+
+                    <hr class="dashed"/>
+
+                    <div id="buy" class="form-item" style="display: none">
+                        <div class="form-label">购买：</div>
+                        <div class="form-content">
+                            <input type="hidden" id="hasQrcodeResource" value="true">
+                            <input id="wuliao" type="hidden" value="46988-00"/>
+                            <input id="wbs" type="hidden" value="13-05698-001"/>
+                            <input id="isbn" type="hidden" value="978-7-04-046988-2"/>
+                            <input id="qrcodeSize" type="hidden" value="5"/>
+<a href="javascript:buyHistory(0, 'https://mall.hep.com.cn/static/dist/searchList?keywords=46988-00');" class="lanchang" style="background-image: '/static/internal/common/image/mall_ico.png'"></a>
+<a href="javascript:buyHistory(1, 'https://item.jd.com/10120544758514.html')" class="jingdong"></a>
+                            <a href="javascript:buyHistory(2, 'http://product.dangdang.com/25199176.html')" class="dangdang"></a>
+                            <a href="javascript:buyHistory(4, 'https://detail.tmall.com/item.htm?spm=a212k0.12153887.0.0.4d7c687d0wv49t&id=554914661843')" ><img src="/static/internal/common/image/tm.png" style="height:0.15rem"/></a>
+                            <a href="javascript:buyHistory(5, 'https://weidian.com/item.html?itemID=2129384022')" ><img src="/static/internal/common/image/wd.png" style="height:0.15rem"/></a>
+                            </div>
+                    </div>
+
+                    <hr class="dashed"/>
+
+                    <div class="form-item">
+                        <div class="form-label">作者：</div>
+                        <div class="form-content">
+                            黄伯荣 廖序东</div>
+                    </div>
+
+                    <hr class="solid"/>
+
+                    <div class="form-item">
+                        <div class="form-label">定价：</div>
+                        <div class="form-content">
+                            31.80 元</div>
+                    </div>
+
+                    <hr class="solid"/>
+
+                    <div class="form-item">
+                        <div class="form-label">出版时间：</div>
+                        <div class="form-content">
+                            2017年5月</div>
+                    </div>
+                    <hr class="solid"/>
+
+                    <div class="form-item">
+                        <div class="form-label">ISBN：</div>
+                        <div class="form-content">
+                            978-7-04-046988-2</div>
+                    </div>
+
+                    <hr class="solid"/>
+
+                    <div class="form-item">
+                        <div class="form-label">物料号：</div>
+                        <div class="form-content">
+                            46988-00</div>
+                    </div>
+
+                    <hr class="solid"/>
+
+                    <div class="form-item">
+                        <div class="form-label">读者对象：</div>
+                        <div class="form-content">
+                            高等教育</div>
+                    </div>
+                    <hr class="solid"/>
+
+                    <div class="form-item">
+                        <div class="form-label">一级分类：</div>
+                        <div class="form-content">
+                            中文</div>
+                    </div>
+                    <hr class="solid"/>
+
+                    <div class="form-item">
+                        <div class="form-label">二级分类：</div>
+                        <div class="form-content">
+                            中国语言文学</div>
+                    </div>
+                    <hr class="solid"/>
+
+                    <div class="form-item">
+                        <div class="form-label">三级分类：</div>
+                        <div class="form-content">
+                            汉语言文学</div>
+                    </div>
+                    <hr class="solid"/>
+
+                    <div class="form-item">
+                        <div class="form-label">重点项目：</div>
+                        <div class="form-content">
+                            暂无</div>
+                    </div>
+
+                    <hr class="solid"/>
+
+                    <div class="form-item">
+                        <div class="form-label">版面字数：</div>
+                        <div class="form-content">
+                            290.00千字</div>
+                    </div>
+
+                    <hr class="solid"/>
+
+                    <div class="form-item">
+                        <div class="form-label">开本：</div>
+                        <div class="form-content">
+                            16开</div>
+                    </div>
+
+                    <hr class="solid"/>
+
+<div class="form-item">
+                        <div class="form-label">装帧形式：</div>
+                        <div class="form-content">
+                            平装</div>
+                    </div>
+                    <hr class="solid"/>
+                    <div class="form-item">
+                        <div class="form-label">页数：</div>
+                        <div class="form-content">
+                            252</div>
+                    </div>
+                    <hr class="solid"/>
+                    <div class="form-item">
+                        <div class="form-label">最新</br>印次时间：</div>
+                        <div class="form-content">
+                            2024年9月</div>
+                    </div>
+
+
+                    </div>
+
+
+            </div>
+            <div class="tab-content-item">
+                <ul class="catalog">
+                    <li>目录<ul><li>第四章 语法<ul><li>第一节 语法概说<ul><li>一､语法和语法体系<ul></ul></li><li>二､语法的性质<ul></ul></li><li>三､语法单位和句法成分<ul></ul></li><li>思考和练习一<ul></ul></li></ul></li><li>第二节 词类(上)<ul><li>一､划分词类的依据<ul></ul></li><li>二､实词<ul></ul></li><li>思考和练习二<ul></ul></li></ul></li><li>第三节 词类(下)<ul><li>一､虚词<ul></ul></li><li>二､词类小结<ul></ul></li><li>☆三､词类的误用<ul></ul></li><li>思考和练习三<ul></ul></li></ul></li><li>第四节 短语<ul><li>一､短语及其分类<ul></ul></li><li>二､短语的结构类型<ul></ul></li><li>三､短语的功能类型<ul></ul></li><li>四､多义短语<ul></ul></li><li>五､短语分析小结<ul></ul></li><li>思考和练习四<ul></ul></li></ul></li><li>第五节 句法成分<ul><li>一､主语 谓语<ul></ul></li><li>二､动语 宾语<ul></ul></li><li>三､定语<ul></ul></li><li>四､状语<ul></ul></li><li>五､补语<ul></ul></li><li>六､中心语<ul></ul></li><li>七､独立语<ul></ul></li><li>☆八､句法成分小结<ul></ul></li><li>附录:句法分析例解<ul></ul></li><li>思考和练习五<ul></ul></li></ul></li><li>第六节 单句<ul><li>一､句型<ul></ul></li><li>二､几种常用句式<ul></ul></li><li>三､变式句<ul></ul></li><li>四､句子的变换<ul></ul></li><li>五､句类<ul></ul></li><li>六､单句分类小结<ul></ul></li><li>☆语法分析<ul></ul></li><li>思考和练习六<ul></ul></li></ul></li><li>第七节 单句语病的检查和修改<ul><li>一､常见的句法失误<ul></ul></li><li>二､检查语病的方法<ul></ul></li><li>三､修改语病的原则<ul></ul></li><li>思考和练习七<ul></ul></li></ul></li><li>第八节 复句<ul><li>一､概说<ul></ul></li><li>二､复句的意义类型<ul></ul></li><li>三､多重复句和紧缩句<ul></ul></li><li>☆四､复句语病的检查和修改<ul></ul></li><li>思考和练习八<ul></ul></li></ul></li><li>☆第九节 句群<ul><li>一､句群概说<ul></ul></li><li>二､句群的意义类型<ul></ul></li><li>三､多重句群<ul></ul></li><li>四､句群语病的检查和修改<ul></ul></li><li>思考和练习九<ul></ul></li></ul></li><li>☆第十节 标点符号<ul><li>一､标点符号的作用和种类<ul></ul></li><li>二､标点符号的用法<ul></ul></li><li>三､标点符号用法的灵活性<ul></ul></li><li>四､标点符号的位置<ul></ul></li><li>思考和练习十<ul></ul></li></ul></li></ul></li><li>第五章 修辞<ul><li>第一节 修辞概说<ul><li>一､什么是修辞<ul></ul></li><li>二､修辞和语境<ul></ul></li><li>三､修辞同语音､词汇､语法的关系<ul></ul></li><li>四､修辞学与语用学<ul></ul></li><li>五､修辞的作用和学习修辞的目的<ul></ul></li><li>思考和练习一<ul></ul></li></ul></li><li>第二节 词语的锤炼<ul><li>一､意义的锤炼<ul></ul></li><li>二､声音的锤炼<ul></ul></li><li>思考和练习二<ul></ul></li></ul></li><li>第三节 句式的选择<ul><li>一､长句和短句<ul></ul></li><li>二､整句和散句<ul></ul></li><li>三､主动句和被动句<ul></ul></li><li>四､肯定句和否定句<ul></ul></li><li>五､口语句式和书面语句式<ul></ul></li><li>思考和练习三<ul></ul></li></ul></li><li>第四节 辞格(一)<ul><li>一､比喻<ul></ul></li><li>二､比拟<ul></ul></li><li>三､借代<ul></ul></li><li>四､拈连<ul></ul></li><li>五､夸张<ul></ul></li><li>思考和练习四<ul></ul></li></ul></li><li>第五节 辞格(二)<ul><li>一､双关<ul></ul></li><li>二､仿词<ul></ul></li><li>三､反语<ul></ul></li><li>四､婉曲<ul></ul></li><li>思考和练习五<ul></ul></li></ul></li><li>第六节 辞格(三)<ul><li>一､对偶<ul></ul></li><li>二､排比<ul></ul></li><li>三､层递<ul></ul></li><li>四､顶真<ul></ul></li><li>☆五､回环<ul></ul></li><li>思考和练习六<ul></ul></li></ul></li><li>第七节 辞格(四)<ul><li>一､对比<ul></ul></li><li>二､映衬<ul></ul></li><li>三､反复<ul></ul></li><li>四､设问<ul></ul></li><li>五､反问<ul></ul></li><li>思考和练习七<ul></ul></li></ul></li><li>第八节 辞格的综合运用<ul><li>一､辞格的连用<ul></ul></li><li>二､辞格的兼用<ul></ul></li><li>三､辞格的套用<ul></ul></li><li>思考和练习八<ul></ul></li></ul></li><li>第九节 修辞常见的失误与评改<ul><li>一､韵律配合不协调<ul></ul></li><li>二､词语选用不精当<ul></ul></li><li>三､句子表意不畅达<ul></ul></li><li>四､辞格运用不恰当<ul></ul></li><li>思考和练习九<ul></ul></li></ul></li><li>第十节 语体<ul><li>一､公文语体<ul></ul></li><li>二､科技语体<ul></ul></li><li>三､政论语体<ul></ul></li><li>四､文艺语体<ul></ul></li><li>思考和练习十<ul></ul></li></ul></li></ul></li><li>后记<ul></ul></li></ul></li></ul>
+            </div>
+            <div class="tab-content-item">
+                <div class='book-resource'><a href="javascript:downloadRes('TEACHER_RESOURCE');">Flash课件</a></div><div class='book-resource'><a href="javascript:downloadRes('TEACHER_RESOURCE');">现代汉语 增订六版 下册 黄伯荣 廖序东 主编</a></div><div style="border-top: 1px dashed #efefef;padding-top:0.1rem;font-size:0.17rem">
+                    <span >如无法打开或下载资源，请在电脑端（xuanshu.hep.com.cn)进行下载操作。</span>
+                </div>
+            </div>
+            <div class="tab-content-item">
+                <div class="qrcode-resource" data-qrcode="http%3A%2F%2F2d.hep.cn%2F1356981%2F1">
+                                短语分析举例<a>
+                                    <span class="type"><span class="label label-primary">链接</span></span>
+                                    </a>
+                                    </div>
+                <div class="qrcode-resource" data-qrcode="http%3A%2F%2F2d.hep.cn%2F1356981%2F2">
+                                单句分析举例<a>
+                                    <span class="type"><span class="label label-primary">链接</span></span>
+                                    </a>
+                                    </div>
+                <div class="qrcode-resource" data-qrcode="http%3A%2F%2F2d.hep.cn%2F1356981%2F3">
+                                复句分析举例<a>
+                                    <span class="type"><span class="label label-primary">链接</span></span>
+                                    </a>
+                                    </div>
+                <div  style="border-top: 1px dashed #efefef;padding: 0.1rem 0;cursor:default" >
+                                语法小测验<span style="float:right;margin-right:0.45rem;">
+                                    <span class="type"><span class="label label-primary">链接</span></span>
+                                    </span>
+                                    </div>
+                <div  style="border-top: 1px dashed #efefef;padding: 0.1rem 0;cursor:default" >
+                                修辞小测验<span style="float:right;margin-right:0.45rem;">
+                                    <span class="type"><span class="label label-primary">链接</span></span>
+                                    </span>
+                                    </div>
+                </div>
+            </div>
+
+        <div class="book-related">
+            <h3>相关图书</h3>
+            <hr class="solid"/>
+            <div class="book-list">
+                <div class="book-item">
+                    <div class="book-wrap">
+                        <div class="book-img">
+                            <a href="/front/h5Mobile/bookDetails?bookId=59cc0645ba9eb884cf814f70">
+                                <img src="https://hepshow-image-formal.oss-cn-beijing.aliyuncs.com/bookCover/2026-09-4w/6ab6fabfe4b05d4b5857854a.jpg"/>
+                            </a>
+                        </div>
+                        <div class="book-title">
+                            <a href="/front/h5Mobile/bookDetails?bookId=59cc0645ba9eb884cf814f70">
+                                中国古代文学(下册)(小大专)</a>
+                        </div>
+                        <div class="book-author">
+                            沈惠乐</div>
+                        <div class="book-ext">
+                            <div class="book-price">
+                                19.00 元</div>
+                            <a class="book-favorite" href="javascript:$.createFavoriteBook('59cc0645ba9eb884cf814f70');">
+                                <span class="icon icon-heart"></span>
+                                <span>收藏</span>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                <div class="book-item">
+                    <div class="book-wrap">
+                        <div class="book-img">
+                            <a href="/front/h5Mobile/bookDetails?bookId=59cc38b5ba9eb884cf8162be">
+                                <img src="https://hepshow-image-formal.oss-cn-beijing.aliyuncs.com/bookCover/2026-09-2w/6aa3071ee4b09843fa258dab.jpg"/>
+                            </a>
+                        </div>
+                        <div class="book-title">
+                            <a href="/front/h5Mobile/bookDetails?bookId=59cc38b5ba9eb884cf8162be">
+                                中国古代文学作品选简编(下册)</a>
+                        </div>
+                        <div class="book-author">
+                            郁贤皓</div>
+                        <div class="book-ext">
+                            <div class="book-price">
+                                32.30 元</div>
+                            <a class="book-favorite" href="javascript:$.createFavoriteBook('59cc38b5ba9eb884cf8162be');">
+                                <span class="icon icon-heart"></span>
+                                <span>收藏</span>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                <div class="book-item">
+                    <div class="book-wrap">
+                        <div class="book-img">
+                            <a href="/front/h5Mobile/bookDetails?bookId=59cb0a3bba9eb884cf81033e">
+                                <img src="https://hepshow-image-formal.oss-cn-beijing.aliyuncs.com/bookCover/2026-09-2w/6aa34134e4b09843fa2b2f9c.jpg"/>
+                            </a>
+                        </div>
+                        <div class="book-title">
+                            <a href="/front/h5Mobile/bookDetails?bookId=59cb0a3bba9eb884cf81033e">
+                                中国现代文学作品导引（1917～2000）第三卷</a>
+                        </div>
+                        <div class="book-author">
+                            吴秀明</div>
+                        <div class="book-ext">
+                            <div class="book-price">
+                                30.50 元</div>
+                            <a class="book-favorite" href="javascript:$.createFavoriteBook('59cb0a3bba9eb884cf81033e');">
+                                <span class="icon icon-heart"></span>
+                                <span>收藏</span>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                <div class="book-item">
+                    <div class="book-wrap">
+                        <div class="book-img">
+                            <a href="/front/h5Mobile/bookDetails?bookId=59cad798ba9eb884cf80eaaa">
+                                <img src="https://hepshow-image-formal.oss-cn-beijing.aliyuncs.com/bookCover/2026-09-2w/6aa33399e4b09843fa298851.jpg"/>
+                            </a>
+                        </div>
+                        <div class="book-title">
+                            <a href="/front/h5Mobile/bookDetails?bookId=59cad798ba9eb884cf80eaaa">
+                                中国现代文学作品导引（1917～2000）第二卷</a>
+                        </div>
+                        <div class="book-author">
+                            龙泉明</div>
+                        <div class="book-ext">
+                            <div class="book-price">
+                                30.50 元</div>
+                            <a class="book-favorite" href="javascript:$.createFavoriteBook('59cad798ba9eb884cf80eaaa');">
+                                <span class="icon icon-heart"></span>
+                                <span>收藏</span>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                <div class="book-item">
+                    <div class="book-wrap">
+                        <div class="book-img">
+                            <a href="/front/h5Mobile/bookDetails?bookId=59cb38c4ba9eb884cf81124c">
+                                <img src="https://hepshow-image-formal.oss-cn-beijing.aliyuncs.com/default/default-book-cover.png"/>
+                            </a>
+                        </div>
+                        <div class="book-title">
+                            <a href="/front/h5Mobile/bookDetails?bookId=59cb38c4ba9eb884cf81124c">
+                                现代汉语</a>
+                        </div>
+                        <div class="book-author">
+                            张登岐</div>
+                        <div class="book-ext">
+                            <div class="book-price">
+                                37.60 元</div>
+                            <a class="book-favorite" href="javascript:$.createFavoriteBook('59cb38c4ba9eb884cf81124c');">
+                                <span class="icon icon-heart"></span>
+                                <span>收藏</span>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                <div class="book-item">
+                    <div class="book-wrap">
+                        <div class="book-img">
+                            <a href="/front/h5Mobile/bookDetails?bookId=59cac642ba9eb884cf80e14e">
+                                <img src="https://hepshow-image-formal.oss-cn-beijing.aliyuncs.com/bookCover/2026-09-2w/6aa32c46e4b09843fa28d581.jpg"/>
+                            </a>
+                        </div>
+                        <div class="book-title">
+                            <a href="/front/h5Mobile/bookDetails?bookId=59cac642ba9eb884cf80e14e">
+                                现代汉语(增订四版) 下册  (加学林网数码防伪标)</a>
+                        </div>
+                        <div class="book-author">
+                            黄伯荣 廖序东主编</div>
+                        <div class="book-ext">
+                            <div class="book-price">
+                                22.90 元</div>
+                            <a class="book-favorite" href="javascript:$.createFavoriteBook('59cac642ba9eb884cf80e14e');">
+                                <span class="icon icon-heart"></span>
+                                <span>收藏</span>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                <div class="book-item">
+                    <div class="book-wrap">
+                        <div class="book-img">
+                            <a href="/front/h5Mobile/bookDetails?bookId=59cc8b1bba9eb884cf817612">
+                                <img src="https://hepshow-image-formal.oss-cn-beijing.aliyuncs.com/bookCover/2026-09-4w/6ab6fc42e4b05d4b585791f0.jpg"/>
+                            </a>
+                        </div>
+                        <div class="book-title">
+                            <a href="/front/h5Mobile/bookDetails?bookId=59cc8b1bba9eb884cf817612">
+                                现代汉语复式教程（配盘）</a>
+                        </div>
+                        <div class="book-author">
+                            颜迈</div>
+                        <div class="book-ext">
+                            <div class="book-price">
+                                29.60 元</div>
+                            <a class="book-favorite" href="javascript:$.createFavoriteBook('59cc8b1bba9eb884cf817612');">
+                                <span class="icon icon-heart"></span>
+                                <span>收藏</span>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                <div class="book-item">
+                    <div class="book-wrap">
+                        <div class="book-img">
+                            <a href="/front/h5Mobile/bookDetails?bookId=59cd34e7ba9eb884cf81950c">
+                                <img src="https://hepshow-image-formal.oss-cn-beijing.aliyuncs.com/bookCover/2026-09-2w/6aa30609e4b09843fa257f3b.jpg"/>
+                            </a>
+                        </div>
+                        <div class="book-title">
+                            <a href="/front/h5Mobile/bookDetails?bookId=59cd34e7ba9eb884cf81950c">
+                                中国古代文学教程（下册）（第二版）</a>
+                        </div>
+                        <div class="book-author">
+                            于非</div>
+                        <div class="book-ext">
+                            <div class="book-price">
+                                23.20 元</div>
+                            <a class="book-favorite" href="javascript:$.createFavoriteBook('59cd34e7ba9eb884cf81950c');">
+                                <span class="icon icon-heart"></span>
+                                <span>收藏</span>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                <div class="book-item">
+                    <div class="book-wrap">
+                        <div class="book-img">
+                            <a href="/front/h5Mobile/bookDetails?bookId=59cf6596ba9eb884cf822a9a">
+                                <img src="https://hepshow-image-formal.oss-cn-beijing.aliyuncs.com/bookCover/2026-11-1w/6aecb61ee4b0f6ed1085a5aa.jpg"/>
+                            </a>
+                        </div>
+                        <div class="book-title">
+                            <a href="/front/h5Mobile/bookDetails?bookId=59cf6596ba9eb884cf822a9a">
+                                古代汉语（第3版）（上册）</a>
+                        </div>
+                        <div class="book-author">
+                            朱振家</div>
+                        <div class="book-ext">
+                            <div class="book-price">
+                                30.30 元</div>
+                            <a class="book-favorite" href="javascript:$.createFavoriteBook('59cf6596ba9eb884cf822a9a');">
+                                <span class="icon icon-heart"></span>
+                                <span>收藏</span>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                <div class="book-item">
+                    <div class="book-wrap">
+                        <div class="book-img">
+                            <a href="/front/h5Mobile/bookDetails?bookId=59cc0e7eba9eb884cf8152fc">
+                                <img src="https://hepshow-image-formal.oss-cn-beijing.aliyuncs.com/bookCover/2026-10-5w/6adf8758e4b0f6ed0fb69377.jpg"/>
+                            </a>
+                        </div>
+                        <div class="book-title">
+                            <a href="/front/h5Mobile/bookDetails?bookId=59cc0e7eba9eb884cf8152fc">
+                                二十世纪中国文学史（下册）（抗战挖改）</a>
+                        </div>
+                        <div class="book-author">
+                            严家炎</div>
+                        <div class="book-ext">
+                            <div class="book-price">
+                                29.90 元</div>
+                            <a class="book-favorite" href="javascript:$.createFavoriteBook('59cc0e7eba9eb884cf8152fc');">
+                                <span class="icon icon-heart"></span>
+                                <span>收藏</span>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                <div class="book-item">
+                    <div class="book-wrap">
+                        <div class="book-img">
+                            <a href="/front/h5Mobile/bookDetails?bookId=59cd431bba9eb884cf81996a">
+                                <img src="https://hepshow-image-formal.oss-cn-beijing.aliyuncs.com/bookCover/2026-09-4w/6ab6fe40e4b05d4b58579c6a.jpg"/>
+                            </a>
+                        </div>
+                        <div class="book-title">
+                            <a href="/front/h5Mobile/bookDetails?bookId=59cd431bba9eb884cf81996a">
+                                古代汉语(上册)(新开本)</a>
+                        </div>
+                        <div class="book-author">
+                            许嘉璐</div>
+                        <div class="book-ext">
+                            <div class="book-price">
+                                21.20 元</div>
+                            <a class="book-favorite" href="javascript:$.createFavoriteBook('59cd431bba9eb884cf81996a');">
+                                <span class="icon icon-heart"></span>
+                                <span>收藏</span>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                <div class="book-item">
+                    <div class="book-wrap">
+                        <div class="book-img">
+                            <a href="/front/h5Mobile/bookDetails?bookId=59cda367ba9eb884cf81b932">
+                                <img src="https://hepshow-image-formal.oss-cn-beijing.aliyuncs.com/bookCover/2026-09-4w/6ab6e64be4b05d4b58569718.jpg"/>
+                            </a>
+                        </div>
+                        <div class="book-title">
+                            <a href="/front/h5Mobile/bookDetails?bookId=59cda367ba9eb884cf81b932">
+                                古代汉语(下册)(新开本)</a>
+                        </div>
+                        <div class="book-author">
+                            许嘉璐</div>
+                        <div class="book-ext">
+                            <div class="book-price">
+                                15.20 元</div>
+                            <a class="book-favorite" href="javascript:$.createFavoriteBook('59cda367ba9eb884cf81b932');">
+                                <span class="icon icon-heart"></span>
+                                <span>收藏</span>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                <div class="book-item">
+                    <div class="book-wrap">
+                        <div class="book-img">
+                            <a href="/front/h5Mobile/bookDetails?bookId=59cd50d1ba9eb884cf819db6">
+                                <img src="https://hepshow-image-formal.oss-cn-beijing.aliyuncs.com/bookCover/2026-09-2w/6aa31e64e4b09843fa277439.jpg"/>
+                            </a>
+                        </div>
+                        <div class="book-title">
+                            <a href="/front/h5Mobile/bookDetails?bookId=59cd50d1ba9eb884cf819db6">
+                                中国现代文学教程</a>
+                        </div>
+                        <div class="book-author">
+                            张鸿声 秦方奇  袁桂娥</div>
+                        <div class="book-ext">
+                            <div class="book-price">
+                                30.00 元</div>
+                            <a class="book-favorite" href="javascript:$.createFavoriteBook('59cd50d1ba9eb884cf819db6');">
+                                <span class="icon icon-heart"></span>
+                                <span>收藏</span>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                <div class="book-item">
+                    <div class="book-wrap">
+                        <div class="book-img">
+                            <a href="/front/h5Mobile/bookDetails?bookId=59cda360ba9eb884cf81b930">
+                                <img src="https://hepshow-image-formal.oss-cn-beijing.aliyuncs.com/bookCover/2026-09-4w/6ab6e7e0e4b05d4b5856a3a1.jpg"/>
+                            </a>
+                        </div>
+                        <div class="book-title">
+                            <a href="/front/h5Mobile/bookDetails?bookId=59cda360ba9eb884cf81b930">
+                                古代汉语(中册)(新开本)</a>
+                        </div>
+                        <div class="book-author">
+                            许嘉璐</div>
+                        <div class="book-ext">
+                            <div class="book-price">
+                                16.00 元</div>
+                            <a class="book-favorite" href="javascript:$.createFavoriteBook('59cda360ba9eb884cf81b930');">
+                                <span class="icon icon-heart"></span>
+                                <span>收藏</span>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                <div class="book-item">
+                    <div class="book-wrap">
+                        <div class="book-img">
+                            <a href="/front/h5Mobile/bookDetails?bookId=59caa83dba9eb884cf80dbf2">
+                                <img src="https://hepshow-image-formal.oss-cn-beijing.aliyuncs.com/default/default-book-cover.png"/>
+                            </a>
+                        </div>
+                        <div class="book-title">
+                            <a href="/front/h5Mobile/bookDetails?bookId=59caa83dba9eb884cf80dbf2">
+                                现代汉语(增订五版) 下册</a>
+                        </div>
+                        <div class="book-author">
+                            黄伯荣 廖序东</div>
+                        <div class="book-ext">
+                            <div class="book-price">
+                                28.00 元</div>
+                            <a class="book-favorite" href="javascript:$.createFavoriteBook('59caa83dba9eb884cf80dbf2');">
+                                <span class="icon icon-heart"></span>
+                                <span>收藏</span>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                </div>
+        </div>
+        </div>
+
+    <div class="book-operations">
+        <div class="operation" style="width:15%">
+            <button class="icon icon-love" onclick="$.createFavoriteBook('59cf951bba9eb884cf823c6a')"></button>
+        </div>
+        <div class="operation"  style="width:85%" >
+            <button onclick="$.message('该书暂无样章！')" class="icon">样章试读</button>
+            </div>
+        </div>
+
+    <div class="book-operations-holder"></div>
+    <script src="/static/internal/h5Mobile/slider.js"></script>
+</div>
+
+</body>
+</html>
