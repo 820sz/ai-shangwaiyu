@@ -98,19 +98,11 @@ class _AboutDocScreenState extends State<AboutDocScreen> {
           : ListView(
               padding: const EdgeInsets.fromLTRB(22, 14, 22, 40),
               children: <Widget>[
+                // 顶部栏已经显示文档名（软件思想），这里不再放一个同名大标题；
+                // 只保留眉标 + 分隔线，让 Markdown 自己的 H1（原文标题）当正文标题，
+                // 避免「软件思想 / 软件思想 / 谈谈语言学习的本质」三层重复。
                 BriefLabel(widget.doc.subtitle, color: t.accent),
                 const SizedBox(height: 8),
-                Text(
-                  widget.doc.title,
-                  style: AppFont.displayStyle.copyWith(
-                    fontSize: 28,
-                    height: 1.2,
-                    letterSpacing: -0.6,
-                    fontWeight: FontWeight.w800,
-                    color: t.ink,
-                  ),
-                ),
-                const SizedBox(height: 10),
                 Container(height: 1, color: t.line),
                 if (AboutContent.isMissing(widget.doc)) ...[
                   const SizedBox(height: 10),

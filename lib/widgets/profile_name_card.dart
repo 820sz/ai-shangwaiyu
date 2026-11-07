@@ -160,7 +160,7 @@ class ProfileCardView extends StatelessWidget {
             Positioned.fill(
               child: IgnorePointer(
                 child: ImageFiltered(
-                  imageFilter: ImageFilter.blur(sigmaX: 6, sigmaY: 6),
+                  imageFilter: ImageFilter.blur(sigmaX: 3, sigmaY: 3),
                   child: _CardBackdrop(settings: settings),
                 ),
               ),
@@ -172,10 +172,13 @@ class ProfileCardView extends StatelessWidget {
                     gradient: LinearGradient(
                       begin: Alignment.topCenter,
                       end: Alignment.bottomCenter,
+                      stops: const <double>[0, 0.42, 1],
                       colors: <Color>[
-                        t.surface.withValues(alpha: 0.92),
-                        t.surface.withValues(alpha: 0.84),
-                        t.surface.withValues(alpha: 0.94),
+                        // 顶部只压一层薄雾：用户自己选的照片要看得见；
+                        // 中部最透（照片主体露出来）；底部数据区再压重一点保可读。
+                        t.surface.withValues(alpha: 0.52),
+                        t.surface.withValues(alpha: 0.22),
+                        t.surface.withValues(alpha: 0.86),
                       ],
                     ),
                   ),
@@ -399,15 +402,19 @@ class ProfileCardView extends StatelessWidget {
   Widget _stat(BriefTheme t, String label, String value) {
     return Column(
       children: <Widget>[
-        Text(
-          value.isEmpty ? '—' : value,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          textAlign: TextAlign.center,
-          style: AppFont.bodyStyle.copyWith(
-            fontSize: 15,
-            fontWeight: FontWeight.w800,
-            color: t.ink,
+        // 三栏各约 90px 宽：用 FittedBox 等比缩小而不是截断，
+        // 否则「约 4250 词」会被截成「约 425…」（真机 2026-11-07 反馈）。
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            value.isEmpty ? '—' : value,
+            maxLines: 1,
+            textAlign: TextAlign.center,
+            style: AppFont.bodyStyle.copyWith(
+              fontSize: 15,
+              fontWeight: FontWeight.w800,
+              color: t.ink,
+            ),
           ),
         ),
         const SizedBox(height: 2),

@@ -271,7 +271,9 @@ void main() {
   testWidgets(
     'render 名片·有背景图(scrim 后仍清晰)',
     (WidgetTester tester) async {
-      final File photo = File('assets/images/whale_tail.png');
+      // 用一张**有颜色**的图做背景，才能在渲染图里看出 scrim 是否遮死照片
+      // （whale_tail.png 是大面积白色，压不压 scrim 都看不出来）。
+      final File photo = File('assets/icons/gemini-color.png');
       await _render(
         tester,
         'assist-mine-impl-namecard-photo.png',

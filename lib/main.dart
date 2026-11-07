@@ -69,7 +69,12 @@ Future<void> _checkUpdateOnLaunch() async {
   try {
     final now = DateTime.now();
     final lastMs = await UpdateService.lastAutoCheckMs();
-    if (!UpdateService.isAutoCheckDue(lastMs, now)) return;
+    // 2026-11-07 用户反馈"只有手动点才能看到更新"：节流从 24h 收紧到 2h，
+    // 并配合前台恢复时的再检查（见 app.dart），有新版本尽快弹提示。
+    if (!UpdateService.isAutoCheckDue(lastMs, now,
+        interval: const Duration(hours: 2))) {
+      return;
+    }
 
     final ctx = await _waitForAppContext();
     if (ctx == null || !ctx.mounted) return;

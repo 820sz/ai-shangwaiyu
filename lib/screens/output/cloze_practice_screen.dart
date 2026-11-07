@@ -151,8 +151,18 @@ class _ClozePracticeScreenState extends State<ClozePracticeScreen> {
               ),
             ),
             const SizedBox(width: Gap.xs),
-            AppTag('来自《${widget.set.materialTitle}》'),
-            const Spacer(),
+            // 材料标题可能很长（真机反馈：来源标签被右边界裁断、没有省略号），
+            // 用 Flexible 限宽 + 单行省略；状态文字仍贴右。
+            Flexible(
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: AppTag(
+                  '来自《${widget.set.materialTitle}》',
+                  maxLines: 1,
+                ),
+              ),
+            ),
+            const SizedBox(width: Gap.xs),
             if (revealed)
               Text(
                 correct ? '✓ 正确' : '✗ 错了',

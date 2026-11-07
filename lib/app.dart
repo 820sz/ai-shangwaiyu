@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'config/theme.dart';
 import 'services/theme_controller.dart';
+import 'services/update_service.dart';
 import 'widgets/bottom_nav.dart';
 import 'widgets/exit_prompt.dart';
 import 'widgets/about_notice_gate.dart';
+import 'widgets/update_dialog.dart';
 import 'screens/splash_screen.dart';
 import 'screens/tutor/tutor_home.dart';
 import 'screens/input/input_home.dart';
@@ -35,11 +37,54 @@ class ReadFlowApp extends StatefulWidget {
   State<ReadFlowApp> createState() => _ReadFlowAppState();
 }
 
-class _ReadFlowAppState extends State<ReadFlowApp> {
+class _ReadFlowAppState extends State<ReadFlowApp>
+    with WidgetsBindingObserver {
   /// 默认落在「学习助理」页 —— 打开 App 先看到"今天学什么"。
   /// 注意:它在底栏是**最右**一格(v2.2 用户调整后的顺序),
   /// 所以启动时选中的是最右项,这是刻意的(入口位 ≠ 优先级)。
   ReadFlowTab _currentTab = ReadFlowTab.tutor;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// 2026-11-07 用户反馈"只有手动点才能看到更新"：
+  /// 启动时 main.dart 会查一次（2h 节流）；这里补「从后台回到前台」也查一次，
+  /// 让 App 长时间挂在后台后回来也能尽快看到新版本。
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _checkUpdateOnResume();
+    }
+  }
+
+  Future<void> _checkUpdateOnResume() async {
+    try {
+      final now = DateTime.now();
+      final lastMs = await UpdateService.lastAutoCheckMs();
+      if (!UpdateService.isAutoCheckDue(lastMs, now,
+          interval: const Duration(hours: 2))) {
+        return;
+      }
+      final ctx = appNavigatorKey.currentContext;
+      if (ctx == null || !ctx.mounted) return;
+      final info = await UpdateService.checkLatestRelease();
+      await UpdateService.markAutoCheckDone(now);
+      if (info != null && info.hasUpdate && ctx.mounted) {
+        await showUpdateDialog(ctx, info);
+      }
+    } catch (e) {
+      debugPrint('ReadFlow 前台恢复检查更新失败(静默): $e');
+    }
+  }
 
   @override
   Widget build(BuildContext context) {

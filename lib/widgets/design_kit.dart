@@ -45,12 +45,19 @@ class AppTag extends StatelessWidget {
   /// 描边款(背景透明):用在图片/彩色底上
   final bool outlined;
 
+  /// 长标签（如「来自《长标题》」）在窄容器里需要单行省略，
+  /// 由调用方用 Flexible 约束宽度 + maxLines/overflow（2026-11-07 真机反馈：来源标签被截断）。
+  final int? maxLines;
+  final TextOverflow? overflow;
+
   const AppTag(
     this.label, {
     super.key,
     this.tone = AppTagTone.neutral,
     this.icon,
     this.outlined = false,
+    this.maxLines,
+    this.overflow,
   });
 
   @override
@@ -78,6 +85,9 @@ class AppTag extends StatelessWidget {
           ],
           Text(
             label,
+            maxLines: maxLines,
+            overflow: overflow ??
+                (maxLines == 1 ? TextOverflow.ellipsis : null),
             style: AppFont.tagStyle.copyWith(
               color: color,
               fontWeight: FontWeight.w700,
