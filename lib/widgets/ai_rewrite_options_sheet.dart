@@ -24,6 +24,8 @@ Future<AiRewriteOptions?> showAiRewriteOptions(BuildContext context) {
   return showModalBottomSheet<AiRewriteOptions>(
     context: context,
     backgroundColor: Colors.transparent,
+    isScrollControlled: true,
+    useSafeArea: true,
     builder: (context) => const _AiRewriteOptionsSheet(),
   );
 }
@@ -43,14 +45,19 @@ class _AiRewriteOptionsSheetState extends State<_AiRewriteOptionsSheet> {
   Widget build(BuildContext context) {
     final skin = V4Skin.of(context);
     final bottom = MediaQuery.of(context).padding.bottom;
+    // 选项较多 + 系统大字号时，内容会超过一屏：限制最大高度并允许滚动，
+    // 保证底部「开始生成」按钮能滚到、点得到（2026-11-08 真机反馈）。
+    final double maxH = MediaQuery.sizeOf(context).height * 0.86;
     return Container(
+      constraints: BoxConstraints(maxHeight: maxH),
       decoration: BoxDecoration(
         color: skin.surface,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
       ),
       padding: EdgeInsets.fromLTRB(Gap.md, Gap.sm, Gap.md, Gap.md + bottom),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Center(
@@ -142,7 +149,8 @@ class _AiRewriteOptionsSheetState extends State<_AiRewriteOptionsSheet> {
               child: const Text('开始生成 AI 改写学习版（非原文）'),
             ),
           ),
-        ],
+          ],
+        ),
       ),
     );
   }

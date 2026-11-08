@@ -359,82 +359,128 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
       for (final id in searchedIds)
         _shortSourceLabelOf(id),
     ];
-    final result = await OriginalSearch.search(
-      searchQuery,
-      category: category,
-      sourceIds: requested,
-      onProgress: _onProgress,
-    );
-    final tokens = _relevanceTokens('$query $searchQuery');
+    // 相关性口径：能给原版书名时，要求**标题里出现书名/主题词**（比只命中摘要里的
+    // 一个通用词严格得多），避免"沾边关键词但内容毫无关系"。
+    final matchTokens = plan.changed
+        ? _relevanceTokens(searchQuery)
+        : _relevanceTokens('$query $searchQuery');
+    final matchTitleOnly = plan.changed;
     var irrelevant = 0;
     final fresh = <MaterialResultItem>[];
     final sources = <AiRewriteSource>[];
+    final notes = <String>[];
+    final seenUrls = <String>{};
+    var rawHits = 0;
     var seq = _controller.items.length;
-    for (final hit in result.hits) {
-      final source = MaterialSourceService.sourceOf(hit.sourceId);
-      final kind = inferMaterialKind(
-        hit.title,
-        hit.url,
-        fallback: source?.kind ?? 'article',
+
+    Future<void> runPass(String passQuery) async {
+      final result = await OriginalSearch.search(
+        passQuery,
+        category: category,
+        sourceIds: requested,
+        onProgress: _onProgress,
       );
-      // 过滤前的线索全部留下:AI 改写只能用真实搜到的东西
-      sources.add(
-        AiRewriteSource(
-          title: hit.title.trim().isEmpty ? hit.url : hit.title.trim(),
-          url: hit.url,
-          site: source?.label ?? hit.sourceId,
-          snippet: hit.note,
-          kind: kind,
-        ),
-      );
-      // 相关性:与用户关键词/原版检索词毫无交集的结果直接丢
-      //（典型:搜《原子习惯》时 RSS 返回的最新新闻）。
-      if (!_hitMatchesTokens('${hit.title} ${hit.note}', tokens)) {
-        irrelevant++;
-        continue;
-      }
-      final estimate = MaterialLibrary.estimateDifficulty(
-        sourceId: hit.sourceId,
-        kind: kind,
-      );
-      if (!_bandMatches(estimate.band)) continue;
-      // 黑名单(题材/关键词)与材料推荐口径一致:命中就不展示
-      if (!_prefs.allowsMaterial(
-        title: hit.title,
-        source: source?.label ?? '',
-        genres: const <String>[],
-      )) {
-        continue;
-      }
-      fresh.add(
-        MaterialResultItem(
-          title: hit.title.trim().isEmpty ? hit.url : hit.title.trim(),
-          url: hit.url,
-          sourceLabel: source?.label ?? hit.sourceId,
-          kind: kind,
-          snippet: hit.note,
-          imageUrl: hit.imageUrl,
+      rawHits += result.hits.length;
+      notes.addAll(result.notes);
+      for (final hit in result.hits) {
+        if (!seenUrls.add(hit.url)) continue;
+        final source = MaterialSourceService.sourceOf(hit.sourceId);
+        final kind = inferMaterialKind(
+          hit.title,
+          hit.url,
+          fallback: source?.kind ?? 'article',
+        );
+        // 过滤前的线索全部留下：AI 改写只能用真实搜到的东西
+        sources.add(
+          AiRewriteSource(
+            title: hit.title.trim().isEmpty ? hit.url : hit.title.trim(),
+            url: hit.url,
+            site: source?.label ?? hit.sourceId,
+            snippet: hit.note,
+            kind: kind,
+          ),
+        );
+        final haystack =
+            matchTitleOnly ? hit.title : '${hit.title} ${hit.note}';
+        if (!_hitMatchesTokens(haystack, matchTokens)) {
+          irrelevant++;
+          continue;
+        }
+        final estimate = MaterialLibrary.estimateDifficulty(
           sourceId: hit.sourceId,
-          estimateLabel: estimate.label,
-          estimateBasis: estimate.basis,
-          seq: seq++,
-        ),
-      );
+          kind: kind,
+        );
+        if (!_bandMatches(estimate.band)) continue;
+        // 黑名单(题材/关键词)与材料推荐口径一致:命中就不展示
+        if (!_prefs.allowsMaterial(
+          title: hit.title,
+          source: source?.label ?? '',
+          genres: const <String>[],
+        )) {
+          continue;
+        }
+        fresh.add(
+          MaterialResultItem(
+            title: hit.title.trim().isEmpty ? hit.url : hit.title.trim(),
+            url: hit.url,
+            sourceLabel: source?.label ?? hit.sourceId,
+            kind: kind,
+            snippet: hit.note,
+            imageUrl: hit.imageUrl,
+            sourceId: hit.sourceId,
+            estimateLabel: estimate.label,
+            estimateBasis: estimate.basis,
+            seq: seq++,
+          ),
+        );
+      }
     }
+
+    await runPass(searchQuery);
+    // 用户 2026-11-08：原版搜不到时，应该去找**这本书/这篇材料的二手解析、
+    // 书评、读后感**（真实存在的文章），而不是拿沾边关键词凑数。
+    if (fresh.length < 2) {
+      List<String> extra = const <String>[];
+      try {
+        extra = await planner.planQueries(
+          '用户想找《${plan.original}》（原版名可能是 "${searchQuery}"）的英文二手材料：'
+          '书评 book review、内容解析 summary/analysis、读后感 discussion/essay、'
+          '作者观点解读。请给出 2 条英文检索词，必须包含书名或核心主题词。',
+          max: 2,
+        );
+      } catch (_) {
+        // AI 规划失败也要兜底试一把
+      }
+      if (extra.isEmpty && plan.changed) {
+        extra = <String>[
+          '"$searchQuery" book review',
+          '"$searchQuery" summary analysis',
+        ];
+      }
+      for (final extraQuery in extra) {
+        _event('原版没找到，补搜相关解读:$extraQuery');
+        await runPass(extraQuery);
+        if (fresh.length >= 4) break;
+      }
+      if (fresh.isNotEmpty) {
+        notes.add('原版没找到，已补搜「书评 / 解析 / 读后感」类相关文章 ${fresh.length} 条。');
+      }
+    }
+
     _event(
       fresh.isEmpty
           ? '没有匹配的结果 —— 换个关键词,或放宽来源/难度'
-          : '找到 ${fresh.length} 篇原文',
+          : '找到 ${fresh.length} 篇相关材料',
       stage: fresh.isEmpty ? SearchStage.sourceEmpty : SearchStage.done,
     );
     return FreeSearchRun(
       items: fresh,
       sources: sources,
-      rawHits: result.hits.length,
+      rawHits: rawHits,
       searchedSourceLabels: searchedLabels,
       notes: <String>[
-        ...result.notes,
-        if (irrelevant > 0) '已丢弃 $irrelevant 条与关键词无关的结果（如 RSS 最新内容）。',
+        ...notes,
+        if (irrelevant > 0) '已丢弃 $irrelevant 条与书名/关键词无关的结果。',
       ],
     );
   }
@@ -1839,11 +1885,18 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
             const SizedBox(height: 8),
             SizedBox(
               width: double.infinity,
-              height: 42,
               child: FilledButton.icon(
                 onPressed: _generateAiRewrite,
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size.fromHeight(48),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                ),
                 icon: const Icon(Icons.auto_awesome_rounded, size: 17),
-                label: const Text('生成 AI 改写学习版(非原文)'),
+                label: const Text(
+                  '生成 AI 改写学习版(非原文)',
+                  textAlign: TextAlign.center,
+                ),
               ),
             ),
             const SizedBox(height: 4),
