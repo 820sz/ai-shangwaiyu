@@ -668,10 +668,14 @@ class MaterialAiRewriter {
   }
 
   Future<AiRewriteOutcome> generate(AiRewriteRequest request) async {
-    if (request.sources.isEmpty) {
+    // 2026-11-08 用户明确逻辑：没有原版/线索时，AI 应当先用**自己的知识**
+    // 梳理这本书/主题讲什么，再按体系改写（明确标注非原文），而不是拒绝生成。
+    // 只有在连"作品/主题"都没有时（topicHint/query 都空）才拒绝。
+    final hasTopic = request.topicHint.trim().isNotEmpty ||
+        request.query.trim().isNotEmpty;
+    if (request.sources.isEmpty && !hasTopic) {
       return const AiRewriteOutcome.failure(
-        '这次一条有效线索都没搜到,没有可供 AI 依据的来源 —— 不能凭空编一篇材料给你。'
-        '换一个更常见的英文关键词再搜一次,或直接用原始关键词打开浏览器找。',
+        '这次没有作品名/主题也没有可用线索 —— 先输入书名或一个更具体的关键词。',
       );
     }
     final prompt = buildAiRewritePrompt(request);

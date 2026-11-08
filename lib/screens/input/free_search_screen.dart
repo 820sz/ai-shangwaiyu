@@ -10,6 +10,8 @@ import '../../providers/vocab_provider.dart';
 import '../../services/find_need_context.dart';
 import '../../services/input_prefs.dart';
 import '../../services/material_ai_rewrite.dart';
+import '../../services/material_discovery.dart';
+import '../../services/learner_model_store.dart';
 import '../../services/search_query_planner.dart';
 import '../../widgets/ai_rewrite_options_sheet.dart';
 import '../../services/material_channel.dart';
@@ -471,6 +473,47 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
       }
       if (fresh.isNotEmpty) {
         notes.add('原版没找到，已补搜「书评 / 解析 / 读后感」类相关文章 ${fresh.length} 条。');
+      }
+    }
+
+    // 2026-11-08：公开源（书/论文/RSS）覆盖面有限。原版找不到时，用官方搜索
+    // 补搜「这本书的二手解读/书评/读后感」，而不是直接放弃。
+    if (fresh.isEmpty && plan.changed) {
+      _event('公开源没有原文，正在用官方搜索找这本书的二手解读…');
+      try {
+        final secondary = await MaterialDiscovery().discover(
+          queries: <String>[
+            '$searchQuery book review summary',
+            '$searchQuery key ideas analysis',
+          ],
+          excludeUrls: seenUrls,
+          prefs: _prefs,
+          model: LearnerModelStore.load(),
+          vocab: const <Vocabulary>[],
+          maxFetch: 4,
+          userQuery: '围绕《${plan.original}》的二手解读、书评、读后感',
+          onEvent: (String _) {},
+        );
+        notes.addAll(secondary.notes.take(2));
+        for (final candidate in secondary.items) {
+          final text = '${candidate.title} ${candidate.snippet}'.toLowerCase();
+          if (!_strictMatches(text, searchQuery)) continue;
+          fresh.add(MaterialResultItem.fromCandidate(candidate, seq: seq++));
+          sources.add(
+            AiRewriteSource(
+              title: candidate.title,
+              url: candidate.url,
+              site: candidate.sourceLabel,
+              snippet: candidate.snippet,
+              kind: candidate.kind,
+            ),
+          );
+        }
+        if (fresh.isNotEmpty) {
+          notes.add('公开源没有原文，已用官方搜索补到二手解读 ${fresh.length} 篇。');
+        }
+      } catch (e) {
+        notes.add('二手解读补搜失败：$e');
       }
     }
 
@@ -1900,8 +1943,8 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
             Padding(
               padding: const EdgeInsets.only(top: 3),
               child: Text(
-                '这次一条线索都没有 —— AI 会只围绕你的检索主题写一篇学习材料,'
-                '不冒充任何来源、不编数据。',
+                '没有原始材料也没关系：AI 会先用自己掌握的知识梳理这个作品/主题'
+            '（核心观点、方法、结论），再按体系改写成学习版；不冒充原文、不编造引文数据。',
                 style: TextStyle(
                   fontSize: 10,
                   height: 1.45,
