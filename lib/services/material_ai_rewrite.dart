@@ -308,43 +308,38 @@ double aiRewriteChineseRatio(String text) {
 ({String system, String user}) buildAiRewritePrompt(AiRewriteRequest request) {
   final limit = request.wordLimit;
   final lengthRule = (limit == null || limit <= 0)
-      ? '篇幅**不设固定字数上限**：优先保证把主题的主要内容讲完整（一般 500~900 词，'
-          '按内容需要写，不要为了凑字数重复，也不要为了短而省略关键点）。'
-      : '篇幅约 $limit 词（±15%）；如关键点较多可略超，但不要冗长重复。';
+      ? '篇幅由原材料内容量决定：原作内容多就写长、少就写短；覆盖完整优先，'
+          '通常 1000~2500 词，不要为凑字数重复，也不要为了短而省略核心内容。'
+      : '用户要求约 $limit 词（±15%）；如内容覆盖需要可略超。';
   final difficulty = switch (request.difficultyMode) {
-    'easier' => '在目标难度之下的**更简单**版本：优先高频词、短句、清楚的结构。',
-    'harder' => '在目标难度之上的**更难**版本：使用更丰富的词汇与更复杂的句式，但保持可读。',
-    _ => '尽量**贴近原材料/目标难度的用词与句长**；不要额外拔高或刻意简化。',
+    'easier' => '用更简单的英文：高频词、短句、清楚的结构。',
+    'harder' => '用更丰富的词汇与更复杂的句式，但保持可读。',
+    _ => '用词与句长贴近原材料/目标难度，不要额外拔高或刻意简化。',
   };
-  final system = '''你是英语学习材料编辑。用户这次搜到的材料大多读不到全文（或只有标题/摘要线索）。
-你的任务：围绕用户的**检索主题**，改写一篇**英文学习材料**——它不是原文，而是把主题讲清楚的改写学习版。
+  final system = '''你是英语学习材料编辑。你要做的是：把用户要找的这部作品/这个主题，以原作者的叙述口吻重写成一篇英文学习材料（相当于"用英文把原作内容重写一遍"），而不是写书评、读后感、概述或介绍文章。
 
 硬规则（违反任何一条都算失败）：
-1. **先确定作品/主题，再按体系改写**：先用你已有的知识判断用户要找的是哪本书/哪篇文章、它讲了什么；
-   先列 outline（4~8 个核心要点：主旨、关键观点/方法、章节结构、结论或应用），正文必须**逐点覆盖**这些核心内容
-   —— 不要用零散线索拼凑，也不要写成泛泛而谈。
-2. 允许使用你自己对这部作品/主题的知识（不限语言），但必须明确这是**改写学习版、不是原文**；
-   不许编造具体引文、页码、统计数据或链接；不要冒充原书原文，不要写 "excerpt from"。
-3. 给到的搜索线索只用于**补充或纠正**（确认书名/作者/主题）；线索不足时以你的知识为主。
-4. 正文用**英文**，分段清楚（有开头、逐点展开、收束）；不要写练习题、生词表或 JSON 外解释。
-5. $lengthRule
-6. 难度：$difficulty
-7. 只输出 JSON：
+1. 口吻：沿用原作的叙述视角与人称（原作是第一人称就用第一人称；是论述/教学口吻就用相应口吻）。正文里不许出现"这本书讲了…/作者认为…/本文介绍…/这是围绕《X》的改写…"这类第三人称元叙述。
+2. 内容覆盖优先：先用你知道的（以及线索里能确认的）内容，梳理原作的主要结构/章节/核心观点/方法/例子/结论，正文要按原作的结构完整展开这些内容；核心内容不许一笔带过。
+3. 篇幅：$lengthRule
+4. 语言：英文正文，分段清楚（像原作章节/段落那样自然展开）；不要练习题、生词表、书评式评价。
+5. 非原文标注：正文里不要写"AI改写/非原文"字样；标注只由 App 在标题与文末统一加。
+6. 禁止编造：不许编造具体引文、页码、统计数据、链接；可以写一般性内容，但不要假装是原文原句。
+7. 难度：$difficulty
+8. 只输出 JSON：
 {
-  "topic": "英文主题（<=60 字符，不带书名号/引号/星号）",
-  "title_cn": "中文标题（<=30 字）",
-  "summary_cn": "1~2 句中文导读（说明这是 AI 改写学习版）",
-  "outline": ["关键点1", "关键点2", "…"],
-  "body": "英文正文（段落之间用 \\n\\n 分隔，覆盖 outline 的全部要点）",
+  "topic": "英文书名/主题（<=80 字符，不带书名号/引号/星号）",
+  "title_cn": "中文书名/主题（<=30 字）",
+  "outline": ["原作核心内容点1", "点2", "…"],
+  "body": "英文正文（段落之间用 \\n\\n 分隔；按原作结构完整展开）",
   "used_sources": [1, 2]
 }
-used_sources 填线索编号（1 起，最多 3 个，必须真实用到；可空数组）。''';
-
+outline 只用于自查覆盖，不得原样出现在正文里；used_sources 填线索编号（1 起，可空数组）。''';
   final buf = StringBuffer();
   if (request.topicHint.trim().isNotEmpty) {
     buf.writeln('用户要找的作品/主题:${request.topicHint.trim()}');
   }
-  buf.writeln('用户搜索关键词（主题以此为准）:${request.query.trim()}');
+  buf.writeln('用户搜索关键词:${request.query.trim()}');
   if (request.bandLabel.trim().isNotEmpty) {
     buf.writeln('目标难度档:${request.bandLabel.trim()}');
   }
@@ -357,19 +352,19 @@ used_sources 填线索编号（1 起，最多 3 个，必须真实用到；可�
   if (request.extraNote.trim().isNotEmpty) {
     buf.writeln('用户补充要求:${request.extraNote.trim()}');
   }
-  buf.writeln('这次搜到的真实线索（只用来理解主题/背景；不要复制链接）：');
+  buf.writeln('这次搜到的线索（只用来补充/确认内容，不要复制链接）：');
   if (request.sources.isEmpty) {
-    buf.writeln('（这次没有可用线索——请只围绕检索主题写一般性学习材料，不要声称有来源、不要编具体数据。）');
+    buf.writeln('（没有外部线索——请用你对这部作品/主题的知识来写，不要声称有来源。）');
   } else {
     for (var i = 0; i < request.sources.length; i++) {
-      final s = request.sources[i];
+      final src = request.sources[i];
       buf.writeln(
-        '${i + 1}. title=${s.title} | site=${s.site} | kind=${s.kind} '
-        '| snippet=${s.snippet} | url=${s.url}',
+        '${i + 1}. title=${src.title} | site=${src.site} | kind=${src.kind} '
+        '| snippet=${src.snippet} | url=${src.url}',
       );
     }
   }
-  buf.writeln('请先列 outline（3~6 点），再写覆盖全部要点的英文正文，按上面的 JSON 输出。');
+  buf.writeln('请按原文/作品本身的口吻与结构，写一篇覆盖完整内容的英文学习版，按 JSON 输出。');
   return (system: system, user: buf.toString());
 }
 

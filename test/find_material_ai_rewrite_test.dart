@@ -129,26 +129,26 @@ void main() {
   group('提示词(纯函数)', () {
     test('带上关键词/档位/目标/真实线索编号,并写死"只输出 JSON"', () {
       final prompt = buildAiRewritePrompt(request());
-      expect(prompt.system, contains('不是原文'));
-      expect(prompt.system, contains('不许编造具体引文'));
+      expect(prompt.system, contains('非原文'));
+      expect(prompt.system, contains('禁止编造'));
       expect(prompt.system, contains('只输出 JSON'));
       // 2026-11-08：覆盖优先 + 先出 outline、字数不设固定上限
-      expect(prompt.system, contains('先确定作品/主题'));
+      expect(prompt.system, contains('原作者的叙述口吻'));
       expect(prompt.system, contains('outline'));
-      expect(prompt.system, contains('不设固定字数'));
+      expect(prompt.system, contains('篇幅由原材料内容量决定'));
       expect(prompt.user, contains('原子习惯 atomic habits'));
       expect(prompt.user, contains('i+10 · 挑战'));
       expect(prompt.user, contains('四六级'));
       expect(prompt.user, contains('1. title=Atomic Habits'));
       expect(prompt.user, contains('3. title=The Power of Habit'));
-      expect(prompt.user, contains('覆盖全部要点'));
+      expect(prompt.user, contains('覆盖完整内容的英文学习版'));
     });
 
     test('没有任何线索时提示词不会让模型凭空编(输入侧仍由 generate 挡住)', () {
       final prompt = buildAiRewritePrompt(
         AiRewriteRequest(query: 'q', sources: const <AiRewriteSource>[]),
       );
-      expect(prompt.user, contains('这次没有可用线索'));
+      expect(prompt.user, contains('没有外部线索'));
       expect(prompt.user, isNot(contains('1. title=')));
     });
   });

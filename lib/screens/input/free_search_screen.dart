@@ -446,74 +446,63 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
     }
 
     await runPass(searchQuery);
-    // 用户 2026-11-08：原版搜不到时，应该去找**这本书/这篇材料的二手解析、
-    // 书评、读后感**（真实存在的文章），而不是拿沾边关键词凑数。
+    // 2026-11-08 修正：原版没找到时不要再在同一个书源里空转（上一版补搜 3 次都查 Gutenberg）。
+    // 书/作品类 → 直接用官方搜索找「内容解读/摘要」作为真实参考；
+    // 其他类型 → 用 AI 规划的检索词补搜一轮公开源。
     if (fresh.length < 2) {
-      List<String> extra = const <String>[];
-      try {
-        extra = await planner.planQueries(
-          '用户想找《${plan.original}》（原版名可能是 "${searchQuery}"）的英文二手材料：'
-          '书评 book review、内容解析 summary/analysis、读后感 discussion/essay、'
-          '作者观点解读。请给出 2 条英文检索词，必须包含书名或核心主题词。',
-          max: 2,
-        );
-      } catch (_) {
-        // AI 规划失败也要兜底试一把
-      }
-      if (extra.isEmpty && plan.changed) {
-        extra = <String>[
-          '"$searchQuery" book review',
-          '"$searchQuery" summary analysis',
-        ];
-      }
-      for (final extraQuery in extra) {
-        _event('原版没找到，补搜相关解读:$extraQuery');
-        await runPass(extraQuery);
-        if (fresh.length >= 4) break;
-      }
-      if (fresh.isNotEmpty) {
-        notes.add('原版没找到，已补搜「书评 / 解析 / 读后感」类相关文章 ${fresh.length} 条。');
-      }
-    }
-
-    // 2026-11-08：公开源（书/论文/RSS）覆盖面有限。原版找不到时，用官方搜索
-    // 补搜「这本书的二手解读/书评/读后感」，而不是直接放弃。
-    if (fresh.isEmpty && plan.changed) {
-      _event('公开源没有原文，正在用官方搜索找这本书的二手解读…');
-      try {
-        final secondary = await MaterialDiscovery().discover(
-          queries: <String>[
-            '$searchQuery book review summary',
-            '$searchQuery key ideas analysis',
-          ],
-          excludeUrls: seenUrls,
-          prefs: _prefs,
-          model: LearnerModelStore.load(),
-          vocab: const <Vocabulary>[],
-          maxFetch: 4,
-          userQuery: '围绕《${plan.original}》的二手解读、书评、读后感',
-          onEvent: (String _) {},
-        );
-        notes.addAll(secondary.notes.take(2));
-        for (final candidate in secondary.items) {
-          final text = '${candidate.title} ${candidate.snippet}'.toLowerCase();
-          if (!_strictMatches(text, searchQuery)) continue;
-          fresh.add(MaterialResultItem.fromCandidate(candidate, seq: seq++));
-          sources.add(
-            AiRewriteSource(
-              title: candidate.title,
-              url: candidate.url,
-              site: candidate.sourceLabel,
-              snippet: candidate.snippet,
-              kind: candidate.kind,
-            ),
+      if (plan.changed) {
+        _event('公开源没有原文，改用官方搜索找内容参考…');
+        try {
+          final secondary = await MaterialDiscovery().discover(
+            queries: <String>[
+              '$searchQuery summary chapter by chapter',
+              '$searchQuery key ideas explained',
+              '$searchQuery book notes',
+            ],
+            excludeUrls: seenUrls,
+            prefs: _prefs,
+            model: LearnerModelStore.load(),
+            vocab: const <Vocabulary>[],
+            maxFetch: 5,
+            userQuery: '《${plan.original}》的内容要点（用于 AI 改写参考）',
+            onEvent: (String _) {},
           );
+          notes.addAll(secondary.notes.take(2));
+          for (final candidate in secondary.items) {
+            final text = '${candidate.title} ${candidate.snippet}'.toLowerCase();
+            if (!_strictMatches(text, searchQuery)) continue;
+            fresh.add(MaterialResultItem.fromCandidate(candidate, seq: seq++));
+            sources.add(
+              AiRewriteSource(
+                title: candidate.title,
+                url: candidate.url,
+                site: candidate.sourceLabel,
+                snippet: candidate.snippet,
+                kind: candidate.kind,
+              ),
+            );
+          }
+          if (fresh.isNotEmpty) {
+            notes.add('原版没有可读原文，已用官方搜索找到 ${fresh.length} 篇内容参考。');
+          }
+        } catch (e) {
+          notes.add('内容参考搜索失败：$e');
         }
-        if (fresh.isNotEmpty) {
-          notes.add('公开源没有原文，已用官方搜索补到二手解读 ${fresh.length} 篇。');
+      } else {
+        List<String> extra = const <String>[];
+        try {
+          extra = await planner.planQueries(
+            '围绕《${plan.original}》（"$searchQuery"）找可读的英文相关内容。'
+            '给出 2 条英文检索词。',
+            max: 2,
+          );
+        } catch (_) {}
+        for (final extraQuery in extra) {
+          _event('补搜:$extraQuery');
+          await runPass(extraQuery);
+          if (fresh.length >= 4) break;
         }
-      } catch (e) {
-        notes.add('二手解读补搜失败：$e');
+        if (fresh.isNotEmpty) notes.add('已补搜 ${fresh.length} 条相关内容。');
       }
     }
 
