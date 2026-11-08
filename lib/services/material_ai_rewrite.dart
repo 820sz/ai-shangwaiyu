@@ -107,6 +107,9 @@ class AiRewriteRequest {
   /// 难度改写方式：'same'(贴近原材料难度,默认) / 'easier' / 'harder'
   final String difficultyMode;
 
+  /// 用户要找的作品/主题（例：`原子习惯` / 原版名 `Atomic Habits`）。
+  final String topicHint;
+
   AiRewriteRequest({
     required this.query,
     required this.sources,
@@ -118,6 +121,7 @@ class AiRewriteRequest {
     this.extraNote = '',
     this.wordLimit,
     this.difficultyMode = 'same',
+    this.topicHint = '',
   }) : targetWords = targetWords != null && targetWords > 0
             ? targetWords
             : aiRewriteTargetWords(bandLabel);
@@ -316,10 +320,12 @@ double aiRewriteChineseRatio(String text) {
 你的任务：围绕用户的**检索主题**，改写一篇**英文学习材料**——它不是原文，而是把主题讲清楚的改写学习版。
 
 硬规则（违反任何一条都算失败）：
-1. **优先保证内容覆盖**：先从线索里提炼 3~6 个关键点（写进 JSON 的 outline），正文必须逐点覆盖；
-   线索不足以支撑某个点时不要编造；可围绕检索主题补充一般性背景，但不要虚构具体数据/引文/作者。
-2. 禁止编造链接、作者、书名、引用、统计数据；不要写 "according to [URL]"；不要整段抄线索句子。
-3. 明确这是改写：标题点明主题，不要冒充原书原文，不要写 "excerpt from"。
+1. **先确定作品/主题，再按体系改写**：先用你已有的知识判断用户要找的是哪本书/哪篇文章、它讲了什么；
+   先列 outline（4~8 个核心要点：主旨、关键观点/方法、章节结构、结论或应用），正文必须**逐点覆盖**这些核心内容
+   —— 不要用零散线索拼凑，也不要写成泛泛而谈。
+2. 允许使用你自己对这部作品/主题的知识（不限语言），但必须明确这是**改写学习版、不是原文**；
+   不许编造具体引文、页码、统计数据或链接；不要冒充原书原文，不要写 "excerpt from"。
+3. 给到的搜索线索只用于**补充或纠正**（确认书名/作者/主题）；线索不足时以你的知识为主。
 4. 正文用**英文**，分段清楚（有开头、逐点展开、收束）；不要写练习题、生词表或 JSON 外解释。
 5. $lengthRule
 6. 难度：$difficulty
@@ -334,8 +340,11 @@ double aiRewriteChineseRatio(String text) {
 }
 used_sources 填线索编号（1 起，最多 3 个，必须真实用到；可空数组）。''';
 
-  final buf = StringBuffer()
-    ..writeln('用户搜索关键词（主题以此为准）:${request.query.trim()}');
+  final buf = StringBuffer();
+  if (request.topicHint.trim().isNotEmpty) {
+    buf.writeln('用户要找的作品/主题:${request.topicHint.trim()}');
+  }
+  buf.writeln('用户搜索关键词（主题以此为准）:${request.query.trim()}');
   if (request.bandLabel.trim().isNotEmpty) {
     buf.writeln('目标难度档:${request.bandLabel.trim()}');
   }

@@ -969,6 +969,7 @@ class _NeedSearchScreenState extends State<NeedSearchScreen> {
         bandHint: (band == null || band.isAny) ? '' : band.description,
         goals: ctx?.goals ?? const <String>[],
         interests: ctx?.interests ?? const <String>[],
+        topicHint: query,
         wordLimit: options.wordLimit,
         difficultyMode: options.difficultyMode,
       );

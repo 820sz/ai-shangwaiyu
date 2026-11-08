@@ -145,6 +145,9 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
   /// 类型筛选:'book' / 'paper' / 'news' / 'podcast' / 'wiki' / 空(=不限)
   String _kind = '';
 
+  /// 最近一次检索词规划（用于 AI 改写时告诉模型「是哪本书/哪个主题」）
+  SearchQueryPlan _lastPlan = SearchQueryPlan.raw('');
+
   /// 难度筛选:'' = 不限;否则是 `MaterialLibrary.difficultyBands` 里的区间
   String _band = '';
 
@@ -345,15 +348,24 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
       plan = SearchQueryPlan.raw(query);
     }
     final searchQuery = plan.primaryQuery;
+    _lastPlan = plan;
     if (plan.changed) {
       _event(
         '已按「$searchQuery」检索'
         '${plan.reason.isEmpty ? '' : '（${plan.reason}）'}',
       );
     }
-    if (_kind == 'wiki') return _wikiRun(searchQuery);
-    final category = _categoryOf(_kind);
-    final requested = broaden ? null : _selectedSourceIds();
+    // 用户没手动选类型时，按 AI 判断的类型收窄来源：
+    // 书 → 只搜书籍源（不要在 arXiv 里把 "atomic" 当物理原子搜出论文）。
+    final plannedKind = const <String>{'book', 'paper', 'news', 'podcast'}.contains(plan.kind)
+        ? plan.kind
+        : '';
+    final effectiveKind = _kind.isNotEmpty ? _kind : plannedKind;
+    if (effectiveKind == 'wiki' || (_kind == 'wiki' && plan.kind.isEmpty)) {
+      return _wikiRun(searchQuery);
+    }
+    final category = _categoryOf(effectiveKind);
+    final requested = broaden ? null : _selectedSourceIds(effectiveKind);
     final searchedIds = requested ?? OriginalSearch.sourcesForCategory(category);
     final searchedLabels = <String>[
       for (final id in searchedIds)
@@ -361,10 +373,6 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
     ];
     // 相关性口径：能给原版书名时，要求**标题里出现书名/主题词**（比只命中摘要里的
     // 一个通用词严格得多），避免"沾边关键词但内容毫无关系"。
-    final matchTokens = plan.changed
-        ? _relevanceTokens(searchQuery)
-        : _relevanceTokens('$query $searchQuery');
-    final matchTitleOnly = plan.changed;
     var irrelevant = 0;
     final fresh = <MaterialResultItem>[];
     final sources = <AiRewriteSource>[];
@@ -400,9 +408,8 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
             kind: kind,
           ),
         );
-        final haystack =
-            matchTitleOnly ? hit.title : '${hit.title} ${hit.note}';
-        if (!_hitMatchesTokens(haystack, matchTokens)) {
+        final haystack = '${hit.title} ${hit.note}';
+        if (!_strictMatches(haystack, searchQuery)) {
           irrelevant++;
           continue;
         }
@@ -483,6 +490,41 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
         if (irrelevant > 0) '已丢弃 $irrelevant 条与书名/关键词无关的结果。',
       ],
     );
+  }
+
+  /// 严格相关性（2026-11-08 用户要求"别拿沾边关键词凑数"）：
+  /// - 英文：先看完整短语是否出现；否则要求**多数实词**都出现（≤2 个词时必须全部出现）；
+  /// - 中文：至少出现一个 2 字子串。
+  static bool _strictMatches(String haystack, String query) {
+    final hay = haystack.toLowerCase();
+    final q = query.trim().toLowerCase();
+    if (q.isEmpty) return true;
+    if (hay.contains(q)) return true;
+    // 中文查询：2 字子串命中即可
+    if (RegExp(r'[\u4e00-\u9fff]').hasMatch(q)) {
+      for (var i = 0; i + 2 <= q.length; i++) {
+        final t = q.substring(i, i + 2);
+        if (RegExp(r'[\u4e00-\u9fff]{2}').hasMatch(t) && hay.contains(t)) {
+          return true;
+        }
+      }
+      return false;
+    }
+    const stop = <String>{
+      'the', 'and', 'for', 'with', 'from', 'that', 'this', 'how', 'why',
+      'what', 'your', 'you', 'are', 'was', 'were', 'has', 'have', 'about',
+      'into', 'book', 'books', 'article', 'articles', 'english',
+    };
+    final words = <String>[
+      for (final m in RegExp(r"[a-z][a-z'’\-]{2,}").allMatches(q))
+        if (!stop.contains(m.group(0)!)) m.group(0)!,
+    ];
+    if (words.isEmpty) return true;
+    var hits = 0;
+    for (final w in words) {
+      if (hay.contains(w)) hits++;
+    }
+    return hits >= (words.length <= 2 ? words.length : (words.length * 0.66).ceil());
   }
 
   /// 关键词/原版检索词 → 相关性令牌（中文 2 字子串；英文 ≥3 字母词）。
@@ -648,9 +690,10 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
   ///
   /// 用户没手动选来源时,按类型收窄到对应源;手动选了来源则以手动为准
   /// (两者在 `OriginalSearch` 内部按"分类源 ∩ 指定源"取交集)。
-  List<String>? _selectedSourceIds() {
+  List<String>? _selectedSourceIds([String? kindOverride]) {
     if (_sources.isNotEmpty) return _sources.toList();
-    final matchedKind = switch (_kind) {
+    final kind = kindOverride ?? _kind;
+    final matchedKind = switch (kind) {
       'book' => 'book',
       'paper' => 'paper',
       'news' => 'news',
@@ -816,6 +859,9 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
       goals: _prefs.examGoals.take(2).toList(),
       interests: _prefs.interests.take(3).toList(),
       extraNote: _aiExtraNote(),
+      topicHint: _lastPlan.changed
+          ? '${_lastPlan.original}（原版名可能是 ${_lastPlan.primaryQuery}）'
+          : query,
       wordLimit: options.wordLimit,
       difficultyMode: options.difficultyMode,
     );

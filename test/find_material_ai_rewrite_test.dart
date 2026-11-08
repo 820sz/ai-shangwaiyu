@@ -130,10 +130,10 @@ void main() {
     test('带上关键词/档位/目标/真实线索编号,并写死"只输出 JSON"', () {
       final prompt = buildAiRewritePrompt(request());
       expect(prompt.system, contains('不是原文'));
-      expect(prompt.system, contains('禁止编造链接'));
+      expect(prompt.system, contains('不许编造具体引文'));
       expect(prompt.system, contains('只输出 JSON'));
       // 2026-11-08：覆盖优先 + 先出 outline、字数不设固定上限
-      expect(prompt.system, contains('优先保证内容覆盖'));
+      expect(prompt.system, contains('先确定作品/主题'));
       expect(prompt.system, contains('outline'));
       expect(prompt.system, contains('不设固定字数'));
       expect(prompt.user, contains('原子习惯 atomic habits'));
