@@ -11,6 +11,7 @@ import '../../services/find_need_context.dart';
 import '../../services/input_prefs.dart';
 import '../../services/material_ai_rewrite.dart';
 import '../../services/search_query_planner.dart';
+import '../../widgets/ai_rewrite_options_sheet.dart';
 import '../../services/material_channel.dart';
 import '../../services/material_library.dart';
 import '../../services/material_need.dart';
@@ -210,9 +211,8 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
       }
       return;
     }
-    if (query.isNotEmpty) {
-      unawaited(_restoreSnapshot(query));
-    }
+    // 2026-11-08 用户反馈：进页自动恢复旧快照会让「上次的 NPR 新闻」看起来像本次结果；
+    // 自由搜只展示本次搜索的结果（历史记录仍可在入口页「历史」里看）。
   }
 
   @override
@@ -233,13 +233,6 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
     if (mounted) setState(() {});
   }
 
-  Future<void> _restoreSnapshot(String query) async {
-    await _controller.loadSnapshot();
-    if (!mounted) return;
-    if (_controller.items.isNotEmpty) {
-      setState(() => _searchedThisSession = true);
-    }
-  }
 
   // ── 搜索 ────────────────────────────────────────────────────────────
 
@@ -750,12 +743,19 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
 
   Future<void> _generateAiRewrite() async {
     if (_aiRunning || _aiBusy) return;
-    final sources = _aiSources();
-    if (sources.isEmpty) {
-      _snack('这次没有任何真实线索 —— 换一个常见关键词再搜一次,AI 才有依据改写(不凭空编)。');
-      return;
-    }
-    final query = _query.text.trim().isEmpty ? _recommendedQuery() : _query.text.trim();
+    final query =
+        _query.text.trim().isEmpty ? _recommendedQuery() : _query.text.trim();
+    // 2026-11-08 用户要求：生成前先问"字数/难度"，默认不限字数、贴近原难度。
+    final options = await showAiRewriteOptions(context);
+    if (options == null || !mounted) return;
+    // 只把**与本次关键词相关**的线索给模型（NPR 最新新闻这种不相关线索会把内容带偏）
+    final tokens = _relevanceTokens(query);
+    final all = _aiSources();
+    var sources = all
+        .where((s) => _hitMatchesTokens('${s.title} ${s.snippet}', tokens))
+        .take(8)
+        .toList();
+    if (sources.isEmpty) sources = all.take(3).toList();
     setState(() {
       _aiRunning = true;
       _aiError = null;
@@ -770,9 +770,19 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
       goals: _prefs.examGoals.take(2).toList(),
       interests: _prefs.interests.take(3).toList(),
       extraNote: _aiExtraNote(),
+      wordLimit: options.wordLimit,
+      difficultyMode: options.difficultyMode,
     );
     final rewriter = widget.aiRewriter ?? MaterialAiRewriter();
-    final outcome = await rewriter.generate(request);
+    var outcome = await rewriter.generate(request);
+    // 覆盖优先：篇幅明显不够时重试一次（同一请求，模型通常会写得更完整）
+    final minWords = options.wordLimit != null
+        ? (options.wordLimit! * 0.75).round()
+        : 300;
+    if (outcome.ok && outcome.material!.wordCount < minWords) {
+      final retry = await rewriter.generate(request);
+      if (retry.ok) outcome = retry;
+    }
     if (!mounted) return;
     setState(() {
       _aiRunning = false;
@@ -1798,8 +1808,8 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
             Padding(
               padding: const EdgeInsets.only(top: 3),
               child: Text(
-                '这次一条线索都没有 —— AI 没有可依据的来源,不凭空编。'
-                '换一个更常见的英文关键词再搜一次。',
+                '这次一条线索都没有 —— AI 会只围绕你的检索主题写一篇学习材料,'
+                '不冒充任何来源、不编数据。',
                 style: TextStyle(
                   fontSize: 10,
                   height: 1.45,
@@ -1831,17 +1841,22 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
               width: double.infinity,
               height: 42,
               child: FilledButton.icon(
-                onPressed: sources.isEmpty ? null : _generateAiRewrite,
+                onPressed: _generateAiRewrite,
                 icon: const Icon(Icons.auto_awesome_rounded, size: 17),
                 label: const Text('生成 AI 改写学习版(非原文)'),
               ),
             ),
             const SizedBox(height: 4),
             Text(
-              '会调用 1 次模型(按你的 API 计费,不花官方搜索的钱)。'
-              '生成后可直接阅读或保存到「我的」。',
-              style: TextStyle(fontSize: 9.5, color: skin.inkFaint),
+              '会调用 1 次模型(按你的 API 计费,不花官方搜索的钱)。',
+              style: TextStyle(fontSize: 9.5, height: 1.5, color: skin.inkFaint),
             ),
+            const SizedBox(height: 2),
+            Text(
+              '生成后可直接阅读,或保存到「我的」。',
+              style: TextStyle(fontSize: 9.5, height: 1.5, color: skin.inkFaint),
+            ),
+            const SizedBox(height: 16),
           ],
           if (_aiError != null) ...<Widget>[
             const SizedBox(height: 8),
@@ -1933,6 +1948,15 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
             ),
           ),
           const SizedBox(height: 6),
+          if (material.coverageLine.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 2),
+              child: Text(
+                material.coverageLine,
+                style: TextStyle(
+                    fontSize: 10, height: 1.5, color: skin.inkSoft),
+              ),
+            ),
           Text(
             '基于 ${material.usedSources.length} 条真实来源:',
             style: TextStyle(

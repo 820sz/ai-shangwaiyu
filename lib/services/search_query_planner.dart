@@ -54,9 +54,15 @@ typedef SearchQueryPlannerHandler = Future<SearchQueryPlan?> Function(
 /// 检索词规划器：默认调 DeepSeek（JSON mode），失败一律退回原词。
 class SearchQueryPlanner {
   final SearchQueryPlannerHandler _handler;
+  final Future<List<String>> Function(String intent, {int max})
+      _planIntentHandler;
 
-  SearchQueryPlanner({SearchQueryPlannerHandler? handler})
-      : _handler = handler ?? defaultSearchQueryPlannerHandler;
+  SearchQueryPlanner({
+    SearchQueryPlannerHandler? handler,
+    Future<List<String>> Function(String intent, {int max})? planIntentHandler,
+  })  : _handler = handler ?? defaultSearchQueryPlannerHandler,
+        _planIntentHandler =
+            planIntentHandler ?? defaultSearchIntentPlanner;
 
   Future<SearchQueryPlan> plan(String raw) async {
     final trimmed = raw.trim();
@@ -90,6 +96,40 @@ class SearchQueryPlanner {
     }
     return SearchQueryPlan.raw(trimmed);
   }
+
+  /// 「按我的情况找」用：把整段中文需求（目标/兴趣/弱项）规划成 1~3 条
+  /// **英文检索词**（目标只用于难度，不直接当检索词）。失败返回空列表。
+  Future<List<String>> planQueries(String intent, {int max = 3}) async {
+    final text = intent.trim();
+    if (text.isEmpty) return const <String>[];
+    // 已经全是英文 → 直接把拆出来的英文短语当检索词（不花模型调用）
+    final hasCjk = RegExp(r'[\u4e00-\u9fff]').hasMatch(text);
+    if (!hasCjk) {
+      final out = <String>[];
+      for (final m in RegExp(r'[A-Za-z][A-Za-z ]{3,}').allMatches(text)) {
+        final q = m.group(0)!.trim();
+        if (q.isNotEmpty && !out.contains(q)) out.add(q);
+        if (out.length >= max) break;
+      }
+      return out;
+    }
+    try {
+      final queries = await _planIntentHandler(text, max: max);
+      final clean = <String>[];
+      final seen = <String>{};
+      for (final q in queries) {
+        final t = q.trim();
+        if (t.isEmpty) continue;
+        if (!seen.add(t.toLowerCase())) continue;
+        clean.add(t);
+        if (clean.length >= max) break;
+      }
+      return clean;
+    } catch (_) {
+      return const <String>[];
+    }
+  }
+
 }
 
 /// 默认实现：让模型识别中文书名/译名/主题对应的英文原名或最合适检索词。
@@ -147,4 +187,44 @@ Map<String, dynamic>? _decodeJsonMap(String raw) {
     if (decoded is Map) return decoded.cast<String, dynamic>();
   } catch (_) {}
   return null;
+}
+
+/// 默认实现：把「按我的情况找」的一整段中文需求规划成 1~3 条英文检索词。
+///
+/// 关键纪律：**目标（四六级/考研…）只用于难度，不当检索词**；
+/// 检索词要为"能搜到英文学习材料"服务（topic-first，如
+/// "interesting science article for intermediate English readers"）。
+Future<List<String>> defaultSearchIntentPlanner(
+  String intent, {
+  int max = 3,
+}) async {
+  final system = '''你是检索词规划器。用户想找**英文学习材料**，下面给出他的中文需求、兴趣、目标与难度。
+请规划 1~$max 条**英文检索词**，目标是让公开源（Gutenberg/arXiv/RSS）或官方搜索能搜到可读的英文材料。
+
+规则：
+1. 只输出 JSON：{"queries":["...","..."],"reason":"一句中文说明"}；
+2. 检索词要 topic-first（先主题、再类型/难度词），每条 2~8 个英文词；
+3. **不要把考试名称（四六级/考研/雅思）当检索词**；考试目标只影响难度；
+4. 不要把中文原样塞进检索词；不确定就把主题写成一般性英文表达（如 "interesting non-fiction article"）；
+5. queries 去重、最多 $max 条。''';
+  final text = await DeepseekApiService().completeJson(
+    system: system,
+    user: '用户需求：$intent',
+    maxTokens: 300,
+    temperature: 0.2,
+    thinkingLevel: 'output',
+  );
+  if (text == null || text.trim().isEmpty) return const <String>[];
+  final map = _decodeJsonMap(text);
+  if (map == null) return const <String>[];
+  final raw = map['queries'];
+  final out = <String>[];
+  if (raw is List) {
+    for (final q in raw) {
+      if (q is String && q.trim().isNotEmpty) out.add(q.trim());
+    }
+  } else if (raw is String && raw.trim().isNotEmpty) {
+    out.add(raw.trim());
+  }
+  return out;
 }

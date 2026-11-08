@@ -101,6 +101,12 @@ class AiRewriteRequest {
   /// 用户补充要求(可空)
   final String extraNote;
 
+  /// 用户要求的篇幅（null = 不限，优先保证内容覆盖度）
+  final int? wordLimit;
+
+  /// 难度改写方式：'same'(贴近原材料难度,默认) / 'easier' / 'harder'
+  final String difficultyMode;
+
   AiRewriteRequest({
     required this.query,
     required this.sources,
@@ -110,6 +116,8 @@ class AiRewriteRequest {
     this.goals = const <String>[],
     this.interests = const <String>[],
     this.extraNote = '',
+    this.wordLimit,
+    this.difficultyMode = 'same',
   }) : targetWords = targetWords != null && targetWords > 0
             ? targetWords
             : aiRewriteTargetWords(bandLabel);
@@ -153,6 +161,9 @@ class AiRewrittenMaterial {
   /// 生成这条的模型槽位说明(例:副槽位 · deepseek-flash);空 = 不知道
   final String modelLabel;
 
+  /// 改写的要点覆盖清单（模型先提炼再逐点覆盖；空 = 模型没给）
+  final List<String> outline;
+
   const AiRewrittenMaterial({
     required this.topic,
     required this.body,
@@ -165,6 +176,7 @@ class AiRewrittenMaterial {
     this.cefr = '',
     this.bandLabel = '',
     this.modelLabel = '',
+    this.outline = const <String>[],
   });
 
   /// 入库/书架/阅读器里显示的完整标题(永远带"非原文"标注)
@@ -172,6 +184,10 @@ class AiRewrittenMaterial {
 
   /// 依据是否有限(界面必须明说)
   bool get basisLimited => usedSources.length < 2;
+
+  /// 要点覆盖说明（模型给了 outline 才有；界面上用来证明"覆盖到了原文主要内容"）
+  String get coverageLine =>
+      outline.isEmpty ? '' : '覆盖 ${outline.length} 个内容要点';
 
   /// 一行真实数字说明(字数/覆盖率/CEFR/时长/目标档)
   String get metricLine {
@@ -286,31 +302,40 @@ double aiRewriteChineseRatio(String text) {
 /// - 明确说"不是原文",不许声称是某书/某站原文,不许复制受版权保护的长段落;
 /// - 难度按目标档位,但**不许在正文里自称难度百分比/词数**(由本地实数算)。
 ({String system, String user}) buildAiRewritePrompt(AiRewriteRequest request) {
-  final target = request.targetWords;
-  final system = '''你是英语学习材料编辑。你的任务:基于用户这次真实搜到、但读不了正文的公开线索,
-改写一篇**英文学习材料**。它**不是原文**,只是按线索主题重写的学习版。
+  final limit = request.wordLimit;
+  final lengthRule = (limit == null || limit <= 0)
+      ? '篇幅**不设固定字数上限**：优先保证把主题的主要内容讲完整（一般 500~900 词，'
+          '按内容需要写，不要为了凑字数重复，也不要为了短而省略关键点）。'
+      : '篇幅约 $limit 词（±15%）；如关键点较多可略超，但不要冗长重复。';
+  final difficulty = switch (request.difficultyMode) {
+    'easier' => '在目标难度之下的**更简单**版本：优先高频词、短句、清楚的结构。',
+    'harder' => '在目标难度之上的**更难**版本：使用更丰富的词汇与更复杂的句式，但保持可读。',
+    _ => '尽量**贴近原材料/目标难度的用词与句长**；不要额外拔高或刻意简化。',
+  };
+  final system = '''你是英语学习材料编辑。用户这次搜到的材料大多读不到全文（或只有标题/摘要线索）。
+你的任务：围绕用户的**检索主题**，改写一篇**英文学习材料**——它不是原文，而是把主题讲清楚的改写学习版。
 
-硬规则(违反任何一条都算失败):
-1. 只能取材于下面给出的真实线索(标题/摘要/来源)。**不许编造链接、作者、书名、引用、统计数据**;
-   不要写 "according to [URL]" 之类需要引用具体页面的话,也不要把线索里的句子整段抄下来。
-2. 明确这是改写:标题必须点明主题,不要冒充《原子习惯》等原书原文,不要写 "excerpt from"。
-3. 正文用**英文**,分 3~4 段,总词数 $target 词左右(±15%)。内容要能独立读懂,
-   有开头、有展开、有收束;不要写练习题、不要列生词表、不要输出 JSON 外的解释。
-4. 难度对齐目标档位:${request.bandHint.trim().isEmpty ? request.bandLabel : request.bandHint}。
-   用词与句长按这个档位控制;不要在正文里自称"覆盖率/难度等级/词数"。
-5. 不要输出任何真实人物/机构的最新言论或数据(无法核实);用一般性表述。
-6. 只输出 JSON,格式:
+硬规则（违反任何一条都算失败）：
+1. **优先保证内容覆盖**：先从线索里提炼 3~6 个关键点（写进 JSON 的 outline），正文必须逐点覆盖；
+   线索不足以支撑某个点时不要编造；可围绕检索主题补充一般性背景，但不要虚构具体数据/引文/作者。
+2. 禁止编造链接、作者、书名、引用、统计数据；不要写 "according to [URL]"；不要整段抄线索句子。
+3. 明确这是改写：标题点明主题，不要冒充原书原文，不要写 "excerpt from"。
+4. 正文用**英文**，分段清楚（有开头、逐点展开、收束）；不要写练习题、生词表或 JSON 外解释。
+5. $lengthRule
+6. 难度：$difficulty
+7. 只输出 JSON：
 {
-  "topic": "英文主题(<=60 字符,不带书名号/引号/星号)",
-  "title_cn": "中文标题(<=30 字)",
-  "summary_cn": "1~2 句中文导读,说明这是 AI 基于搜索线索改写的学习版",
-  "body": "英文正文(段落之间用 \\n\\n 分隔)",
+  "topic": "英文主题（<=60 字符，不带书名号/引号/星号）",
+  "title_cn": "中文标题（<=30 字）",
+  "summary_cn": "1~2 句中文导读（说明这是 AI 改写学习版）",
+  "outline": ["关键点1", "关键点2", "…"],
+  "body": "英文正文（段落之间用 \\n\\n 分隔，覆盖 outline 的全部要点）",
   "used_sources": [1, 2]
 }
-其中 used_sources 填下面线索的**编号**(从 1 开始,最多 3 个;必须真实用到)。''';
+used_sources 填线索编号（1 起，最多 3 个，必须真实用到；可空数组）。''';
 
   final buf = StringBuffer()
-    ..writeln('用户搜索关键词:${request.query.trim()}');
+    ..writeln('用户搜索关键词（主题以此为准）:${request.query.trim()}');
   if (request.bandLabel.trim().isNotEmpty) {
     buf.writeln('目标难度档:${request.bandLabel.trim()}');
   }
@@ -323,17 +348,19 @@ double aiRewriteChineseRatio(String text) {
   if (request.extraNote.trim().isNotEmpty) {
     buf.writeln('用户补充要求:${request.extraNote.trim()}');
   }
-  buf.writeln('这次搜到的真实线索(只能基于它们改写;不要复制链接):');
-  for (var i = 0; i < request.sources.length; i++) {
-    final s = request.sources[i];
-    buf.writeln(
-      '${i + 1}. title=${s.title} | site=${s.site} | kind=${s.kind} '
-      '| snippet=${s.snippet} | url=${s.url}',
-    );
+  buf.writeln('这次搜到的真实线索（只用来理解主题/背景；不要复制链接）：');
+  if (request.sources.isEmpty) {
+    buf.writeln('（这次没有可用线索——请只围绕检索主题写一般性学习材料，不要声称有来源、不要编具体数据。）');
+  } else {
+    for (var i = 0; i < request.sources.length; i++) {
+      final s = request.sources[i];
+      buf.writeln(
+        '${i + 1}. title=${s.title} | site=${s.site} | kind=${s.kind} '
+        '| snippet=${s.snippet} | url=${s.url}',
+      );
+    }
   }
-  buf.writeln(
-    '请按上面的 JSON 格式输出一篇 $target 词左右的英文学习材料(明确是改写版,不是原文)。',
-  );
+  buf.writeln('请先列 outline（3~6 点），再写覆盖全部要点的英文正文，按上面的 JSON 输出。');
   return (system: system, user: buf.toString());
 }
 
@@ -388,6 +415,20 @@ AiRewrittenMaterial? parseAiRewrite(
   if (aiRewriteChineseRatio(body) > 0.08) return null;
 
   final used = _pickUsedSources(map, request.sources);
+  final outlineRaw =
+      map['outline'] ?? map['points'] ?? map['key_points'] ?? map['keyPoints'];
+  final outline = <String>[];
+  if (outlineRaw is List) {
+    for (final value in outlineRaw) {
+      if (value is String && value.trim().isNotEmpty) {
+        outline.add(value.trim());
+      } else if (value is Map) {
+        final text = '${value['point'] ?? value['text'] ?? value['title'] ?? ''}'
+            .trim();
+        if (text.isNotEmpty) outline.add(text);
+      }
+    }
+  }
   return AiRewrittenMaterial(
     topic: topic,
     titleCn: pick(<String>['title_cn', 'title_cn_note', 'zh_title', 'title_zh']),
@@ -397,6 +438,7 @@ AiRewrittenMaterial? parseAiRewrite(
     wordCount: wordCount,
     bandLabel: request.bandLabel.trim(),
     modelLabel: modelLabel,
+    outline: outline,
   );
 }
 

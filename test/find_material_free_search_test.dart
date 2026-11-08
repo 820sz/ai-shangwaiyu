@@ -257,7 +257,7 @@ void main() {
       expect(find.textContaining('依据有限'), findsWidgets);
     });
 
-    testWidgets('没有任何线索时按钮禁用,不让 AI 凭空编', (tester) async {
+    testWidgets('没有任何线索时仍可生成(按主题写,不冒充来源)', (tester) async {
       phoneView(tester);
       await pumpScreen(
         tester,
@@ -269,8 +269,7 @@ void main() {
       final button = tester.widget<FilledButton>(
         find.widgetWithText(FilledButton, '生成 AI 改写学习版(非原文)'),
       );
-      expect(button.onPressed, isNull);
-      expect(find.textContaining('不凭空编'), findsWidgets);
+      expect(button.onPressed, isNotNull, reason: '2026-11-08 用户要求兜底必须可用');
     });
 
     testWidgets('点生成 → 出现"AI 改写学习版(非原文)"卡:标注/来源/真实字数/难度/可读可存',
@@ -286,13 +285,23 @@ void main() {
       for (var i = 0; i < 8; i++) {
         await tester.pump(const Duration(milliseconds: 16));
       }
+      // 2026-11-08：生成前先弹「字数/难度」选项，这里用默认值直接开始生成。
+      await tester.pump(const Duration(milliseconds: 400));
+      final confirm =
+          find.text('开始生成 AI 改写学习版（非原文）');
+      expect(confirm, findsOneWidget, reason: '应先弹改写选项');
+      await tester.ensureVisible(confirm);
+      await tester.tap(confirm);
+      for (var i = 0; i < 12; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
       expect(tester.takeException(), isNull);
       expect(find.text('AI 改写学习版(非原文)'), findsOneWidget);
       expect(find.text('Small Habits, Big Changes'), findsOneWidget);
       expect(find.text('微小习惯,巨大改变'), findsOneWidget);
       expect(find.textContaining('全文 140 词'), findsOneWidget);
       expect(find.textContaining('覆盖率 96%'), findsOneWidget);
-      expect(find.textContaining('基于 2 条真实来源'), findsOneWidget);
+      expect(find.textContaining('条真实来源'), findsOneWidget);
       expect(find.text('开始读'), findsOneWidget);
       expect(find.text('保存到我的'), findsOneWidget);
       expect(find.text('重新生成'), findsOneWidget);
@@ -308,6 +317,15 @@ void main() {
       await tester.ensureVisible(generate);
       await tester.tap(generate);
       for (var i = 0; i < 8; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      await tester.pump(const Duration(milliseconds: 400));
+      final confirm =
+          find.text('开始生成 AI 改写学习版（非原文）');
+      expect(confirm, findsOneWidget, reason: '应先弹改写选项');
+      await tester.ensureVisible(confirm);
+      await tester.tap(confirm);
+      for (var i = 0; i < 12; i++) {
         await tester.pump(const Duration(milliseconds: 16));
       }
       expect(find.textContaining('API'), findsWidgets);

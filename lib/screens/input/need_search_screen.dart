@@ -11,7 +11,9 @@ import '../../services/input_prefs.dart';
 import '../../services/learner_model_store.dart';
 import '../../services/material_channel.dart';
 import '../../services/material_ai_rewrite.dart';
+import '../../widgets/ai_rewrite_options_sheet.dart';
 import '../../services/material_discovery.dart';
+import '../../services/search_query_planner.dart';
 import '../../services/material_need.dart';
 import '../../services/material_taxonomy.dart';
 import '../../services/original_search.dart';
@@ -189,9 +191,36 @@ class _NeedSearchScreenState extends State<NeedSearchScreen> {
         _event('新检索词:${extraQueries.join(' / ')}');
       }
 
+      // 2026-11-08 根因：`ctx.queries()` 里是中文目标/兴趣（兴趣只留拉丁字母），
+      // 公开源只认英文、官方搜索拿到中文就是考试/报名页 → 永远 0 条。
+      // 这里把「需求+兴趣+目标+难度」交给 AI 规划成英文检索词（目标只用于难度）。
+      var plannedQueries = ctx.queries();
+      final needsPlanning = plannedQueries.any(
+            (q) => RegExp(r'[\u4e00-\u9fff]').hasMatch(q),
+          ) ||
+          plannedQueries.every((q) => !RegExp(r'[A-Za-z]').hasMatch(q));
+      if (needsPlanning) {
+        final intent = <String>[
+          ctx.needText,
+          if (ctx.interests.isNotEmpty) '兴趣:${ctx.interests.join("、")}',
+          if (ctx.goals.isNotEmpty) '目标:${ctx.goals.join("、")}',
+          '想找能读到原文的英文学习材料',
+        ].join('；');
+        try {
+          final planned =
+              await SearchQueryPlanner().planQueries(intent, max: 3);
+          if (planned.isNotEmpty) {
+            plannedQueries = planned;
+            _event('已规划英文检索词:${planned.join(" / ")}');
+          }
+        } catch (e) {
+          _event('检索词规划失败,按原需求检索: $e');
+        }
+      }
+      if (!mounted) return;
       final vocab = context.read<VocabProvider>().vocabularies;
       final run = await MaterialDiscovery().discover(
-        queries: ctx.queries(),
+        queries: plannedQueries,
         extraQueries: extraQueries,
         excludeUrls: <String>{for (final item in _controller.items) item.url},
         prefs: _prefs,
@@ -860,6 +889,15 @@ class _NeedSearchScreenState extends State<NeedSearchScreen> {
               material.metricLine,
               style: TextStyle(fontSize: 11, height: 1.5, color: skin.inkSoft),
             ),
+            if (material.coverageLine.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(
+                  material.coverageLine,
+                  style:
+                      TextStyle(fontSize: 11, height: 1.5, color: skin.inkSoft),
+                ),
+              ),
             const SizedBox(height: 4),
             Text(
               '来源：${material.usedSources.map((s) => s.title).take(3).join(' / ')}',
@@ -885,7 +923,7 @@ class _NeedSearchScreenState extends State<NeedSearchScreen> {
           ] else ...[
             const SizedBox(height: Gap.sm),
             FilledButton(
-              onPressed: _aiBusy || _clues.isEmpty ? null : _generateAiRewrite,
+              onPressed: _aiBusy ? null : _generateAiRewrite,
               child: Text(_aiBusy ? '生成中…' : '生成 AI 改写学习版（非原文）'),
             ),
           ],
@@ -897,8 +935,18 @@ class _NeedSearchScreenState extends State<NeedSearchScreen> {
   Future<void> _generateAiRewrite() async {
     if (_aiBusy) return;
     final ctx = _ctx;
-    final sources = _clues
+    final query = ctx?.needText.trim() ?? '按我的情况找材料';
+    // 2026-11-08 用户要求：生成前先问"字数/难度"，默认不限字数、贴近原难度。
+    final options = await showAiRewriteOptions(context);
+    if (options == null || !mounted) return;
+    // 线索优先取与本主题相关的；全不相关时保留前 3 条真实线索（仍是真实来源）
+    final tokens = _tokensFor(query);
+    var picked = _clues
+        .where((c) => _matchesTokens('${c.title} ${c.snippet}', tokens))
         .take(8)
+        .toList();
+    if (picked.isEmpty) picked = _clues.take(3).toList();
+    final sources = picked
         .map((c) => AiRewriteSource(
               title: c.title,
               url: c.url,
@@ -907,10 +955,6 @@ class _NeedSearchScreenState extends State<NeedSearchScreen> {
               kind: c.kind,
             ))
         .toList();
-    if (sources.isEmpty) {
-      setState(() => _aiError = '这次没有真实线索可依据，无法生成（不凭空编）。');
-      return;
-    }
     setState(() {
       _aiBusy = true;
       _aiError = null;
@@ -919,14 +963,24 @@ class _NeedSearchScreenState extends State<NeedSearchScreen> {
     try {
       final band = ctx?.need.band;
       final request = AiRewriteRequest(
-        query: ctx?.needText ?? '按我的情况找材料',
+        query: query,
         sources: sources,
         bandLabel: (band == null || band.isAny) ? '' : band.label,
         bandHint: (band == null || band.isAny) ? '' : band.description,
         goals: ctx?.goals ?? const <String>[],
         interests: ctx?.interests ?? const <String>[],
+        wordLimit: options.wordLimit,
+        difficultyMode: options.difficultyMode,
       );
-      final outcome = await MaterialAiRewriter().generate(request);
+      final rewriter = MaterialAiRewriter();
+      var outcome = await rewriter.generate(request);
+      final minWords = options.wordLimit != null
+          ? (options.wordLimit! * 0.75).round()
+          : 300;
+      if (outcome.ok && outcome.material!.wordCount < minWords) {
+        final retry = await rewriter.generate(request);
+        if (retry.ok) outcome = retry;
+      }
       if (!mounted) return;
       setState(() {
         _aiBusy = false;
@@ -943,6 +997,31 @@ class _NeedSearchScreenState extends State<NeedSearchScreen> {
         _aiError = 'AI 改写失败：$e';
       });
     }
+  }
+
+  static List<String> _tokensFor(String text) {
+    final out = <String>[];
+    final seen = <String>{};
+    for (final m in RegExp(r'[a-z0-9]{3,}').allMatches(text.toLowerCase())) {
+      if (seen.add(m.group(0)!)) out.add(m.group(0)!);
+    }
+    for (final m in RegExp(r'[\u4e00-\u9fff]{2,}').allMatches(text)) {
+      final cn = m.group(0)!;
+      for (var i = 0; i + 2 <= cn.length; i++) {
+        final t = cn.substring(i, i + 2);
+        if (seen.add(t)) out.add(t);
+      }
+    }
+    return out;
+  }
+
+  static bool _matchesTokens(String haystack, List<String> tokens) {
+    if (tokens.isEmpty) return true;
+    final hay = haystack.toLowerCase();
+    for (final t in tokens) {
+      if (hay.contains(t)) return true;
+    }
+    return false;
   }
 
   Future<void> _openAiMaterial(AiRewrittenMaterial material) async {
