@@ -272,40 +272,44 @@ class ContentQuality {
     'pada', 'juga', 'lebih', 'kamu', 'saya', 'atau', 'karena', 'sudah',
   };
 
-  /// 公告/报名/考试信息页信号（中文）。命中即不是可读材料。
-  static const List<String> _announcementSignals = <String>[
-    '报名',
-    '公告',
+  /// 公告/报名/考试信息页：强信号（单个命中即拒）。
+  static const List<String> _announcementStrongSignals = <String>[
+    '报名入口',
+    '报名时间',
+    '报名条件',
+    '考试报名',
+    '报名系统',
+    '准考证',
+    '成绩查询',
+    '查分',
+    '分数线',
+    '考试大纲',
+    '考试安排',
+    '考试科目',
+    '考试流程',
+    '考试时间',
     '考试简介',
     '招生简章',
+    '校园招聘',
+    '课程大纲',
+    '课程介绍',
+    '课程安排',
+    '成绩单',
+  ];
+
+  /// 公告/报名页：弱信号（累计 3 个才拒，避免正常文章里出现一个词就被误杀）。
+  static const List<String> _announcementWeakSignals = <String>[
+    '报名',
+    '公告',
     '招生',
     '培训',
     '辅导班',
     '网校',
     '官网',
-    '考试时间',
-    '准考证',
-    '成绩查询',
-    '查分',
-    '分数线',
-    '报考',
-    '考试大纲',
-    '考试安排',
-    '考试科目',
-    '报名入口',
-    '报名时间',
-    '报名条件',
-    '考试流程',
-    '考试报名',
-    '成绩单',
-    '校园招聘',
-    '课程介绍',
-    '课程大纲',
-    '课程安排',
   ];
 
-  /// 公告/报名/考试信息页信号（英文）。
-  static const List<String> _announcementSignalsEn = <String>[
+  /// 英文强信号。
+  static const List<String> _announcementStrongSignalsEn = <String>[
     'registration',
     'sign up',
     'signup',
@@ -321,6 +325,14 @@ class ContentQuality {
     'apply now',
     'application form',
     'how to apply',
+  ];
+
+  /// 英文弱信号（累计 3 个才拒）。
+  static const List<String> _announcementWeakSignalsEn = <String>[
+    'notice',
+    'apply',
+    'official',
+    'schedule',
   ];
 
   /// URL 里的公告/报名信号（路径级）。
@@ -403,19 +415,31 @@ class ContentQuality {
     return false;
   }
 
-  /// 是否像公告/报名/考试信息页（标题/摘要/URL 任一命中）。
+  /// 是否像公告/报名/考试信息页。
+  ///
+  /// 2026-11-08 用户真机反馈「按需搜永远 0 条、8 条全被当公告过滤」：
+  /// 旧实现是**任一弱信号命中就拒**（`官网/公告/培训/招生` 这类词在正常文章里
+  /// 也可能出现）。现在改成"强信号单个即拒 + 弱信号累计 3 个才拒 + URL 路径强信号"。
   static bool looksLikeAnnouncementPage({
     required String title,
     String url = '',
     String snippet = '',
   }) {
     final hay = '${title.toLowerCase()} ${snippet.toLowerCase()}';
-    for (final signal in _announcementSignals) {
+    for (final signal in _announcementStrongSignals) {
       if (hay.contains(signal)) return true;
     }
-    for (final signal in _announcementSignalsEn) {
+    for (final signal in _announcementStrongSignalsEn) {
       if (hay.contains(signal)) return true;
     }
+    var weak = 0;
+    for (final signal in _announcementWeakSignals) {
+      if (hay.contains(signal)) weak++;
+    }
+    for (final signal in _announcementWeakSignalsEn) {
+      if (hay.contains(signal)) weak++;
+    }
+    if (weak >= 3) return true;
     final path = url.toLowerCase();
     if (path.isNotEmpty) {
       for (final signal in _announcementUrlSignals) {

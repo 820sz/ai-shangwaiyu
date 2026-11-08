@@ -10,6 +10,7 @@ import '../../services/find_need_context.dart';
 import '../../services/input_prefs.dart';
 import '../../services/learner_model_store.dart';
 import '../../services/material_channel.dart';
+import '../../services/material_ai_rewrite.dart';
 import '../../services/material_discovery.dart';
 import '../../services/material_need.dart';
 import '../../services/material_taxonomy.dart';
@@ -18,6 +19,7 @@ import '../../widgets/app_ui.dart';
 import '../../widgets/material_result_list.dart';
 import '../../widgets/search_timeline.dart';
 import 'material_browse_screen.dart';
+import 'free_search_screen.dart';
 import 'material_reader_screen.dart';
 
 /// 「找材料 · 按我的情况找」独立页(用户选型 A 方案的右路)。
@@ -76,6 +78,12 @@ class _NeedSearchScreenState extends State<NeedSearchScreen> {
   /// 本次会话的花费(官方搜索计费口径,与频道页一致:不含模型调用)
   double _costCny = 0;
   int _apiRequests = 0;
+
+  /// 过滤前的真实线索(给「搜不到 → AI 改写保底」当依据)
+  List<DiscoveredCandidate> _clues = const <DiscoveredCandidate>[];
+  bool _aiBusy = false;
+  AiRewrittenMaterial? _aiMaterial;
+  String? _aiError;
 
   @override
   void initState() {
@@ -223,6 +231,9 @@ class _NeedSearchScreenState extends State<NeedSearchScreen> {
         _notes = List<String>.of(run.notes);
         _costCny = _controller.costCny;
         _apiRequests = _controller.apiRequests;
+        _clues = run.clues;
+        _aiMaterial = null;
+        _aiError = null;
       });
       _scrollToTop();
       if (!saved) {
@@ -766,11 +777,213 @@ class _NeedSearchScreenState extends State<NeedSearchScreen> {
                 TextStyle(fontSize: 11, height: 1.5, color: skin.inkSoft),
           ),
           const SizedBox(height: Gap.sm),
-          FilledButton(
-            onPressed: _running ? null : () => _runSearch(),
-            child: const Text('再找一次'),
+          Wrap(
+            spacing: Gap.sm,
+            runSpacing: Gap.xs,
+            children: <Widget>[
+              FilledButton(
+                onPressed: _running ? null : () => _runSearch(),
+                child: const Text('再找一次'),
+              ),
+              OutlinedButton(
+                onPressed: _running ? null : _openFreeSearchFallback,
+                child: const Text('去自由搜'),
+              ),
+            ],
           ),
+          if (_clues.isNotEmpty || _aiMaterial != null || _aiError != null) ...[
+            const SizedBox(height: Gap.md),
+            _aiFallback(skin),
+          ],
         ],
+      ),
+    );
+  }
+
+  /// 搜不到正文时的 AI 改写保底（用户 2026-11-08 明确要求）：
+  /// 不是原文、依据这次真实搜到的线索（标题/摘要/来源）重写一篇英文学习材料；
+  /// 正文末尾写明来源，标题带「AI 改写学习版（非原文）」。
+  Widget _aiFallback(V4Skin skin) {
+    final material = _aiMaterial;
+    return Container(
+      padding: const EdgeInsets.all(Gap.sm),
+      decoration: BoxDecoration(
+        color: skin.surfaceAlt,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: skin.hairline),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            material == null ? '没有可读原文？AI 改写兜底（非原文）' : 'AI 改写学习版（非原文）',
+            style: AppFont.subheadStyle.copyWith(
+              color: skin.ink,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 6),
+          if (material == null)
+            Text(
+              _clues.isEmpty
+                  ? '这次没有真实线索可依据，无法生成（不凭空编）。'
+                  : '基于这次搜到的 ${_clues.length} 条真实线索（标题/摘要/来源）改写一篇英文学习材料；'
+                      '不是原文，正文末尾会注明来源。',
+              style: TextStyle(fontSize: 11, height: 1.5, color: skin.inkSoft),
+            ),
+          if (_aiError != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              _aiError!,
+              style: TextStyle(
+                fontSize: 11,
+                height: 1.5,
+                color: Theme.of(context).colorScheme.error,
+              ),
+            ),
+          ],
+          if (material != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              material.titleCn.trim().isEmpty
+                  ? material.topic
+                  : '${material.topic} · ${material.titleCn}',
+              style: AppFont.bodyStyle.copyWith(
+                fontSize: 13,
+                height: 1.4,
+                color: skin.ink,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              material.metricLine,
+              style: TextStyle(fontSize: 11, height: 1.5, color: skin.inkSoft),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '来源：${material.usedSources.map((s) => s.title).take(3).join(' / ')}',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 10.5, height: 1.4, color: skin.inkSoft),
+            ),
+            const SizedBox(height: Gap.sm),
+            Wrap(
+              spacing: Gap.sm,
+              runSpacing: Gap.xs,
+              children: <Widget>[
+                FilledButton(
+                  onPressed: () => _openAiMaterial(material),
+                  child: const Text('开始读'),
+                ),
+                OutlinedButton(
+                  onPressed: () => _saveAiMaterial(material),
+                  child: const Text('保存到我的'),
+                ),
+              ],
+            ),
+          ] else ...[
+            const SizedBox(height: Gap.sm),
+            FilledButton(
+              onPressed: _aiBusy || _clues.isEmpty ? null : _generateAiRewrite,
+              child: Text(_aiBusy ? '生成中…' : '生成 AI 改写学习版（非原文）'),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Future<void> _generateAiRewrite() async {
+    if (_aiBusy) return;
+    final ctx = _ctx;
+    final sources = _clues
+        .take(8)
+        .map((c) => AiRewriteSource(
+              title: c.title,
+              url: c.url,
+              site: c.sourceLabel,
+              snippet: c.snippet,
+              kind: c.kind,
+            ))
+        .toList();
+    if (sources.isEmpty) {
+      setState(() => _aiError = '这次没有真实线索可依据，无法生成（不凭空编）。');
+      return;
+    }
+    setState(() {
+      _aiBusy = true;
+      _aiError = null;
+      _aiMaterial = null;
+    });
+    try {
+      final band = ctx?.need.band;
+      final request = AiRewriteRequest(
+        query: ctx?.needText ?? '按我的情况找材料',
+        sources: sources,
+        bandLabel: (band == null || band.isAny) ? '' : band.label,
+        bandHint: (band == null || band.isAny) ? '' : band.description,
+        goals: ctx?.goals ?? const <String>[],
+        interests: ctx?.interests ?? const <String>[],
+      );
+      final outcome = await MaterialAiRewriter().generate(request);
+      if (!mounted) return;
+      setState(() {
+        _aiBusy = false;
+        if (outcome.ok) {
+          _aiMaterial = outcome.material;
+        } else {
+          _aiError = outcome.error ?? 'AI 改写失败，请稍后再试。';
+        }
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _aiBusy = false;
+        _aiError = 'AI 改写失败：$e';
+      });
+    }
+  }
+
+  Future<void> _openAiMaterial(AiRewrittenMaterial material) async {
+    final id = await _ingestAiMaterial(material);
+    if (id <= 0) {
+      _snack('保存失败，没法打开这篇 AI 改写材料。');
+      return;
+    }
+    if (!mounted) return;
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => MaterialReaderScreen(materialId: id),
+      ),
+    );
+  }
+
+  Future<void> _saveAiMaterial(AiRewrittenMaterial material) async {
+    final id = await _ingestAiMaterial(material);
+    if (!mounted) return;
+    if (id <= 0) {
+      _snack('保存失败，请稍后再试。');
+    } else {
+      _snack('已保存到「我的」：标题带「AI 改写学习版（非原文）」标注。');
+    }
+  }
+
+  Future<int> _ingestAiMaterial(AiRewrittenMaterial material) {
+    return MaterialAiRewriteStore.ingest(
+      material,
+      model: _ctx?.model,
+      vocab: context.read<VocabProvider>().vocabularies,
+    );
+  }
+
+  void _openFreeSearchFallback() {
+    final query = _ctx?.needText.trim() ?? '';
+    Navigator.push<void>(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => FreeSearchScreen(initialQuery: query),
       ),
     );
   }

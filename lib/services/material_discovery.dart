@@ -169,6 +169,10 @@ class DiscoveryRun {
   /// 补救轮实际使用的新检索词(未触发 = 空;UI/诊断据此说明"为什么又搜了一次")
   final List<String> refineQueries;
 
+  /// **过滤前**的候选线索(最多 12 条;给「搜不到时 AI 改写保底」当依据,
+  /// 只含标题/摘要/URL/来源,不含正文)。不是给用户阅读的结果列表。
+  final List<DiscoveredCandidate> clues;
+
   const DiscoveryRun({
     required this.items,
     this.notes = const [],
@@ -179,6 +183,7 @@ class DiscoveryRun {
     this.droppedCount = 0,
     this.refined = false,
     this.refineQueries = const <String>[],
+    this.clues = const <DiscoveredCandidate>[],
   });
 
   bool get isEmpty => items.isEmpty;
@@ -254,6 +259,8 @@ class MaterialDiscovery {
     var filteredAnnouncement = 0;
     var filteredNonEnglish = 0;
     var filteredWeak = 0;
+    // 过滤前的真实线索池:搜不到正文时给 AI 改写保底用(最多 12 条)
+    final cluePool = <DiscoveredCandidate>[];
     final filterSeeds = <String>[
       ...plan,
       if (categoryHint.trim().isNotEmpty) categoryHint.trim(),
@@ -276,6 +283,7 @@ class MaterialDiscovery {
         // 已经给用户看过的 URL 直接丢(排除判断在 seen 之前:不占位)
         if (excluded.contains(key) || excluded.contains(c.url.trim())) continue;
         if (!seen.add(key)) continue;
+        if (cluePool.length < 12) cluePool.add(c);
         // 用户黑名单:标题/来源里出现屏蔽词就整条丢掉(C1-14 的落点)
         if (!prefs.allowsMaterial(
           title: c.title,
@@ -478,6 +486,7 @@ class MaterialDiscovery {
         searchApiUnavailableReason: client.unavailableReason,
         refined: refined,
         refineQueries: refineQueries,
+        clues: List<DiscoveredCandidate>.unmodifiable(cluePool),
       );
     }
 
@@ -550,6 +559,7 @@ class MaterialDiscovery {
       droppedCount: dropped,
       refined: refined,
       refineQueries: refineQueries,
+      clues: List<DiscoveredCandidate>.unmodifiable(cluePool),
     );
   }
 

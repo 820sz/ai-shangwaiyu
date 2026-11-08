@@ -356,6 +356,12 @@ class MaterialResultItem {
     this.saved = false,
   });
 
+  /// 是否是「AI 改写（非原文）」材料 —— 卡片上必须有一个小的 AI 改写标记。
+  bool get isAiRewrite =>
+      title.contains('AI 改写学习版') ||
+      title.contains('AI改写') ||
+      sourceLabel.contains('AI 改写');
+
   /// 从发现流水线的候选转换(内容/难度只在本次运行里有效)。
   factory MaterialResultItem.fromCandidate(
     DiscoveredCandidate c, {
@@ -694,6 +700,9 @@ class MaterialResultCard extends StatelessWidget {
   final bool contentUnavailable;
   final bool pdf;
 
+  /// 是「AI 改写（非原文）」材料时在卡片上打一个小标记
+  final bool isAiRewrite;
+
   /// 「为什么推这篇」一行(按需找专用;必须由调用方保证是有真实依据才传)
   final String? reason;
 
@@ -729,6 +738,7 @@ class MaterialResultCard extends StatelessWidget {
     this.cefr = '',
     this.estimateLabel,
     this.saved = false,
+    this.isAiRewrite = false,
     this.busy = false,
     this.contentUnavailable = false,
     this.pdf = false,
@@ -747,6 +757,7 @@ class MaterialResultCard extends StatelessWidget {
     final skin = V4Skin.of(context);
     final tags = <Widget>[
       AppTag(sourceLabel.trim().isEmpty ? '未知来源' : sourceLabel),
+      if (isAiRewrite) const AppTag('AI 改写', tone: AppTagTone.primary),
       AppTag(materialResultKindChipLabel(kind)),
       if (coverage != null)
         AppTag(
@@ -1241,6 +1252,7 @@ class MaterialResultList extends StatelessWidget {
             cefr: item.analysis?.cefr ?? '',
             estimateLabel: item.estimateLabel,
             saved: item.saved,
+            isAiRewrite: item.isAiRewrite,
             busy: busyUrl != null && busyUrl == item.url,
             contentUnavailable: item.contentUnavailable,
             pdf: MaterialDiscovery.looksLikePdfUrl(item.url),

@@ -157,13 +157,10 @@ class ProfileCardView extends StatelessWidget {
           // ② 纸面渐变 scrim(上 92% → 中 84% → 下 94% 纸色) —— 照片仍看得出来,
           //    但墨字/标签/三栏数据都有足够对比度(无图时完全不出现这两层)。
           if (hasPhoto) ...[
+            // 2026-11-08 用户反馈"背景始终是模糊的"：卡片上不再额外加模糊，
+            // 照片保持清晰；文字可读性交给下面的渐变 scrim（上淡下重）。
             Positioned.fill(
-              child: IgnorePointer(
-                child: ImageFiltered(
-                  imageFilter: ImageFilter.blur(sigmaX: 3, sigmaY: 3),
-                  child: _CardBackdrop(settings: settings),
-                ),
-              ),
+              child: IgnorePointer(child: _CardBackdrop(settings: settings)),
             ),
             Positioned.fill(
               child: IgnorePointer(
@@ -571,7 +568,10 @@ class _CardBackdrop extends StatelessWidget {
   Widget _imageLayer(String path, List<Color> fallbackColors) {
     final align = settings.backgroundAlignment;
     final scale = ProfileCardSettings.normalizeBgScale(settings.bgScale);
-    final blur = ProfileCardSettings.normalizeBgBlur(settings.bgBlur);
+    // 2026-11-08 用户反馈"背景始终是模糊的"：卡片展示时把模糊封顶在 2px
+    // （编辑弹层里仍按用户设置预览，但名片本身上照片要保持可辨认）。
+    final blur =
+        ProfileCardSettings.normalizeBgBlur(settings.bgBlur).clamp(0, 2).toDouble();
     return LayoutBuilder(
       builder: (context, c) {
         // 兜底尺寸只为"约束意外无界"时不崩(正常一定是有界的)

@@ -10,6 +10,7 @@ import '../../providers/vocab_provider.dart';
 import '../../services/find_need_context.dart';
 import '../../services/input_prefs.dart';
 import '../../services/material_ai_rewrite.dart';
+import '../../services/search_query_planner.dart';
 import '../../services/material_channel.dart';
 import '../../services/material_library.dart';
 import '../../services/material_need.dart';
@@ -111,6 +112,9 @@ class FreeSearchScreen extends StatefulWidget {
   /// **仅渲染/测试用**:绕过真实公开源检索(网络)直接给一次运行结果
   final FreeSearchRunner? debugRun;
 
+  /// **仅测试用**:注入检索词规划器(默认 DeepSeek)
+  final SearchQueryPlanner? queryPlanner;
+
   const FreeSearchScreen({
     super.key,
     this.initialQuery,
@@ -120,6 +124,7 @@ class FreeSearchScreen extends StatefulWidget {
     this.debugNotes,
     this.aiRewriter,
     this.debugRun,
+    this.queryPlanner,
   });
 
   @override
@@ -337,7 +342,23 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
     // 「百科」单独走:维基源在 OriginalSearch 链路里没有关键词检索接口,
     // 只能从**真实随机条目池**(listItems)拉一批再本地按关键词筛 ——
     // 这是能力边界,结果页文案会明说,不假装它和别的类型一样能搜。
-    if (_kind == 'wiki') return _wikiRun(query);
+    // 2026-11-08 用户要求：搜中文书名/译名时，AI 先判断原版英文名再检索
+    //（例：《原子习惯》→ Atomic Habits）。规划失败退回原词，不阻塞搜索。
+    final planner = widget.queryPlanner ?? SearchQueryPlanner();
+    SearchQueryPlan plan = SearchQueryPlan.raw(query);
+    try {
+      plan = await planner.plan(query);
+    } catch (_) {
+      plan = SearchQueryPlan.raw(query);
+    }
+    final searchQuery = plan.primaryQuery;
+    if (plan.changed) {
+      _event(
+        '已按「$searchQuery」检索'
+        '${plan.reason.isEmpty ? '' : '（${plan.reason}）'}',
+      );
+    }
+    if (_kind == 'wiki') return _wikiRun(searchQuery);
     final category = _categoryOf(_kind);
     final requested = broaden ? null : _selectedSourceIds();
     final searchedIds = requested ?? OriginalSearch.sourcesForCategory(category);
@@ -346,11 +367,13 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
         _shortSourceLabelOf(id),
     ];
     final result = await OriginalSearch.search(
-      query,
+      searchQuery,
       category: category,
       sourceIds: requested,
       onProgress: _onProgress,
     );
+    final tokens = _relevanceTokens('$query $searchQuery');
+    var irrelevant = 0;
     final fresh = <MaterialResultItem>[];
     final sources = <AiRewriteSource>[];
     var seq = _controller.items.length;
@@ -371,6 +394,12 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
           kind: kind,
         ),
       );
+      // 相关性:与用户关键词/原版检索词毫无交集的结果直接丢
+      //（典型:搜《原子习惯》时 RSS 返回的最新新闻）。
+      if (!_hitMatchesTokens('${hit.title} ${hit.note}', tokens)) {
+        irrelevant++;
+        continue;
+      }
       final estimate = MaterialLibrary.estimateDifficulty(
         sourceId: hit.sourceId,
         kind: kind,
@@ -410,8 +439,39 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
       sources: sources,
       rawHits: result.hits.length,
       searchedSourceLabels: searchedLabels,
-      notes: result.notes,
+      notes: <String>[
+        ...result.notes,
+        if (irrelevant > 0) '已丢弃 $irrelevant 条与关键词无关的结果（如 RSS 最新内容）。',
+      ],
     );
+  }
+
+  /// 关键词/原版检索词 → 相关性令牌（中文 2 字子串；英文 ≥3 字母词）。
+  static List<String> _relevanceTokens(String text) {
+    final out = <String>[];
+    final seen = <String>{};
+    final lower = text.toLowerCase();
+    for (final match in RegExp(r'[a-z0-9]{3,}').allMatches(lower)) {
+      final token = match.group(0)!;
+      if (seen.add(token)) out.add(token);
+    }
+    for (final match in RegExp(r'[\u4e00-\u9fff]{2,}').allMatches(text)) {
+      final cn = match.group(0)!;
+      for (var i = 0; i + 2 <= cn.length; i++) {
+        final token = cn.substring(i, i + 2);
+        if (seen.add(token)) out.add(token);
+      }
+    }
+    return out;
+  }
+
+  static bool _hitMatchesTokens(String haystack, List<String> tokens) {
+    if (tokens.isEmpty) return true;
+    final hay = haystack.toLowerCase();
+    for (final token in tokens) {
+      if (hay.contains(token)) return true;
+    }
+    return false;
   }
 
   /// 百科类型的真实候选:拉维基的随机条目池,再按关键词本地筛。
