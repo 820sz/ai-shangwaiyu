@@ -565,7 +565,7 @@ class _ApiSettingsScreenState extends State<ApiSettingsScreen> {
             ),
           ),
           Text(
-            '拍照识文 / 手写转写 / 全文翻译 / 素材推荐 / 追问。需要支持图片识别的模型。',
+            '需要支持图片识别的模型。',
             style: AppFont.tagStyle.copyWith(color: muted, height: 1.5),
           ),
           const SizedBox(height: Gap.sm),

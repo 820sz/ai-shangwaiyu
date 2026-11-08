@@ -28,10 +28,10 @@ import 'package:flutter/foundation.dart';
 
 import '../models/learner_model.dart';
 import '../models/vocabulary.dart';
-import 'base_api.dart';
 import 'database.dart';
 import 'deepseek_api.dart';
 import 'doubao_api.dart' show DoubaoApiService;
+import 'input_prefs.dart';
 import 'learner_model_store.dart';
 import 'material_library.dart';
 
@@ -605,13 +605,22 @@ Map<String, Object?> buildAiRewriteMaterialRow(
 // ═══════════════════════════════════════════════════════════════════════
 
 /// 生产默认:用 JSON mode 让模型改写(任务级思考档与"出题"同类:要完整 JSON)。
-Future<String?> defaultMaterialAiRewriteHandler(String system, String user) {
+///
+/// [thinkingLevel] 由用户设置「AI 思考强度」决定(标准 = high,深入 = max);
+/// 不传时读一次设置。**必须是合法档位**(disabled/low/high/max),否则
+/// `buildThinkingParamsFor` 会静默降级成"不思考"。
+Future<String?> defaultMaterialAiRewriteHandler(
+  String system,
+  String user, {
+  String? thinkingLevel,
+}) {
   return DeepseekApiService().completeJson(
     system: system,
     user: user,
     maxTokens: 2600,
     temperature: 0.7,
-    thinkingLevel: BaseApiService.thinkingForTask('output'),
+    thinkingLevel:
+        thinkingLevel ?? AiThinkingLevel.load().rewriteLevel,
     receiveTimeout: const Duration(seconds: 120),
   );
 }
@@ -643,15 +652,34 @@ Future<AiRewriteMeasurement?> defaultMaterialAiRewriteMeasurer(
 /// AI 改写执行者:提示词 → 模型 → 解析 → 本地量难度。
 ///
 /// 失败不抛:返回 [AiRewriteOutcome.failure] 的人话原因,界面直接展示。
+///
+/// **思考强度**([thinking])在构造时解析一次(默认读用户设置),供两处使用:
+/// ① 默认 handler 的真实请求档位;② 结果卡上显示"思考强度:标准/深入"
+/// (用户要求"能看见发挥了什么")。测试可显式注入 [level]。
 class MaterialAiRewriter {
-  final AiRewriteHandler _handler;
-  final AiRewriteMeasurer _measurer;
+  late final AiRewriteHandler _handler;
+  late final AiRewriteMeasurer _measurer;
+
+  /// 本次改写实际使用的思考强度(结果卡展示用)
+  late final AiThinkingLevel thinking;
 
   MaterialAiRewriter({
     AiRewriteHandler? handler,
     AiRewriteMeasurer? measurer,
-  })  : _handler = handler ?? defaultMaterialAiRewriteHandler,
-        _measurer = measurer ?? defaultMaterialAiRewriteMeasurer;
+    AiThinkingLevel? level,
+  }) {
+    thinking = level ?? AiThinkingLevel.load();
+    _handler = handler ??
+        (system, user) => defaultMaterialAiRewriteHandler(
+              system,
+              user,
+              thinkingLevel: thinking.rewriteLevel,
+            );
+    _measurer = measurer ?? defaultMaterialAiRewriteMeasurer;
+  }
+
+  /// 界面显示用的档位名(快 / 标准 / 深入)
+  String get thinkingLabel => thinking.label;
 
   /// 模型槽位说明(给界面标注"谁改写的";拿不到就空串)
   static String get modelLabel {

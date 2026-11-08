@@ -2,6 +2,25 @@ import 'package:flutter/material.dart';
 
 import '../config/design_tokens.dart';
 
+/// 灰字瘦身(v2.30.0,用户:"大量灰字冗余注释看着累")。
+///
+/// 所有"说明性灰字"统一走这里:**只留第一句、最多 30 字**。
+/// 为什么在排版层截而不是改数据层:这些句子有的来自 service(简报/周报),
+/// 数据本身是完整的;界面上只需要一行,多出来的信息在点进去的详情页里。
+String briefOneLine(String text, {int maxChars = 30}) {
+  final String s = text.trim();
+  if (s.isEmpty) return s;
+  // 先取第一句(。;! ? 换行都算断句),再裁剪
+  final int cut = s.indexOf(RegExp(r'[。;;!!??\n]'));
+  String first = cut < 0 ? s : s.substring(0, cut);
+  first = first.trim();
+  if (first.isEmpty) first = s;
+  if (first.length <= maxChars) {
+    return first.endsWith('。') ? first : '$first。';
+  }
+  return '${first.substring(0, maxChars)}…';
+}
+
 /// B ·「每日简报」语言 —— **只服务「助理」「我的」两个板块**。
 ///
 /// 为什么单开一个 kit 而不是改 `v4_kit`/`v4_theme`:
@@ -276,6 +295,8 @@ class BriefLead extends StatelessWidget {
       children: <Widget>[
         Text(
           title,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
           style: AppFont.titleStyle.copyWith(
             fontSize: 22,
             height: 1.32,
@@ -287,9 +308,11 @@ class BriefLead extends StatelessWidget {
         const SizedBox(height: Gap.xs),
         Text(
           body,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
           style: AppFont.bodyStyle.copyWith(
-            fontSize: 13.5,
-            height: 1.75,
+            fontSize: 13,
+            height: 1.55,
             color: t.inkSoft,
           ),
         ),
@@ -346,7 +369,7 @@ class BriefTimelineRow extends StatelessWidget {
               Text(
                 when,
                 style: AppFont.metaStyle.copyWith(
-                  fontSize: 10.5,
+                  fontSize: 11,
                   fontWeight: FontWeight.w600,
                   color: t.inkFaint,
                 ),
@@ -354,6 +377,8 @@ class BriefTimelineRow extends StatelessWidget {
               const SizedBox(height: 1),
               Text(
                 title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: AppFont.bodyStyle.copyWith(
                   fontSize: 13,
                   height: 1.45,
@@ -365,10 +390,12 @@ class BriefTimelineRow extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   detail!,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: AppFont.metaStyle.copyWith(
-                    fontSize: 10.5,
+                    fontSize: 11,
                     height: 1.45,
-                    color: t.inkFaint,
+                    color: t.inkSoft,
                   ),
                 ),
               ],
@@ -474,9 +501,11 @@ class BriefQuote extends StatelessWidget {
       ),
       child: Text(
         text,
+        maxLines: 3,
+        overflow: TextOverflow.ellipsis,
         style: AppFont.bodyStyle.copyWith(
-          fontSize: 14,
-          height: 1.8,
+          fontSize: 13.5,
+          height: 1.65,
           color: t.ink,
         ),
       ),
@@ -621,6 +650,8 @@ class BriefEntryRow extends StatelessWidget {
                     children: <Widget>[
                       Text(
                         title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: AppFont.bodyStyle.copyWith(
                           fontSize: 14,
                           fontWeight: FontWeight.w700,
@@ -630,6 +661,8 @@ class BriefEntryRow extends StatelessWidget {
                       const SizedBox(height: 2),
                       Text(
                         subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: AppFont.metaStyle.copyWith(
                           fontSize: 11,
                           height: 1.5,
@@ -784,9 +817,11 @@ class BriefEmpty extends StatelessWidget {
         const SizedBox(height: 4),
         Text(
           hint,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
           style: AppFont.bodyStyle.copyWith(
-            fontSize: 12,
-            height: 1.6,
+            fontSize: 11,
+            height: 1.55,
             color: t.inkSoft,
           ),
         ),

@@ -150,7 +150,7 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
             ),
           ),
           const SizedBox(height: Gap.xs),
-          BriefLead(title: b.headline, body: b.lead),
+          BriefLead(title: b.headline, body: briefOneLine(b.lead)),
           const SizedBox(height: Gap.md),
 
           // ── 个性化名片(保留原有头像/背景/签名能力)──
@@ -178,7 +178,7 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
                 if (b.facts.isEmpty)
                   BriefEmpty(
                     title: '这周还没有学习记录',
-                    hint: '收一个词、做一次练习,这里就会出现真实数字与 7 天柱。',
+                    hint: '收词或练习后,这里出现真实数字。',
                     actionLabel: '去输入页',
                     onAction: () => Navigator.maybePop(context),
                   )
@@ -204,9 +204,11 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
                   BriefBars(values: b.weekBars, height: 30),
                   const SizedBox(height: 6),
                   Text(
-                    '近 7 天活动量 ${b.weekBarsTotal > 0 ? '合计 ${b.weekBarsTotal}' : '暂无记录'}',
+                    '近 7 天 合计 ${b.weekBarsTotal}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: AppFont.metaStyle.copyWith(
-                      fontSize: 10.5,
+                      fontSize: 11,
                       color: t.inkFaint,
                     ),
                   ),
@@ -214,10 +216,12 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
                 if (b.gaps.isNotEmpty) ...[
                   const SizedBox(height: 10),
                   Text(
-                    '还缺:${b.gaps.join('、')} —— 补上之后,统计与建议才会具体。',
+                    '还缺:${b.gaps.join('、')}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: AppFont.metaStyle.copyWith(
-                      fontSize: 10.5,
-                      height: 1.55,
+                      fontSize: 11,
+                      height: 1.5,
                       color: t.warn,
                     ),
                   ),
@@ -240,7 +244,7 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
                 ),
                 BriefEntryRow(
                   title: '我的生词本',
-                  subtitle: '${stats.totalVocab} 个词 · 按书籍分组',
+                  subtitle: '${stats.totalVocab} 个词',
                   dense: true,
                   onTap: () async {
                     await Navigator.push(
@@ -254,7 +258,7 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
                 ),
                 BriefEntryRow(
                   title: '复习模式',
-                  subtitle: '抽认卡记忆 · 到期词优先',
+                  subtitle: '抽认卡记忆',
                   dense: true,
                   onTap: () async {
                     await Navigator.push(
@@ -266,7 +270,7 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
                 ),
                 BriefEntryRow(
                   title: '收藏夹',
-                  subtitle: '收藏的洞见与好句',
+                  subtitle: '洞见与好句',
                   dense: true,
                   showDivider: false,
                   onTap: () => Navigator.push(
@@ -286,7 +290,7 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
               children: <Widget>[
                 BriefEntryRow(
                   title: '学习统计',
-                  subtitle: '趋势 / 热力图 / 月度(诊断台排版)',
+                  subtitle: '趋势 / 热力图 / 月度',
                   dense: true,
                   onTap: () => Navigator.push(
                     context,
@@ -295,7 +299,7 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
                 ),
                 BriefEntryRow(
                   title: '本周报告',
-                  subtitle: '这周做了什么、下周改什么(本地算,不调 AI)',
+                  subtitle: '本周做了什么、下周改什么',
                   dense: true,
                   onTap: () => Navigator.push(
                     context,
@@ -307,8 +311,8 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
                 BriefEntryRow(
                   title: '错误档案',
                   subtitle: _activeErrorKinds > 0
-                      ? '待处理 $_activeErrorKinds 类 · 写译/测验/复习的错题'
-                      : '写译批改、读后测验与复习里的错题',
+                      ? '待处理 $_activeErrorKinds 类'
+                      : '写译 / 测验 / 复习错题',
                   trailingText: _activeErrorKinds > 0 ? '$_activeErrorKinds 类' : null,
                   dense: true,
                   onTap: _openErrorArchive,
@@ -316,8 +320,8 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
                 BriefEntryRow(
                   title: '写译记录',
                   subtitle: _writingLogCount > 0
-                      ? '$_writingLogCount 篇 · 按日期归档的写译轨迹'
-                      : '按日期归档的写译练习轨迹',
+                      ? '$_writingLogCount 篇 · 按日期归档'
+                      : '按日期归档的写译记录',
                   trailingText: _writingLogCount > 0 ? '$_writingLogCount 篇' : null,
                   dense: true,
                   onTap: () async {
@@ -332,7 +336,7 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
                 ),
                 BriefEntryRow(
                   title: '备份与导出',
-                  subtitle: '完整备份(可回导)/ 生词本 CSV / Anki 导入包',
+                  subtitle: '备份 / CSV / Anki 包',
                   dense: true,
                   showDivider: false,
                   onTap: () => Navigator.push(
@@ -352,7 +356,7 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
               children: <Widget>[
                 BriefEntryRow(
                   title: 'API 设置',
-                  subtitle: '配置 API Key(只显示厂商与长度)',
+                  subtitle: '配置 API Key',
                   dense: true,
                   onTap: () => Navigator.push(
                     context,
@@ -367,7 +371,7 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
                 ),
                 BriefEntryRow(
                   title: '外观',
-                  subtitle: '浅色 / 深色 / 跟随系统 · 开屏文案',
+                  subtitle: '主题 · 开屏文案',
                   dense: true,
                   onTap: () => Navigator.push(
                     context,
@@ -378,7 +382,7 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
                 ),
                 BriefEntryRow(
                   title: '桌面小组件',
-                  subtitle: '在桌面看今天的任务与待复习数',
+                  subtitle: '任务与待复习数',
                   dense: true,
                   onTap: () => Navigator.push(
                     context,
@@ -389,7 +393,7 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
                 ),
                 BriefEntryRow(
                   title: '关于与更新',
-                  subtitle: '版本 / 检查更新 / 诊断信息 / 开源许可 / 公告重看',
+                  subtitle: '版本 / 更新 / 许可',
                   dense: true,
                   showDivider: false,
                   onTap: _openAbout,
@@ -480,7 +484,7 @@ class _ProfileHomeScreenState extends State<ProfileHomeScreen> {
                 ),
                 const SizedBox(height: Gap.xxs),
                 Text(
-                  '测试给出的是区间而不是单一数字;隔一段时间可以重测,基线会更新。',
+                  '区间估计,可随时重测。',
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                     height: 1.5,

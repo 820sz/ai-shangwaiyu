@@ -436,7 +436,7 @@ class _TutorHomeScreenState extends State<TutorHomeScreen> {
             ),
           ),
           const SizedBox(height: Gap.xs),
-          BriefLead(title: b.headline, body: b.lead),
+          BriefLead(title: b.headline, body: briefOneLine(b.lead)),
           const SizedBox(height: Gap.md),
 
           // ── 今天:时间线 + 主行动 ──
@@ -453,7 +453,7 @@ class _TutorHomeScreenState extends State<TutorHomeScreen> {
                       Text(
                         '约 ${b.totalMinutes} 分钟',
                         style: AppFont.metaStyle.copyWith(
-                          fontSize: 10.5,
+                          fontSize: 11,
                           color: t.inkFaint,
                         ),
                       ),
@@ -464,8 +464,8 @@ class _TutorHomeScreenState extends State<TutorHomeScreen> {
                   BriefEmpty(
                     title: '今天还没有任务',
                     hint: b.dueWords > 0
-                        ? '有 ${b.dueWords} 个到期词 —— 先完成一件最小的事,再谈计划。'
-                        : '助理还没排出建议。自己加一条,或者先做一次词汇量速测。',
+                        ? '有 ${b.dueWords} 个到期词,先清一件。'
+                        : '助理还没排建议,自己加一条。',
                     actionLabel: '自己加一条',
                     onAction: _addCustomTask,
                   )
@@ -481,9 +481,11 @@ class _TutorHomeScreenState extends State<TutorHomeScreen> {
                 if (b.todayNote.isNotEmpty) ...[
                   const SizedBox(height: Gap.xs),
                   Text(
-                    b.todayNote,
+                    briefOneLine(b.todayNote),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: AppFont.metaStyle.copyWith(
-                      fontSize: 10.5,
+                      fontSize: 11,
                       color: t.inkFaint,
                     ),
                   ),
@@ -534,8 +536,8 @@ class _TutorHomeScreenState extends State<TutorHomeScreen> {
                 if (b.weekStats.isEmpty)
                   BriefEmpty(
                     title: '本周还没有结算过的任务',
-                    hint: b.weekNote,
-                    actionLabel: '去复盘看看',
+                    hint: briefOneLine(b.weekNote),
+                    actionLabel: '去复盘',
                     onAction: _openReview,
                   )
                 else ...[
@@ -560,9 +562,9 @@ class _TutorHomeScreenState extends State<TutorHomeScreen> {
                     BriefBars(values: b.weekBars, height: 30),
                     const SizedBox(height: 6),
                     Text(
-                      '近 7 天活动量 合计 ${b.weekBarsTotal}',
+                      '近 7 天 合计 ${b.weekBarsTotal}',
                       style: AppFont.metaStyle.copyWith(
-                        fontSize: 10.5,
+                        fontSize: 11,
                         color: t.inkFaint,
                       ),
                     ),
@@ -570,10 +572,12 @@ class _TutorHomeScreenState extends State<TutorHomeScreen> {
                   if (b.weekNote.isNotEmpty) ...[
                     const SizedBox(height: 8),
                     Text(
-                      b.weekNote,
+                      briefOneLine(b.weekNote),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: AppFont.metaStyle.copyWith(
                         fontSize: 11,
-                        height: 1.55,
+                        height: 1.5,
                         color: t.inkSoft,
                       ),
                     ),
@@ -602,16 +606,18 @@ class _TutorHomeScreenState extends State<TutorHomeScreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    b.pendingHint,
+                    briefOneLine(b.pendingHint),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: AppFont.bodyStyle.copyWith(
-                      fontSize: 12,
-                      height: 1.65,
+                      fontSize: 11,
+                      height: 1.55,
                       color: t.inkSoft,
                     ),
                   ),
                   const SizedBox(height: 10),
                   BriefOutlineButton(
-                    label: '做一次词汇量速测(约 5 分钟)',
+                    label: '去做速测(5 分钟)',
                     onTap: _openPlacement,
                   ),
                 ],
@@ -629,11 +635,12 @@ class _TutorHomeScreenState extends State<TutorHomeScreen> {
                   const BriefLabel('先聊两句'),
                   const SizedBox(height: 8),
                   Text(
-                    '6 个问题,点选项就行(一分钟)。答完助理才知道你的目标、每天能学多久、'
-                    '爱看什么 —— 下面的简报才会真的贴合你。',
+                    '6 个问题,一分钟答完;答完简报才贴合你。',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: AppFont.bodyStyle.copyWith(
-                      fontSize: 12.5,
-                      height: 1.7,
+                      fontSize: 11,
+                      height: 1.5,
                       color: t.inkSoft,
                     ),
                   ),
@@ -665,15 +672,15 @@ class _TutorHomeScreenState extends State<TutorHomeScreen> {
                 BriefEntryRow(
                   title: '学习任务',
                   subtitle: _taskRows.isEmpty
-                      ? '今天还没有任务 · 点开可以自己加'
-                      : '${_taskRows.length} 条 · 点开看详情与操作',
+                      ? '今天还没有任务'
+                      : '${_taskRows.length} 条 · 点开看详情',
                   dense: true,
                   onTap: _openReview,
                 ),
                 BriefEntryRow(
                   title: _lastChatLine.isEmpty ? '与 AI 聊聊' : '继续上次的对话',
                   subtitle: _lastChatLine.isEmpty
-                      ? '聊你的卡点与计划 —— 它会记进长期记忆,影响上面的简报'
+                      ? '聊卡点与计划,会记进长期记忆'
                       : _clip(_lastChatLine, 40),
                   dense: true,
                   onTap: () => _openChat(),
@@ -686,7 +693,7 @@ class _TutorHomeScreenState extends State<TutorHomeScreen> {
                 ),
                 BriefEntryRow(
                   title: '学习访谈',
-                  subtitle: '目标 / 每天时长 / 题材偏好',
+                  subtitle: '目标 / 时长 / 题材',
                   dense: true,
                   showDivider: false,
                   onTap: _openInterview,
@@ -700,12 +707,8 @@ class _TutorHomeScreenState extends State<TutorHomeScreen> {
   }
 
   String _reviewSubtitle(Briefing b) {
-    if (b.weekStats.isEmpty) return '五维现状 · 近 7 天计划 vs 实际(还没有结算数据)';
-    final StringBuffer sb = StringBuffer('五维现状 · 近 7 天');
-    for (final BriefFact f in b.weekStats.take(2)) {
-      sb.write(' · ${f.label} ${f.value}');
-    }
-    return sb.toString();
+    if (b.weekStats.isEmpty) return '五维现状 · 还没有结算数据';
+    return '五维现状 · 近 7 天';
   }
 
   String _short(String s) => s.length <= 14 ? s : '${s.substring(0, 14)}…';

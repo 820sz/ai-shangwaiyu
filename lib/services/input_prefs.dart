@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 
+import '../config/constants.dart';
 import '../models/learner_model.dart';
 import 'database.dart';
 import 'learner_model_store.dart';
@@ -728,3 +730,134 @@ class InputPreferences {
     return out;
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// 「找材料」AI 思考强度(2026-11-08 用户要求:在哪看/调;搜索要发挥满 AI)
+// ═══════════════════════════════════════════════════════════════════════
+
+/// 找材料链路里"哪类 AI 任务"(同一档位在两类任务上映射不同)。
+enum FindMaterialAiTask {
+  /// 检索词规划 / 补救轮(输出很短,重思考纯浪费时延)
+  plan,
+
+  /// AI 改写学习版(要吐完整长文,不能漏字段)
+  rewrite,
+}
+
+/// 用户可选的「AI 思考强度」三档(快 / 标准 / 深入)。
+///
+/// 为什么要包一层而不是直接把 disabled/low/high/max 摆给用户:
+/// - 底层档位在两类任务上并**不对称**(规划是轻任务、改写是重任务);
+/// - 用户要的是"快/标准/深入"这种可理解的选择;
+/// - **标准 = 改造前的有效行为基线**(规划 low、改写 high),默认不变差;
+/// - **深入**才把重任务拉到 max(用户点名"搜索有没有发挥满 AI 能力")。
+///
+/// 历史背景(2026-11-08 本轮修复):此前 `search_query_planner.dart` 两处把
+/// `thinkingLevel` 写成任务名 `'output'`,而 `ApiEndpointConfig.buildThinkingParamsFor`
+/// 遇到非法值会走 `_ => 'disabled'` —— 也就是说检索词规划一直在"不思考"跑。
+/// 现在统一从 [AiThinkingLevel.load] 读**合法档位**,并在 AI 改写结果卡上
+/// 显示本次实际使用的档位(让用户"看得见发挥了什么")。
+enum AiThinkingLevel {
+  fast(
+    '快',
+    '最快:规划不思考、改写轻思考;复杂书名/长需求可能不准',
+    'disabled',
+    'low',
+  ),
+  standard(
+    '标准',
+    '默认:规划轻思考、改写深思考(改造前质量基线)',
+    'low',
+    'high',
+  ),
+  deep(
+    '深入',
+    '质量优先:规划高思考、改写极致,每次多花几秒',
+    'high',
+    'max',
+  );
+
+  const AiThinkingLevel(
+    this.label,
+    this.description,
+    this.planLevel,
+    this.rewriteLevel,
+  );
+
+  /// 界面文案(快 / 标准 / 深入)
+  final String label;
+
+  /// 一句话说明(设置项下面只显示这一行)
+  final String description;
+
+  /// 检索词规划/补救轮用的 DeepSeek thinkingLevel(合法值:disabled/low/high/max)
+  final String planLevel;
+
+  /// AI 改写用的 DeepSeek thinkingLevel
+  final String rewriteLevel;
+
+  /// Hive key(与其它设置同一个 `settings` box,零 DB 迁移)
+  static const String hiveKey = 'find_material_ai_thinking';
+
+  /// 读不到/首次使用 → **标准**(与改造前的有效行为一致)
+  static const AiThinkingLevel fallback = AiThinkingLevel.standard;
+
+  /// 任务 → 真实 thinkingLevel(纯函数,可单测)
+  String levelFor(FindMaterialAiTask task) =>
+      task == FindMaterialAiTask.rewrite ? rewriteLevel : planLevel;
+
+  /// 测试注入:设了就不读 Hive(渲染/单测不依赖 box)
+  @visibleForTesting
+  static AiThinkingLevel? debugOverride;
+
+  /// 测试注入:用内存 map 代替 Hive,验证"保存后能读回"
+  @visibleForTesting
+  static Map<String, Object?>? debugStore;
+
+  @visibleForTesting
+  static void debugReset() {
+    debugOverride = null;
+    debugStore = null;
+  }
+
+  /// 字符串 → 档位(不认识 → 标准,绝不抛)
+  static AiThinkingLevel parse(Object? raw) {
+    final name = '$raw'.trim();
+    for (final level in AiThinkingLevel.values) {
+      if (level.name == name) return level;
+    }
+    return fallback;
+  }
+
+  /// 读用户设置(异常/未设置 → 标准;页面永远能开)
+  static AiThinkingLevel load() {
+    final override = debugOverride;
+    if (override != null) return override;
+    try {
+      final raw = debugStore != null
+          ? debugStore![hiveKey]
+          : Hive.box(AppConstants.hiveBoxSettings).get(hiveKey);
+      return parse(raw);
+    } catch (e) {
+      debugPrint('ReadFlow 读取 AI 思考强度失败(按标准): $e');
+      return fallback;
+    }
+  }
+
+  /// 写用户设置;返回是否真的写进 Hive(false = 存储不可用,UI 可提示但不必打断)
+  static Future<bool> save(AiThinkingLevel level) async {
+    final store = debugStore;
+    if (store != null) {
+      store[hiveKey] = level.name;
+      return true;
+    }
+    try {
+      await Hive.box(AppConstants.hiveBoxSettings).put(hiveKey, level.name);
+      return true;
+    } catch (e) {
+      debugPrint('ReadFlow 保存 AI 思考强度失败: $e');
+      return false;
+    }
+  }
+}
+

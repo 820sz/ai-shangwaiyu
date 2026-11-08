@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'deepseek_api.dart';
+import 'input_prefs.dart';
 
 /// 「自由搜」的检索词规划（2026-11-08 用户要求）：
 ///
@@ -149,7 +150,9 @@ Future<SearchQueryPlan?> defaultSearchQueryPlannerHandler(String raw) async {
     user: user,
     maxTokens: 300,
     temperature: 0.2,
-    thinkingLevel: 'output',
+    // 用户可在「找材料 → 筛选 → AI 思考强度」里调(默认标准 = low);
+    // 之前这里写的是任务名 'output'(非法档位 → 被静默降级成 disabled)
+    thinkingLevel: AiThinkingLevel.load().planLevel,
   );
   if (text == null || text.trim().isEmpty) return null;
   final map = _decodeJsonMap(text);
@@ -212,7 +215,9 @@ Future<List<String>> defaultSearchIntentPlanner(
     user: '用户需求：$intent',
     maxTokens: 300,
     temperature: 0.2,
-    thinkingLevel: 'output',
+    // 用户可在「找材料 → 筛选 → AI 思考强度」里调(默认标准 = low);
+    // 之前这里写的是任务名 'output'(非法档位 → 被静默降级成 disabled)
+    thinkingLevel: AiThinkingLevel.load().planLevel,
   );
   if (text == null || text.trim().isEmpty) return const <String>[];
   final map = _decodeJsonMap(text);

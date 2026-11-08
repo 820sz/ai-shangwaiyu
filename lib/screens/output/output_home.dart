@@ -168,7 +168,7 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
                 title: '四阶练习（推荐）',
-                meta: '写词 / 写句 / 写段 / 写篇，可从材料和目标出题，按 rubric 批改',
+                meta: '从材料/目标出题，按 rubric 批改',
                 onTap: () => Navigator.pop(ctx, 'tier'),
               ),
               const SizedBox(height: Gap.xs),
@@ -179,7 +179,7 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
                 title: '旧版练习计划',
-                meta: '按水平排练习计划（保留历史进度，不再新增题型）',
+                meta: '按水平排计划，保留历史进度',
                 onTap: () => Navigator.pop(ctx, 'legacy'),
               ),
               const SizedBox(height: Gap.xs),
@@ -241,15 +241,10 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
                   ],
                 ),
                 const SizedBox(height: Gap.sm),
-                Text(
-                  '这件事做不好不如不做 —— 它至少要接三样东西:',
-                  style: theme.textTheme.bodySmall?.copyWith(height: 1.5),
-                ),
-                const SizedBox(height: Gap.xs),
                 for (final line in const [
-                  '实时语音(你说一句、它接一句,延迟要低到不打断思路)',
-                  '发音评分(音素级:哪个音不准、重音在哪,不能只给个总分)',
-                  '按目标出话题(四六级口试 / 雅思 Part 2 / 日常寒暄,题库不同)',
+                  '实时语音（低延迟）',
+                  '音素级发音评分',
+                  '按目标出话题',
                 ])
                   Padding(
                     padding: const EdgeInsets.only(bottom: 6),
@@ -279,14 +274,6 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
                     ),
                   ),
                 const SizedBox(height: Gap.xs),
-                Text(
-                  '在那之前:写出来的东西,才是说出来的地基 —— '
-                  '说不出来,多半是先写不出来。',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    height: 1.5,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
               ],
             ),
           ),
@@ -451,11 +438,8 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
                     const SizedBox(height: Gap.xs),
                     Text(
                       goals.isEmpty
-                          ? '选目标(可多选)后,四阶题目都会按它挑词长、句长与评分标准'
-                          : DrillCatalog.resolve(goals)
-                              .map((g) => g.what)
-                              .take(2)
-                              .join(';'),
+                          ? '未选目标时按通用难度出题'
+                          : '目标影响出题难度与评分标准',
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: muted,
                         fontSize: 11.5,
@@ -595,7 +579,7 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
               child: AppActionTile(
                 icon: Icons.edit_note,
                 title: '写译批改',
-                subtitle: '手写 / 电子稿 → 按你的目标考试评分（rubric 维度分）',
+                subtitle: '按目标考试 rubric 给维度分',
                 highlight: true,
                 onTap: () => Navigator.push(
                   context,
@@ -608,7 +592,7 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
               child: AppActionTile(
                 icon: Icons.workspace_premium_outlined,
                 title: '按目标考试真题练',
-                subtitle: '抓公开真题页面出题（写作 / 翻译），每题标注来源',
+                subtitle: '抓公开真题页，每题标注来源',
                 onTap: () => _openPractice(OutputTier.essay),
               ),
             ),
@@ -634,7 +618,7 @@ class _OutputHomeScreenState extends State<OutputHomeScreen> {
                 child: AppActionTile(
                   icon: Icons.mic_none,
                   title: '口语交流(敬请期待)',
-                  subtitle: '要接实时语音 + 音素级发音评分 + 按目标出话题,做不好不上',
+                  subtitle: '实时语音 + 发音评分（未开放）',
                   trailing: Container(
                     padding:
                         const EdgeInsets.symmetric(horizontal: 8, vertical: 2),

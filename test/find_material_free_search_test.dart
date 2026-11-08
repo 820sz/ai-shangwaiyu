@@ -241,8 +241,8 @@ void main() {
       phoneView(tester);
       await pumpScreen(tester, emptyScreen());
       expect(find.text('这次没找到能读的结果'), findsOneWidget);
-      expect(find.textContaining('为什么没抓到正文'), findsWidgets);
-      expect(find.textContaining('命中几条:原始命中 2 条'), findsOneWidget);
+      expect(find.textContaining('没有可读正文'), findsWidgets);
+      expect(find.textContaining('原始命中 2 条'), findsOneWidget);
       expect(find.textContaining('Project Gutenberg'), findsWidgets);
       expect(find.textContaining('依据:2 条真实线索'), findsOneWidget);
       expect(find.text('生成 AI 改写学习版(非原文)'), findsOneWidget);

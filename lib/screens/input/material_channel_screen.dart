@@ -1972,7 +1972,7 @@ class _MaterialChannelScreenState extends State<MaterialChannelScreen>
         children.add(
           Center(
             child: Text(
-              '还有 ${pageCount - 1 - page} 页 · 翻页或「继续找更多」都能看到后面的结果',
+              '还有 ${pageCount - 1 - page} 页',
               style: AppFont.tagStyle.copyWith(color: skin.inkFaint),
             ),
           ),
@@ -2116,7 +2116,7 @@ class _MaterialChannelScreenState extends State<MaterialChannelScreen>
             Padding(
               padding: const EdgeInsets.only(left: 21, right: 8, bottom: 4),
               child: Text(
-                '这些是上次的结果(只存链接):点「开始读/保存到我的」会补抓正文。',
+                '上次结果只存链接;点「开始读」会补抓正文。',
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: AppFont.tagStyle.copyWith(
@@ -2217,7 +2217,7 @@ class _MaterialChannelScreenState extends State<MaterialChannelScreen>
           ),
           const SizedBox(height: Gap.xs),
           Text(
-            '每次最多抓 8 篇正文并本地算难度;官方搜索按成功请求计费(这次大约几厘到几分钱)。',
+            '每次最多抓 8 篇正文;官方搜索按成功请求计费(几厘到几分钱)。',
             style: AppFont.tagStyle.copyWith(color: skin.inkFaint, height: 1.4),
           ),
         ],
@@ -2400,7 +2400,7 @@ class _MaterialChannelScreenState extends State<MaterialChannelScreen>
         ],
       ),
       Text(
-        '按最近更新排序 · 长按卡片或点「⋯」可改中文名 / 从频道移除 / 删除',
+        '按最近更新排序 · 长按卡片可管理',
         style: AppFont.tagStyle.copyWith(color: skin.inkFaint, height: 1.4),
       ),
       // QA N2:材料库读取有 300 条上限(DB 层本轮不改)。到上限时**明说**,
@@ -2409,7 +2409,7 @@ class _MaterialChannelScreenState extends State<MaterialChannelScreen>
         Padding(
           padding: const EdgeInsets.only(top: 4),
           child: Text(
-            '已按最近更新读取前 $materialChannelMineShelfLimit 篇;更早的材料请到「材料库」查看。',
+            '只显示前 $materialChannelMineShelfLimit 篇;更早的到「材料库」看。',
             style: AppFont.tagStyle.copyWith(
               color: skin.inkFaint,
               height: 1.4,

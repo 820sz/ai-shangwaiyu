@@ -1,0 +1,2 @@
+cd /d/readflow || exit 1
+bash tool/lockrun.sh test test/find_material_thinking_setting_test.dart test/find_material_free_search_test.dart test/find_material_ai_rewrite_test.dart test/reader_followup_context_test.dart test/reader_followup_ui_test.dart test/tutor_briefing_test.dart test/profile_about_test.dart test/practice_flow_test.dart --no-pub --timeout 180s 2>&1 | tail -8

@@ -452,7 +452,7 @@ class _NeedSearchScreenState extends State<NeedSearchScreen> {
     children.add(const SizedBox(height: Gap.xs));
     children.add(
       Text(
-        '每次最多抓 8 篇正文并本地算难度;官方搜索按成功请求计费(这次大约几厘到几分钱)。',
+        '每次最多抓 8 篇正文;官方搜索按成功请求计费(几厘到几分钱)。',
         style: TextStyle(fontSize: 10, color: skin.inkFaint, height: 1.4),
       ),
     );
@@ -773,9 +773,8 @@ class _NeedSearchScreenState extends State<NeedSearchScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            '· 会按你的难度档/目标/弱项去公开源与官方搜索找真实原文\n'
-            '· 每篇都会抓正文、按你的词频算真实覆盖率(所以「为什么推」有数字)\n'
-            '· 官方搜索按成功请求计费,页面会如实显示这一轮花了多少',
+            '· 按难度档/目标/弱项找真实原文;每篇抓正文算真实覆盖率\n'
+            '· 官方搜索按成功请求计费,页面显示本轮花费',
             style: TextStyle(
               fontSize: 11,
               height: 1.6,
@@ -855,9 +854,8 @@ class _NeedSearchScreenState extends State<NeedSearchScreen> {
           if (material == null)
             Text(
               _clues.isEmpty
-                  ? '这次没有真实线索可依据，无法生成（不凭空编）。'
-                  : '基于这次搜到的 ${_clues.length} 条真实线索（标题/摘要/来源）改写一篇英文学习材料；'
-                      '不是原文，正文末尾会注明来源。',
+                  ? '这次没有真实线索可依据,无法生成(不凭空编)。'
+                  : '基于 ${_clues.length} 条真实线索改写(非原文),正文末尾注明来源。',
               style: TextStyle(fontSize: 11, height: 1.5, color: skin.inkSoft),
             ),
           if (_aiError != null) ...[
@@ -1122,7 +1120,7 @@ class _NeedSearchScreenState extends State<NeedSearchScreen> {
                     color: skin.ink,
                   )),
               const SizedBox(height: 4),
-              Text('全部读自本机学习助理(学习者模型 + 行为统计),没有一条是编的。',
+              Text('全部读自本机学习助理,没有编造。',
                   style:
                       TextStyle(fontSize: 10.5, color: skin.inkFaint)),
               const SizedBox(height: Gap.sm),

@@ -1195,8 +1195,8 @@ ${TranslationPolicy.discipline}
 
     final systemContent = context.trim().isEmpty
         ? '你是英语学习助手。回答用户追问。简洁准确，根据材料量自行决定回答长度。$translationHint'
-        : '你是英语学习助手。基于图片识别结果回答用户追问。简洁准确，根据材料量自行决定回答长度。\n\n'
-            '识别材料上下文：\n$context$translationHint';
+        : '你是英语学习助手。基于用户当前在看的材料（正文/段落，可能来自阅读器或图片识别）回答追问。简洁准确，根据材料量自行决定回答长度。\n\n'
+            '材料上下文：\n$context$translationHint';
 
     final body = BaseApiService.buildChatBody(
       cfg: cfg,

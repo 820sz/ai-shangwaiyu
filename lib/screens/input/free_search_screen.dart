@@ -184,9 +184,16 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
   bool _aiSaved = false;
   String? _aiError;
 
+  /// 「AI 思考强度」当前档(用户可调;Hive 持久化,默认标准)
+  AiThinkingLevel _aiThinking = AiThinkingLevel.fallback;
+
+  /// 最近一次 AI 改写**实际使用**的档位名(结果卡上展示;设置改了也不回改历史结果)
+  String _aiThinkingUsed = '';
+
   @override
   void initState() {
     super.initState();
+    _aiThinking = AiThinkingLevel.load();
     try {
       _prefs = InputPreferences.load();
     } catch (_) {
@@ -897,7 +904,8 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
       wordLimit: options.wordLimit,
       difficultyMode: options.difficultyMode,
     );
-    final rewriter = widget.aiRewriter ?? MaterialAiRewriter();
+    final rewriter = widget.aiRewriter ?? MaterialAiRewriter(level: _aiThinking);
+    final usedThinking = rewriter.thinkingLabel;
     var outcome = await rewriter.generate(request);
     // 覆盖优先：篇幅明显不够时重试一次（同一请求，模型通常会写得更完整）
     final minWords = options.wordLimit != null
@@ -910,6 +918,7 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
     if (!mounted) return;
     setState(() {
       _aiRunning = false;
+      _aiThinkingUsed = usedThinking;
       if (outcome.ok) {
         _aiMaterial = outcome.material;
         _aiError = null;
@@ -1316,7 +1325,7 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
                     _filterGroup(
                       skin,
                       title: '来源',
-                      hint: '9 个真实公开源,可多选',
+                      hint: '9 个公开源,可多选',
                       children: <Widget>[
                         _chip(
                           skin,
@@ -1344,7 +1353,7 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
                     _filterGroup(
                       skin,
                       title: '类型',
-                      hint: '按材料形态过滤(百科走随机条目池)',
+                      hint: '按材料形态过滤',
                       children: <Widget>[
                         _chip(
                           skin,
@@ -1387,7 +1396,7 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
                     _filterGroup(
                       skin,
                       title: '难度',
-                      hint: '按来源预估,非精确覆盖率(抓正文后才算真实难度)',
+                      hint: '来源级预计,非精确覆盖率',
                       children: <Widget>[
                         _chip(
                           skin,
@@ -1407,7 +1416,7 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
                     _filterGroup(
                       skin,
                       title: '场景',
-                      hint: '公开源没有场景元数据 —— 点了是填入检索词预设',
+                      hint: '点了填入检索词预设',
                       children: <Widget>[
                         for (final sub in MaterialTaxonomy.scene.subtopics)
                           _chip(
@@ -1427,10 +1436,38 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
                           ),
                       ],
                     ),
+                    _filterGroup(
+                      skin,
+                      title: 'AI 思考强度',
+                      hint: '作用于检索规划与 AI 改写',
+                      children: <Widget>[
+                        for (final level in AiThinkingLevel.values)
+                          _chip(
+                            skin,
+                            level.label,
+                            selected: _aiThinking == level,
+                            onTap: () {
+                              setState(() => _aiThinking = level);
+                              unawaited(AiThinkingLevel.save(level));
+                            },
+                          ),
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Text(
+                            '${_aiThinking.label}:${_aiThinking.description}',
+                            style: TextStyle(
+                              fontSize: 9.5,
+                              height: 1.4,
+                              color: skin.inkFaint,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                     Padding(
                       padding: const EdgeInsets.only(top: 2),
                       child: Text(
-                        '语言:英文(当前公开源全部是英文站,没有多语言源可切)',
+                        '仅英文(公开源全是英文站)',
                         style: TextStyle(fontSize: 9.5, color: skin.inkFaint),
                       ),
                     ),
@@ -1616,7 +1653,7 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
           onContinue: _running ? null : () => _runSearch(broaden: true),
           continueEnabled: !_running,
           continueLabel: '继续找更多',
-          continueHint: '放宽来源再搜一轮;没有新增就说明这个关键词已经找全了。',
+          continueHint: '放宽来源再搜一轮;没有新增就说明找全了。',
         ),
       );
       children.add(const SizedBox(height: Gap.md));
@@ -1728,10 +1765,8 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            '· 公开源只认英文关键词(中文需求请用「按我的情况找」)\n'
-            '· 搜到的是原文链接,点「开始读」会抓正文入库并按你的词频算难度\n'
-            '· 免费:不走 AI 检索,不花官方搜索的钱\n'
-            '· 万一没有可读原文:可以看下面「AI 改写学习版(非原文)」兜底',
+            '· 只认英文关键词(中文需求请用「按我的情况找」)\n'
+            '· 免费:不走 AI 检索;没抓到可读原文可用下方 AI 改写兜底',
             style: TextStyle(
               fontSize: 11,
               height: 1.6,
@@ -1779,21 +1814,15 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
       final searched = _searchedSources.isEmpty
           ? '公开源'
           : _searchedSources.take(3).join('、');
-      diagnostics.add('搜了什么:关键词「${query.isEmpty ? '(空)' : query}」'
-          ' · 检索 $searched'
-          '${_searchedSources.length > 3 ? ' 等 ${_searchedSources.length} 个源' : ''}');
-      diagnostics.add('命中几条:原始命中 $_rawHits 条,按你选的筛选条件'
-          '(来源/类型/难度/屏蔽词)后 0 条可展示');
+      diagnostics.add('关键词「${query.isEmpty ? '(空)' : query}」· 检索 $searched'
+          '${_searchedSources.length > 3 ? ' 等 ${_searchedSources.length} 个源' : ''}'
+          ' · 原始命中 $_rawHits 条 · 筛选后 0 条');
       if (_notes.isNotEmpty) {
-        diagnostics.add('源怎么说:${_notes.take(3).join(';')}');
+        diagnostics.add('源说明:${_notes.take(2).join(';')}');
       }
-      if (_rawHits == 0) {
-        diagnostics.add('为什么没抓到正文:根本没有命中结果 —— 关键词可能太窄/太新,'
-            '或这个源没有可检索的原文');
-      } else {
-        diagnostics.add('为什么没抓到正文:命中的不是可读原文(列表页/需登录/非英文),'
-            '或都被筛选条件挡掉了');
-      }
+      diagnostics.add(_rawHits == 0
+          ? '没有可读正文:关键词可能太窄/太新,或这个源没有可检索原文'
+          : '没有可读正文:命中的是列表页/需登录/非英文,或被筛选条件挡掉');
     }
     return AppCard(
       child: Column(
@@ -1889,10 +1918,8 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
           const SizedBox(height: 6),
           Text(
             hasOriginals
-                ? '如果有原文,优先读上面的结果;都不是你要的(或抓不到正文),'
-                    '可以让 AI 基于这次搜到的标题/摘要改写一篇学习版 —— 它不是原文。'
-                : '这次没找到可读原文。可以让 AI 基于这次真实搜到的标题/摘要/来源'
-                    '改写一篇适合你难度的英文学习版 —— 它不是原文。',
+                ? '原文优先;都不合适时,让 AI 基于这次搜到的标题/摘要改写一篇。'
+                : '让 AI 基于这次搜到的线索改写一篇学习版。',
             style: TextStyle(
               fontSize: 11,
               height: 1.55,
@@ -1908,7 +1935,7 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
           ],
           const SizedBox(height: 6),
           Text(
-            '依据:${sources.length} 条真实线索(标题/摘要/来源链接)',
+            '依据:${sources.length} 条真实线索',
             style: TextStyle(
               fontSize: 10.5,
               fontWeight: FontWeight.w600,
@@ -1919,8 +1946,7 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
             Padding(
               padding: const EdgeInsets.only(top: 3),
               child: Text(
-                '线索只有 ${sources.length} 条 —— 改写的依据有限,内容会偏概括,'
-                '拿到后建议对照来源链接核对。',
+                '线索少,依据有限;建议对照来源链接核对。',
                 style: TextStyle(
                   fontSize: 10,
                   height: 1.45,
@@ -1932,8 +1958,7 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
             Padding(
               padding: const EdgeInsets.only(top: 3),
               child: Text(
-                '没有原始材料也没关系：AI 会先用自己掌握的知识梳理这个作品/主题'
-            '（核心观点、方法、结论），再按体系改写成学习版；不冒充原文、不编造引文数据。',
+                '没有原始材料:AI 用自己的知识梳理这个作品/主题再改写,不冒充原文。',
                 style: TextStyle(
                   fontSize: 10,
                   height: 1.45,
@@ -1979,12 +2004,7 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
             ),
             const SizedBox(height: 4),
             Text(
-              '会调用 1 次模型(按你的 API 计费,不花官方搜索的钱)。',
-              style: TextStyle(fontSize: 9.5, height: 1.5, color: skin.inkFaint),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              '生成后可直接阅读,或保存到「我的」。',
+              '1 次模型调用(按你的 API 计费);生成后可阅读或保存到「我的」。',
               style: TextStyle(fontSize: 9.5, height: 1.5, color: skin.inkFaint),
             ),
             const SizedBox(height: 16),
@@ -2078,6 +2098,13 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
               color: skin.ink,
             ),
           ),
+          if (_aiThinkingUsed.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 2),
+            Text(
+              '思考强度:$_aiThinkingUsed',
+              style: TextStyle(fontSize: 9.5, color: skin.inkFaint),
+            ),
+          ],
           const SizedBox(height: 6),
           if (material.coverageLine.isNotEmpty)
             Padding(
@@ -2117,8 +2144,7 @@ class _FreeSearchScreenState extends State<FreeSearchScreen> {
             ),
           const SizedBox(height: 6),
           Text(
-            '正文末尾保留来源链接与许可;入库标题带「$aiRewriteMarker」标注,'
-            '不会和原文混在一起。',
+            '正文末尾保留来源链接与许可。',
             style: TextStyle(fontSize: 9.5, height: 1.45, color: skin.inkFaint),
           ),
           const SizedBox(height: 8),

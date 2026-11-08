@@ -217,8 +217,7 @@ class _MaterialBrowseScreenState extends State<MaterialBrowseScreen> {
                       borderRadius: BorderRadius.circular(18),
                     ),
                     child: Text(
-                      '这个方向还没有材料。可以用「导入」把外部文章/书导进来,'
-                      '或等下一版接入的「AI 补长尾」按这个方向去找。',
+                      '这个方向还没有材料。可「导入」外部文章/书,或用下方 AI 补一批。',
                       style: TextStyle(
                           fontSize: 11.5, height: 1.6, color: skin.inkSoft),
                     ),
@@ -303,7 +302,7 @@ class _MaterialBrowseScreenState extends State<MaterialBrowseScreen> {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    '按「${_aiCategoryLabel()}」这个方向,用公开源 + AI 再找一批',
+                    '按「${_aiCategoryLabel()}」方向,用公开源 + AI 再找一批',
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(fontSize: 10.5, color: skin.inkSoft),
@@ -344,8 +343,7 @@ class _MaterialBrowseScreenState extends State<MaterialBrowseScreen> {
       padding: const EdgeInsets.fromLTRB(Gap.page, Gap.sm, Gap.page, Gap.xl),
       children: <Widget>[
         Text(
-          '这里只改需求。难度档与形式偏好是全 App 共享的事实源：'
-          '保存后材料中心、频道页和「找材料」都按它排序与推荐。',
+          '这里只改需求;难度与形式偏好全 App 共用,保存后各找材料页都按它推荐。',
           style: TextStyle(fontSize: 11.5, height: 1.6, color: skin.inkSoft),
         ),
         const SizedBox(height: Gap.sm),
@@ -367,7 +365,7 @@ class _MaterialBrowseScreenState extends State<MaterialBrowseScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        Text('难度档(会同步给全 App 的材料推荐/难度标签)',
+        Text('难度档(全 App 共用)',
             style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
@@ -388,7 +386,7 @@ class _MaterialBrowseScreenState extends State<MaterialBrowseScreen> {
         ),
         if (_need.goals.isNotEmpty) ...[
           const SizedBox(height: Gap.sm),
-          Text('学习目标(来自助理访谈,只读)',
+          Text('学习目标(来自助理,只读)',
               style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w700,

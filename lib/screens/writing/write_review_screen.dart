@@ -1181,7 +1181,7 @@ class _WriteReviewScreenState extends State<WriteReviewScreen> {
                 ),
                 const SizedBox(height: Gap.xs),
                 Text(
-                  '两种都行：先转电子档可以顺手改错别字；直接批改会把照片交给 AI，跳过转写确认。',
+                  '先转写可顺手改错字；直接批改由 AI 读图。',
                   style: AppFont.tagStyle.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                     height: 1.45,
@@ -2178,7 +2178,7 @@ class _ReviewSettingsSheetState extends State<_ReviewSettingsSheet> {
             ),
             const SizedBox(height: Gap.xxs),
             Text(
-              '只影响「AI 批改」这一步；「先转电子档」仍走快速识别，不会变慢。',
+              '只影响「AI 批改」。',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: cs.onSurfaceVariant,
                 height: 1.5,

@@ -80,7 +80,7 @@ Future<void> showDrillGoalPicker(
                   Padding(
                     padding: const EdgeInsets.fromLTRB(Gap.md, 0, Gap.md, Gap.xs),
                     child: Text(
-                      '目标决定给你练哪些词、多长的句子;多选可以混着练'
+                      '目标决定练什么、句子多长。'
                       '(比如同时在备六级又想过雅思)。',
                       style: theme.textTheme.bodySmall
                           ?.copyWith(color: muted, height: 1.4),
@@ -639,7 +639,7 @@ class _DrillPlanScreenState extends State<DrillPlanScreen> {
               const SizedBox(height: Gap.xs),
               Text(
                 _onlyDue
-                    ? '复习队列里的词都还没到期 —— 关掉「只练到期词」就能练新词;'
+                    ? '都未到期；关掉「只练到期词」练新词。'
                         '或者去「复习」页把到期的先过一遍。'
                     : _mode.emptyHint,
                 style: Theme.of(ctx).textTheme.bodySmall?.copyWith(height: 1.5),
@@ -691,8 +691,7 @@ class _DrillPlanScreenState extends State<DrillPlanScreen> {
             ),
             const SizedBox(height: Gap.xxs),
             Text(
-              '软件里的数据(词汇量基线 / CEFR / 生词数)不够用时,自己补一句 —— '
-              '比如"六级已过,主攻听力""语法弱,长句看不懂"。练习会按它选材料。',
+              '可补一句水平说明，练习按它选材料。',
               style: Theme.of(ctx)
                   .textTheme
                   .bodySmall
@@ -1022,8 +1021,8 @@ class _DrillPlanScreenState extends State<DrillPlanScreen> {
                 const SizedBox(height: Gap.xs),
                 Text(
                   _model.hasVocabBaseline
-                      ? '难度档按你测出来的词汇量算(数据来自软件内测试)。'
-                      : '还没测过词汇量,暂按进阶档练 —— 去「我的 → 词汇量测试」量一次会更准。',
+                      ? '难度档按词汇量测试结果算。'
+                      : '还没测词汇量，暂按进阶档。',
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: muted,
                     fontSize: 11,
@@ -1207,7 +1206,7 @@ class _DrillPlanScreenState extends State<DrillPlanScreen> {
                   ),
                   const SizedBox(height: 5),
                   Text(
-                    '按你的目标排出 4 周练什么(每周一个能力面),每天一包题,进度自动记。',
+                    '按目标排 4 周，每天一包题。',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: muted,
                       fontSize: 11,

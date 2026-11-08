@@ -367,7 +367,7 @@ class _WeeklyReportScreenState extends State<WeeklyReportScreen> {
             title: '本周输出',
             child: _buildBullets(
               report.outputLines,
-              fallback: '本周没有输出练习(写作 / 翻译 / 回译)',
+              fallback: '本周没有输出练习',
             ),
           ),
           _Section(
@@ -375,7 +375,7 @@ class _WeeklyReportScreenState extends State<WeeklyReportScreen> {
             title: '亮点',
             child: _buildBullets(
               report.highlights,
-              fallback: '这周没有可称为亮点的事 —— 从下面的第一条建议开始',
+              fallback: '这周没有亮点',
             ),
           ),
           _Section(
@@ -390,9 +390,9 @@ class _WeeklyReportScreenState extends State<WeeklyReportScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            '本周报告由本机数据算出(不联网、不调用 AI);'
-            '历史周报会在后续版本以「选周期」的方式补算。',
+            '本机计算,不联网、不调 AI。',
             style: AppFont.metaStyle.copyWith(
+              fontSize: 11,
               color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
           ),
@@ -409,7 +409,7 @@ class _WeeklyReportScreenState extends State<WeeklyReportScreen> {
       child: AppEmptyState(
         icon: Icons.calendar_today_outlined,
         title: '本周还没有学习记录',
-        hint: '读一篇材料或复习几个词,这里就会有内容',
+        hint: '读或复习后,这里出现记录',
       ),
     );
   }
@@ -432,7 +432,7 @@ class _WeeklyReportScreenState extends State<WeeklyReportScreen> {
     );
     final total = series.fold<double>(0, (sum, v) => sum + v).round();
     if (total <= 0) {
-      return const AppEmptyState(title: '暂无数据', hint: '这 7 天没有新收词记录');
+      return const AppEmptyState(title: '暂无数据', hint: '这 7 天没有新收词');
     }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -457,7 +457,7 @@ class _WeeklyReportScreenState extends State<WeeklyReportScreen> {
         ),
         const SizedBox(height: 4),
         Text(
-          '每根柱 = 当天新收词数(共 $total 个)· 左旧右新',
+          '每天新收词 · 共 $total 个',
           style: AppFont.metaStyle.copyWith(fontSize: 11.5, color: muted),
         ),
       ],
@@ -483,7 +483,7 @@ class _WeeklyReportScreenState extends State<WeeklyReportScreen> {
     ).map((v) => v.round()).toList(growable: false);
     final total = counts.fold<int>(0, (sum, v) => sum + v);
     if (total <= 0) {
-      return const AppEmptyState(title: '暂无数据', hint: '这 5 周还没有收词或练习记录');
+      return const AppEmptyState(title: '暂无数据', hint: '这 5 周没有记录');
     }
     final levels = HeatmapCalendar.tiersOf(counts);
     return Column(
@@ -508,7 +508,7 @@ class _WeeklyReportScreenState extends State<WeeklyReportScreen> {
         ),
         const SizedBox(height: 8),
         Text(
-          '颜色越深 = 当天新收词 + 练习量越多(复习结果按词存,没有逐日历史,不在此图)',
+          '颜色越深 = 当天学习量越多',
           style: AppFont.metaStyle.copyWith(fontSize: 11.5, color: muted),
         ),
       ],
@@ -527,9 +527,10 @@ class _WeeklyReportScreenState extends State<WeeklyReportScreen> {
         const SizedBox(width: 6),
         Expanded(
           child: Text(
-            '${_fmtDate(report.from)} ~ ${_fmtDate(report.to)}'
-            ' · 滚动 7 天含今天',
-            style: AppFont.metaStyle.copyWith(fontSize: 11.5, color: muted),
+            '${_fmtDate(report.from)} ~ ${_fmtDate(report.to)}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: AppFont.metaStyle.copyWith(fontSize: 11, color: muted),
           ),
         ),
         // 日期区间是报告的一部分:同一个页面刷新后区间会变,必须写死在页面上

@@ -97,19 +97,17 @@ class _AppearanceScreenState extends State<AppearanceScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '· 深色模式改的是「全局配色」(页面、卡片、正文、阅读页都跟着变),'
-                    '不是只换个背景色;',
+                    '· 深色改全局配色,不只换背景。',
                     style: AppFont.tagStyle.copyWith(color: muted, height: 1.5),
                   ),
                   const SizedBox(height: Gap.xxs),
                   Text(
-                    '· 彩色标签(生词类型、掌握度、图表)在两种模式下都保留颜色 —— '
-                    '它们承担"区分"的信息,不能变成灰;',
+                    '· 彩色标签两种模式下都保留颜色。',
                     style: AppFont.tagStyle.copyWith(color: muted, height: 1.5),
                   ),
                   const SizedBox(height: Gap.xxs),
                   Text(
-                    '· 主题偏好会记在本机,重装/换机后需要重新选一次。',
+                    '· 主题偏好记在本机。',
                     style: AppFont.tagStyle.copyWith(color: muted, height: 1.5),
                   ),
                 ],

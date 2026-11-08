@@ -363,7 +363,7 @@ class _ErrorArchiveScreenState extends State<ErrorArchiveScreen> {
           icon: Icons.filter_alt_outlined,
           art: EmptyArtKind.magnifier,
           title: '这个来源没有记录',
-          hint: '当前只看「${_errorSourceLabel(_source!)}」,清掉筛选能看到全部',
+          hint: '只看「${_errorSourceLabel(_source!)}」,清掉筛选看全部',
           action: TextButton.icon(
             onPressed: () => setState(() => _source = null),
             icon: const Icon(Icons.clear_all, size: 16),
@@ -382,8 +382,8 @@ class _ErrorArchiveScreenState extends State<ErrorArchiveScreen> {
           art: EmptyArtKind.magnifier,
           title: everHad ? '待处理的错误都清干净了' : '还没有错误记录',
           hint: everHad
-              ? '共 ${_fixed.length} 类已改正 —— 再错一次会自动回到这里'
-              : '错误标签来自写译批改/读后测验/复习答错;做一次写译批改就会自动建档',
+              ? '共 ${_fixed.length} 类已改正'
+              : '写译批改后自动建档',
           action: everHad
               ? TextButton.icon(
                   onPressed: () => setState(() => _tab = 1),
@@ -411,7 +411,7 @@ class _ErrorArchiveScreenState extends State<ErrorArchiveScreen> {
         icon: Icons.check_circle_outline,
         art: EmptyArtKind.magnifier,
         title: '还没有标记已改正的记录',
-        hint: '在「待处理」里点「标记已改正」,修好的错误会出现在这里',
+        hint: '点「标记已改正」后出现在这里',
         action: TextButton.icon(
           onPressed: () => setState(() => _tab = 0),
           icon: const Icon(Icons.inbox_outlined, size: 16),

@@ -141,7 +141,7 @@ class _TutorReviewScreenState extends State<TutorReviewScreen> {
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       child: Text(
-                        '还没有可分析的维度 —— 先做一次词汇量速测,或收几个词。',
+                        '先做一次速测,或收几个词。',
                         style: AppFont.bodyStyle.copyWith(
                           fontSize: 12,
                           height: 1.6,
@@ -161,7 +161,7 @@ class _TutorReviewScreenState extends State<TutorReviewScreen> {
             Padding(
               padding: const EdgeInsets.only(top: 6),
               child: Text(
-                '细条 = 这一维当前状态(越满越稳;空 = 需要处理)。没测到的维度写「待测」,不编数字。',
+                '细条 = 该维度状态,越满越稳',
                 style: AppFont.metaStyle.copyWith(
                   fontSize: 10,
                   height: 1.5,
@@ -201,7 +201,7 @@ class _TutorReviewScreenState extends State<TutorReviewScreen> {
                   const SizedBox(height: Gap.sm),
                   if (weekBars.fold<double>(0, (double a, double b) => a + b) <= 0)
                     Text(
-                      '这 7 天没有学习记录 —— 收词或做一次练习后,这里会出现每天的量。',
+                      '这 7 天没有记录。',
                       style: AppFont.bodyStyle.copyWith(
                         fontSize: 12,
                         height: 1.6,
@@ -246,7 +246,7 @@ class _TutorReviewScreenState extends State<TutorReviewScreen> {
                 children: <Widget>[
                   if (review.lines.isEmpty)
                     Text(
-                      '还没有可复盘的记录 —— 完成或跳过一条任务后,这里会给出完成率与偏差。',
+                      '完成或跳过一条任务后,这里出完成率。',
                       style: AppFont.bodyStyle.copyWith(
                         fontSize: 12,
                         height: 1.6,
@@ -297,7 +297,7 @@ class _TutorReviewScreenState extends State<TutorReviewScreen> {
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       child: Text(
-                        '今天还没有任务。回首页可以「自己加一条」,或让助理按现状给建议。',
+                        '今天还没有任务,回首页自己加。',
                         style: AppFont.bodyStyle.copyWith(
                           fontSize: 12,
                           height: 1.6,
@@ -335,7 +335,7 @@ class _TutorReviewScreenState extends State<TutorReviewScreen> {
         value: '待测',
         measured: false,
         evidence: insight.evidence.isEmpty
-            ? '还没有这一维的数据 —— 做一次词汇量速测,或先完成一次相关练习。'
+            ? '先做速测或相关练习。'
             : insight.evidence,
         onTap: insight.actionJump == null
             ? null

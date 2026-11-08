@@ -276,7 +276,7 @@ class _TutorTaskDetailScreenState extends State<TutorTaskDetailScreen> {
                 const SizedBox(height: 6),
                 Text(
                   _reason.isEmpty
-                      ? '这条任务没有记录依据(手工添加或旧版数据)。做完它,复盘里会记一条真实产出。'
+                      ? '这条任务没有记录依据。'
                       : _reason,
                   style: AppFont.bodyStyle.copyWith(
                     fontSize: 12.5,
@@ -379,7 +379,7 @@ class _TutorTaskDetailScreenState extends State<TutorTaskDetailScreen> {
           ),
           const SizedBox(height: Gap.sm),
           Text(
-            '所有操作都会写进任务事件,复盘按真实状态统计 —— 勾完成不会替你写"学了多久"。',
+            '操作会写进任务事件,复盘按真实状态统计。',
             style: AppFont.metaStyle.copyWith(
               fontSize: 10.5,
               height: 1.6,

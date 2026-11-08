@@ -319,10 +319,12 @@ class DashMetricRow extends StatelessWidget {
             const SizedBox(height: 5),
             Text(
               evidence,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: AppFont.metaStyle.copyWith(
-                fontSize: 10.5,
+                fontSize: 11,
                 height: 1.4,
-                color: d.inkFaint,
+                color: d.inkSoft,
               ),
             ),
           ],
@@ -421,10 +423,12 @@ class DashListRow extends StatelessWidget {
                   const SizedBox(height: 3),
                   Text(
                     subtitle!,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: AppFont.metaStyle.copyWith(
-                      fontSize: 10.5,
+                      fontSize: 11,
                       height: 1.4,
-                      color: d.inkFaint,
+                      color: d.inkSoft,
                     ),
                   ),
                 ],

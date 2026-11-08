@@ -41,6 +41,8 @@ import 'dictation_screen.dart';
 import 'reading_quiz_screen.dart';
 import 'widgets/category_picker.dart';
 import 'widgets/follow_up_drawer.dart';
+import 'widgets/quick_replies.dart';
+import 'widgets/reader_follow_up_context.dart';
 import 'widgets/sub_category_input.dart';
 
 /// 材料阅读器(v2.0)。
@@ -258,69 +260,39 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     emptyHint: '就这份材料提问,AI 会基于正文回答',
   );
 
-  /// 追问时的材料上下文。
+  /// 追问时的材料上下文（委托纯函数 [buildReaderFollowUpContext]，可单测）。
   ///
-  /// 两种范围:
-  /// - 整篇(底部「追问」):标题 + 难度 + 正文节选(太长会挤爆提示词);
-  /// - 单段(点译文):**只带这一段**的原文 + 页面上显示的中文译文,外加
-  ///   前后各一段原文(仅用于判断代词与术语,明确告诉模型不要翻)。
+  /// 根因记录（2026-11-08 用户反馈 / 真机截图实测）：
+  /// 旧实现在这里按块累加正文、`if (body.length + t.length > 6000) break;` ——
+  /// 而正文按 **2500 词一块**入库：一篇 2011 词的材料只有 1 块、约 1.2 万字符，
+  /// 第一次循环就 break，body 为空 → AI 只收到「正文节选:」这一行标题，于是
+  /// 回复"正文节选是空的，只有标题和元信息（2011 词、B2、覆盖率 84.9%）"。
   ///
-  /// 为什么单段要单独喂:用户点译文想问的是"这里为什么这么译/有没有译错",
-  /// 把整篇 6000 字节选塞进去,模型会去总结全文,反而答不到这一句上。
+  /// 现在：保证非空（按字符截断）、整篇时**优先当前在读小节**、单段追问保持
+  /// "本段原文 + 页面译文 + 前后邻段"。
   String _buildFollowUpContext() {
-    final title = '${_material?['title'] ?? ''}';
     final a = _analysis;
-    final head = StringBuffer()
-      ..writeln('材料:$title')
-      ..writeln('来源:${_material?['url'] ?? '（无链接）'}');
-    if (a != null) {
-      head.writeln('篇幅 ${a.wordCount} 词 · ${a.cefr} · '
-          '我的已知词覆盖率 ${(a.knownTokenRatio * 100).toStringAsFixed(1)}%');
-    }
+    final difficultyLine = a == null
+        ? ''
+        : '篇幅 ${a.wordCount} 词 · ${a.cefr} · '
+            '我的已知词覆盖率 ${(a.knownTokenRatio * 100).toStringAsFixed(1)}%';
     final at = _followUpChunk;
-    if (at != null && at >= 0 && at < _units.length) {
-      String clip(String s, int max) =>
-          s.length <= max ? s : '${s.substring(0, max)}…';
-      // v2.13.1:追问的"这一段"= 翻译单元(真段落),不是 2500 词的正文块 ——
-      // 否则用户点一段译文追问,喂给模型的会是整块(甚至整章)。
-      final unit = _units[at];
-      final original = unit.text.trim();
-      final subtitle = '${_chunks[unit.chunkIndex]['title'] ?? ''}'.trim();
-      final previous = at > 0 ? _units[at - 1].text.trim() : '';
-      final next = at + 1 < _units.length ? _units[at + 1].text.trim() : '';
-      final translation = _translations[at];
-      final body = StringBuffer()
-        ..writeln('这次追问只针对第 ${at + 1}/${_units.length} 段。');
-      if (subtitle.isNotEmpty) body.writeln('小标题:$subtitle');
-      if (previous.isNotEmpty) {
-        body
-          ..writeln('\n上一段原文(只用于理解指代/术语,不要翻译):')
-          ..writeln(clip(previous, 800));
-      }
-      body
-        ..writeln('\n本段原文:')
-        ..writeln(clip(original, 2000));
-      if (translation != null && translation.trim().isNotEmpty) {
-        body
-          ..writeln('\n页面上的中文译文:')
-          ..writeln(clip(translation, 2000));
-      } else {
-        body.writeln('\n页面上的这一段还没有中文译文。');
-      }
-      if (next.isNotEmpty) {
-        body
-          ..writeln('\n下一段原文(只用于理解指代/术语,不要翻译):')
-          ..writeln(clip(next, 800));
-      }
-      return '${head.toString()}\n$body';
-    }
-    final body = StringBuffer();
-    for (final c in _chunks) {
-      final t = '${c['text'] ?? ''}';
-      if (body.length + t.length > 6000) break;
-      body.writeln(t);
-    }
-    return '${head.toString()}\n正文节选:\n$body';
+    return buildReaderFollowUpContext(
+      title: '${_material?['title'] ?? ''}',
+      sourceUrl: '${_material?['url'] ?? ''}',
+      difficultyLine: difficultyLine,
+      chunkTitles: <String>[for (final c in _chunks) '${c['title'] ?? ''}'],
+      chunkTexts: <String>[for (final c in _chunks) '${c['text'] ?? ''}'],
+      unitTexts: <String>[for (final u in _units) u.text],
+      translations: _translations,
+      pinnedUnit: at,
+      pinnedChunk: (at != null && at >= 0 && at < _units.length)
+          ? _units[at].chunkIndex
+          : null,
+      currentChunk: _chunks.isEmpty
+          ? null
+          : _lastChunkIndex.clamp(0, _chunks.length - 1),
+    );
   }
 
   @override
@@ -927,6 +899,51 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     if (mounted) Navigator.of(context).maybePop();
   }
 
+  /// 点右上角 % 胶囊弹「回到顶部 / 跳到底部」小菜单（2026-11-08 用户反馈 C）。
+  ///
+  /// 保持 C 的**零常驻按钮**:不新增任何常驻控件,只复用已有的 % 胶囊做
+  /// 轻量入口(控制台/底部把手区都不变);平滑滚动后 `_onScroll` 照常更新
+  /// 进度并落库,不破坏续读位置。
+  void _showProgressJumpMenu() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => ReaderActionSheet(
+        palette: _palette,
+        title: '跳到',
+        note: '进度照常记录;回顶/回底只是移动视图,不会改动已读比例。',
+        actions: <ReaderActionItem>[
+          ReaderActionItem(
+            icon: Icons.vertical_align_top,
+            label: '回到顶部',
+            hint: '0%',
+            onTap: () => _animateScrollTo(0),
+          ),
+          ReaderActionItem(
+            icon: Icons.vertical_align_bottom,
+            label: '跳到底部',
+            hint: '100%',
+            onTap: () => _animateScrollTo(double.infinity),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 平滑滚动到指定位置(`double.infinity` = 到底);未挂载/无内容时静默忽略。
+  void _animateScrollTo(double target) {
+    if (!_scrollCtrl.hasClients) return;
+    final max = _scrollCtrl.position.maxScrollExtent;
+    if (max <= 0) return;
+    final to = target.isFinite ? target.clamp(0.0, max) : max;
+    if ((_scrollCtrl.offset - to).abs() < 1) return;
+    _scrollCtrl.animateTo(
+      to,
+      duration: const Duration(milliseconds: 320),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
   /// 顶部 2px 翻译细提示(不压正文):翻译进行中 / 已翻比例的一条细线。
   Widget _translationHintLine(ReaderPalette p) {
     final total = _units.isEmpty ? 1 : _units.length;
@@ -1118,6 +1135,9 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
       controller: _followUp,
       title: '追问这一段',
       prefillQuestion: _followUpQuestionFor(index),
+      // 阅读场景只留两个快捷键(梳理内容 / 评价材料),不再常置
+      // 英英词典/逐句翻译等识图场景按钮(2026-11-08 用户反馈)。
+      quickReplies: QuickReplies.reader,
     );
   }
 
@@ -1780,6 +1800,7 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
       context: context,
       controller: _followUp,
       title: '追问材料',
+      quickReplies: QuickReplies.reader,
     );
   }
 
@@ -1811,9 +1832,14 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
     return '${text.substring(0, 6000)}\n…(原文过长,以上为前 6000 字)';
   }
 
-  void _openRichForms() {
+  Future<void> _openRichForms() async {
     if (_chunks.isEmpty) return;
-    showModalBottomSheet<void>(
+    // 2026-11-08 用户反馈:点「丰富形式」后页面跳到全材料最下方。这里除了
+    // 保持"弹 sheet 选形式"(不再有其它滚动逻辑),还兜底:sheet 关闭后如果
+    // 阅读位置被动过(比如列表因插入生成骨架而 relayout),恢复原位置 ——
+    // 用户只是选格式,不该被挪走。
+    final offset = _scrollCtrl.hasClients ? _scrollCtrl.offset : 0.0;
+    await showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
       isScrollControlled: true,
@@ -1827,6 +1853,13 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
         },
       ),
     );
+    if (!mounted || !_scrollCtrl.hasClients) return;
+    final max = _scrollCtrl.position.maxScrollExtent;
+    if (max <= 0) return;
+    final target = offset.clamp(0.0, max);
+    if ((_scrollCtrl.offset - target).abs() > 1) {
+      _scrollCtrl.jumpTo(target);
+    }
   }
 
   /// 生成一个内容块:进度用 AiWaitingTimeline(三步都是**真实发生**的),
@@ -2307,7 +2340,7 @@ class _MaterialReaderScreenState extends State<MaterialReaderScreen> {
           ReaderProgressBadge(
             progress: _readingPercent,
             palette: p,
-            onTap: _openConsole,
+            onTap: _showProgressJumpMenu,
           ),
         ],
       ),

@@ -106,12 +106,10 @@ class AboutNoticeScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'ReadFlow 是一个"输入 → 输出"闭环的英语学习工具：读真实材料、'
-                    '收词复习、做写译批改，再用学习助理把数据变成下一步动作。'
-                    '下面三份说明，是这个软件的承诺、做法与想法。',
+                    '读真实材料、收词复习、写译批改,助理把数据变成下一步。',
                     style: AppFont.bodyStyle.copyWith(
-                      fontSize: 13.5,
-                      height: 1.75,
+                      fontSize: 13,
+                      height: 1.6,
                       color: t.inkSoft,
                     ),
                   ),
@@ -125,11 +123,10 @@ class AboutNoticeScreen extends StatelessWidget {
                   ],
                   const SizedBox(height: 4),
                   Text(
-                    '点「我已阅读并继续」后，这份公告不再自动弹出；'
-                    '随时可在「我的 → 关于与更新」里重看。',
+                    '点继续后不再自动弹出,可在「我的 → 关于」重看。',
                     style: AppFont.metaStyle.copyWith(
-                      fontSize: 10.5,
-                      height: 1.6,
+                      fontSize: 11,
+                      height: 1.5,
                       color: t.inkFaint,
                     ),
                   ),
@@ -199,11 +196,11 @@ class _DocCard extends StatelessWidget {
           if (summaryOverride != null)
             Text(
               summaryOverride!,
-              maxLines: 3,
+              maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: AppFont.bodyStyle.copyWith(
-                fontSize: 12,
-                height: 1.7,
+                fontSize: 11,
+                height: 1.6,
                 color: t.inkSoft,
               ),
             )
@@ -217,11 +214,11 @@ class _DocCard extends StatelessWidget {
                         : '…');
                 return Text(
                   text,
-                  maxLines: 3,
+                  maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: AppFont.bodyStyle.copyWith(
-                    fontSize: 12,
-                    height: 1.7,
+                    fontSize: 11,
+                    height: 1.6,
                     color: t.inkSoft,
                   ),
                 );

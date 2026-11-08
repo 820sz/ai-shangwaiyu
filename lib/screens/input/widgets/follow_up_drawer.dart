@@ -420,6 +420,10 @@ void showFollowUpDrawer({
   String? prefillQuestion,
   String? contextOverride,
   String title = '追问抽屉',
+  /// 快捷回复按钮(2026-11-08 / task-21 A2):不传 = 默认那排(识图/写译);
+  /// 阅读器只传 `QuickReplies.reader`(梳理内容 / 评价材料),不再把
+  /// 英英词典/逐句翻译等识图场景按钮常置在阅读追问里。
+  List<QuickReply>? quickReplies,
 }) {
   controller.inputCtrl.clear();
   if (prefillQuestion != null) controller.inputCtrl.text = prefillQuestion;
@@ -443,7 +447,11 @@ void showFollowUpDrawer({
       padding: EdgeInsets.only(
         bottom: MediaQuery.of(ctx).viewInsets.bottom + bottomSafe,
       ),
-      child: _FollowUpSheet(controller: controller, title: title),
+      child: _FollowUpSheet(
+        controller: controller,
+        title: title,
+        quickReplies: quickReplies,
+      ),
     ),
   );
 }
@@ -599,7 +607,14 @@ class _FollowUpSheet extends StatelessWidget {
   final FollowUpController controller;
   final String title;
 
-  const _FollowUpSheet({required this.controller, required this.title});
+  /// 快捷回复(为空 = 默认那排)
+  final List<QuickReply>? quickReplies;
+
+  const _FollowUpSheet({
+    required this.controller,
+    required this.title,
+    this.quickReplies,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -852,6 +867,7 @@ class _FollowUpSheet extends StatelessWidget {
         valueListenable: controller.loading,
         builder: (_, loading, _) => QuickReplyBar(
           enabled: !loading,
+          replies: quickReplies ?? QuickReplies.defaults,
           onPick: (prompt) => controller.send(prompt),
         ),
       ),

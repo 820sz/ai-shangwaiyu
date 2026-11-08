@@ -140,7 +140,7 @@ class AboutScreen extends StatelessWidget {
                 ],
                 DashListRow(
                   title: '开屏公告',
-                  subtitle: '首次启动读过的三份说明 · 可重看',
+                  subtitle: '首次启动的三份说明',
                   leading: Icon(Icons.campaign_outlined, size: 20, color: d.inkSoft),
                   onTap: () => _openNotice(context),
                 ),
@@ -155,13 +155,13 @@ class AboutScreen extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 _line(d, Icons.phone_iphone_rounded, '学习数据只存在这台手机上',
-                    '生词、材料、复习记录、统计都写在本机数据库,不上传服务器。'),
+                    '生词、材料、统计都在本机,不上传。'),
                 const SizedBox(height: Gap.sm),
                 _line(d, Icons.cloud_off_outlined, '统计与周报都是本地计算',
-                    '不联网、不调用 API —— 只有你主动用 AI 功能时才发请求。'),
+                    '不联网,只有你用 AI 时才发请求。'),
                 const SizedBox(height: Gap.sm),
                 _line(d, Icons.key_outlined, 'API Key 只保存在本机设置里',
-                    '诊断信息里也只显示厂商与长度,不会打印可用片段。'),
+                    '诊断里只显示厂商与长度。'),
               ],
             ),
           ),
@@ -174,21 +174,21 @@ class AboutScreen extends StatelessWidget {
               children: <Widget>[
                 DashListRow(
                   title: '检查更新',
-                  subtitle: '从 GitHub 读取最新 Release;失败会明说原因',
+                  subtitle: 'GitHub 最新 Release',
                   leading: Icon(Icons.system_update_alt, size: 20, color: d.inkSoft),
                   onTap: () async => onCheckUpdate(),
                 ),
                 Divider(height: 1, thickness: 0.8, color: d.line),
                 DashListRow(
                   title: '诊断信息',
-                  subtitle: 'API 配置摘要(打码)+ 崩溃日志,截图即可定位问题',
+                  subtitle: '配置摘要(打码)+ 崩溃日志',
                   leading: Icon(Icons.medical_information, size: 20, color: d.inkSoft),
                   onTap: () async => onShowDiagnostics(),
                 ),
                 Divider(height: 1, thickness: 0.8, color: d.line),
                 DashListRow(
                   title: '开源许可',
-                  subtitle: '本软件使用的第三方开源库许可证汇总',
+                  subtitle: '第三方开源库许可证',
                   leading: Icon(Icons.workspace_premium_outlined,
                       size: 20, color: d.inkSoft),
                   onTap: () => _openLicenses(context),
@@ -204,22 +204,11 @@ class AboutScreen extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 Text(
-                  'ReadFlow 是一个"输入 → 输出"闭环的英语学习工具:读真实材料、'
-                  '收词复习、做写译批改,再用学习助理把数据变成下一步动作。',
+                  '输入 → 输出闭环:读真实材料、收词复习、写译批改。',
                   style: AppFont.bodyStyle.copyWith(
                     fontSize: 12.5,
-                    height: 1.75,
-                    color: d.inkSoft,
-                  ),
-                ),
-                const SizedBox(height: Gap.sm),
-                Text(
-                  '界面语言:输入/输出 = 果冻;助理/我的 = 每日简报(B);'
-                  '数据内页 = 诊断台(A)。',
-                  style: AppFont.metaStyle.copyWith(
-                    fontSize: 10.5,
                     height: 1.6,
-                    color: d.inkFaint,
+                    color: d.inkSoft,
                   ),
                 ),
               ],

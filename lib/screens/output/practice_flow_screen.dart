@@ -320,9 +320,7 @@ class _PracticeFlowScreenState extends State<PracticeFlowScreen> {
         builder: (ctx) => AlertDialog(
           title: const Text('还有题没批改'),
           content: Text(
-            '本组共 ${widget.set.tasks.length} 题，已批改 $_scoredCount 题，'
-            '还有 $pending 题没提交批改。\n\n'
-            '现在完成会影响本次统计（未批改的题不计分），可以先回去补完。',
+            '已批改 $_scoredCount/${widget.set.tasks.length} 题；未批改不计分。',
             style: AppFont.tagStyle.copyWith(height: 1.5),
           ),
           actions: <Widget>[
@@ -374,7 +372,7 @@ class _PracticeFlowScreenState extends State<PracticeFlowScreen> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '共 $total 题 · 已批改 $_scoredCount 题 · 点任意题可跳转',
+                      '已批改 $_scoredCount/$total 题 · 点题号跳转',
                       style: AppFont.tagStyle.copyWith(
                         color: skin.inkSoft,
                         fontSize: 10.5,
@@ -924,17 +922,17 @@ class _PracticeFlowScreenState extends State<PracticeFlowScreen> {
     final (String title, String body) = switch (task.tier) {
       OutputTier.sentence => (
           '写句',
-          '先把主干(主谓宾)写对,再补修饰与连接词;写完读一遍,看时态与主谓是否一致。',
+          '先把主干写对，再补修饰；查时态与主谓一致。',
         ),
       OutputTier.paragraph => (
           '写段',
-          '先列 2~3 个要点(或用题面给的提示),再连成一段:主题句 → 展开 → 收尾。',
+          '先列 2~3 个要点，再连成一段。',
         ),
       OutputTier.essay => (
           '写篇',
-          '先花 2 分钟定结构(立场 → 两个理由配例子 → 收尾),再落笔;写按评分维度自检。',
+          '先定立场与理由，再落笔。',
         ),
-      OutputTier.word => ('写词', '把词写对,再看它在句子里怎么用。'),
+      OutputTier.word => ('写词', '把词写对，再看它在句子里怎么用。'),
     };
     final dims = task.tier == OutputTier.essay
         ? _rubricOf(task).dimensions.map((d) => d.label).toList()
@@ -992,9 +990,9 @@ class _PracticeFlowScreenState extends State<PracticeFlowScreen> {
 
   String _editorHint(OutputTaskSpec task) => switch (task.tier) {
         OutputTier.word => '写出英文单词…',
-        OutputTier.sentence => '写出英文句子（先主干，再修饰）…',
-        OutputTier.paragraph => '写一段英文（2~4 句，先要点后展开）…',
-        OutputTier.essay => '写一篇英文短文（先结构，再落笔）…',
+        OutputTier.sentence => '写出英文句子…',
+        OutputTier.paragraph => '写一段英文…',
+        OutputTier.essay => '写一篇英文短文…',
       };
 
   Widget _typeBadge(ThemeData theme, String type) {

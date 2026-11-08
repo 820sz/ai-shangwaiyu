@@ -132,10 +132,11 @@ class _StatsPageScreenState extends State<StatsPageScreen> {
             padding: const EdgeInsets.only(top: 8, bottom: 2),
             child: Text(
               '活跃 $activeDays7/7 天'
-              '${weekMinutes > 0 ? ' · 共 $weekMinutes 分钟' : ''}'
-              ' · 口径:新收词 + 练习量',
+              '${weekMinutes > 0 ? ' · $weekMinutes 分钟' : ''}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: AppFont.metaStyle.copyWith(
-                fontSize: 10.5,
+                fontSize: 11,
                 color: theme.colorScheme.onSurfaceVariant,
               ),
             ),
@@ -219,7 +220,7 @@ class _StatsPageScreenState extends State<StatsPageScreen> {
                   AppEmptyState(
                     icon: Icons.query_stats_outlined,
                     title: '这 7 天还没有记录',
-                    hint: '收词或做练习后,这里会出现每天的学习量',
+                    hint: '收词或练习后,这里出现数据',
                   )
                 else ...[
                   Row(
@@ -259,7 +260,7 @@ class _StatsPageScreenState extends State<StatsPageScreen> {
                   _WeekdayLabels(days: 7),
                   const SizedBox(height: Gap.xxs),
                   Text(
-                    '新收词 + 练习量 · 左旧右新(复习记录没有逐日历史,不在此图)',
+                    '新收词 + 练习量',
                     style: AppFont.metaStyle.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
@@ -364,7 +365,7 @@ class _MonthlyCard extends StatelessWidget {
         children: [
           AppSectionTitle(
             title: '月度新增词汇',
-            subtitle: '最近 ${recent.length} 个月 · 来自每日学习日志(左旧右新)',
+            subtitle: '最近 ${recent.length} 个月',
             trailing: Text(
               '合计 $total 词',
               style: AppFont.metaStyle.copyWith(color: muted),
@@ -376,7 +377,7 @@ class _MonthlyCard extends StatelessWidget {
             AppEmptyState(
               icon: Icons.calendar_month_outlined,
               title: '还没有月度数据',
-              hint: '收词后这里会按月统计新增词汇',
+              hint: '收词后按月统计',
             )
           else ...[
             SparkBars(
@@ -521,8 +522,10 @@ class _ReadingInProgressCardState extends State<_ReadingInProgressCard> {
             const SizedBox(height: Gap.sm),
           ],
           Text(
-            '退出阅读器也不用记进度,回来接着读;本周报告里也能看到这些材料。',
-            style: AppFont.metaStyle.copyWith(color: muted),
+            '退出也不用记进度。',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: AppFont.metaStyle.copyWith(fontSize: 11, color: muted),
           ),
         ],
       ),

@@ -144,10 +144,10 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
       };
 
   String get _tierHint => switch (widget.tier) {
-        OutputTier.sentence => '两种来源:从你读过的文章抽真实句子,或直接用内置作文范文句',
-        OutputTier.paragraph => '两种来源:读完的材料当依据,或内置范文段落做仿写/默写',
-        OutputTier.essay => '两种来源:按目标考试抓真题,或用内置真题风格题目按 rubric 练',
-        OutputTier.word => '两种来源:复习你的生词本,或按目标练内置考纲/外刊高频词',
+        OutputTier.sentence => '从读过的文章抽句，或内置范文句',
+        OutputTier.paragraph => '从材料写段，或内置范文段仿写',
+        OutputTier.essay => '按目标抓真题，或内置真题风格题',
+        OutputTier.word => '复习生词本，或按目标练考纲词',
       };
 
   /// 按目标考试词表练词(v3 批 7 P1-3):用 assets 里的考纲词表,
@@ -662,8 +662,8 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
           const SizedBox(height: 8),
           Text(
             exam == null
-                ? '还没选考试目标：先在「输入 → 我的需求」里选一个，或直接在上面按等级练。'
-                : '本次按「$levelLabel」出题 · 内置素材离线可用',
+                ? '先在「输入 → 我的需求」选考试目标'
+                : '本次按「$levelLabel」出题',
             style: AppFont.tagStyle.copyWith(
               color: cs.onSurfaceVariant,
               fontSize: 10.5,
@@ -671,10 +671,9 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
             ),
           ),
           const SizedBox(height: Gap.lg),
-          PaperSectionHead(
+          const PaperSectionHead(
             index: '01',
             title: '按目标练',
-            trailing: '内置素材 · 离线可用',
           ),
           const SizedBox(height: Gap.sm),
           if (!DeepseekApiService().isConfigured) ...[
@@ -689,8 +688,7 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
                   const SizedBox(width: Gap.xs),
                   Expanded(
                     child: Text(
-                      '还没配置 AI Key：出题与批改都要调用模型。'
-                      '去「我的 → API 设置」填好 Key 再回来。',
+                      '未配置 AI Key；去「我的 → API 设置」填写。',
                       style: AppFont.tagStyle.copyWith(
                         color: Theme.of(context).colorScheme.onSurface,
                         height: 1.4,
@@ -729,7 +727,7 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          '在你读过的句子里挖掉生词，四选一补回来 —— 词要回到上下文里才算会',
+                          '读过的句子挖空，四选一补词',
                           style: AppFont.tagStyle
                               .copyWith(color: cs.onSurfaceVariant, height: 1.35),
                         ),
@@ -763,7 +761,7 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            '你的目标词表 · ${_examWords.length} 词已收录，拼写与中译英',
+                            '目标词表 ${_examWords.length} 词 · 拼写与中译英',
                             style: AppFont.tagStyle.copyWith(
                               color: cs.onSurfaceVariant,
                               height: 1.35,
@@ -800,7 +798,7 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          '按 FSRS 到期队列练(读过的材料里收的词)',
+                          '按到期队列练（FSRS）',
                           style: AppFont.tagStyle
                               .copyWith(color: cs.onSurfaceVariant),
                         ),
@@ -856,12 +854,9 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
                             const SizedBox(height: 2),
                             Text(
                               switch (mode) {
-                                SentencePracticeMode.rewrite =>
-                                  '给原句升级句式/合并从句；没配 AI 时自动变成离线对照',
-                                SentencePracticeMode.correction =>
-                                  '句子被故意改坏几处，把它改回正确英文',
-                                SentencePracticeMode.wordOrder =>
-                                  '词块打乱，按正确顺序点成一句话',
+                                SentencePracticeMode.rewrite => '升级句式或合并从句',
+                                SentencePracticeMode.correction => '改回正确英文',
+                                SentencePracticeMode.wordOrder => '词块排成一句话',
                               },
                               style: AppFont.tagStyle.copyWith(
                                 color: cs.onSurfaceVariant,
@@ -915,6 +910,8 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
                             const SizedBox(height: 2),
                             Text(
                               src.description,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                               style: AppFont.tagStyle.copyWith(
                                 color: cs.onSurfaceVariant,
                                 height: 1.35,
@@ -969,10 +966,10 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
                   const SizedBox(height: 4),
                   Text(
                     exam == null
-                        ? '先在「输入 → 我的需求」或「我的 → 学习偏好」里选考试目标（可多选）。'
+                        ? '先在「我的需求」选考试目标'
                         : (_composer.examSearchAvailable
-                            ? '用 DeepSeek 官方搜索抓取公开真题页面，只基于抓到的正文出题，每题标注来源。'
-                            : '需要 DeepSeek 官方 Key（设置 → API 设置 → 副槽位，sk- 开头）才能抓真题。'),
+                            ? '用官方搜索抓真题页，只基于正文出题，标注来源。'
+                            : '需 DeepSeek 官方 Key（API 设置 → 副槽位）。'),
                     style: AppFont.tagStyle.copyWith(
                       color: cs.onSurfaceVariant,
                       height: 1.4,
@@ -1043,7 +1040,7 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
             AppEmptyState(
               icon: Icons.auto_stories_outlined,
               title: '还没有读过的材料',
-              hint: '先去「输入」读一篇材料 —— 输出练习的题目从你读过的内容里出，才有语境。',
+              hint: '先去「输入」读一篇。',
               action: FilledButton(
                 onPressed: () => Navigator.pop(context),
                 child: const Text('去输入'),

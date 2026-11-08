@@ -81,8 +81,7 @@ class _PracticeHistoryScreenState extends State<PracticeHistoryScreen> {
       builder: (ctx) => AlertDialog(
         title: const Text('重建题源标签？'),
         content: Text(
-          '$examBackfillHint\n\n'
-          '会扫最近 200 个题组，只补「考试等级 / 年份 / 套数」三列，不删题、不改题目内容。',
+          examBackfillHint,
           style: AppFont.tagStyle.copyWith(height: 1.5),
         ),
         actions: <Widget>[
@@ -188,8 +187,8 @@ class _PracticeHistoryScreenState extends State<PracticeHistoryScreen> {
         PaperTitle(
           title: '题库',
           subtitle: _sets.isEmpty
-              ? '做完一组练习就会留在这里，随时原样重练。'
-              : '共 ${_sets.length} 组 · 点开可原样重练（不重新出题）',
+              ? '做完一组练习就会留在这里。'
+              : '共 ${_sets.length} 组 · 点开可重练',
         ),
         const SizedBox(height: Gap.md),
         // P0-2:等级筛选(数据层已支持 examType 过滤)
@@ -205,10 +204,8 @@ class _PracticeHistoryScreenState extends State<PracticeHistoryScreen> {
         if (_sets.isEmpty)
           PaperEmpty(
             icon: Icons.inventory_2_outlined,
-            title: '这个等级还没有做过的题组',
-            hint: _level.isEmpty
-                ? '去输出四阶任意一阶练一组，这里就会留下题库，以后能原样重练。'
-                : '换一个等级看看，或者去四阶设置里按这个等级练一组。',
+            title: '这个等级还没有题组',
+            hint: _level.isEmpty ? '去四阶练一组。' : '换个等级，或去练一组。',
             actionLabel: '去练习',
             onAction: () => Navigator.maybePop(context),
           )

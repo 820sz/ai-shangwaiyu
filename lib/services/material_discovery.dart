@@ -3,7 +3,6 @@ import 'dart:convert';
 
 import '../models/learner_model.dart';
 import '../models/vocabulary.dart';
-import '../services/base_api.dart';
 import '../services/content_quality.dart';
 import '../services/deepseek_api.dart';
 import '../services/deepseek_search.dart';
@@ -1084,7 +1083,8 @@ Future<List<String>> defaultMaterialRefine(MaterialRefineInput input) async {
     maxTokens: 1024,
     temperature: 0.3,
     // 换检索词和"检索计划"同类:输出短、要快 → 任务级轻思考
-    thinkingLevel: BaseApiService.thinkingForTask('plan'),
+    // 用户可在「找材料 → 筛选 → AI 思考强度」里调(默认标准 = low);
+    thinkingLevel: AiThinkingLevel.load().planLevel,
   );
   if (content == null) return const <String>[];
   return parseRefineQueries(content);
